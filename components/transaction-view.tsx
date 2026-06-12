@@ -1,0 +1,586 @@
+'use client'
+
+import { useState } from 'react'
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  CalendarDays,
+  CheckCircle2,
+  Hash,
+  MapPin,
+  PackageSearch,
+  Save,
+  ScanLine,
+} from 'lucide-react'
+import type { StockItem, StockLot, StockWorkspace } from '@/lib/bm/types'
+import { formatDate, formatQuantity } from '@/lib/bm/rules'
+import { api, Button, Card, Field, Input, Notice, PageHeader, Select, Textarea } from '@/components/ui'
+
+type Mode = 'receive' | 'issue' | 'move'
+
+export function TransactionView({
+  mode,
+  initialData,
+  defaultItemId,
+  defaultLotId,
+  defaultLocationId,
+}: {
+  mode: Mode
+  initialData: StockWorkspace
+  defaultItemId?: string
+  defaultLotId?: string
+  defaultLocationId?: string
+}) {
+  const [data, setData] = useState(initialData)
+  const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
+  const activeItems = data.items.filter((item) => item.isActive)
+  const activeLocations = data.locations.filter((location) => location.isActive)
+  const title = mode === 'receive' ? 'รับเข้า / Receive' : mode === 'issue' ? 'ตัด Stock / Issue' : 'ย้ายที่เก็บ / Move'
+  const description = mode === 'receive'
+    ? 'รับน้ำยาเข้าคลังด้วยหน้าจอมือถือ เลือก item, location, lot และจำนวน'
+    : mode === 'issue'
+      ? 'ตัด stock จาก lot และ location ที่มีของคงเหลือ พร้อมบันทึก purpose'
+      : 'ย้ายยอดคงเหลือระหว่าง location'
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-4 pb-28 sm:pb-5">
+      <PageHeader eyebrow="Mobile stock transaction" title={title} description={description} />
+      {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
+      {mode === 'receive' ? (
+        <ReceiveForm
+          items={activeItems}
+          locations={activeLocations}
+          defaultItemId={defaultItemId}
+          onSaved={(stock) => {
+            setData(stock)
+            setNotice({ tone: 'success', text: 'บันทึกรับเข้าแล้ว / Receive saved' })
+          }}
+          onError={(text) => setNotice({ tone: 'danger', text })}
+        />
+      ) : null}
+      {mode === 'issue' ? (
+        <IssueForm
+          items={activeItems}
+          defaultLotId={defaultLotId}
+          defaultLocationId={defaultLocationId}
+          onSaved={(stock) => {
+            setData(stock)
+            setNotice({ tone: 'success', text: 'ตัด stock แล้ว / Issue saved' })
+          }}
+          onError={(text) => setNotice({ tone: 'danger', text })}
+        />
+      ) : null}
+      {mode === 'move' ? (
+        <MoveForm
+          items={activeItems}
+          locations={activeLocations}
+          defaultLotId={defaultLotId}
+          defaultLocationId={defaultLocationId}
+          onSaved={(stock) => {
+            setData(stock)
+            setNotice({ tone: 'success', text: 'บันทึกย้ายที่เก็บแล้ว / Move saved' })
+          }}
+          onError={(text) => setNotice({ tone: 'danger', text })}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function ReceiveForm({
+  items,
+  locations,
+  defaultItemId,
+  onSaved,
+  onError,
+}: {
+  items: StockItem[]
+  locations: StockWorkspace['locations']
+  defaultItemId?: string
+  onSaved: (stock: StockWorkspace) => void
+  onError: (text: string) => void
+}) {
+  const [form, setForm] = useState({
+    itemId: items.some((item) => item.id === defaultItemId) ? defaultItemId! : items[0]?.id ?? '',
+    locationId: locations[0]?.id ?? '',
+    lotNumber: '',
+    expiryDate: '',
+    quantity: '',
+    supplier: '',
+    manufacturerBarcode: '',
+    reference: '',
+    note: '',
+  })
+  const [itemSearch, setItemSearch] = useState('')
+  const [busy, setBusy] = useState(false)
+  const item = items.find((candidate) => candidate.id === form.itemId)
+  const location = locations.find((candidate) => candidate.id === form.locationId)
+  const filteredItems = filterItems(items, itemSearch).slice(0, 12)
+  const canSave = Boolean(item && location && form.quantity && (!item.trackLot || form.lotNumber.trim()) && (!item.trackExpiry || form.expiryDate))
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    if (!canSave || !item) return
+    setBusy(true)
+    try {
+      const result = await api<{ stock: StockWorkspace }>('/api/stock/receipts', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...form,
+          quantity: Number(form.quantity),
+          lotNumber: item.trackLot ? form.lotNumber : null,
+          expiryDate: item.trackExpiry ? form.expiryDate : null,
+        }),
+      })
+      onSaved(result.stock)
+      setForm({ ...form, lotNumber: '', expiryDate: '', quantity: '', supplier: '', manufacturerBarcode: '', reference: '', note: '' })
+      setItemSearch('')
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'บันทึกรับเข้าไม่สำเร็จ')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!items.length || !locations.length) {
+    return <Notice tone="warning">ต้องมี item และ location ก่อนรับเข้า stock / Add item and location first.</Notice>
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <MobilePanel>
+        <PanelTitle icon={<ScanLine />} title="1. เลือกสินค้า / Select item" detail="สแกนหรือค้นด้วย item code, ชื่อ, catalog, barcode" />
+        <ScanSearch
+          value={itemSearch}
+          onChange={setItemSearch}
+          placeholder="Scan / search item"
+          onPickFirst={() => {
+            const first = filteredItems[0]
+            if (first) {
+              setForm({ ...form, itemId: first.id, lotNumber: '', expiryDate: '' })
+              setItemSearch('')
+            }
+          }}
+        />
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {filteredItems.map((option) => (
+            <ChoiceButton
+              key={option.id}
+              selected={option.id === form.itemId}
+              title={`${option.itemCode} · ${option.name}`}
+              meta={`${option.categoryName} · ${option.unit}${option.catalogNo ? ` · ${option.catalogNo}` : ''}`}
+              onClick={() => setForm({ ...form, itemId: option.id, lotNumber: '', expiryDate: '' })}
+            />
+          ))}
+        </div>
+      </MobilePanel>
+
+      <MobilePanel>
+        <PanelTitle icon={<MapPin />} title="2. Location" detail={location ? `${location.code} · ${location.name}` : 'เลือกที่เก็บ'} />
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {locations.map((option) => (
+            <ChoiceButton
+              key={option.id}
+              selected={option.id === form.locationId}
+              title={option.code}
+              meta={option.name}
+              compact
+              onClick={() => setForm({ ...form, locationId: option.id })}
+            />
+          ))}
+        </div>
+      </MobilePanel>
+
+      <MobilePanel>
+        <PanelTitle icon={<Hash />} title="3. Lot และจำนวน / Lot and quantity" detail={item ? `${item.itemCode} · ${item.unit}` : 'เลือก item ก่อน'} />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <BigField label="Lot number">
+            <Input
+              required={item?.trackLot}
+              disabled={!item?.trackLot}
+              className="h-12 text-base"
+              value={item?.trackLot ? form.lotNumber : 'NO-LOT'}
+              onChange={(event) => setForm({ ...form, lotNumber: event.target.value })}
+            />
+          </BigField>
+          <BigField label="Expiry date">
+            <Input
+              required={item?.trackExpiry}
+              disabled={!item?.trackExpiry}
+              type={item?.trackExpiry ? 'date' : 'text'}
+              className="h-12 text-base"
+              value={item?.trackExpiry ? form.expiryDate : 'Not tracked'}
+              onChange={(event) => setForm({ ...form, expiryDate: event.target.value })}
+            />
+          </BigField>
+          <BigField label={`Quantity${item ? ` (${item.unit})` : ''}`}>
+            <Input
+              required
+              inputMode="decimal"
+              type="number"
+              min="0.001"
+              step="0.001"
+              className="h-14 mono text-xl font-bold"
+              value={form.quantity}
+              onChange={(event) => setForm({ ...form, quantity: event.target.value })}
+            />
+          </BigField>
+          <BigField label="Manufacturer barcode">
+            <Input
+              className="h-12 mono text-base"
+              value={form.manufacturerBarcode}
+              onChange={(event) => setForm({ ...form, manufacturerBarcode: event.target.value })}
+              placeholder="Scan barcode"
+            />
+          </BigField>
+        </div>
+      </MobilePanel>
+
+      <MobilePanel>
+        <PanelTitle icon={<PackageSearch />} title="4. รายละเอียดเพิ่ม / Details" detail="ไม่บังคับ" />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Supplier"><Input className="h-11" value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} /></Field>
+          <Field label="Reference"><Input className="h-11" value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></Field>
+          <div className="sm:col-span-2"><Field label="Note"><Textarea rows={3} value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} /></Field></div>
+        </div>
+      </MobilePanel>
+
+      <MobileActionBar>
+        <SummaryLine label="Receive" value={item ? `${item.itemCode} · ${form.quantity || '0'} ${item.unit}` : 'No item'} />
+        <Button disabled={busy || !canSave} className="h-12 min-w-32"><ArrowDownToLine className="size-4" /> Save</Button>
+      </MobileActionBar>
+    </form>
+  )
+}
+
+function IssueForm({
+  items,
+  defaultLotId,
+  defaultLocationId,
+  onSaved,
+  onError,
+}: {
+  items: StockItem[]
+  defaultLotId?: string
+  defaultLocationId?: string
+  onSaved: (stock: StockWorkspace) => void
+  onError: (text: string) => void
+}) {
+  const stockedItems = items.filter((item) => item.lots.some((lot) => lot.balances.some((balance) => balance.onHand > 0)))
+  const firstLot = stockedItems.flatMap((item) => item.lots).find((lot) => lot.id === defaultLotId) ?? stockedItems[0]?.lots.find((lot) => lot.totalOnHand > 0)
+  const [form, setForm] = useState({
+    itemId: firstLot?.itemId ?? stockedItems[0]?.id ?? '',
+    lotId: firstLot?.id ?? '',
+    locationId: defaultLocationId ?? firstLot?.balances[0]?.locationId ?? '',
+    quantity: '',
+    purpose: '',
+    reference: '',
+    note: '',
+    overrideReason: '',
+  })
+  const [itemSearch, setItemSearch] = useState('')
+  const [busy, setBusy] = useState(false)
+  const item = stockedItems.find((candidate) => candidate.id === form.itemId)
+  const filteredItems = filterItems(stockedItems, itemSearch).slice(0, 12)
+  const lots = item?.lots.filter((lot) => lot.balances.some((balance) => balance.onHand > 0)) ?? []
+  const lot = lots.find((candidate) => candidate.id === form.lotId)
+  const balances = lot?.balances.filter((balance) => balance.onHand > 0) ?? []
+  const balance = balances.find((candidate) => candidate.locationId === form.locationId)
+  const canSave = Boolean(lot && balance && form.quantity && form.purpose.trim())
+
+  function selectItem(nextItem: StockItem) {
+    const nextLot = nextItem.lots.find((candidate) => candidate.totalOnHand > 0)
+    setForm({
+      ...form,
+      itemId: nextItem.id,
+      lotId: nextLot?.id ?? '',
+      locationId: nextLot?.balances[0]?.locationId ?? '',
+      overrideReason: '',
+    })
+  }
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    if (!lot || !balance || !canSave) return
+    if (lot.expiryState === 'expired' && !window.confirm(`Lot ${lot.lotNumber} หมดอายุแล้ว ยืนยันการตัด stock?`)) return
+    setBusy(true)
+    try {
+      const result = await api<{ stock: StockWorkspace }>('/api/stock/issues', {
+        method: 'POST',
+        body: JSON.stringify({ ...form, quantity: Number(form.quantity), expiredConfirmed: lot.expiryState === 'expired' }),
+      })
+      onSaved(result.stock)
+      setForm({ ...form, quantity: '', purpose: '', reference: '', note: '', overrideReason: '' })
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'ตัด stock ไม่สำเร็จ')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!stockedItems.length) {
+    return <Notice tone="warning">ยังไม่มี stock สำหรับตัดออก / No stock on hand.</Notice>
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <MobilePanel>
+        <PanelTitle icon={<ScanLine />} title="1. เลือกสินค้า / Select item" detail="สแกนหรือค้น item ที่ต้องการตัด stock" />
+        <ScanSearch
+          value={itemSearch}
+          onChange={setItemSearch}
+          placeholder="Scan / search item"
+          onPickFirst={() => {
+            const first = filteredItems[0]
+            if (first) {
+              selectItem(first)
+              setItemSearch('')
+            }
+          }}
+        />
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {filteredItems.map((option) => (
+            <ChoiceButton
+              key={option.id}
+              selected={option.id === form.itemId}
+              title={`${option.itemCode} · ${option.name}`}
+              meta={`${formatQuantity(option.totalOnHand)} ${option.unit} on hand`}
+              onClick={() => selectItem(option)}
+            />
+          ))}
+        </div>
+      </MobilePanel>
+
+      <MobilePanel>
+        <PanelTitle icon={<CalendarDays />} title="2. เลือก Lot / Select lot" detail="เรียงตาม FEFO ในข้อมูลเดิม" />
+        <div className="grid gap-2">
+          {lots.map((option) => (
+            <LotChoice key={option.id} lot={option} unit={item?.unit ?? ''} selected={option.id === form.lotId} onClick={() => setForm({ ...form, lotId: option.id, locationId: option.balances[0]?.locationId ?? '', overrideReason: '' })} />
+          ))}
+        </div>
+      </MobilePanel>
+
+      <MobilePanel>
+        <PanelTitle icon={<MapPin />} title="3. Location" detail={balance ? `${balance.locationCode} · ${formatQuantity(balance.onHand)} ${item?.unit}` : 'เลือก location'} />
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {balances.map((option) => (
+            <ChoiceButton
+              key={option.locationId}
+              selected={option.locationId === form.locationId}
+              title={option.locationCode}
+              meta={`${formatQuantity(option.onHand)} ${item?.unit ?? ''}`}
+              compact
+              onClick={() => setForm({ ...form, locationId: option.locationId })}
+            />
+          ))}
+        </div>
+      </MobilePanel>
+
+      <MobilePanel>
+        <PanelTitle icon={<ArrowUpFromLine />} title="4. จำนวนและเหตุผล / Quantity and purpose" detail={balance ? `สูงสุด ${formatQuantity(balance.onHand)} ${item?.unit}` : 'เลือก lot/location ก่อน'} />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <BigField label={`Quantity${item ? ` (${item.unit})` : ''}`}>
+            <Input
+              required
+              inputMode="decimal"
+              type="number"
+              min="0.001"
+              max={balance?.onHand}
+              step="0.001"
+              className="h-14 mono text-xl font-bold"
+              value={form.quantity}
+              onChange={(event) => setForm({ ...form, quantity: event.target.value })}
+            />
+          </BigField>
+          <BigField label="Purpose">
+            <Input required className="h-14 text-base" value={form.purpose} onChange={(event) => setForm({ ...form, purpose: event.target.value })} placeholder="เช่น NIPT run, QC, validation" />
+          </BigField>
+          <Field label="Reference"><Input className="h-11" value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></Field>
+          <Field label="FEFO override reason"><Input className="h-11" value={form.overrideReason} onChange={(event) => setForm({ ...form, overrideReason: event.target.value })} /></Field>
+          <div className="sm:col-span-2"><Field label="Note"><Textarea rows={3} value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} /></Field></div>
+        </div>
+        {lot?.expiryState === 'expired' ? <div className="mt-3"><Notice tone="danger">Lot นี้หมดอายุแล้ว / Expired lot</Notice></div> : null}
+      </MobilePanel>
+
+      <MobileActionBar>
+        <SummaryLine label="Issue" value={item ? `${item.itemCode} · ${form.quantity || '0'} ${item.unit}` : 'No item'} />
+        <Button disabled={busy || !canSave} className="h-12 min-w-32"><ArrowUpFromLine className="size-4" /> Save</Button>
+      </MobileActionBar>
+    </form>
+  )
+}
+
+function MoveForm({
+  items,
+  locations,
+  defaultLotId,
+  defaultLocationId,
+  onSaved,
+  onError,
+}: {
+  items: StockItem[]
+  locations: StockWorkspace['locations']
+  defaultLotId?: string
+  defaultLocationId?: string
+  onSaved: (stock: StockWorkspace) => void
+  onError: (text: string) => void
+}) {
+  const stockedItems = items.filter((item) => item.lots.some((lot) => lot.balances.some((balance) => balance.onHand > 0)))
+  const firstLot = stockedItems.flatMap((item) => item.lots).find((lot) => lot.id === defaultLotId) ?? stockedItems[0]?.lots.find((lot) => lot.totalOnHand > 0)
+  const [form, setForm] = useState({ itemId: firstLot?.itemId ?? stockedItems[0]?.id ?? '', lotId: firstLot?.id ?? '', fromLocationId: defaultLocationId ?? firstLot?.balances[0]?.locationId ?? '', toLocationId: '', quantity: '', reference: '', note: '' })
+  const [busy, setBusy] = useState(false)
+  const item = stockedItems.find((candidate) => candidate.id === form.itemId)
+  const lots = item?.lots.filter((lot) => lot.balances.some((balance) => balance.onHand > 0)) ?? []
+  const lot = lots.find((candidate) => candidate.id === form.lotId)
+  const fromBalances = lot?.balances.filter((balance) => balance.onHand > 0) ?? []
+  const fromBalance = fromBalances.find((candidate) => candidate.locationId === form.fromLocationId)
+  const destinationOptions = locations.filter((location) => location.id !== form.fromLocationId)
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    setBusy(true)
+    try {
+      const result = await api<{ stock: StockWorkspace }>('/api/stock/moves', { method: 'POST', body: JSON.stringify({ ...form, quantity: Number(form.quantity) }) })
+      onSaved(result.stock)
+      setForm({ ...form, quantity: '', reference: '', note: '' })
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'บันทึกย้ายที่เก็บไม่สำเร็จ')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card className="p-4 sm:p-5">
+      <form onSubmit={submit} className="grid gap-4 lg:grid-cols-2">
+        <Field label="สินค้า / Item"><Select required value={form.itemId} onChange={(event) => { const next = stockedItems.find((candidate) => candidate.id === event.target.value); const nextLot = next?.lots.find((candidate) => candidate.totalOnHand > 0); setForm({ ...form, itemId: event.target.value, lotId: nextLot?.id ?? '', fromLocationId: nextLot?.balances[0]?.locationId ?? '', toLocationId: '' }) }}>{stockedItems.map((option) => <option key={option.id} value={option.id}>{option.itemCode} · {option.name}</option>)}</Select></Field>
+        <Field label="Lot"><Select required value={form.lotId} onChange={(event) => { const nextLot = lots.find((candidate) => candidate.id === event.target.value); setForm({ ...form, lotId: event.target.value, fromLocationId: nextLot?.balances[0]?.locationId ?? '', toLocationId: '' }) }}>{lots.map((option) => <option key={option.id} value={option.id}>{option.lotNumber} · {formatQuantity(option.totalOnHand)} {item?.unit}</option>)}</Select></Field>
+        <Field label="จาก / From"><Select required value={form.fromLocationId} onChange={(event) => setForm({ ...form, fromLocationId: event.target.value })}>{fromBalances.map((option) => <option key={option.locationId} value={option.locationId}>{option.locationCode} · {formatQuantity(option.onHand)} {item?.unit}</option>)}</Select></Field>
+        <Field label="ไป / To"><Select required value={form.toLocationId} onChange={(event) => setForm({ ...form, toLocationId: event.target.value })}><option value="">เลือก destination</option>{destinationOptions.map((option) => <option key={option.id} value={option.id}>{option.code} · {option.name}</option>)}</Select></Field>
+        <Field label={`จำนวน / Quantity${item ? ` (${item.unit})` : ''}`}><Input required type="number" min="0.001" max={fromBalance?.onHand} step="0.001" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} /></Field>
+        <Field label="Reference"><Input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></Field>
+        <div className="lg:col-span-2"><Field label="หมายเหตุ / Note"><Textarea rows={3} value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} /></Field></div>
+        <div className="lg:col-span-2"><Button disabled={busy || !stockedItems.length}><Save className="size-4" /> บันทึก / Save</Button></div>
+      </form>
+    </Card>
+  )
+}
+
+function MobilePanel({ children }: { children: React.ReactNode }) {
+  return <section className="rounded-lg border border-[#d6e2e3] bg-white/95 p-3 shadow-[0_12px_34px_rgba(20,64,72,0.06)] sm:p-4">{children}</section>
+}
+
+function PanelTitle({ icon, title, detail }: { icon: React.ReactNode; title: string; detail: string }) {
+  return (
+    <div className="mb-3 flex items-start gap-2">
+      <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-[#e8f7f5] text-[#0b7f76] [&>svg]:size-4">{icon}</span>
+      <div className="min-w-0">
+        <h2 className="font-bold text-[#173d50]">{title}</h2>
+        <p className="mt-0.5 text-xs leading-5 text-[#789097]">{detail}</p>
+      </div>
+    </div>
+  )
+}
+
+function ScanSearch({ value, onChange, onPickFirst, placeholder }: { value: string; onChange: (value: string) => void; onPickFirst: () => void; placeholder: string }) {
+  return (
+    <div className="relative">
+      <ScanLine className="absolute top-3.5 left-3 size-5 text-[#88a1a7]" />
+      <Input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            onPickFirst()
+          }
+        }}
+        className="h-12 pl-11 text-base"
+        placeholder={placeholder}
+      />
+    </div>
+  )
+}
+
+function ChoiceButton({
+  selected,
+  title,
+  meta,
+  onClick,
+  compact = false,
+}: {
+  selected: boolean
+  title: string
+  meta: string
+  onClick: () => void
+  compact?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex min-h-14 w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-left transition ${selected ? 'border-[#0b7f76] bg-[#eef9f7] shadow-[inset_0_0_0_1px_#0b7f76]' : 'border-[#d8e6e6] bg-white hover:border-[#9fc2c3]'}`}
+    >
+      <span className="min-w-0">
+        <span className={`block font-bold text-[#173d50] ${compact ? 'text-sm' : 'text-sm sm:text-base'}`}>{title}</span>
+        <span className="mt-0.5 block truncate text-xs text-[#789097]">{meta}</span>
+      </span>
+      {selected ? <CheckCircle2 className="size-5 shrink-0 text-[#0b7f76]" /> : null}
+    </button>
+  )
+}
+
+function LotChoice({ lot, unit, selected, onClick }: { lot: StockLot; unit: string; selected: boolean; onClick: () => void }) {
+  const stateClass = lot.expiryState === 'expired' ? 'bg-[#fff1f2] text-[#b33b46]' : lot.expiryState === 'expiring' ? 'bg-[#fff8e8] text-[#a76511]' : 'bg-[#eef8f5] text-[#0b7f76]'
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-md border p-3 text-left transition ${selected ? 'border-[#0b7f76] bg-[#eef9f7] shadow-[inset_0_0_0_1px_#0b7f76]' : 'border-[#d8e6e6] bg-white hover:border-[#9fc2c3]'}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="mono text-sm font-bold text-[#173d50]">{lot.lotNumber}</p>
+          <p className="mt-1 text-xs text-[#789097]">EXP {formatDate(lot.expiryDate)}</p>
+        </div>
+        <span className={`rounded px-2 py-1 text-[10px] font-bold ${stateClass}`}>{lot.expiryState}</span>
+      </div>
+      <div className="mt-3 flex items-end justify-between gap-2">
+        <p className="mono text-lg font-bold text-[#173d50]">{formatQuantity(lot.totalOnHand)} <span className="text-xs text-[#789097]">{unit}</span></p>
+        {selected ? <CheckCircle2 className="size-5 text-[#0b7f76]" /> : null}
+      </div>
+    </button>
+  )
+}
+
+function BigField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-bold text-[#58747d]">{label}</span>
+      {children}
+    </label>
+  )
+}
+
+function MobileActionBar({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="fixed right-0 bottom-0 left-0 z-30 border-t border-[#d6e2e3] bg-white/95 px-4 py-3 shadow-[0_-18px_40px_rgba(20,64,72,0.14)] backdrop-blur sm:static sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:shadow-none sm:backdrop-blur-0">
+      <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">{children}</div>
+    </div>
+  )
+}
+
+function SummaryLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-bold tracking-[0.16em] text-[#789097] uppercase">{label}</p>
+      <p className="truncate text-sm font-bold text-[#173d50]">{value}</p>
+    </div>
+  )
+}
+
+function filterItems(items: StockItem[], query: string) {
+  const term = query.trim().toLowerCase()
+  if (!term) return items
+  return items.filter((item) => [item.itemCode, item.name, item.categoryName, item.catalogNo, item.manufacturerBarcode].filter(Boolean).join(' ').toLowerCase().includes(term))
+}
