@@ -519,7 +519,7 @@ export async function resolveScan(codeInput: string): Promise<ScanResolution> {
       itemId: asString(itemRow.id),
       itemCode: asString(itemRow.item_code),
       itemName: asString(itemRow.name),
-      href: `/receive?itemId=${encodeURIComponent(asString(itemRow.id))}`,
+      href: `/movements?mode=receive&itemId=${encodeURIComponent(asString(itemRow.id))}`,
     }
   }
 

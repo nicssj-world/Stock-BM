@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Hash,
   MapPin,
+  MoveRight,
   PackageSearch,
   Save,
   ScanLine,
@@ -18,19 +19,26 @@ import { api, Button, Card, Field, Input, Notice, PageHeader, Select, Textarea }
 
 type Mode = 'receive' | 'issue' | 'move'
 
+const TABS: { mode: Mode; label: string; icon: typeof ArrowDownToLine }[] = [
+  { mode: 'receive', label: 'รับเข้า', icon: ArrowDownToLine },
+  { mode: 'issue', label: 'ตัด Stock', icon: ArrowUpFromLine },
+  { mode: 'move', label: 'ย้ายที่', icon: MoveRight },
+]
+
 export function TransactionView({
-  mode,
+  initialMode,
   initialData,
   defaultItemId,
   defaultLotId,
   defaultLocationId,
 }: {
-  mode: Mode
+  initialMode: Mode
   initialData: StockWorkspace
   defaultItemId?: string
   defaultLotId?: string
   defaultLocationId?: string
 }) {
+  const [mode, setMode] = useState<Mode>(initialMode)
   const [data, setData] = useState(initialData)
   const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
   const activeItems = data.items.filter((item) => item.isActive)
@@ -44,7 +52,27 @@ export function TransactionView({
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 pb-28 sm:pb-5">
-      <PageHeader eyebrow="Mobile stock transaction" title={title} description={description} />
+      <PageHeader eyebrow="Stock movement" title={title} description={description} />
+      <div className="inline-flex flex-wrap gap-1 rounded-lg border border-[#d6e2e3] bg-white p-1" role="tablist" aria-label="ประเภทการเคลื่อนไหว stock">
+        {TABS.map(({ mode: tabMode, label, icon: Icon }) => {
+          const active = mode === tabMode
+          return (
+            <button
+              key={tabMode}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => {
+                setMode(tabMode)
+                setNotice(null)
+              }}
+              className={`flex items-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-semibold transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${active ? 'bg-[#0b7f76] text-white' : 'text-[#58747d] hover:bg-[#eef6f5]'}`}
+            >
+              <Icon className="size-4" /> {label}
+            </button>
+          )
+        })}
+      </div>
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
       {mode === 'receive' ? (
         <ReceiveForm

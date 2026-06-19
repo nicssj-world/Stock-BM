@@ -97,9 +97,9 @@ function ScanResult({ result }: { result: ScanResolution }) {
           {result.lotNumber ? <p className="mono mt-2 text-sm text-[#55727c]">LOT {result.lotNumber}{result.locationCode ? ` · ${result.locationCode}` : ''}</p> : null}
         </div>
         <div className="flex flex-wrap gap-2">
-          {result.itemId ? <Button variant="secondary" onClick={() => { window.location.href = `/receive?itemId=${result.itemId}` }}><PackagePlus className="size-4" /> Receive</Button> : null}
-          {result.lotId ? <Button onClick={() => { window.location.href = `/issue?lotId=${result.lotId}${result.locationId ? `&locationId=${result.locationId}` : ''}` }}><QrCode className="size-4" /> Issue</Button> : null}
-          {result.lotId ? <Button variant="secondary" onClick={() => { window.location.href = `/move?lotId=${result.lotId}${result.locationId ? `&locationId=${result.locationId}` : ''}` }}><MoveRight className="size-4" /> Move</Button> : null}
+          {result.itemId ? <Button variant="secondary" onClick={() => { window.location.href = `/movements?mode=receive&itemId=${result.itemId}` }}><PackagePlus className="size-4" /> Receive</Button> : null}
+          {result.lotId ? <Button onClick={() => { window.location.href = `/movements?mode=issue&lotId=${result.lotId}${result.locationId ? `&locationId=${result.locationId}` : ''}` }}><QrCode className="size-4" /> Issue</Button> : null}
+          {result.lotId ? <Button variant="secondary" onClick={() => { window.location.href = `/movements?mode=move&lotId=${result.lotId}${result.locationId ? `&locationId=${result.locationId}` : ''}` }}><MoveRight className="size-4" /> Move</Button> : null}
         </div>
       </div>
     </Card>

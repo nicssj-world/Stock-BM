@@ -30,7 +30,7 @@ export function AdminView({ actor, initialData }: { actor: BmActor; initialData:
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-5">
-      <PageHeader eyebrow="Administration" title="Admin" description={`Stock-BM Admin · ${actor.displayName}`} />
+      <PageHeader eyebrow="Administration" title="Admin" description={`Molecular-CBH QMS Admin · ${actor.displayName}`} />
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
       <div className="flex flex-wrap gap-2">
         {(['items', 'categories', 'locations', 'users'] as Tab[]).map((item) => <Button key={item} variant={tab === item ? 'primary' : 'secondary'} onClick={() => setTab(item)}>{item}</Button>)}

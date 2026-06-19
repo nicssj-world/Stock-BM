@@ -1,6 +1,6 @@
-# Stock-BM
+# Molecular-CBH QMS
 
-Web app สำหรับจัดการ stock น้ำยาและ consumable งานอณูชีววิทยา โรงพยาบาลชลบุรี
+ระบบบริหารคุณภาพห้องปฏิบัติการงานอณูชีววิทยา โรงพยาบาลชลบุรี (เดิมชื่อ Stock-BM) ครอบคลุม 3 ส่วน: จัดการ stock น้ำยา/consumable, IQC (Internal Quality Control) และ EQA (External Quality Assessment)
 
 ## Stack
 
@@ -20,7 +20,7 @@ NEXT_PUBLIC_BM_SUPABASE_ANON_KEY=
 BM_SUPABASE_SERVICE_ROLE_KEY=
 ```
 
-ใช้ Supabase project เดียวกับ `Genomic-CBH` แต่ Stock-BM ใช้ cookie แยกชื่อ `bm-stock-auth`
+ใช้ Supabase project เดียวกับ `Genomic-CBH` แต่ Molecular-CBH QMS ใช้ cookie แยกชื่อ `bm-stock-auth`
 
 ## Database
 

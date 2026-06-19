@@ -21,7 +21,7 @@ export async function POST(request: Request) {
     const actor = await getActor()
     if (!actor) {
       await supabase.auth.signOut()
-      throw new HttpError(403, 'บัญชีนี้ยังไม่มีสิทธิ์เข้า Stock-BM กรุณาติดต่อ Admin')
+      throw new HttpError(403, 'บัญชีนี้ยังไม่มีสิทธิ์เข้า Molecular-CBH QMS กรุณาติดต่อ Admin')
     }
     return { actor }
   })

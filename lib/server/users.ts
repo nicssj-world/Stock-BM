@@ -100,7 +100,7 @@ export async function updateUserAccess(
   actor: BmActor,
 ) {
   await assertAdmin(actor)
-  if (userId === actor.id && input.stockActive === false) throw new HttpError(400, 'You cannot deactivate your own Stock-BM access')
+  if (userId === actor.id && input.stockActive === false) throw new HttpError(400, 'You cannot deactivate your own Molecular-CBH QMS access')
   const admin = getAdminClient()
   const profileUpdates: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (input.displayName !== undefined) profileUpdates.display_name = input.displayName.trim()

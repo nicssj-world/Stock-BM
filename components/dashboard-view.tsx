@@ -31,7 +31,7 @@ export function DashboardView({ actor, stock }: { actor: BmActor; stock: StockWo
         eyebrow="BM Stock Control"
         title="ภาพรวม / Dashboard"
         description={`สวัสดี ${actor.displayName} · ${actor.role}`}
-        actions={<Button onClick={() => router.push('/receive')}>รับเข้า / Receive</Button>}
+        actions={<Button onClick={() => router.push('/movements?mode=receive')}>รับเข้า / Receive</Button>}
       />
       <Card className="p-4">
         <form onSubmit={submit} className="grid gap-3 lg:grid-cols-[1fr_auto]">

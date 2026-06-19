@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { AlertTriangle, LoaderCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, LoaderCircle, Minus, XCircle } from 'lucide-react'
 
 export function Button({
   children,
@@ -91,6 +91,64 @@ export function Notice({ children, tone = 'info' }: { children: ReactNode; tone?
     success: 'border-[#c6e2ca] bg-[#f3faf4] text-[#4b7b51]',
   }
   return <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${styles[tone]}`}><AlertTriangle className="mt-0.5 size-4 shrink-0" />{children}</div>
+}
+
+export type StatusTone = 'accepted' | 'warning' | 'rejected' | 'neutral'
+
+// Status is always conveyed with icon + text + colour (never colour alone).
+export function StatusBadge({ tone, label }: { tone: StatusTone; label: string }) {
+  const map = {
+    accepted: { cls: 'border-[#c6e2ca] bg-[#f1faf3] text-[#2f7d44]', Icon: CheckCircle2 },
+    warning: { cls: 'border-[#eed4a6] bg-[#fff9ed] text-[#a9700f]', Icon: AlertTriangle },
+    rejected: { cls: 'border-[#efc7cc] bg-[#fff5f6] text-[#c02a37]', Icon: XCircle },
+    neutral: { cls: 'border-[#d2dee0] bg-[#f6f9f9] text-[#5b7681]', Icon: Minus },
+  } as const
+  const { cls, Icon } = map[tone]
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold ${cls}`}>
+      <Icon className="size-3" aria-hidden="true" />
+      {label}
+    </span>
+  )
+}
+
+export function StatCard({ label, value, tone = 'neutral', hint }: { label: string; value: ReactNode; tone?: StatusTone; hint?: string }) {
+  const accent = {
+    accepted: 'text-[#2f7d44]',
+    warning: 'text-[#a9700f]',
+    rejected: 'text-[#c02a37]',
+    neutral: 'text-[#173d50]',
+  }[tone]
+  return (
+    <Card className="p-4">
+      <p className="text-[11px] font-bold tracking-[0.14em] text-[#789097] uppercase">{label}</p>
+      <p className={`mono mt-2 text-2xl font-bold tabular-nums ${accent}`}>{value}</p>
+      {hint ? <p className="mt-1 text-xs text-[#8ba0a5]">{hint}</p> : null}
+    </Card>
+  )
+}
+
+export function Tabs<T extends string>({ tabs, active, onChange }: { tabs: { key: T; label: string; icon?: typeof CheckCircle2 }[]; active: T; onChange: (key: T) => void }) {
+  return (
+    <div className="inline-flex flex-wrap gap-1 rounded-lg border border-[#d6e2e3] bg-white p-1" role="tablist">
+      {tabs.map(({ key, label, icon: Icon }) => {
+        const on = key === active
+        return (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={on}
+            onClick={() => onChange(key)}
+            className={`flex items-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-semibold transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${on ? 'bg-[#0b7f76] text-white' : 'text-[#58747d] hover:bg-[#eef6f5]'}`}
+          >
+            {Icon ? <Icon className="size-4" aria-hidden="true" /> : null}
+            {label}
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 export async function api<T>(url: string, options?: RequestInit): Promise<T> {

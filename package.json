@@ -1,5 +1,5 @@
 {
-  "name": "stock-bm",
+  "name": "molecular-cbh-qms",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "bootstrap:stock-admin": "node --env-file-if-exists=.env.local scripts/bootstrap-stock-admin.mjs"
+    "bootstrap:stock-admin": "node --env-file-if-exists=.env.local scripts/bootstrap-stock-admin.mjs",
+    "seed:iqc-cd4": "node --env-file-if-exists=.env.local scripts/import-iqc-cd4.mjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.2.7",

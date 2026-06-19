@@ -43,4 +43,19 @@ body {
   body {
     background: white;
   }
+  aside,
+  .no-print {
+    display: none !important;
+  }
+  .paper {
+    box-shadow: none;
+    border-color: #cbd5d8;
+  }
+  .print-only {
+    display: block !important;
+  }
+}
+
+.print-only {
+  display: none;
 }

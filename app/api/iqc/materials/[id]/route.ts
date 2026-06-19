@@ -1,0 +1,10 @@
+import { z } from 'zod'
+import { requireActor } from '@/lib/server/auth'
+import { setIqcEntityActive } from '@/lib/server/iqc'
+import { readJson, respond } from '@/lib/server/route'
+
+const schema = z.object({ isActive: z.boolean() })
+
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  return respond(async () => ({ iqc: await setIqcEntityActive('material', (await params).id, (await readJson(request, schema)).isActive, await requireActor()) }))
+}

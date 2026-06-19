@@ -34,9 +34,9 @@ export function LoginForm() {
       <section className="relative grid w-full max-w-5xl overflow-hidden rounded-lg border border-[#d4e3e4] bg-white shadow-[0_30px_90px_rgba(17,62,71,0.14)] lg:grid-cols-[1.05fr_0.95fr]">
         <div className="relative hidden overflow-hidden bg-[#123944] p-9 text-white lg:block">
           <div className="flex size-12 items-center justify-center rounded-lg bg-[#0b7f76]"><FlaskConical className="size-6" /></div>
-          <p className="mt-20 text-xs font-bold tracking-[0.2em] text-[#7ee3d8] uppercase">BM Reagent Control</p>
-          <h1 className="mt-3 text-4xl font-bold">Stock-BM<br />Chonburi Hospital</h1>
-          <p className="mt-4 max-w-sm text-sm leading-7 text-[#b6d2d8]">จัดการ stock น้ำยาและ consumable แบบ scan-first พร้อม lot, expiry, location และ audit trail</p>
+          <p className="mt-20 text-xs font-bold tracking-[0.2em] text-[#7ee3d8] uppercase">Molecular Lab Quality</p>
+          <h1 className="mt-3 text-4xl font-bold">Molecular-CBH QMS<br />Chonburi Hospital</h1>
+          <p className="mt-4 max-w-sm text-sm leading-7 text-[#b6d2d8]">ระบบบริหารคุณภาพห้องแลปอณูชีววิทยา — Stock, IQC และ EQA พร้อม lot, expiry, audit trail</p>
           <div className="mt-16 grid grid-cols-3 gap-3">
             {[['01', 'Scan'], ['02', 'FEFO'], ['03', 'Audit']].map(([number, label]) => (
               <div key={number} className="border-t border-white/20 pt-3">

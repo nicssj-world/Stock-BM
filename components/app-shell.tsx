@@ -2,25 +2,37 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Activity, Archive, BarChart3, Boxes, ClipboardList, LogOut, MoveRight, PackagePlus, QrCode, Settings, ShieldCheck } from 'lucide-react'
+import { Activity, BarChart3, Boxes, ClipboardCheck, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import { api } from '@/components/ui'
 
-const mainNav = [
-  { href: '/dashboard', label: 'ภาพรวม / Dashboard', icon: Activity },
-  { href: '/inventory', label: 'คลัง / Inventory', icon: Boxes },
-  { href: '/receive', label: 'รับเข้า / Receive', icon: PackagePlus },
-  { href: '/issue', label: 'เบิกออก / Issue', icon: Archive },
-  { href: '/move', label: 'ย้ายที่ / Move', icon: MoveRight },
-  { href: '/scan', label: 'สแกน / Scan', icon: QrCode },
-  { href: '/reports', label: 'รายงาน / Reports', icon: BarChart3 },
-  { href: '/audit', label: 'Audit', icon: ClipboardList },
-]
+type NavItem = { href: string; label: string; icon: typeof Activity }
+type NavSection = { title: string; items: NavItem[] }
+
+const stockSection: NavSection = {
+  title: 'Stock',
+  items: [
+    { href: '/dashboard', label: 'ภาพรวม / Dashboard', icon: Activity },
+    { href: '/inventory', label: 'คลัง / Inventory', icon: Boxes },
+    { href: '/movements', label: 'เคลื่อนไหว / Movements', icon: MoveRight },
+    { href: '/scan', label: 'สแกน / Scan', icon: QrCode },
+    { href: '/reports', label: 'รายงาน / Reports & Audit', icon: BarChart3 },
+  ],
+}
+
+const qualitySection: NavSection = {
+  title: 'Quality',
+  items: [
+    { href: '/iqc', label: 'IQC', icon: LineChart },
+    { href: '/eqa', label: 'EQA', icon: ClipboardCheck },
+  ],
+}
 
 export function AppShell({ actor, children }: { actor: BmActor; children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
-  const nav = actor.role === 'Admin' ? [...mainNav, { href: '/admin', label: 'Admin', icon: Settings }] : mainNav
+  const sections: NavSection[] = [stockSection, qualitySection]
+  if (actor.role === 'Admin') sections.push({ title: 'System', items: [{ href: '/admin', label: 'Admin', icon: Settings }] })
 
   async function logout() {
     await api('/api/auth/logout', { method: 'POST' })
@@ -34,25 +46,31 @@ export function AppShell({ actor, children }: { actor: BmActor; children: React.
         <div className="flex items-center justify-between gap-3 px-4 py-4 lg:block lg:px-5 lg:py-6">
           <div>
             <p className="text-[11px] font-bold tracking-[0.2em] text-[#7ee3d8] uppercase">Chonburi Hospital</p>
-            <h1 className="mt-1 text-xl font-bold">Stock-BM</h1>
-            <p className="mt-1 hidden text-xs text-[#a8c8ce] lg:block">Molecular Biology Inventory</p>
+            <h1 className="mt-1 text-xl leading-tight font-bold">Molecular-CBH QMS</h1>
+            <p className="mt-1 hidden text-xs text-[#a8c8ce] lg:block">Quality Management System</p>
           </div>
           <span className="rounded border border-white/15 bg-white/10 px-2 py-1 text-[10px] font-bold text-[#cce7eb] lg:hidden">{actor.role}</span>
         </div>
         <nav className="flex gap-1 overflow-x-auto px-3 pb-3 lg:block lg:space-y-1 lg:overflow-visible lg:px-3">
-          {nav.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href || pathname.startsWith(`${href}/`)
-            return (
-              <Link
-                key={href}
-                href={href}
-                className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition lg:w-full ${active ? 'bg-[#0b7f76] text-white' : 'text-[#b9d6dc] hover:bg-white/8 hover:text-white'}`}
-              >
-                <Icon className="size-4" />
-                <span className="whitespace-nowrap">{label}</span>
-              </Link>
-            )
-          })}
+          {sections.map((section) => (
+            <div key={section.title} className="contents lg:block">
+              <p className="hidden px-3 pt-4 pb-1 text-[10px] font-bold tracking-[0.16em] text-[#5f939b] uppercase lg:block">{section.title}</p>
+              {section.items.map(({ href, label, icon: Icon }) => {
+                const active = pathname === href || pathname.startsWith(`${href}/`)
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    aria-current={active ? 'page' : undefined}
+                    className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition focus-visible:ring-2 focus-visible:ring-[#7ee3d8] focus-visible:outline-none lg:w-full ${active ? 'bg-[#0b7f76] text-white' : 'text-[#b9d6dc] hover:bg-white/8 hover:text-white'}`}
+                  >
+                    <Icon className="size-4" />
+                    <span className="whitespace-nowrap">{label}</span>
+                  </Link>
+                )
+              })}
+            </div>
+          ))}
         </nav>
         <div className="hidden border-t border-white/10 p-4 lg:block">
           <div className="rounded-md border border-white/10 bg-white/5 p-3">

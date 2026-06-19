@@ -7,8 +7,8 @@ import '@fontsource/ibm-plex-mono/600.css'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Stock-BM | Chonburi Hospital',
-  description: 'Molecular biology reagent and consumable stock workspace for Chonburi Hospital.',
+  title: 'Molecular-CBH QMS | Chonburi Hospital',
+  description: 'Molecular laboratory quality management system (Stock, IQC, EQA) for Chonburi Hospital.',
 }
 
 export default function RootLayout({
