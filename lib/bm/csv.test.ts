@@ -22,6 +22,7 @@ describe('BM stock CSV', () => {
         unit: 'kit',
         minimumStock: 1,
         expiryWarningDays: 90,
+        defaultIssueQty: null,
         storageCondition: null,
         supplier: null,
         catalogNo: null,

@@ -56,6 +56,7 @@ export interface StockItem {
   unit: string
   minimumStock: number
   expiryWarningDays: number
+  defaultIssueQty: number | null
   storageCondition: string | null
   supplier: string | null
   catalogNo: string | null
@@ -118,10 +119,26 @@ export interface ScanResolution {
   itemCode?: string
   itemName?: string
   lotId?: string
+  lotToken?: string
   lotNumber?: string
   locationId?: string
   locationCode?: string
   href?: string
+}
+
+// Context for the one-screen quick-issue reached by scanning a lot QR sticker.
+export interface LotIssueContext {
+  lotId: string
+  lotNumber: string
+  itemId: string
+  itemCode: string
+  itemName: string
+  unit: string
+  expiryDate: string | null
+  expiryState: ExpiryState
+  defaultIssueQty: number | null
+  balances: StockBalance[]
+  suggestedLocationId: string | null
 }
 
 export interface AdminUserRow {

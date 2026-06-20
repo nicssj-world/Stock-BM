@@ -3,6 +3,7 @@ import 'server-only'
 import { getExpiryState, sortLotsFefo } from '@/lib/bm/rules'
 import type {
   BmActor,
+  LotIssueContext,
   ScanResolution,
   StockBalance,
   StockCategory,
@@ -165,6 +166,7 @@ export async function getStockWorkspace(actor: BmActor): Promise<StockWorkspace>
       unit: asString(row.unit),
       minimumStock,
       expiryWarningDays: Number(row.expiry_warning_days ?? 90),
+      defaultIssueQty: row.default_issue_qty == null ? null : number(row.default_issue_qty),
       storageCondition: nullableString(row.storage_condition),
       supplier: nullableString(row.supplier),
       catalogNo: nullableString(row.catalog_no),
@@ -317,6 +319,7 @@ export async function createItem(input: {
   unit: string
   minimumStock: number
   expiryWarningDays: number
+  defaultIssueQty?: number | null
   storageCondition?: string | null
   supplier?: string | null
   catalogNo?: string | null
@@ -337,6 +340,7 @@ export async function createItem(input: {
       unit: input.unit.trim(),
       minimum_stock: input.minimumStock,
       expiry_warning_days: input.expiryWarningDays,
+      default_issue_qty: input.defaultIssueQty ?? null,
       storage_condition: clean(input.storageCondition),
       supplier: clean(input.supplier),
       catalog_no: clean(input.catalogNo),
@@ -378,6 +382,7 @@ export async function updateItem(itemId: string, input: Partial<Parameters<typeo
   if (input.unit !== undefined) updates.unit = input.unit.trim()
   if (input.minimumStock !== undefined) updates.minimum_stock = input.minimumStock
   if (input.expiryWarningDays !== undefined) updates.expiry_warning_days = input.expiryWarningDays
+  if (input.defaultIssueQty !== undefined) updates.default_issue_qty = input.defaultIssueQty
   if (input.storageCondition !== undefined) updates.storage_condition = clean(input.storageCondition)
   if (input.supplier !== undefined) updates.supplier = clean(input.supplier)
   if (input.catalogNo !== undefined) updates.catalog_no = clean(input.catalogNo)
@@ -526,8 +531,8 @@ export async function resolveScan(codeInput: string): Promise<ScanResolution> {
   return { kind: 'unknown', code }
 }
 
-function extractLotToken(value: string) {
-  const match = value.match(/\/scan\/lot\/([A-Za-z0-9_-]+)/)
+export function extractLotToken(value: string) {
+  const match = value.match(/\/(?:scan\/lot|issue)\/([A-Za-z0-9_-]+)/)
   if (match) return match[1]
   if (/^[A-Za-z0-9_-]{18,80}$/.test(value)) return value
   return null
@@ -556,10 +561,79 @@ async function lotResolution(lotRow: RecordRow, code: string, kind: ScanResoluti
     itemCode: asString(itemRow.item_code),
     itemName: asString(itemRow.name),
     lotId: asString(lotRow.id),
+    lotToken: asString(lotRow.internal_qr_token),
     lotNumber: asString(lotRow.lot_number),
     locationId,
     locationCode,
     href: `/scan/lot/${encodeURIComponent(asString(lotRow.internal_qr_token))}`,
   }
+}
+
+// Context for the quick-issue screen reached by scanning a lot QR sticker.
+// Reuses getStockWorkspace so balances/expiry/FEFO are computed consistently.
+export async function resolveLotForIssue(token: string, actor: BmActor): Promise<LotIssueContext> {
+  const trimmed = token.trim()
+  if (!trimmed) throw new HttpError(404, 'Lot not found')
+  const workspace = await getStockWorkspace(actor)
+  const item = workspace.items.find((candidate) => candidate.lots.some((lot) => lot.internalQrToken === trimmed))
+  const lot = item?.lots.find((candidate) => candidate.internalQrToken === trimmed)
+  if (!item || !lot) throw new HttpError(404, 'Lot not found for this QR')
+  const balances = lot.balances.filter((balance) => balance.onHand > 0)
+  const suggestedLocationId = [...balances].sort((a, b) => b.onHand - a.onHand)[0]?.locationId ?? null
+  return {
+    lotId: lot.id,
+    lotNumber: lot.lotNumber,
+    itemId: item.id,
+    itemCode: item.itemCode,
+    itemName: item.name,
+    unit: item.unit,
+    expiryDate: lot.expiryDate,
+    expiryState: lot.expiryState,
+    defaultIssueQty: item.defaultIssueQty,
+    balances,
+    suggestedLocationId,
+  }
+}
+
+// Resolve a scanned code (URL or raw token) to issue context for batch scanning.
+export async function resolveIssueContext(code: string, actor: BmActor): Promise<LotIssueContext> {
+  const token = extractLotToken(code)
+  if (!token) throw new HttpError(404, 'Not a lot QR')
+  return resolveLotForIssue(token, actor)
+}
+
+// Batch issue: one ledger transaction per line (the issue RPC is per-lot). Lines are
+// independent — a failure on one does not roll back others; results report per line.
+export async function issueBatch(input: {
+  lines: { lotId: string; locationId: string; quantity: number; expiredConfirmed?: boolean; overrideReason?: string | null }[]
+  purpose: string
+  reference?: string | null
+  note?: string | null
+}, actor: BmActor): Promise<{ stock: StockWorkspace; results: { lotId: string; ok: boolean; error?: string }[] }> {
+  if (!input.lines.length) throw new HttpError(400, 'No lines to issue')
+  if (!input.purpose.trim()) throw new HttpError(400, 'Purpose is required')
+  const admin = getAdminClient()
+  const results: { lotId: string; ok: boolean; error?: string }[] = []
+  for (const line of input.lines) {
+    try {
+      const { data, error } = await admin.rpc('issue_bm_stock', {
+        p_lot: line.lotId,
+        p_location: line.locationId,
+        p_quantity: line.quantity,
+        p_purpose_text: input.purpose.trim(),
+        p_reference_text: clean(input.reference),
+        p_note: clean(input.note),
+        p_override_reason: clean(line.overrideReason),
+        p_expired_confirmed: line.expiredConfirmed ?? false,
+        p_actor: actor.id,
+      })
+      if (error) throw new Error(error.message)
+      await writeAudit(actor, 'stock.issue', 'stock-transaction', asString(data), { ...line, purpose: input.purpose, batch: true })
+      results.push({ lotId: line.lotId, ok: true })
+    } catch (lineError) {
+      results.push({ lotId: line.lotId, ok: false, error: lineError instanceof Error ? lineError.message : 'failed' })
+    }
+  }
+  return { stock: await getStockWorkspace(actor), results }
 }
 

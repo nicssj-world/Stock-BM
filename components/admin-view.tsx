@@ -51,6 +51,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
     unit: '',
     minimumStock: '0',
     expiryWarningDays: '90',
+    defaultIssueQty: '',
     storageCondition: '',
     supplier: '',
     catalogNo: '',
@@ -82,6 +83,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
       unit: item.unit,
       minimumStock: String(item.minimumStock),
       expiryWarningDays: String(item.expiryWarningDays),
+      defaultIssueQty: item.defaultIssueQty == null ? '' : String(item.defaultIssueQty),
       storageCondition: item.storageCondition ?? '',
       supplier: item.supplier ?? '',
       catalogNo: item.catalogNo ?? '',
@@ -96,7 +98,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
     event.preventDefault()
     setBusy(true)
     try {
-      const payload = { ...form, minimumStock: Number(form.minimumStock), expiryWarningDays: Number(form.expiryWarningDays) }
+      const payload = { ...form, minimumStock: Number(form.minimumStock), expiryWarningDays: Number(form.expiryWarningDays), defaultIssueQty: form.defaultIssueQty === '' ? null : Number(form.defaultIssueQty) }
       const result = await api<{ stock: StockWorkspace }>(editingItemId ? `/api/admin/items/${editingItemId}` : '/api/admin/items', {
         method: editingItemId ? 'PATCH' : 'POST',
         body: JSON.stringify(payload),
@@ -150,6 +152,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
         <Field label="ชื่อ / Name"><Input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></Field>
         <Field label="Category"><Select required value={form.categoryId} onChange={(event) => setForm({ ...form, categoryId: event.target.value })}>{categoryOptions.map((category) => <option key={category.id} value={category.id}>{category.name}{category.isActive ? '' : ' (inactive)'}</option>)}</Select></Field>
         <div className="grid gap-3 sm:grid-cols-2"><Field label="Minimum"><Input required type="number" min="0" step="0.001" value={form.minimumStock} onChange={(event) => setForm({ ...form, minimumStock: event.target.value })} /></Field><Field label="Expiry warning days"><Input required type="number" min="0" value={form.expiryWarningDays} onChange={(event) => setForm({ ...form, expiryWarningDays: event.target.value })} /></Field></div>
+        <Field label="Default issue qty (ตัด stock prefill)"><Input type="number" min="0.001" step="0.001" value={form.defaultIssueQty} onChange={(event) => setForm({ ...form, defaultIssueQty: event.target.value })} placeholder="เว้นว่าง = ไม่ตั้ง · consumable เช่น 1" /></Field>
         <div className="grid gap-3 sm:grid-cols-2"><Field label="Storage condition"><Input value={form.storageCondition} onChange={(event) => setForm({ ...form, storageCondition: event.target.value })} /></Field><Field label="Supplier"><Input value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} /></Field></div>
         <div className="grid gap-3 sm:grid-cols-2"><Field label="Catalog no"><Input value={form.catalogNo} onChange={(event) => setForm({ ...form, catalogNo: event.target.value })} /></Field><Field label="Manufacturer"><Input value={form.manufacturer} onChange={(event) => setForm({ ...form, manufacturer: event.target.value })} /></Field></div>
         <Field label="Manufacturer barcode"><Input value={form.manufacturerBarcode} onChange={(event) => setForm({ ...form, manufacturerBarcode: event.target.value })} /></Field>

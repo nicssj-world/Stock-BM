@@ -10,6 +10,7 @@ const itemSchema = z.object({
   unit: z.string().trim().min(1).max(40),
   minimumStock: z.number().min(0),
   expiryWarningDays: z.number().int().min(0).max(3650),
+  defaultIssueQty: z.number().positive().nullable().optional(),
   storageCondition: z.string().trim().max(120).nullable().optional(),
   supplier: z.string().trim().max(180).nullable().optional(),
   catalogNo: z.string().trim().max(120).nullable().optional(),

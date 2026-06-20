@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Camera, MoveRight, PackagePlus, QrCode, ScanLine } from 'lucide-react'
+import { Camera, Layers, MoveRight, PackagePlus, QrCode, ScanLine } from 'lucide-react'
 import type { ScanResolution } from '@/lib/bm/types'
 import { api, Button, Card, Input, Notice, PageHeader } from '@/components/ui'
 
@@ -68,7 +69,12 @@ export function ScanView({ initialCode }: { initialCode?: string }) {
 
   return (
     <div className="mx-auto max-w-5xl space-y-5">
-      <PageHeader eyebrow="Scanner" title="สแกน / Scan" description="ค้นหา internal QR หรือ manufacturer barcode" />
+      <PageHeader
+        eyebrow="Scanner"
+        title="สแกน / Scan"
+        description="ค้นหา internal QR หรือ manufacturer barcode"
+        actions={<Link href="/issue/batch"><Button variant="secondary"><Layers className="size-4" /> ตัดหลายรายการ</Button></Link>}
+      />
       <Card className="p-4">
         <form onSubmit={(event) => { event.preventDefault(); resolve() }} className="grid gap-3 lg:grid-cols-[1fr_auto_auto]">
           <div className="relative">
@@ -98,7 +104,7 @@ function ScanResult({ result }: { result: ScanResolution }) {
         </div>
         <div className="flex flex-wrap gap-2">
           {result.itemId ? <Button variant="secondary" onClick={() => { window.location.href = `/movements?mode=receive&itemId=${result.itemId}` }}><PackagePlus className="size-4" /> Receive</Button> : null}
-          {result.lotId ? <Button onClick={() => { window.location.href = `/movements?mode=issue&lotId=${result.lotId}${result.locationId ? `&locationId=${result.locationId}` : ''}` }}><QrCode className="size-4" /> Issue</Button> : null}
+          {result.lotToken ? <Button onClick={() => { window.location.href = `/issue/${result.lotToken}` }}><QrCode className="size-4" /> Issue</Button> : result.lotId ? <Button onClick={() => { window.location.href = `/movements?mode=issue&lotId=${result.lotId}${result.locationId ? `&locationId=${result.locationId}` : ''}` }}><QrCode className="size-4" /> Issue</Button> : null}
           {result.lotId ? <Button variant="secondary" onClick={() => { window.location.href = `/movements?mode=move&lotId=${result.lotId}${result.locationId ? `&locationId=${result.locationId}` : ''}` }}><MoveRight className="size-4" /> Move</Button> : null}
         </div>
       </div>

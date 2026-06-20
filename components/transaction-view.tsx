@@ -14,7 +14,7 @@ import {
   ScanLine,
 } from 'lucide-react'
 import type { StockItem, StockLot, StockWorkspace } from '@/lib/bm/types'
-import { formatDate, formatQuantity } from '@/lib/bm/rules'
+import { formatDate, formatQuantity, suggestedUsableLot } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, Textarea } from '@/components/ui'
 
 type Mode = 'receive' | 'issue' | 'move'
@@ -295,12 +295,14 @@ function IssueForm({
   onError: (text: string) => void
 }) {
   const stockedItems = items.filter((item) => item.lots.some((lot) => lot.balances.some((balance) => balance.onHand > 0)))
-  const firstLot = stockedItems.flatMap((item) => item.lots).find((lot) => lot.id === defaultLotId) ?? stockedItems[0]?.lots.find((lot) => lot.totalOnHand > 0)
+  const firstItem = stockedItems[0]
+  const firstLot = stockedItems.flatMap((item) => item.lots).find((lot) => lot.id === defaultLotId) ?? suggestedUsableLot(firstItem?.lots ?? []) ?? firstItem?.lots.find((lot) => lot.totalOnHand > 0)
+  const firstQtyItem = stockedItems.find((item) => item.id === firstLot?.itemId) ?? firstItem
   const [form, setForm] = useState({
-    itemId: firstLot?.itemId ?? stockedItems[0]?.id ?? '',
+    itemId: firstLot?.itemId ?? firstItem?.id ?? '',
     lotId: firstLot?.id ?? '',
     locationId: defaultLocationId ?? firstLot?.balances[0]?.locationId ?? '',
-    quantity: '',
+    quantity: firstQtyItem?.defaultIssueQty != null ? String(firstQtyItem.defaultIssueQty) : '',
     purpose: '',
     reference: '',
     note: '',
@@ -317,12 +319,13 @@ function IssueForm({
   const canSave = Boolean(lot && balance && form.quantity && form.purpose.trim())
 
   function selectItem(nextItem: StockItem) {
-    const nextLot = nextItem.lots.find((candidate) => candidate.totalOnHand > 0)
+    const nextLot = suggestedUsableLot(nextItem.lots) ?? nextItem.lots.find((candidate) => candidate.totalOnHand > 0)
     setForm({
       ...form,
       itemId: nextItem.id,
       lotId: nextLot?.id ?? '',
       locationId: nextLot?.balances[0]?.locationId ?? '',
+      quantity: nextItem.defaultIssueQty != null ? String(nextItem.defaultIssueQty) : '',
       overrideReason: '',
     })
   }

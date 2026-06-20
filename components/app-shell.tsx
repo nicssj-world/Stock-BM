@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Activity, BarChart3, Boxes, ClipboardCheck, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck } from 'lucide-react'
+import { Activity, BarChart3, Boxes, ClipboardCheck, GitCompareArrows, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck, Thermometer } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import { api } from '@/components/ui'
 
@@ -28,10 +28,18 @@ const qualitySection: NavSection = {
   ],
 }
 
+const monitoringSection: NavSection = {
+  title: 'Monitoring',
+  items: [
+    { href: '/environment', label: 'อุณหภูมิ / Temperature', icon: Thermometer },
+    { href: '/lot-verification', label: 'Lot verification', icon: GitCompareArrows },
+  ],
+}
+
 export function AppShell({ actor, children }: { actor: BmActor; children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
-  const sections: NavSection[] = [stockSection, qualitySection]
+  const sections: NavSection[] = [stockSection, qualitySection, monitoringSection]
   if (actor.role === 'Admin') sections.push({ title: 'System', items: [{ href: '/admin', label: 'Admin', icon: Settings }] })
 
   async function logout() {

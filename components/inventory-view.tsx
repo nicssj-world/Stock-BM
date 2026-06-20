@@ -43,7 +43,7 @@ export function InventoryView({ actor, initialData }: { actor: BmActor; initialD
         eyebrow="Inventory ledger"
         title="คลังน้ำยา / Inventory"
         description="ยอดคงเหลือแยกตาม lot และ location พร้อม ledger แบบ append-only"
-        actions={<div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={() => { window.location.href = '/api/stock/export?report=balances' }}><FileDown className="size-4" /> Balances CSV</Button><Button variant="secondary" onClick={() => { window.location.href = '/api/stock/export?report=movements' }}><History className="size-4" /> Ledger CSV</Button></div>}
+        actions={<div className="flex flex-wrap gap-2">{actor.role === 'Admin' ? <Button variant="secondary" onClick={() => { window.location.href = '/inventory/qr' }}><Printer className="size-4" /> พิมพ์ QR lot</Button> : null}<Button variant="secondary" onClick={() => { window.location.href = '/api/stock/export?report=balances' }}><FileDown className="size-4" /> Balances CSV</Button><Button variant="secondary" onClick={() => { window.location.href = '/api/stock/export?report=movements' }}><History className="size-4" /> Ledger CSV</Button></div>}
       />
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
       <Card className="overflow-hidden">

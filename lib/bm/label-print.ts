@@ -9,7 +9,8 @@ function escapeHtml(value: string) {
 }
 
 export async function printLotLabel(lot: StockLot, item: StockItem, location?: StockLocation) {
-  const href = `${window.location.origin}/scan/lot/${encodeURIComponent(lot.internalQrToken)}`
+  // Scanning the sticker opens the one-screen quick-issue for this lot directly.
+  const href = `${window.location.origin}/issue/${encodeURIComponent(lot.internalQrToken)}`
   const qr = await QRCode.toDataURL(href, { margin: 0, width: 96 })
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
     @page { size: 60mm 20mm; margin: 0; }

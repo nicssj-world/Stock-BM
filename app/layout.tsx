@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import '@fontsource/noto-sans-thai/400.css'
 import '@fontsource/noto-sans-thai/600.css'
 import '@fontsource/noto-sans-thai/700.css'
@@ -8,7 +8,12 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: 'Molecular-CBH QMS | Chonburi Hospital',
-  description: 'Molecular laboratory quality management system (Stock, IQC, EQA) for Chonburi Hospital.',
+  description: 'Molecular laboratory quality management system (Stock, IQC, EQA, Monitoring) for Chonburi Hospital.',
+  appleWebApp: { capable: true, statusBarStyle: 'default', title: 'CBH QMS' },
+}
+
+export const viewport: Viewport = {
+  themeColor: '#123944',
 }
 
 export default function RootLayout({
