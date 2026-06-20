@@ -79,7 +79,7 @@ const LOTS = [
   },
   {
     lot: 'BM0526L',
-    expiry: null,
+    expiry: '2026-07-17',
     assigned: { '%CD3': [56.3, 5.0], AbsCD3: [701.5, 91.2], '%CD4': [10.0, 2.0], AbsCD4: [124.6, 24.9] },
     rows: [
       ['17-Jun-26', 52.89, 812, 10.8, 166], ['18-Jun-26', 58.35, 793, 11, 149],
@@ -136,6 +136,8 @@ for (const cfg of LOTS) {
     const { data, error } = await admin.from('iqc_control_lots').insert({ control_material_id: material.id, lot_number: cfg.lot, expiry_date: cfg.expiry, created_by: actorId }).select('id').single()
     if (error) throw error
     lot = data
+  } else if (cfg.expiry) {
+    await admin.from('iqc_control_lots').update({ expiry_date: cfg.expiry }).eq('id', lot.id)
   }
 
   for (const code of ORDER) {
