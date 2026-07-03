@@ -1,0 +1,13 @@
+import { z } from 'zod'
+import { requireActor } from '@/lib/server/auth'
+import { checkoutHpvSample } from '@/lib/server/hpv'
+import { readJson, respond } from '@/lib/server/route'
+
+const schema = z.object({
+  barcode: z.string().trim().min(1).max(180),
+  note: z.string().trim().max(500).nullable().optional(),
+})
+
+export async function POST(request: Request) {
+  return respond(async () => ({ workspace: await checkoutHpvSample(await readJson(request, schema), await requireActor()) }))
+}

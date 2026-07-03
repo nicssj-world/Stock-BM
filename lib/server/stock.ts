@@ -174,6 +174,7 @@ export async function getStockWorkspace(actor: BmActor): Promise<StockWorkspace>
       manufacturerBarcode: nullableString(row.manufacturer_barcode),
       trackLot: Boolean(row.track_lot),
       trackExpiry: Boolean(row.track_expiry),
+      isHpv: Boolean(row.is_hpv),
       isActive: Boolean(row.is_active),
       totalOnHand,
       usableOnHand,
@@ -282,6 +283,15 @@ export async function updateCategory(id: string, input: { name?: string; isActiv
   return getStockWorkspace(actor)
 }
 
+export async function deleteCategory(id: string, actor: BmActor) {
+  await assertAdmin(actor)
+  const { error } = await getAdminClient().from('bm_stock_categories').delete().eq('id', id)
+  if (error?.code === '23503') throw new HttpError(409, 'ลบ category ไม่ได้ มี item ที่ใช้ category นี้อยู่')
+  fail(error)
+  await writeAudit(actor, 'category.delete', 'stock-category', id, {})
+  return getStockWorkspace(actor)
+}
+
 export async function createLocation(input: { code: string; name: string; storageCondition?: string | null }, actor: BmActor) {
   await assertAdmin(actor)
   const { data, error } = await getAdminClient()
@@ -294,6 +304,7 @@ export async function createLocation(input: { code: string; name: string; storag
     })
     .select('id')
     .single()
+  if (error?.code === '23505') throw new HttpError(409, `Location code "${input.code.trim().toUpperCase()}" มีอยู่แล้ว`)
   fail(error)
   await writeAudit(actor, 'location.create', 'stock-location', asString((data as RecordRow).id), input)
   return getStockWorkspace(actor)
@@ -307,8 +318,18 @@ export async function updateLocation(id: string, input: { code?: string; name?: 
   if (input.storageCondition !== undefined) updates.storage_condition = clean(input.storageCondition)
   if (input.isActive !== undefined) updates.is_active = input.isActive
   const { error } = await getAdminClient().from('bm_stock_locations').update(updates).eq('id', id)
+  if (error?.code === '23505') throw new HttpError(409, `Location code "${(input.code ?? '').trim().toUpperCase()}" มีอยู่แล้ว`)
   fail(error)
   await writeAudit(actor, 'location.update', 'stock-location', id, input)
+  return getStockWorkspace(actor)
+}
+
+export async function deleteLocation(id: string, actor: BmActor) {
+  await assertAdmin(actor)
+  const { error } = await getAdminClient().from('bm_stock_locations').delete().eq('id', id)
+  if (error?.code === '23503') throw new HttpError(409, 'ลบ location ไม่ได้ มี stock transaction ที่อ้างถึง location นี้อยู่')
+  fail(error)
+  await writeAudit(actor, 'location.delete', 'stock-location', id, {})
   return getStockWorkspace(actor)
 }
 
@@ -327,6 +348,7 @@ export async function createItem(input: {
   manufacturerBarcode?: string | null
   trackLot: boolean
   trackExpiry: boolean
+  isHpv?: boolean
 }, actor: BmActor) {
   await assertAdmin(actor)
   assertTracking(input.trackLot, input.trackExpiry)
@@ -348,6 +370,7 @@ export async function createItem(input: {
       manufacturer_barcode: clean(input.manufacturerBarcode),
       track_lot: input.trackLot,
       track_expiry: input.trackExpiry,
+      is_hpv: input.isHpv ?? false,
       created_by: actor.id,
     })
     .select('id')
@@ -390,10 +413,20 @@ export async function updateItem(itemId: string, input: Partial<Parameters<typeo
   if (input.manufacturerBarcode !== undefined) updates.manufacturer_barcode = clean(input.manufacturerBarcode)
   if (input.trackLot !== undefined) updates.track_lot = input.trackLot
   if (input.trackExpiry !== undefined) updates.track_expiry = input.trackExpiry
+  if (input.isHpv !== undefined) updates.is_hpv = input.isHpv
   if (input.isActive !== undefined) updates.is_active = input.isActive
   const { error } = await getAdminClient().from('bm_stock_items').update(updates).eq('id', itemId)
   fail(error)
   await writeAudit(actor, 'item.update', 'stock-item', itemId, input)
+  return getStockWorkspace(actor)
+}
+
+export async function deleteItem(id: string, actor: BmActor) {
+  await assertAdmin(actor)
+  const { error } = await getAdminClient().from('bm_stock_items').delete().eq('id', id)
+  if (error?.code === '23503') throw new HttpError(409, 'ลบ item ไม่ได้ มี lot หรือ transaction ที่อ้างถึง item นี้อยู่')
+  fail(error)
+  await writeAudit(actor, 'item.delete', 'stock-item', id, {})
   return getStockWorkspace(actor)
 }
 

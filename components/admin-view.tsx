@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { KeyRound, MapPin, PackagePlus, Pencil, Plus, Tags, UserCog, X } from 'lucide-react'
+import { KeyRound, MapPin, PackagePlus, Pencil, Plus, Tags, Trash2, UserCog, X } from 'lucide-react'
 import type { AdminUserRow, BmActor, StockCategory, StockItem, StockLocation, StockWorkspace } from '@/lib/bm/types'
 import { api, Button, Card, Field, Input, Loading, Notice, PageHeader, Select } from '@/components/ui'
 
@@ -59,6 +59,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
     manufacturerBarcode: '',
     trackLot: true,
     trackExpiry: true,
+    isHpv: false,
   }
   const [form, setForm] = useState(emptyForm)
   const [editingItemId, setEditingItemId] = useState<string | null>(null)
@@ -91,6 +92,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
       manufacturerBarcode: item.manufacturerBarcode ?? '',
       trackLot: item.trackLot,
       trackExpiry: item.trackExpiry,
+      isHpv: item.isHpv,
     })
   }
 
@@ -121,6 +123,17 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
     }
   }
 
+  async function remove(item: StockItem) {
+    if (!window.confirm(`ลบ item "${item.name}" ใช่ไหม?\n\nถ้ามี lot หรือ transaction อยู่จะลบไม่ได้`)) return
+    try {
+      const result = await api<{ stock: StockWorkspace }>(`/api/admin/items/${item.id}`, { method: 'DELETE' })
+      onSaved(result.stock, 'ลบ item แล้ว')
+      if (editingItemId === item.id) resetForm()
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'ลบไม่สำเร็จ')
+    }
+  }
+
   return <div className="grid gap-4 xl:grid-cols-[1fr_430px]">
     <Card className="overflow-hidden">
       <div className="flex items-center gap-2 border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3"><PackagePlus className="size-4 text-[#0b7f76]" /><h2 className="font-bold">Items</h2></div>
@@ -134,6 +147,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
           <div className="flex shrink-0 items-center gap-1.5">
             <Button type="button" variant="ghost" className="px-2 py-1 text-xs" onClick={() => edit(item)}><Pencil className="size-3.5" /> Edit</Button>
             <button onClick={() => toggle(item)} className={`rounded border px-2 py-1 text-[10px] font-bold ${item.isActive ? 'border-[#c7e0c8] bg-[#f0f8f1] text-[#518058]' : 'border-[#e0d7d8] bg-[#f7f4f4] text-[#8d7b7d]'}`}>{item.isActive ? 'ACTIVE' : 'INACTIVE'}</button>
+            <Button type="button" variant="ghost" className="px-2 py-1 text-xs text-red-500 hover:text-red-700" onClick={() => remove(item)}><Trash2 className="size-3.5" /></Button>
           </div>
         </div>)}
         {!data.items.length ? <p className="px-4 py-10 text-center text-sm text-[#91a4a9]">No items</p> : null}
@@ -158,6 +172,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
         <Field label="Manufacturer barcode"><Input value={form.manufacturerBarcode} onChange={(event) => setForm({ ...form, manufacturerBarcode: event.target.value })} /></Field>
         <label className="flex items-center gap-2 text-xs font-semibold text-[#58747d]"><input type="checkbox" checked={form.trackLot} onChange={(event) => setForm({ ...form, trackLot: event.target.checked, trackExpiry: event.target.checked ? form.trackExpiry : false })} /> Track lot</label>
         <label className="flex items-center gap-2 text-xs font-semibold text-[#58747d]"><input type="checkbox" disabled={!form.trackLot} checked={form.trackExpiry} onChange={(event) => setForm({ ...form, trackExpiry: event.target.checked })} /> Track expiry</label>
+        <label className="flex items-center gap-2 text-xs font-semibold text-[#58747d]"><input type="checkbox" checked={form.isHpv} onChange={(event) => setForm({ ...form, isHpv: event.target.checked })} /> HPV Management item</label>
         {editingItem ? <Notice tone="info">ถ้า item นี้มี transaction แล้ว ระบบอาจไม่อนุญาตให้เปลี่ยน Lot/Expiry tracking เพื่อป้องกัน ledger เพี้ยน</Notice> : null}
         <Button disabled={busy || !categoryOptions.length}>{editingItem ? <Pencil className="size-4" /> : <Plus className="size-4" />}{editingItem ? 'บันทึกแก้ไข / Save edit' : 'เพิ่ม / Add'}</Button>
       </form>
@@ -203,7 +218,18 @@ function CategoriesAdmin({ categories, onSaved, onError }: { categories: StockCa
     }
   }
 
-  return <MasterList icon={<Tags />} title="Categories" selectedId={editingCategoryId} items={categories.map((item) => ({ id: item.id, title: item.name, active: item.isActive, onEdit: () => edit(item), onToggle: () => toggle(item) }))}>
+  async function remove(category: StockCategory) {
+    if (!window.confirm(`ลบ category "${category.name}" ใช่ไหม?\n\nถ้ามี item ที่ใช้ category นี้อยู่จะลบไม่ได้`)) return
+    try {
+      const result = await api<{ stock: StockWorkspace }>(`/api/admin/categories/${category.id}`, { method: 'DELETE' })
+      onSaved(result.stock, 'ลบ category แล้ว')
+      if (editingCategoryId === category.id) resetForm()
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'ลบไม่สำเร็จ')
+    }
+  }
+
+  return <MasterList icon={<Tags />} title="Categories" selectedId={editingCategoryId} items={categories.map((item) => ({ id: item.id, title: item.name, active: item.isActive, onEdit: () => edit(item), onToggle: () => toggle(item), onDelete: () => remove(item) }))}>
     <form onSubmit={save} className="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
       <Input required value={name} onChange={(event) => setName(event.target.value)} placeholder="Reagent, Consumable" />
       {editingCategory ? <Button type="button" variant="ghost" onClick={resetForm}><X className="size-4" /> Cancel</Button> : null}
@@ -216,6 +242,7 @@ function LocationsAdmin({ locations, onSaved, onError }: { locations: StockLocat
   const emptyForm = { code: '', name: '', storageCondition: '' }
   const [form, setForm] = useState(emptyForm)
   const [editingLocationId, setEditingLocationId] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
   const editingLocation = locations.find((location) => location.id === editingLocationId) ?? null
 
   function resetForm() {
@@ -234,6 +261,7 @@ function LocationsAdmin({ locations, onSaved, onError }: { locations: StockLocat
 
   async function save(event: React.FormEvent) {
     event.preventDefault()
+    setBusy(true)
     try {
       const result = await api<{ stock: StockWorkspace }>(editingLocationId ? `/api/admin/locations/${editingLocationId}` : '/api/admin/locations', {
         method: editingLocationId ? 'PATCH' : 'POST',
@@ -243,6 +271,8 @@ function LocationsAdmin({ locations, onSaved, onError }: { locations: StockLocat
       resetForm()
     } catch (error) {
       onError(error instanceof Error ? error.message : 'บันทึกไม่สำเร็จ')
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -255,18 +285,29 @@ function LocationsAdmin({ locations, onSaved, onError }: { locations: StockLocat
     }
   }
 
-  return <MasterList icon={<MapPin />} title="Locations" selectedId={editingLocationId} items={locations.map((item) => ({ id: item.id, title: `${item.code} · ${item.name}`, meta: item.storageCondition ?? '', active: item.isActive, onEdit: () => edit(item), onToggle: () => toggle(item) }))}>
+  async function remove(location: StockLocation) {
+    if (!window.confirm(`ลบ location "${location.code} · ${location.name}" ใช่ไหม?\n\nถ้ามี stock transaction ที่อ้างถึง location นี้อยู่จะลบไม่ได้`)) return
+    try {
+      const result = await api<{ stock: StockWorkspace }>(`/api/admin/locations/${location.id}`, { method: 'DELETE' })
+      onSaved(result.stock, 'ลบ location แล้ว')
+      if (editingLocationId === location.id) resetForm()
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'ลบไม่สำเร็จ')
+    }
+  }
+
+  return <MasterList icon={<MapPin />} title="Locations" selectedId={editingLocationId} items={locations.map((item) => ({ id: item.id, title: `${item.code} · ${item.name}`, meta: item.storageCondition ?? '', active: item.isActive, onEdit: () => edit(item), onToggle: () => toggle(item), onDelete: () => remove(item) }))}>
     <form onSubmit={save} className="grid gap-2 sm:grid-cols-[140px_1fr_1fr_auto_auto]">
       <Input required value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })} placeholder="4C-A" />
       <Input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="ตู้เย็น 4C ชั้น A" />
       <Input value={form.storageCondition} onChange={(event) => setForm({ ...form, storageCondition: event.target.value })} placeholder="2-8C" />
-      {editingLocation ? <Button type="button" variant="ghost" onClick={resetForm}><X className="size-4" /> Cancel</Button> : null}
-      <Button><Plus className="size-4" /> {editingLocation ? 'Save edit' : 'Add'}</Button>
+      {editingLocation ? <Button type="button" variant="ghost" onClick={resetForm} disabled={busy}><X className="size-4" /> Cancel</Button> : null}
+      <Button disabled={busy}><Plus className="size-4" /> {editingLocation ? 'Save edit' : 'Add'}</Button>
     </form>
   </MasterList>
 }
 
-function MasterList({ icon, title, items, children, selectedId }: { icon: React.ReactNode; title: string; selectedId?: string | null; items: { id: string; title: string; meta?: string; active: boolean; onEdit?: () => void; onToggle: () => void }[]; children: React.ReactNode }) {
+function MasterList({ icon, title, items, children, selectedId }: { icon: React.ReactNode; title: string; selectedId?: string | null; items: { id: string; title: string; meta?: string; active: boolean; onEdit?: () => void; onToggle: () => void; onDelete?: () => void }[]; children: React.ReactNode }) {
   return <Card className="overflow-hidden">
     <div className="flex items-center gap-2 border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3"><span className="text-[#0b7f76] [&>svg]:size-4">{icon}</span><h2 className="font-bold">{title}</h2></div>
     <div className="p-4">{children}</div>
@@ -278,6 +319,7 @@ function MasterList({ icon, title, items, children, selectedId }: { icon: React.
       <div className="flex shrink-0 items-center gap-1.5">
         {item.onEdit ? <Button type="button" variant="ghost" className="px-2 py-1 text-xs" onClick={item.onEdit}><Pencil className="size-3.5" /> Edit</Button> : null}
         <button onClick={item.onToggle} className={`rounded border px-2 py-1 text-[10px] font-bold ${item.active ? 'border-[#c7e0c8] bg-[#f0f8f1] text-[#518058]' : 'border-[#e0d7d8] bg-[#f7f4f4] text-[#8d7b7d]'}`}>{item.active ? 'ACTIVE' : 'INACTIVE'}</button>
+        {item.onDelete ? <Button type="button" variant="ghost" className="px-2 py-1 text-xs text-red-500 hover:text-red-700" onClick={item.onDelete}><Trash2 className="size-3.5" /></Button> : null}
       </div>
     </div>)}</div>
   </Card>
@@ -319,10 +361,20 @@ function UsersAdmin({ actorId, users, refreshUsers, onError, onSuccess }: { acto
       onError(error instanceof Error ? error.message : 'Reset ไม่สำเร็จ')
     }
   }
+  async function revoke(user: AdminUserRow) {
+    if (!window.confirm(`ยกเลิกสิทธิ์ stock ของ "${user.displayName}" ใช่ไหม?\n\nผู้ใช้จะเข้าระบบ stock ไม่ได้อีกต่อไป`)) return
+    try {
+      await api(`/api/admin/users/${user.id}`, { method: 'DELETE' })
+      await refreshUsers()
+      onSuccess('ยกเลิกสิทธิ์ผู้ใช้แล้ว')
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'ยกเลิกไม่สำเร็จ')
+    }
+  }
   return <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
     <Card className="overflow-hidden">
       <div className="flex items-center gap-2 border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3"><UserCog className="size-4 text-[#0b7f76]" /><h2 className="font-bold">Users</h2></div>
-      {!users ? <div className="p-6"><Loading /></div> : <div className="overflow-x-auto"><table className="w-full min-w-[780px] text-left text-sm"><thead className="bg-[#f7fafa] text-[10px] tracking-[0.08em] text-[#779097] uppercase"><tr><th className="px-4 py-2.5">User</th><th className="px-3 py-2.5">E-Phis</th><th className="px-3 py-2.5">Stock role</th><th className="px-3 py-2.5">Stock</th><th className="px-4 py-2.5"></th></tr></thead><tbody className="divide-y divide-[#edf2f2]">{users.map((user) => <tr key={user.id}><td className="px-4 py-3"><p className="font-bold text-[#45636e]">{user.displayName}</p><p className="text-[10px] text-[#8ba0a5]">{user.genomicRole}{user.id === actorId ? ' · current account' : ''}</p></td><td className="mono px-3 py-3 text-xs text-[#668088]">{user.ephisId}</td><td className="px-3 py-3"><Select className="w-auto py-1 text-xs" value={user.stockRole ?? 'Staff'} onChange={(event) => patch(user, { stockRole: event.target.value as AdminUserRow['stockRole'], stockActive: true })}><option>Staff</option><option>Admin</option></Select></td><td className="px-3 py-3"><button disabled={user.id === actorId} onClick={() => patch(user, { stockActive: !user.stockActive })} className={`rounded border px-2 py-1 text-[10px] font-bold ${user.stockActive ? 'border-[#c7e0c8] bg-[#f0f8f1] text-[#518058]' : 'border-[#e0d7d8] bg-[#f7f4f4] text-[#8d7b7d]'}`}>{user.stockActive ? 'ACTIVE' : 'INACTIVE'}</button></td><td className="px-4 py-3 text-right"><Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => reset(user)}><KeyRound className="size-3.5" /> Reset</Button></td></tr>)}</tbody></table></div>}
+      {!users ? <div className="p-6"><Loading /></div> : <div className="overflow-x-auto"><table className="w-full min-w-[780px] text-left text-sm"><thead className="bg-[#f7fafa] text-[10px] tracking-[0.08em] text-[#779097] uppercase"><tr><th className="px-4 py-2.5">User</th><th className="px-3 py-2.5">E-Phis</th><th className="px-3 py-2.5">Stock role</th><th className="px-3 py-2.5">Stock</th><th className="px-4 py-2.5"></th></tr></thead><tbody className="divide-y divide-[#edf2f2]">{users.map((user) => <tr key={user.id}><td className="px-4 py-3"><p className="font-bold text-[#45636e]">{user.displayName}</p><p className="text-[10px] text-[#8ba0a5]">{user.genomicRole}{user.id === actorId ? ' · current account' : ''}</p></td><td className="mono px-3 py-3 text-xs text-[#668088]">{user.ephisId}</td><td className="px-3 py-3"><Select className="w-auto py-1 text-xs" value={user.stockRole ?? 'Staff'} onChange={(event) => patch(user, { stockRole: event.target.value as AdminUserRow['stockRole'], stockActive: true })}><option>Staff</option><option>Admin</option></Select></td><td className="px-3 py-3"><button disabled={user.id === actorId} onClick={() => patch(user, { stockActive: !user.stockActive })} className={`rounded border px-2 py-1 text-[10px] font-bold ${user.stockActive ? 'border-[#c7e0c8] bg-[#f0f8f1] text-[#518058]' : 'border-[#e0d7d8] bg-[#f7f4f4] text-[#8d7b7d]'}`}>{user.stockActive ? 'ACTIVE' : 'INACTIVE'}</button></td><td className="px-4 py-3 text-right"><div className="flex items-center justify-end gap-1"><Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => reset(user)}><KeyRound className="size-3.5" /> Reset</Button><Button disabled={user.id === actorId} variant="ghost" className="px-2 py-1 text-xs text-red-500 hover:text-red-700 disabled:opacity-30" onClick={() => revoke(user)}><Trash2 className="size-3.5" /></Button></div></td></tr>)}</tbody></table></div>}
     </Card>
     <Card className="p-4">
       <form onSubmit={create} className="space-y-3">

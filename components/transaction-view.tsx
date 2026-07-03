@@ -143,7 +143,7 @@ function ReceiveForm({
   const [busy, setBusy] = useState(false)
   const item = items.find((candidate) => candidate.id === form.itemId)
   const location = locations.find((candidate) => candidate.id === form.locationId)
-  const filteredItems = filterItems(items, itemSearch).slice(0, 12)
+  const filteredItems = filterItems(items, itemSearch)
   const canSave = Boolean(item && location && form.quantity && (!item.trackLot || form.lotNumber.trim()) && (!item.trackExpiry || form.expiryDate))
 
   async function submit(event: React.FormEvent) {
@@ -190,7 +190,7 @@ function ReceiveForm({
             }
           }}
         />
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <div className="mt-3 max-h-[400px] overflow-y-auto grid gap-2 sm:grid-cols-2">
           {filteredItems.map((option) => (
             <ChoiceButton
               key={option.id}
@@ -311,7 +311,7 @@ function IssueForm({
   const [itemSearch, setItemSearch] = useState('')
   const [busy, setBusy] = useState(false)
   const item = stockedItems.find((candidate) => candidate.id === form.itemId)
-  const filteredItems = filterItems(stockedItems, itemSearch).slice(0, 12)
+  const filteredItems = filterItems(stockedItems, itemSearch)
   const lots = item?.lots.filter((lot) => lot.balances.some((balance) => balance.onHand > 0)) ?? []
   const lot = lots.find((candidate) => candidate.id === form.lotId)
   const balances = lot?.balances.filter((balance) => balance.onHand > 0) ?? []
@@ -369,7 +369,7 @@ function IssueForm({
             }
           }}
         />
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <div className="mt-3 max-h-[400px] overflow-y-auto grid gap-2 sm:grid-cols-2">
           {filteredItems.map((option) => (
             <ChoiceButton
               key={option.id}

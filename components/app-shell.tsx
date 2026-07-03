@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Activity, BarChart3, Boxes, ClipboardCheck, GitCompareArrows, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck, Thermometer } from 'lucide-react'
+import { Activity, BarChart3, Boxes, ClipboardCheck, Dna, GitCompareArrows, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck, Thermometer } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import { api } from '@/components/ui'
 
@@ -17,6 +17,13 @@ const stockSection: NavSection = {
     { href: '/movements', label: 'เคลื่อนไหว / Movements', icon: MoveRight },
     { href: '/scan', label: 'สแกน / Scan', icon: QrCode },
     { href: '/reports', label: 'รายงาน / Reports & Audit', icon: BarChart3 },
+  ],
+}
+
+const hpvSection: NavSection = {
+  title: 'HPV',
+  items: [
+    { href: '/hpv', label: 'HPV Management', icon: Dna },
   ],
 }
 
@@ -39,7 +46,7 @@ const monitoringSection: NavSection = {
 export function AppShell({ actor, children }: { actor: BmActor; children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
-  const sections: NavSection[] = [qualitySection, monitoringSection, stockSection]
+  const sections: NavSection[] = [hpvSection, qualitySection, monitoringSection, stockSection]
   if (actor.role === 'Admin') sections.push({ title: 'System', items: [{ href: '/admin', label: 'Admin', icon: Settings }] })
 
   async function logout() {

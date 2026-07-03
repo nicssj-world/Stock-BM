@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { requireStockAdmin } from '@/lib/server/auth'
 import { readJson, respond } from '@/lib/server/route'
-import { updateLocation } from '@/lib/server/stock'
+import { deleteLocation, updateLocation } from '@/lib/server/stock'
 
 const schema = z.object({
   code: z.string().trim().min(1).max(40).optional(),
@@ -12,5 +12,9 @@ const schema = z.object({
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   return respond(async () => ({ stock: await updateLocation((await params).id, await readJson(request, schema), await requireStockAdmin()) }))
+}
+
+export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  return respond(async () => ({ stock: await deleteLocation((await params).id, await requireStockAdmin()) }))
 }
 

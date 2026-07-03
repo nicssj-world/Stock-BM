@@ -130,3 +130,11 @@ export async function resetUserPassword(userId: string, password: string, actor:
   await writeAudit(actor, 'user.password.reset', 'user', userId)
 }
 
+export async function revokeUserAccess(userId: string, actor: BmActor) {
+  await assertAdmin(actor)
+  if (userId === actor.id) throw new HttpError(400, 'ไม่สามารถยกเลิกสิทธิ์ตัวเองได้')
+  const { error } = await getAdminClient().from('bm_user_access').delete().eq('user_id', userId)
+  fail(error)
+  await writeAudit(actor, 'user.revoke', 'user', userId, {})
+}
+

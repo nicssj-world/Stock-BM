@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { requireStockAdmin } from '@/lib/server/auth'
 import { readJson, respond } from '@/lib/server/route'
-import { updateCategory } from '@/lib/server/stock'
+import { deleteCategory, updateCategory } from '@/lib/server/stock'
 
 const schema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
@@ -10,5 +10,9 @@ const schema = z.object({
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   return respond(async () => ({ stock: await updateCategory((await params).id, await readJson(request, schema), await requireStockAdmin()) }))
+}
+
+export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  return respond(async () => ({ stock: await deleteCategory((await params).id, await requireStockAdmin()) }))
 }
 

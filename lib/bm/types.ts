@@ -64,6 +64,7 @@ export interface StockItem {
   manufacturerBarcode: string | null
   trackLot: boolean
   trackExpiry: boolean
+  isHpv: boolean
   isActive: boolean
   totalOnHand: number
   usableOnHand: number

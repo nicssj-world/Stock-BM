@@ -18,6 +18,7 @@ const itemSchema = z.object({
   manufacturerBarcode: z.string().trim().max(180).nullable().optional(),
   trackLot: z.boolean(),
   trackExpiry: z.boolean(),
+  isHpv: z.boolean().optional(),
 })
 
 export async function POST(request: Request) {

@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { requireStockAdmin } from '@/lib/server/auth'
 import { readJson, respond } from '@/lib/server/route'
-import { updateItem } from '@/lib/server/stock'
+import { deleteItem, updateItem } from '@/lib/server/stock'
 
 const itemSchema = z.object({
   itemCode: z.string().trim().min(1).max(80).optional(),
@@ -18,10 +18,15 @@ const itemSchema = z.object({
   manufacturerBarcode: z.string().trim().max(180).nullable().optional(),
   trackLot: z.boolean().optional(),
   trackExpiry: z.boolean().optional(),
+  isHpv: z.boolean().optional(),
   isActive: z.boolean().optional(),
 })
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   return respond(async () => ({ stock: await updateItem((await params).id, await readJson(request, itemSchema), await requireStockAdmin()) }))
+}
+
+export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  return respond(async () => ({ stock: await deleteItem((await params).id, await requireStockAdmin()) }))
 }
 
