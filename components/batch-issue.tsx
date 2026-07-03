@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import Link from 'next/link'
 import { ArrowUpFromLine, Camera, ScanLine, Trash2, X } from 'lucide-react'
 import type { LotIssueContext } from '@/lib/bm/types'
 import { formatQuantity } from '@/lib/bm/rules'
+import { useCameraScanner } from '@/components/camera-scanner'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, Textarea } from '@/components/ui'
 
 interface BatchLine {
@@ -23,10 +24,8 @@ export function BatchIssue() {
   const [purpose, setPurpose] = useState('')
   const [reference, setReference] = useState('')
   const [note, setNote] = useState('')
-  const [cameraOn, setCameraOn] = useState(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ tone: 'success' | 'danger' | 'warning'; text: string } | null>(null)
-  const videoRef = useRef<HTMLVideoElement | null>(null)
   const processingRef = useRef(false)
   const lastRef = useRef<{ code: string; at: number }>({ code: '', at: 0 })
 
@@ -64,27 +63,10 @@ export function BatchIssue() {
     }
   }
 
-  useEffect(() => {
-    if (!cameraOn || !videoRef.current) return
-    let stopped = false
-    let controls: { stop: () => void } | undefined
-    async function start() {
-      try {
-        const { BrowserMultiFormatReader } = await import('@zxing/browser')
-        const reader = new BrowserMultiFormatReader()
-        controls = await reader.decodeFromVideoDevice(undefined, videoRef.current!, (result) => {
-          const text = result?.getText()
-          if (text && !stopped) void addByCode(text)
-        })
-      } catch {
-        setNotice({ tone: 'danger', text: 'เปิดกล้องไม่ได้' })
-        setCameraOn(false)
-      }
-    }
-    start()
-    return () => { stopped = true; controls?.stop() }
-  }, [cameraOn])
-
+  const { cameraOn, starting, toggle, videoRef } = useCameraScanner({
+    onScan: (text) => { void addByCode(text) },
+    onError: (text) => setNotice({ tone: 'danger', text }),
+  })
   function updateLine(key: string, patch: Partial<BatchLine>) {
     setLines((current) => current.map((line) => (line.key === key ? { ...line, ...patch } : line)))
   }
@@ -138,9 +120,9 @@ export function BatchIssue() {
             <ScanLine className="absolute top-3 left-3 size-5 text-[#88a1a7]" />
             <Input value={manual} onChange={(e) => setManual(e.target.value)} className="h-12 pl-11 mono text-base" placeholder="ยิงบาร์โค้ด / วาง token แล้ว Enter" />
           </form>
-          <Button type="button" variant="secondary" className="h-12" onClick={() => setCameraOn((v) => !v)}>{cameraOn ? <X className="size-4" /> : <Camera className="size-4" />} {cameraOn ? 'ปิดกล้อง' : 'กล้อง'}</Button>
+          <Button type="button" variant="secondary" className="h-12" onClick={toggle}>{cameraOn ? <X className="size-4" /> : <Camera className="size-4" />} {cameraOn ? 'ปิดกล้อง' : 'กล้อง'}</Button>
         </div>
-        {cameraOn ? <div className="mt-3 overflow-hidden rounded-md border border-[#d6e2e3] bg-black"><video ref={videoRef} className="aspect-video w-full object-cover" /></div> : null}
+        {cameraOn ? <div className="mt-3 overflow-hidden rounded-md border border-[#d6e2e3] bg-black"><video ref={videoRef} autoPlay muted playsInline className="aspect-video w-full object-cover" /></div> : null}
       </Card>
 
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}

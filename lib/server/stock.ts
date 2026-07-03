@@ -4,6 +4,7 @@ import { getExpiryState, sortLotsFefo } from '@/lib/bm/rules'
 import type {
   BmActor,
   LotIssueContext,
+  QuickIssueResult,
   ScanResolution,
   StockBalance,
   StockCategory,
@@ -615,6 +616,7 @@ export async function resolveLotForIssue(token: string, actor: BmActor): Promise
   const suggestedLocationId = [...balances].sort((a, b) => b.onHand - a.onHand)[0]?.locationId ?? null
   return {
     lotId: lot.id,
+    lotToken: lot.internalQrToken,
     lotNumber: lot.lotNumber,
     itemId: item.id,
     itemCode: item.itemCode,
@@ -633,6 +635,40 @@ export async function resolveIssueContext(code: string, actor: BmActor): Promise
   const token = extractLotToken(code)
   if (!token) throw new HttpError(404, 'Not a lot QR')
   return resolveLotForIssue(token, actor)
+}
+
+export async function quickIssueByCode(code: string, actor: BmActor): Promise<{ stock: StockWorkspace; result: QuickIssueResult }> {
+  const context = await resolveIssueContext(code, actor)
+  const balance = context.balances.find((item) => item.locationId === context.suggestedLocationId) ?? context.balances[0]
+  if (!balance) throw new HttpError(400, 'Lot นี้ไม่มีของคงเหลือ')
+  if (context.expiryState === 'expired') throw new HttpError(400, `Lot ${context.lotNumber} หมดอายุแล้ว ต้องตัดผ่านหน้า manual issue`)
+
+  const quantity = context.defaultIssueQty ?? 1
+  if (!(quantity > 0)) throw new HttpError(400, 'Default issue quantity ไม่ถูกต้อง')
+  if (quantity > balance.onHand) throw new HttpError(400, `ของคงเหลือไม่พอ (${balance.onHand} ${context.unit})`)
+
+  const stock = await issueStock({
+    lotId: context.lotId,
+    locationId: balance.locationId,
+    quantity,
+    purpose: 'QR scan issue',
+    reference: 'auto-scan',
+    note: null,
+    overrideReason: null,
+    expiredConfirmed: false,
+  }, actor)
+
+  return {
+    stock,
+    result: {
+      itemCode: context.itemCode,
+      itemName: context.itemName,
+      lotNumber: context.lotNumber,
+      locationCode: balance.locationCode,
+      quantity,
+      unit: context.unit,
+    },
+  }
 }
 
 // Batch issue: one ledger transaction per line (the issue RPC is per-lot). Lines are

@@ -130,6 +130,7 @@ export interface ScanResolution {
 // Context for the one-screen quick-issue reached by scanning a lot QR sticker.
 export interface LotIssueContext {
   lotId: string
+  lotToken: string
   lotNumber: string
   itemId: string
   itemCode: string
@@ -140,6 +141,15 @@ export interface LotIssueContext {
   defaultIssueQty: number | null
   balances: StockBalance[]
   suggestedLocationId: string | null
+}
+
+export interface QuickIssueResult {
+  itemCode: string
+  itemName: string
+  lotNumber: string
+  locationCode: string
+  quantity: number
+  unit: string
 }
 
 export interface AdminUserRow {

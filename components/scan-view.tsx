@@ -1,28 +1,34 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { Camera, Layers, MoveRight, PackagePlus, QrCode, ScanLine } from 'lucide-react'
-import type { ScanResolution } from '@/lib/bm/types'
+import { Camera, CheckCircle2, Layers, MoveRight, PackagePlus, QrCode, ScanLine } from 'lucide-react'
+import type { QuickIssueResult, ScanResolution } from '@/lib/bm/types'
+import { formatQuantity } from '@/lib/bm/rules'
+import { useCameraScanner } from '@/components/camera-scanner'
 import { api, Button, Card, Input, Notice, PageHeader } from '@/components/ui'
 
 export function ScanView({ initialCode }: { initialCode?: string }) {
-  const router = useRouter()
   const [code, setCode] = useState(initialCode ?? '')
   const [result, setResult] = useState<ScanResolution | null>(null)
+  const [issued, setIssued] = useState<QuickIssueResult | null>(null)
   const [error, setError] = useState('')
-  const [cameraOn, setCameraOn] = useState(false)
-  const videoRef = useRef<HTMLVideoElement | null>(null)
 
   async function resolve(nextCode = code) {
     const trimmed = nextCode.trim()
     if (!trimmed) return
     setError('')
+    setIssued(null)
     try {
       const response = await api<{ result: ScanResolution }>('/api/scan/resolve', { method: 'POST', body: JSON.stringify({ code: trimmed }) })
-      setResult(response.result)
-      if (response.result.href && response.result.kind === 'internal-lot') router.replace(response.result.href)
+      if (response.result.kind === 'internal-lot') {
+        const quick = await api<{ result: QuickIssueResult }>('/api/stock/issues/quick', { method: 'POST', body: JSON.stringify({ code: trimmed }) })
+        setIssued(quick.result)
+        setCode('')
+        setResult(null)
+      } else {
+        setResult(response.result)
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Scan failed')
     }
@@ -37,35 +43,14 @@ export function ScanView({ initialCode }: { initialCode?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialCode])
 
-  useEffect(() => {
-    if (!cameraOn || !videoRef.current) return
-    let stopped = false
-    let controls: { stop: () => void } | undefined
-    async function start() {
-      try {
-        const { BrowserMultiFormatReader } = await import('@zxing/browser')
-        const reader = new BrowserMultiFormatReader()
-        controls = await reader.decodeFromVideoDevice(undefined, videoRef.current!, (decodeResult) => {
-          const text = decodeResult?.getText()
-          if (text && !stopped) {
-            stopped = true
-            setCameraOn(false)
-            setCode(text)
-            resolve(text)
-          }
-        })
-      } catch (cameraError) {
-        setError(cameraError instanceof Error ? cameraError.message : 'Camera unavailable')
-        setCameraOn(false)
-      }
-    }
-    start()
-    return () => {
-      stopped = true
-      controls?.stop()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cameraOn])
+  const { cameraOn, starting, toggle, videoRef } = useCameraScanner({
+    stopOnScan: true,
+    onError: setError,
+    onScan: (text) => {
+      setCode(text)
+      void resolve(text)
+    },
+  })
 
   return (
     <div className="mx-auto max-w-5xl space-y-5">
@@ -82,13 +67,23 @@ export function ScanView({ initialCode }: { initialCode?: string }) {
             <Input autoFocus value={code} onChange={(event) => setCode(event.target.value)} className="h-12 pl-11 mono text-base" placeholder="QR / barcode" />
           </div>
           <Button className="h-12"><QrCode className="size-4" /> Resolve</Button>
-          <Button type="button" variant="secondary" className="h-12" onClick={() => setCameraOn((value) => !value)}><Camera className="size-4" /> Camera</Button>
+          <Button type="button" variant="secondary" className="h-12" onClick={toggle}><Camera className="size-4" /> {cameraOn ? 'Stop camera' : starting ? 'Opening...' : 'Camera'}</Button>
         </form>
         {error ? <div className="mt-3"><Notice tone="danger">{error}</Notice></div> : null}
-        {cameraOn ? <div className="mt-4 overflow-hidden rounded-md border border-[#d6e2e3] bg-black"><video ref={videoRef} className="aspect-video w-full object-cover" /></div> : null}
+        {cameraOn ? <div className="mt-4 overflow-hidden rounded-md border border-[#d6e2e3] bg-black"><video ref={videoRef} autoPlay muted playsInline className="aspect-video w-full object-cover" /></div> : null}
       </Card>
+      {issued ? <QuickIssueDone result={issued} /> : null}
       {result ? <ScanResult result={result} /> : null}
     </div>
+  )
+}
+
+function QuickIssueDone({ result }: { result: QuickIssueResult }) {
+  return (
+    <Notice tone="success">
+      <CheckCircle2 className="size-4" />
+      ตัด stock แล้ว: <span className="mono font-bold">{result.itemCode} LOT {result.lotNumber}</span> · {formatQuantity(result.quantity)} {result.unit} จาก {result.locationCode}
+    </Notice>
   )
 }
 
