@@ -58,6 +58,7 @@ function siteFromRow(row: RecordRow): HpvSite {
     code: nullableString(row.code),
     name: asString(row.name),
     siteType: asString(row.site_type),
+    selfSupplied: Boolean(row.self_supplied),
     isActive: Boolean(row.is_active),
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
@@ -182,9 +183,17 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
   const distributions = distributionRows.map((row) => distributionFromRow(row, names))
   const receipts = receiptRows.map((row) => receiptFromRow(row, names))
   const summaryMap = summarizeHpvSites(distributions, receipts)
+  const sites = siteRows.map(siteFromRow)
+  const selfSuppliedIds = new Set(sites.filter((s) => s.selfSupplied).map((s) => s.id))
+  // Ensure every site has a summary entry, then annotate self-supplied flag
+  for (const site of sites) {
+    summaryMap[site.id] ??= { siteId: site.id, issued: 0, received: 0, outstanding: 0, selfSupplied: false }
+    summaryMap[site.id].selfSupplied = selfSuppliedIds.has(site.id)
+    if (selfSuppliedIds.has(site.id)) summaryMap[site.id].outstanding = 0
+  }
 
   return {
-    sites: siteRows.map(siteFromRow),
+    sites,
     summaries: Object.values(summaryMap).sort((a, b) => b.outstanding - a.outstanding),
     distributions,
     receipts,
@@ -205,13 +214,14 @@ export async function createHpvSite(input: { code?: string | null; name: string;
   return getHpvWorkspace(actor)
 }
 
-export async function updateHpvSite(input: { id: string; code?: string | null; name?: string; siteType?: string | null; isActive?: boolean }, actor: BmActor) {
+export async function updateHpvSite(input: { id: string; code?: string | null; name?: string; siteType?: string | null; isActive?: boolean; selfSupplied?: boolean }, actor: BmActor) {
   assertAdmin(actor)
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (input.code !== undefined) updates.code = clean(input.code)
   if (input.name !== undefined) updates.name = input.name.trim()
   if (input.siteType !== undefined) updates.site_type = clean(input.siteType) ?? 'รพ.สต.'
   if (input.isActive !== undefined) updates.is_active = input.isActive
+  if (input.selfSupplied !== undefined) updates.self_supplied = input.selfSupplied
   const { error } = await getAdminClient().from('bm_hpv_sites').update(updates).eq('id', input.id)
   fail(error)
   await writeAudit(actor, 'hpv.site.update', 'hpv-site', input.id, input)

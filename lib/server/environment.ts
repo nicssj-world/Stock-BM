@@ -3,6 +3,7 @@ import 'server-only'
 import type {
   EnvCardStatus,
   EnvCorrectiveAction,
+  EnvDashboard,
   EnvReading,
   EnvReadingPoint,
   EnvReadingStatus,
@@ -93,6 +94,77 @@ async function loadLocationNames(): Promise<Map<string, string>> {
   const { data, error } = await getAdminClient().from('bm_stock_locations').select('id,name')
   fail(error)
   return new Map(((data ?? []) as RecordRow[]).map((row) => [asString(row.id), asString(row.name)]))
+}
+
+export async function getEnvDashboardData(actor: BmActor): Promise<EnvDashboard> {
+  void actor
+  const admin = getAdminClient()
+  const today = todayBangkok()
+  // 30-day window is enough for last reading + today's check — avoids fetching years of history
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const [
+    { data: unitData, error: unitError },
+    { data: readingData, error: readingError },
+    { data: caData, error: caError },
+    locationNames,
+  ] = await Promise.all([
+    admin.from('env_monitored_units').select('*').eq('is_active', true).order('code'),
+    admin.from('env_readings').select('*').gte('reading_date', since).order('reading_date', { ascending: false }),
+    admin.from('env_corrective_actions').select('reading_id').eq('status', 'open'),
+    loadLocationNames(),
+  ])
+  fail(unitError)
+  fail(readingError)
+  fail(caError)
+
+  const readingRows = (readingData ?? []) as RecordRow[]
+  const caRows = (caData ?? []) as RecordRow[]
+  const names = await getNameMap(readingRows.map((r) => asString(r.recorded_by)))
+  const units = ((unitData ?? []) as RecordRow[]).map((row) => mapUnit(row, locationNames))
+
+  const byUnit = new Map<string, EnvReading[]>()
+  for (const row of readingRows) {
+    const r = mapReading(row, names)
+    const list = byUnit.get(r.unitId) ?? []
+    list.push(r)
+    byUnit.set(r.unitId, list)
+  }
+
+  const readingUnit = new Map(readingRows.map((r) => [asString(r.id), asString(r.unit_id)]))
+  const openCaByUnit = new Map<string, number>()
+  for (const row of caRows) {
+    const unitId = readingUnit.get(asString(row.reading_id))
+    if (!unitId) continue
+    openCaByUnit.set(unitId, (openCaByUnit.get(unitId) ?? 0) + 1)
+  }
+
+  const cards = units
+    .map((unit) => {
+      const unitReadings = byUnit.get(unit.id) ?? []
+      const todayReadings = unitReadings.filter((r) => r.readingDate === today && !r.isVoided)
+      const todayReadingCount = todayReadings.length
+      const loggedToday = todayReadingCount >= unit.readingsPerDay
+      const todayReading = todayReadings[0] ?? null
+      const lastReading = unitReadings.find((r) => !r.isVoided) ?? null
+      const outOfRangeToday = todayReadings.find((r) => r.status === 'out-of-range')
+      const correctedToday = todayReadings.find((r) => r.status === 'corrected')
+      const status: EnvCardStatus = outOfRangeToday ? 'out-of-range' : correctedToday ? 'corrected' : loggedToday ? 'in-range' : 'pending'
+      return { unit, todayReading, todayReadingCount, loggedToday, lastReading, status, openCorrectiveActions: openCaByUnit.get(unit.id) ?? 0 }
+    })
+    .sort((a, b) => rank(a.status) - rank(b.status) || a.unit.code.localeCompare(b.unit.code))
+
+  const loggedToday = cards.filter((c) => c.loggedToday).length
+  const outOfRangeToday = cards.filter((c) => c.status === 'out-of-range').length
+  return {
+    cards,
+    summary: {
+      unitCount: cards.length,
+      loggedToday,
+      pendingToday: cards.length - loggedToday,
+      outOfRangeToday,
+      openCorrectiveActions: caRows.length,
+    },
+  }
 }
 
 export async function getEnvironmentWorkspace(actor: BmActor): Promise<EnvWorkspace> {

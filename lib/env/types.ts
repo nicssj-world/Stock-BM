@@ -84,5 +84,10 @@ export interface EnvWorkspace {
   }
 }
 
+export interface EnvDashboard {
+  cards: Array<Pick<EnvUnitCard, 'unit' | 'todayReading' | 'todayReadingCount' | 'loggedToday' | 'lastReading' | 'status' | 'openCorrectiveActions'>>
+  summary: EnvWorkspace['summary']
+}
+
 // How many recent readings each unit card carries for the mini trend chart.
 export const ENV_TREND_POINTS = 30

@@ -12,6 +12,7 @@ const createSchema = z.object({
 const updateSchema = createSchema.partial().extend({
   id: z.string().uuid(),
   isActive: z.boolean().optional(),
+  selfSupplied: z.boolean().optional(),
 })
 
 export async function POST(request: Request) {

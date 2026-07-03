@@ -106,7 +106,7 @@ export function HpvView({ actor, initialData }: { actor: BmActor; initialData: H
   const openBoxes = data.boxes.filter((box) => box.status === 'open').length
   const fullBoxes = data.boxes.filter((box) => box.status === 'full').length
   const destroyedBoxes = data.boxes.filter((box) => box.status === 'destroyed').length
-  const totalOutstanding = data.summaries.reduce((sum, summary) => sum + summary.outstanding, 0)
+  const totalOutstanding = data.summaries.filter((s) => !s.selfSupplied).reduce((sum, s) => sum + s.outstanding, 0)
 
   return (
     <div className="mx-auto max-w-[1600px] space-y-5">
@@ -150,6 +150,7 @@ function DistributionTab({
   onNotice: (notice: { tone: 'success' | 'danger' | 'warning' | 'info'; text: string } | null) => void
 }) {
   const activeSites = data.sites.filter((site) => site.isActive)
+  const distributionSites = activeSites.filter((site) => !site.selfSupplied)
   const stockLines = useMemo(() => data.stock.items.filter((item) => item.isHpv).flatMap((item) =>
     item.lots.flatMap((lot) => lot.balances.filter((balance) => balance.onHand > 0).map((balance) => ({
       key: `${lot.id}:${balance.locationId}`,
@@ -159,17 +160,17 @@ function DistributionTab({
     }))),
   ), [data.stock.items])
   const [form, setForm] = useState({
-    siteId: activeSites[0]?.id ?? '',
+    siteId: distributionSites[0]?.id ?? '',
     distributedOn: todayKey(),
     stockKey: stockLines[0]?.key ?? '',
     quantity: '1',
     note: '',
     overrideReason: '',
   })
-  const [siteForm, setSiteForm] = useState({ code: '', name: '', siteType: 'รพ.สต.' })
-  const [editingSite, setEditingSite] = useState<{ id: string; code: string; name: string; siteType: string } | null>(null)
+  const [siteForm, setSiteForm] = useState({ code: '', name: '', siteType: 'รพ.สต.', selfSupplied: false })
+  const [editingSite, setEditingSite] = useState<{ id: string; code: string; name: string; siteType: string; selfSupplied: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
-  const selectedSiteId = form.siteId || activeSites[0]?.id || ''
+  const selectedSiteId = form.siteId || distributionSites[0]?.id || ''
   const selectedStockKey = stockLines.some((line) => line.key === form.stockKey) ? form.stockKey : stockLines[0]?.key ?? ''
   const selectedStock = stockLines.find((line) => line.key === selectedStockKey)
 
@@ -206,7 +207,7 @@ function DistributionTab({
     try {
       const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/sites', { method: 'POST', body: JSON.stringify(siteForm) })
       onWorkspace(result.workspace, 'เพิ่มหน่วยงานแล้ว')
-      setSiteForm({ code: '', name: '', siteType: 'รพ.สต.' })
+      setSiteForm({ code: '', name: '', siteType: 'รพ.สต.', selfSupplied: false })
     } catch (error) {
       onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'เพิ่มหน่วยงานไม่สำเร็จ' })
     } finally {
@@ -221,7 +222,7 @@ function DistributionTab({
     try {
       const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/sites', {
         method: 'PATCH',
-        body: JSON.stringify({ id: editingSite.id, name: editingSite.name, code: editingSite.code.trim() || null, siteType: editingSite.siteType }),
+        body: JSON.stringify({ id: editingSite.id, name: editingSite.name, code: editingSite.code.trim() || null, siteType: editingSite.siteType, selfSupplied: editingSite.selfSupplied }),
       })
       onWorkspace(result.workspace, 'อัปเดตหน่วยงานแล้ว')
       setEditingSite(null)
@@ -262,6 +263,15 @@ function DistributionTab({
     }
   }
 
+  async function toggleSelfSupplied(siteId: string, current: boolean) {
+    try {
+      const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/sites', { method: 'PATCH', body: JSON.stringify({ id: siteId, selfSupplied: !current }) })
+      onWorkspace(result.workspace, `อัปเดต ${!current ? 'เป็นชุดตรวจเอง' : 'เป็นรับชุดตรวจจากเรา'} แล้ว`)
+    } catch (error) {
+      onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'อัปเดตหน่วยงานไม่สำเร็จ' })
+    }
+  }
+
   return (
     <div className="space-y-4">
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
@@ -279,18 +289,32 @@ function DistributionTab({
                 const summary = data.summaries.find((item) => item.siteId === site.id)
                 return (
                   <tr key={site.id}>
-                    <td className="px-4 py-3"><p className="font-bold text-[#315763]">{site.name}</p><p className="mono text-xs text-[#91a3a7]">{site.code ?? '-'} · {site.siteType}</p></td>
-                    <td className="mono px-3 py-3 text-right font-bold">{summary?.issued ?? 0}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-[#315763]">{site.name}</p>
+                        {site.selfSupplied ? <span className="rounded-full border border-[#a6c6e8] bg-[#eef4fb] px-2 py-0.5 text-[10px] font-bold text-[#3a6fa8]">ชุดตรวจเอง</span> : null}
+                      </div>
+                      <p className="mono text-xs text-[#91a3a7]">{site.code ?? '-'} · {site.siteType}</p>
+                    </td>
+                    <td className="mono px-3 py-3 text-right font-bold">{site.selfSupplied ? '—' : (summary?.issued ?? 0)}</td>
                     <td className="mono px-3 py-3 text-right font-bold text-[#0b7f76]">{summary?.received ?? 0}</td>
-                    <td className={`mono px-3 py-3 text-right font-bold ${(summary?.outstanding ?? 0) > 0 ? 'text-[#a9700f]' : 'text-[#55727c]'}`}>{summary?.outstanding ?? 0}</td>
+                    <td className="mono px-3 py-3 text-right font-bold">
+                      {site.selfSupplied
+                        ? <span className="text-xs font-normal text-[#91a3a7]">N/A</span>
+                        : <span className={(summary?.outstanding ?? 0) > 0 ? 'text-[#a9700f]' : 'text-[#55727c]'}>{summary?.outstanding ?? 0}</span>}
+                    </td>
                     <td className="px-4 py-3">
                       {actor.role === 'Admin' ? (
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
                           <button onClick={() => toggleSite(site.id, site.isActive)} className={`rounded border px-2 py-1 text-[10px] font-bold ${site.isActive ? 'border-[#c7e0c8] bg-[#f0f8f1] text-[#518058]' : 'border-[#e0d7d8] bg-[#f7f4f4] text-[#8d7b7d]'}`}>{site.isActive ? 'ACTIVE' : 'INACTIVE'}</button>
-                          <button onClick={() => setEditingSite({ id: site.id, code: site.code ?? '', name: site.name, siteType: site.siteType })} className="flex items-center gap-1 rounded border border-[#c7dde0] bg-[#f5f9fa] px-2 py-1 text-[10px] font-bold text-[#55727c] hover:bg-[#ebf5f6]"><Pencil className="size-3" /> แก้ไข</button>
+                          <button onClick={() => toggleSelfSupplied(site.id, site.selfSupplied)} className={`rounded border px-2 py-1 text-[10px] font-bold ${site.selfSupplied ? 'border-[#a6c6e8] bg-[#eef4fb] text-[#3a6fa8]' : 'border-[#c7dde0] bg-[#f5f9fa] text-[#55727c]'}`}>{site.selfSupplied ? 'ชุดตรวจเอง' : 'รับจากเรา'}</button>
+                          <button onClick={() => setEditingSite({ id: site.id, code: site.code ?? '', name: site.name, siteType: site.siteType, selfSupplied: site.selfSupplied })} className="flex items-center gap-1 rounded border border-[#c7dde0] bg-[#f5f9fa] px-2 py-1 text-[10px] font-bold text-[#55727c] hover:bg-[#ebf5f6]"><Pencil className="size-3" /> แก้ไข</button>
                         </div>
                       ) : (
-                        <StatusBadge tone={site.isActive ? 'accepted' : 'neutral'} label={site.isActive ? 'ACTIVE' : 'INACTIVE'} />
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <StatusBadge tone={site.isActive ? 'accepted' : 'neutral'} label={site.isActive ? 'ACTIVE' : 'INACTIVE'} />
+                          {site.selfSupplied ? <StatusBadge tone="warning" label="ชุดตรวจเอง" /> : null}
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -306,7 +330,8 @@ function DistributionTab({
         <Card className="p-4">
           <form onSubmit={submit} className="space-y-3">
             <h2 className="font-bold text-[#173d50]">บันทึกเบิกชุด HPV</h2>
-            <Field label="หน่วยงาน / รพ.สต."><Select required value={selectedSiteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>{activeSites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</Select></Field>
+            <Field label="หน่วยงาน / รพ.สต."><Select required value={selectedSiteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>{distributionSites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</Select></Field>
+            {distributionSites.length === 0 ? <p className="text-xs text-[#789097]">ไม่มีหน่วยงานที่รับชุดตรวจจากเรา</p> : null}
             <Field label="วันที่เบิก"><Input required type="date" value={form.distributedOn} onChange={(e) => setForm({ ...form, distributedOn: e.target.value })} /></Field>
             <Field label="Stock lot / location"><Select required value={selectedStockKey} onChange={(e) => setForm({ ...form, stockKey: e.target.value })}>{stockLines.map((line) => <option key={line.key} value={line.key}>{line.item.itemCode} · {line.item.name} · LOT {line.lot.lotNumber} · {line.balance.locationCode} ({formatQuantity(line.balance.onHand)} {line.item.unit})</option>)}</Select></Field>
             <Field label="จำนวนชุด"><Input required type="number" min="1" step="1" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} /></Field>
@@ -324,6 +349,11 @@ function DistributionTab({
               </div>
               <div className="grid gap-2 sm:grid-cols-[120px_1fr]"><Field label="Code"><Input value={editingSite.code} onChange={(e) => setEditingSite({ ...editingSite, code: e.target.value })} /></Field><Field label="Name"><Input required value={editingSite.name} onChange={(e) => setEditingSite({ ...editingSite, name: e.target.value })} /></Field></div>
               <Field label="Type"><Select value={editingSite.siteType} onChange={(e) => setEditingSite({ ...editingSite, siteType: e.target.value })}><option>รพ.สต.</option><option>รพช.</option><option>คลินิก</option></Select></Field>
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <input type="checkbox" checked={editingSite.selfSupplied} onChange={(e) => setEditingSite({ ...editingSite, selfSupplied: e.target.checked })} className="size-4 rounded" />
+                <span className="font-medium text-[#315763]">ใช้ชุดตรวจของตัวเอง</span>
+                <span className="text-xs text-[#789097]">(ไม่รับชุดตรวจจากเรา)</span>
+              </label>
               <Button disabled={busy}><CheckCircle2 className="size-4" /> บันทึกแก้ไข</Button>
             </form>
           </Card>
@@ -334,6 +364,11 @@ function DistributionTab({
               <h2 className="font-bold text-[#173d50]">เพิ่ม รพ.สต./หน่วยงาน</h2>
               <div className="grid gap-2 sm:grid-cols-[120px_1fr]"><Field label="Code"><Input value={siteForm.code} onChange={(e) => setSiteForm({ ...siteForm, code: e.target.value })} /></Field><Field label="Name"><Input required value={siteForm.name} onChange={(e) => setSiteForm({ ...siteForm, name: e.target.value })} /></Field></div>
               <Field label="Type"><Select value={siteForm.siteType} onChange={(e) => setSiteForm({ ...siteForm, siteType: e.target.value })}><option>รพ.สต.</option><option>รพช.</option><option>คลินิก</option></Select></Field>
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <input type="checkbox" checked={siteForm.selfSupplied} onChange={(e) => setSiteForm({ ...siteForm, selfSupplied: e.target.checked })} className="size-4 rounded" />
+                <span className="font-medium text-[#315763]">ใช้ชุดตรวจของตัวเอง</span>
+                <span className="text-xs text-[#789097]">(ไม่รับชุดตรวจจากเรา)</span>
+              </label>
               <Button disabled={busy}><Plus className="size-4" /> เพิ่มหน่วยงาน</Button>
             </form>
           </Card>

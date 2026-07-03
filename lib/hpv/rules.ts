@@ -15,6 +15,7 @@ export interface HpvSiteSummary {
   issued: number
   received: number
   outstanding: number
+  selfSupplied: boolean
 }
 
 export function nextHpvBoxPosition(occupiedPositions: number[], capacity = HPV_BOX_CAPACITY) {
@@ -36,7 +37,7 @@ export function addOneMonth(date: Date) {
 export function summarizeHpvSites(distributions: HpvDistributionLike[], receipts: HpvReceiptLike[]): Record<string, HpvSiteSummary> {
   const summaries: Record<string, HpvSiteSummary> = {}
   function ensure(siteId: string) {
-    summaries[siteId] ??= { siteId, issued: 0, received: 0, outstanding: 0 }
+    summaries[siteId] ??= { siteId, issued: 0, received: 0, outstanding: 0, selfSupplied: false }
     return summaries[siteId]
   }
 
@@ -49,7 +50,7 @@ export function summarizeHpvSites(distributions: HpvDistributionLike[], receipts
     summary.received += receipt.sampleCount
   }
   for (const summary of Object.values(summaries)) {
-    summary.outstanding = summary.issued - summary.received
+    summary.outstanding = summary.selfSupplied ? 0 : summary.issued - summary.received
   }
   return summaries
 }

@@ -10,6 +10,7 @@ export interface HpvSite {
   code: string | null
   name: string
   siteType: string
+  selfSupplied: boolean
   isActive: boolean
   createdAt: string
   updatedAt: string

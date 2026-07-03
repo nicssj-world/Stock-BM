@@ -5,12 +5,12 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { AlertOctagon, CalendarClock, CheckCircle2, FlaskConical, MapPin, PackageSearch, QrCode, ScanLine, Thermometer } from 'lucide-react'
 import type { BmActor, ScanResolution, StockWorkspace } from '@/lib/bm/types'
-import type { EnvWorkspace } from '@/lib/env/types'
+import type { EnvDashboard } from '@/lib/env/types'
 import type { HpvDashboard } from '@/lib/hpv/types'
 import { formatDate, formatQuantity } from '@/lib/bm/rules'
 import { api, Button, Card, Input, Notice, PageHeader } from '@/components/ui'
 
-export function DashboardView({ actor, stock, env, hpv }: { actor: BmActor; stock: StockWorkspace; env: EnvWorkspace; hpv: HpvDashboard }) {
+export function DashboardView({ actor, stock, env, hpv }: { actor: BmActor; stock: StockWorkspace; env: EnvDashboard; hpv: HpvDashboard }) {
   const router = useRouter()
   const [scan, setScan] = useState('')
   const [notice, setNotice] = useState('')
@@ -144,7 +144,7 @@ export function DashboardView({ actor, stock, env, hpv }: { actor: BmActor; stoc
   )
 }
 
-function TempRow({ card }: { card: EnvWorkspace['cards'][number] }) {
+function TempRow({ card }: { card: EnvDashboard['cards'][number] }) {
   const isOutOfRange = card.status === 'out-of-range'
   const value = card.todayReading?.readingValue ?? card.lastReading?.readingValue
   return (
