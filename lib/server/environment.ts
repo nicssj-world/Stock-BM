@@ -146,9 +146,14 @@ export async function getEnvironmentWorkspace(actor: BmActor): Promise<EnvWorksp
     .filter((unit) => unit.isActive)
     .map((unit) => {
       const unitReadings = byUnit.get(unit.id) ?? []
-      const todayReading = unitReadings.find((reading) => reading.readingDate === today && !reading.isVoided) ?? null
+      const todayReadings = unitReadings.filter((reading) => reading.readingDate === today && !reading.isVoided)
+      const todayReadingCount = todayReadings.length
+      const loggedToday = todayReadingCount >= unit.readingsPerDay
+      const todayReading = todayReadings[0] ?? null
       const lastReading = unitReadings.find((reading) => !reading.isVoided) ?? null
-      const status: EnvCardStatus = todayReading ? todayReading.status : 'pending'
+      const outOfRangeToday = todayReadings.find((r) => r.status === 'out-of-range')
+      const correctedToday = todayReadings.find((r) => r.status === 'corrected')
+      const status: EnvCardStatus = outOfRangeToday ? 'out-of-range' : correctedToday ? 'corrected' : loggedToday ? 'in-range' : 'pending'
       const points: EnvReadingPoint[] = unitReadings
         .filter((reading) => !reading.isVoided)
         .slice(0, ENV_TREND_POINTS)
@@ -157,7 +162,8 @@ export async function getEnvironmentWorkspace(actor: BmActor): Promise<EnvWorksp
       return {
         unit,
         todayReading,
-        loggedToday: Boolean(todayReading),
+        todayReadingCount,
+        loggedToday,
         lastReading,
         status,
         points,
@@ -193,6 +199,7 @@ export async function getEnvironmentWorkspace(actor: BmActor): Promise<EnvWorksp
   return {
     units,
     cards,
+    readings,
     correctiveActions,
     today,
     summary: {

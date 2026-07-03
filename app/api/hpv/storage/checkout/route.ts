@@ -5,6 +5,7 @@ import { readJson, respond } from '@/lib/server/route'
 
 const schema = z.object({
   barcode: z.string().trim().min(1).max(180),
+  destination: z.string().trim().max(200).optional(),
   note: z.string().trim().max(500).nullable().optional(),
 })
 

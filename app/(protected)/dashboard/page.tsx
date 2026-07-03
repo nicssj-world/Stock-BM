@@ -1,9 +1,15 @@
 import { DashboardView } from '@/components/dashboard-view'
 import { requirePageActor } from '@/lib/server/auth'
+import { getEnvironmentWorkspace } from '@/lib/server/environment'
+import { getHpvDashboardData } from '@/lib/server/hpv'
 import { getStockWorkspace } from '@/lib/server/stock'
 
 export default async function DashboardPage() {
   const actor = await requirePageActor()
-  return <DashboardView actor={actor} stock={await getStockWorkspace(actor)} />
+  const [stock, env, hpv] = await Promise.all([
+    getStockWorkspace(actor),
+    getEnvironmentWorkspace(actor),
+    getHpvDashboardData(),
+  ])
+  return <DashboardView actor={actor} stock={stock} env={env} hpv={hpv} />
 }
-

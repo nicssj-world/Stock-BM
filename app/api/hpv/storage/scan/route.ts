@@ -6,6 +6,7 @@ import { readJson, respond } from '@/lib/server/route'
 const schema = z.object({
   barcode: z.string().trim().min(1).max(180),
   boxId: z.string().uuid(),
+  position: z.number().int().min(1).max(25).nullable().optional(),
 })
 
 export async function POST(request: Request) {

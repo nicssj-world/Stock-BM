@@ -4,6 +4,7 @@ import { addOneMonth, nextHpvBoxPosition, summarizeHpvSites } from '@/lib/hpv/ru
 import type { BmActor } from '@/lib/bm/types'
 import type {
   HpvBoxType,
+  HpvDashboard,
   HpvKitDistribution,
   HpvSample,
   HpvSite,
@@ -11,6 +12,7 @@ import type {
   HpvStorageBox,
   HpvWorkspace,
 } from '@/lib/hpv/types'
+import { todayBangkok } from '@/lib/bm/rules'
 import { writeAudit } from '@/lib/server/audit'
 import { HttpError } from '@/lib/server/errors'
 import { getStockWorkspace } from '@/lib/server/stock'
@@ -216,6 +218,40 @@ export async function updateHpvSite(input: { id: string; code?: string | null; n
   return getHpvWorkspace(actor)
 }
 
+export async function cancelHpvDistribution(id: string, reason: string, actor: BmActor) {
+  assertAdmin(actor)
+  const admin = getAdminClient()
+  const { data: distribution, error: distError } = await admin
+    .from('bm_hpv_kit_distributions')
+    .select('stock_transaction_id, site_id, quantity')
+    .eq('id', id)
+    .maybeSingle()
+  fail(distError)
+  const distRow = distribution as RecordRow | null
+  if (!distRow) throw new HttpError(404, 'Distribution not found')
+
+  const stockTransactionId = asString(distRow.stock_transaction_id)
+  const { data: alreadyReversed, error: revCheckError } = await admin
+    .from('bm_stock_transactions')
+    .select('id')
+    .eq('source_transaction_id', stockTransactionId)
+    .maybeSingle()
+  fail(revCheckError)
+  if (alreadyReversed) throw new HttpError(409, 'Stock transaction ถูก reverse ไปแล้ว')
+
+  const { error: reverseError } = await admin.rpc('reverse_bm_stock_transaction', {
+    p_transaction: stockTransactionId,
+    p_reason: `ยกเลิก HPV distribution: ${reason.trim()}`,
+    p_actor: actor.id,
+  })
+  fail(reverseError)
+
+  const { error } = await admin.from('bm_hpv_kit_distributions').delete().eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'hpv.distribution.cancel', 'hpv-distribution', id, { reason })
+  return getHpvWorkspace(actor)
+}
+
 export async function createHpvDistribution(input: {
   siteId: string
   distributedOn: string
@@ -264,6 +300,19 @@ export async function createHpvDistribution(input: {
   return getHpvWorkspace(actor)
 }
 
+export async function updateHpvReceipt(input: { id: string; receivedOn?: string; sampleCount?: number; note?: string | null }, actor: BmActor) {
+  assertAdmin(actor)
+  const updates: Record<string, unknown> = {}
+  if (input.receivedOn !== undefined) updates.received_on = input.receivedOn
+  if (input.sampleCount !== undefined) updates.sample_count = input.sampleCount
+  if (input.note !== undefined) updates.note = clean(input.note)
+  if (!Object.keys(updates).length) return getHpvWorkspace(actor)
+  const { error } = await getAdminClient().from('bm_hpv_site_receipts').update(updates).eq('id', input.id)
+  fail(error)
+  await writeAudit(actor, 'hpv.receipt.update', 'hpv-receipt', input.id, input)
+  return getHpvWorkspace(actor)
+}
+
 export async function createHpvReceipt(input: { siteId: string; receivedOn: string; sampleCount: number; note?: string | null }, actor: BmActor) {
   const { data, error } = await getAdminClient()
     .from('bm_hpv_site_receipts')
@@ -292,7 +341,48 @@ export async function createHpvStorageBox(input: { boxCode: string; boxType: Hpv
   return getHpvWorkspace(actor)
 }
 
-export async function scanHpvSample(input: { barcode: string; boxId: string }, actor: BmActor) {
+export async function closeHpvStorageBox(id: string, actor: BmActor) {
+  assertAdmin(actor)
+  const { data: box, error: boxError } = await getAdminClient().from('bm_hpv_storage_boxes').select('status').eq('id', id).maybeSingle()
+  fail(boxError)
+  if ((box as RecordRow | null)?.status !== 'open') throw new HttpError(400, 'ปิดได้เฉพาะกล่องที่ยังเปิดอยู่')
+  const closedAt = new Date()
+  const { error } = await getAdminClient()
+    .from('bm_hpv_storage_boxes')
+    .update({ status: 'full', filled_at: closedAt.toISOString(), destroy_due_at: addOneMonth(closedAt).toISOString(), updated_at: closedAt.toISOString() })
+    .eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'hpv.box.close', 'hpv-box', id, {})
+  return getHpvWorkspace(actor)
+}
+
+export async function deleteHpvStorageBox(id: string, actor: BmActor) {
+  assertAdmin(actor)
+  const { count, error: countError } = await getAdminClient()
+    .from('bm_hpv_samples')
+    .select('id', { count: 'exact', head: true })
+    .eq('box_id', id)
+  fail(countError)
+  if (count) throw new HttpError(409, 'ลบกล่องไม่ได้ มี sample อยู่ภายในกล่องนี้แล้ว')
+  const { error } = await getAdminClient().from('bm_hpv_storage_boxes').delete().eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'hpv.box.delete', 'hpv-box', id, {})
+  return getHpvWorkspace(actor)
+}
+
+export async function moveHpvSamplePosition(sampleId: string, targetPosition: number, actor: BmActor) {
+  assertAdmin(actor)
+  const { error } = await getAdminClient().rpc('move_hpv_sample_position', {
+    p_sample_id: sampleId,
+    p_target_position: targetPosition,
+    p_actor: actor.id,
+  })
+  fail(error)
+  await writeAudit(actor, 'hpv.sample.move', 'hpv-sample', sampleId, { targetPosition })
+  return getHpvWorkspace(actor)
+}
+
+export async function scanHpvSample(input: { barcode: string; boxId: string; position?: number | null }, actor: BmActor) {
   const admin = getAdminClient()
   const barcode = input.barcode.trim()
   const { data: existing, error: existingError } = await admin.from('bm_hpv_samples').select('id,status').eq('barcode', barcode).maybeSingle()
@@ -307,8 +397,16 @@ export async function scanHpvSample(input: { barcode: string; boxId: string }, a
   const { data: sampleRows, error: sampleError } = await admin.from('bm_hpv_samples').select('position').eq('box_id', input.boxId)
   fail(sampleError)
   const occupied = ((sampleRows ?? []) as RecordRow[]).map((row) => asNumber(row.position))
-  const position = nextHpvBoxPosition(occupied, asNumber(boxRow.capacity))
-  if (!position) throw new HttpError(409, 'HPV storage box is full')
+
+  let position: number
+  if (input.position) {
+    if (occupied.includes(input.position)) throw new HttpError(409, `ตำแหน่งนี้มี sample อยู่แล้ว`)
+    position = input.position
+  } else {
+    const auto = nextHpvBoxPosition(occupied, asNumber(boxRow.capacity))
+    if (!auto) throw new HttpError(409, 'HPV storage box is full')
+    position = auto
+  }
 
   const { data, error } = await admin
     .from('bm_hpv_samples')
@@ -335,7 +433,62 @@ export async function scanHpvSample(input: { barcode: string; boxId: string }, a
   return getHpvWorkspace(actor)
 }
 
-export async function checkoutHpvSample(input: { barcode: string; note?: string | null }, actor: BmActor) {
+export async function deleteHpvSample(id: string, actor: BmActor) {
+  assertAdmin(actor)
+  const admin = getAdminClient()
+  const { data: sample, error: sampleError } = await admin.from('bm_hpv_samples').select('id,box_id,barcode,status').eq('id', id).maybeSingle()
+  fail(sampleError)
+  const row = sample as RecordRow | null
+  if (!row) throw new HttpError(404, 'HPV sample not found')
+  if (asString(row.status) === 'checked_out') throw new HttpError(409, 'ลบ sample ที่ checkout แล้วไม่ได้')
+
+  const { error } = await admin.from('bm_hpv_samples').delete().eq('id', id)
+  fail(error)
+
+  const boxId = asString(row.box_id)
+  const { data: box, error: boxError } = await admin.from('bm_hpv_storage_boxes').select('status').eq('id', boxId).maybeSingle()
+  fail(boxError)
+  if ((box as RecordRow | null)?.status === 'full') {
+    const { error: updateError } = await admin
+      .from('bm_hpv_storage_boxes')
+      .update({ status: 'open', filled_at: null, destroy_due_at: null, updated_at: new Date().toISOString() })
+      .eq('id', boxId)
+    fail(updateError)
+  }
+
+  await writeAudit(actor, 'hpv.sample.delete', 'hpv-sample', id, { barcode: asString(row.barcode), boxId })
+  return getHpvWorkspace(actor)
+}
+
+export async function destroyHpvStorageBox(id: string, actor: BmActor) {
+  assertAdmin(actor)
+  const { data: box, error: boxError } = await getAdminClient().from('bm_hpv_storage_boxes').select('status').eq('id', id).maybeSingle()
+  fail(boxError)
+  const boxRow = box as RecordRow | null
+  if (!boxRow) throw new HttpError(404, 'Storage box not found')
+  if (boxRow.status === 'open') throw new HttpError(400, 'ปิดกล่องก่อนจึงจะทำลายได้')
+  if (boxRow.status === 'destroyed') throw new HttpError(400, 'กล่องนี้ทำลายไปแล้ว')
+  const destroyedAt = new Date().toISOString()
+  const { error } = await getAdminClient()
+    .from('bm_hpv_storage_boxes')
+    .update({ status: 'destroyed', destroyed_at: destroyedAt, destroyed_by: actor.id, updated_at: destroyedAt })
+    .eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'hpv.box.destroy', 'hpv-box', id, {})
+  return getHpvWorkspace(actor)
+}
+
+export async function getHpvDashboardData(): Promise<HpvDashboard> {
+  const admin = getAdminClient()
+  const today = todayBangkok()
+  const [{ count: storedCount }, { count: boxCount }] = await Promise.all([
+    admin.from('bm_hpv_samples').select('*', { count: 'exact', head: true }).eq('status', 'stored'),
+    admin.from('bm_hpv_storage_boxes').select('*', { count: 'exact', head: true }).lte('destroy_due_at', today).neq('status', 'destroyed'),
+  ])
+  return { storedSamples: storedCount ?? 0, boxesDueDestruction: boxCount ?? 0 }
+}
+
+export async function checkoutHpvSample(input: { barcode: string; destination?: string | null; note?: string | null }, actor: BmActor) {
   const admin = getAdminClient()
   const { data: sample, error: sampleError } = await admin.from('bm_hpv_samples').select('id,status').eq('barcode', input.barcode.trim()).maybeSingle()
   fail(sampleError)
@@ -350,11 +503,11 @@ export async function checkoutHpvSample(input: { barcode: string; note?: string 
       status: 'checked_out',
       checked_out_at: checkedOutAt,
       checked_out_by: actor.id,
-      checkout_destination: 'Co-testing',
+      checkout_destination: clean(input.destination) ?? 'Co-testing',
       checkout_note: clean(input.note),
     })
     .eq('id', asString(sampleRow.id))
   fail(error)
-  await writeAudit(actor, 'hpv.sample.checkout', 'hpv-sample', asString(sampleRow.id), { barcode: input.barcode.trim(), destination: 'Co-testing' })
+  await writeAudit(actor, 'hpv.sample.checkout', 'hpv-sample', asString(sampleRow.id), { barcode: input.barcode.trim(), destination: clean(input.destination) ?? 'Co-testing' })
   return getHpvWorkspace(actor)
 }

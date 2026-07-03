@@ -1,16 +1,17 @@
 'use client'
 
 import { useState } from 'react'
-import { BarChart3, ClipboardList } from 'lucide-react'
+import { AlertOctagon, BarChart3, ClipboardList } from 'lucide-react'
 import type { StockWorkspace } from '@/lib/bm/types'
 import { PageHeader } from '@/components/ui'
-import { ReportsPanel } from '@/components/reports-view'
+import { ReportsPanel, StockAlertsPanel } from '@/components/reports-view'
 import { AuditPanel } from '@/components/audit-view'
 
-type Tab = 'reports' | 'audit'
+type Tab = 'reports' | 'alerts' | 'audit'
 
 const TABS: { tab: Tab; label: string; icon: typeof BarChart3 }[] = [
   { tab: 'reports', label: 'รายงาน / Reports', icon: BarChart3 },
+  { tab: 'alerts', label: 'Alerts', icon: AlertOctagon },
   { tab: 'audit', label: 'Audit log', icon: ClipboardList },
 ]
 
@@ -18,7 +19,7 @@ export function ReportsAuditView({ stock }: { stock: StockWorkspace }) {
   const [tab, setTab] = useState<Tab>('reports')
   return (
     <div className="mx-auto max-w-6xl space-y-5">
-      <PageHeader eyebrow="Reports & Audit" title="รายงาน / Reports & Audit" description="Export stock report และดูประวัติการทำรายการ" />
+      <PageHeader eyebrow="Reports & Audit" title="รายงาน / Reports & Audit" description="Export stock report ดู alerts หมดอายุ/low stock และประวัติการทำรายการ" />
       <div className="inline-flex flex-wrap gap-1 rounded-lg border border-[#d6e2e3] bg-white p-1" role="tablist" aria-label="มุมมองรายงาน">
         {TABS.map(({ tab: tabKey, label, icon: Icon }) => {
           const active = tab === tabKey
@@ -36,7 +37,9 @@ export function ReportsAuditView({ stock }: { stock: StockWorkspace }) {
           )
         })}
       </div>
-      {tab === 'reports' ? <ReportsPanel stock={stock} /> : <AuditPanel />}
+      {tab === 'reports' ? <ReportsPanel stock={stock} /> : null}
+      {tab === 'alerts' ? <StockAlertsPanel stock={stock} /> : null}
+      {tab === 'audit' ? <AuditPanel /> : null}
     </div>
   )
 }

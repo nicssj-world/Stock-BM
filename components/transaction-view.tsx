@@ -1,37 +1,58 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
   CalendarDays,
   CheckCircle2,
+  Download,
   Hash,
+  History,
   MapPin,
   MoveRight,
   PackageSearch,
+  RotateCcw,
   Save,
   ScanLine,
+  Search,
+  SlidersHorizontal,
 } from 'lucide-react'
-import type { StockItem, StockLot, StockWorkspace } from '@/lib/bm/types'
-import { formatDate, formatQuantity, suggestedUsableLot } from '@/lib/bm/rules'
+import type { BmActor, StockItem, StockLot, StockTransaction, StockWorkspace } from '@/lib/bm/types'
+import { formatDate, formatDateTime, formatQuantity, suggestedUsableLot } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, Textarea } from '@/components/ui'
 
-type Mode = 'receive' | 'issue' | 'move'
+type Mode = 'receive' | 'issue' | 'move' | 'adjust' | 'history'
 
-const TABS: { mode: Mode; label: string; icon: typeof ArrowDownToLine }[] = [
+const ALL_TABS: { mode: Mode; label: string; icon: typeof ArrowDownToLine; adminOnly?: boolean }[] = [
   { mode: 'receive', label: 'รับเข้า', icon: ArrowDownToLine },
   { mode: 'issue', label: 'ตัด Stock', icon: ArrowUpFromLine },
   { mode: 'move', label: 'ย้ายที่', icon: MoveRight },
+  { mode: 'adjust', label: 'ปรับยอด', icon: SlidersHorizontal, adminOnly: true },
+  { mode: 'history', label: 'History', icon: History },
 ]
 
+function downloadCsv(filename: string, rows: string[][]) {
+  const bom = '﻿'
+  const content = bom + rows.map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export function TransactionView({
+  actor,
   initialMode,
   initialData,
   defaultItemId,
   defaultLotId,
   defaultLocationId,
 }: {
+  actor?: BmActor
   initialMode: Mode
   initialData: StockWorkspace
   defaultItemId?: string
@@ -43,18 +64,25 @@ export function TransactionView({
   const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
   const activeItems = data.items.filter((item) => item.isActive)
   const activeLocations = data.locations.filter((location) => location.isActive)
-  const title = mode === 'receive' ? 'รับเข้า / Receive' : mode === 'issue' ? 'ตัด Stock / Issue' : 'ย้ายที่เก็บ / Move'
-  const description = mode === 'receive'
-    ? 'รับน้ำยาเข้าคลังด้วยหน้าจอมือถือ เลือก item, location, lot และจำนวน'
-    : mode === 'issue'
-      ? 'ตัด stock จาก lot และ location ที่มีของคงเหลือ พร้อมบันทึก purpose'
-      : 'ย้ายยอดคงเหลือระหว่าง location'
+  const visibleTabs = ALL_TABS.filter((tab) => !tab.adminOnly || actor?.role === 'Admin')
+  const title =
+    mode === 'receive' ? 'รับเข้า / Receive'
+    : mode === 'issue' ? 'ตัด Stock / Issue'
+    : mode === 'adjust' ? 'ปรับยอด / Adjust stock'
+    : mode === 'history' ? 'Movement History'
+    : 'ย้ายที่เก็บ / Move'
+  const description =
+    mode === 'receive' ? 'รับน้ำยาเข้าคลังด้วยหน้าจอมือถือ เลือก item, location, lot และจำนวน'
+    : mode === 'issue' ? 'ตัด stock จาก lot และ location ที่มีของคงเหลือ พร้อมบันทึก purpose'
+    : mode === 'adjust' ? 'ปรับยอด stock โดยตรง (สำหรับ Admin) เช่น นับ physical ไม่ตรงระบบ หรือของเสีย'
+    : mode === 'history' ? `${data.transactions.length} transactions — กรองและ export CSV ได้`
+    : 'ย้ายยอดคงเหลือระหว่าง location'
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 pb-28 sm:pb-5">
       <PageHeader eyebrow="Stock movement" title={title} description={description} />
       <div className="inline-flex flex-wrap gap-1 rounded-lg border border-[#d6e2e3] bg-white p-1" role="tablist" aria-label="ประเภทการเคลื่อนไหว stock">
-        {TABS.map(({ mode: tabMode, label, icon: Icon }) => {
+        {visibleTabs.map(({ mode: tabMode, label, icon: Icon }) => {
           const active = mode === tabMode
           return (
             <button
@@ -107,6 +135,28 @@ export function TransactionView({
           onSaved={(stock) => {
             setData(stock)
             setNotice({ tone: 'success', text: 'บันทึกย้ายที่เก็บแล้ว / Move saved' })
+          }}
+          onError={(text) => setNotice({ tone: 'danger', text })}
+        />
+      ) : null}
+      {mode === 'adjust' ? (
+        <AdjustForm
+          items={activeItems}
+          locations={activeLocations}
+          onSaved={(stock) => {
+            setData(stock)
+            setNotice({ tone: 'success', text: 'ปรับยอดแล้ว / Adjustment saved' })
+          }}
+          onError={(text) => setNotice({ tone: 'danger', text })}
+        />
+      ) : null}
+      {mode === 'history' ? (
+        <HistoryTab
+          transactions={data.transactions}
+          actor={actor}
+          onSaved={(stock) => {
+            setData(stock)
+            setNotice({ tone: 'success', text: 'Reverse transaction แล้ว' })
           }}
           onError={(text) => setNotice({ tone: 'danger', text })}
         />
@@ -494,6 +544,322 @@ function MoveForm({
         <div className="lg:col-span-2"><Button disabled={busy || !stockedItems.length}><Save className="size-4" /> บันทึก / Save</Button></div>
       </form>
     </Card>
+  )
+}
+
+function HistoryTab({
+  transactions,
+  actor,
+  onSaved,
+  onError,
+}: {
+  transactions: StockTransaction[]
+  actor?: BmActor
+  onSaved: (stock: StockWorkspace) => void
+  onError: (text: string) => void
+}) {
+  const [q, setQ] = useState('')
+  const [typeFilter, setTypeFilter] = useState('all')
+
+  const visible = useMemo(() => {
+    const term = q.trim().toLowerCase()
+    return transactions.filter((tx) => {
+      const typeOk = typeFilter === 'all' || tx.transactionType === typeFilter
+      const textOk = !term || tx.lines.some((line) =>
+        `${line.itemCode} ${line.itemName} ${line.lotNumber} ${tx.purpose ?? ''} ${tx.reference ?? ''}`.toLowerCase().includes(term),
+      )
+      return typeOk && textOk
+    })
+  }, [transactions, q, typeFilter])
+
+  function exportCsv() {
+    const rows = [
+      ['Date', 'Type', 'Item', 'Lot', 'Location', 'Qty', 'Purpose', 'Reference', 'Note', 'By'],
+      ...transactions.flatMap((tx) =>
+        tx.lines.map((line) => [
+          formatDateTime(tx.createdAt),
+          tx.transactionType,
+          `${line.itemCode} · ${line.itemName}`,
+          line.lotNumber,
+          line.locationCode,
+          String(line.quantity),
+          tx.purpose ?? '',
+          tx.reference ?? '',
+          tx.note ?? '',
+          tx.createdByName ?? '',
+        ]),
+      ),
+    ]
+    downloadCsv(`movements_${new Date().toISOString().slice(0, 10)}.csv`, rows)
+  }
+
+  async function reverse(tx: StockTransaction) {
+    const reason = window.prompt(`Reverse ${tx.transactionType}?\nกรอกเหตุผล:`)
+    if (!reason?.trim()) return
+    try {
+      const result = await api<{ stock: StockWorkspace }>(`/api/stock/transactions/${tx.id}/reverse`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      })
+      onSaved(result.stock)
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'Reverse ไม่สำเร็จ')
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-0 flex-1">
+          <Search className="absolute top-2.5 left-3 size-4 text-[#8ca1a5]" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} className="pl-9" placeholder="ค้น item, lot, purpose, reference" />
+        </div>
+        <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+          <option value="all">All types</option>
+          <option value="receive">Receive</option>
+          <option value="issue">Issue</option>
+          <option value="move">Move</option>
+          <option value="adjustment">Adjustment</option>
+          <option value="reversal">Reversal</option>
+        </Select>
+        <Button variant="secondary" onClick={exportCsv}><Download className="size-4" /> Export CSV</Button>
+        <span className="text-xs text-[#789097]">{visible.length} / {transactions.length}</span>
+      </div>
+      <Card className="overflow-hidden">
+        <div className="max-h-[640px] overflow-y-auto divide-y divide-[#edf2f2]">
+          {visible.map((tx) => <HistoryRow key={tx.id} transaction={tx} actor={actor} onReverse={() => void reverse(tx)} />)}
+          {!visible.length ? <p className="px-4 py-14 text-center text-sm text-[#91a4a9]">ไม่มีรายการ</p> : null}
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+function HistoryRow({ transaction, actor, onReverse }: { transaction: StockTransaction; actor?: BmActor; onReverse: () => void }) {
+  const first = transaction.lines[0]
+  const badgeStyles: Record<StockTransaction['transactionType'], string> = {
+    receive: 'bg-[#eef8f5] text-[#0b7f76]',
+    issue: 'bg-[#fff1f2] text-[#b33b46]',
+    move: 'bg-[#eef3ff] text-[#4568a3]',
+    adjustment: 'bg-[#fff8e8] text-[#a76511]',
+    reversal: 'bg-[#f2f5f5] text-[#6d8085]',
+  }
+  return (
+    <div className="px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${badgeStyles[transaction.transactionType]}`}>{transaction.transactionType}</span>
+            <span className="mono text-xs font-bold text-[#55727c]">{first?.lotNumber ?? '-'}</span>
+            {transaction.reversedByTransactionId ? <span className="rounded bg-[#f2f5f5] px-1.5 py-0.5 text-[9px] font-bold text-[#87999e]">REVERSED</span> : null}
+          </div>
+          <p className="mt-1 text-[11px] text-[#91a3a7]">{formatDateTime(transaction.createdAt)} · {transaction.createdByName ?? '-'}</p>
+          {first ? <p className="mt-0.5 text-xs font-semibold text-[#55727c]">{first.itemCode} · {first.itemName}</p> : null}
+        </div>
+        <div className="text-right">
+          {transaction.lines.map((line, index) => (
+            <p key={index} className={`mono text-sm font-bold ${line.quantity > 0 ? 'text-[#0b7f76]' : 'text-[#be3d49]'}`}>
+              {line.quantity > 0 ? '+' : ''}{formatQuantity(line.quantity)} {line.unit} · {line.locationCode}
+            </p>
+          ))}
+          {actor?.role === 'Admin' && transaction.canReverse
+            ? <button onClick={onReverse} className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-[#789097] hover:text-[#be3d49]"><RotateCcw className="size-3" /> Reverse</button>
+            : null}
+        </div>
+      </div>
+      {transaction.purpose || transaction.reference || transaction.note
+        ? <p className="mt-2 text-[11px] leading-5 text-[#7f9398]">{[transaction.purpose && `Purpose: ${transaction.purpose}`, transaction.reference && `Ref: ${transaction.reference}`, transaction.note].filter(Boolean).join(' · ')}</p>
+        : null}
+    </div>
+  )
+}
+
+function AdjustForm({
+  items,
+  locations,
+  onSaved,
+  onError,
+}: {
+  items: StockItem[]
+  locations: StockWorkspace['locations']
+  onSaved: (stock: StockWorkspace) => void
+  onError: (text: string) => void
+}) {
+  const lottedItems = items.filter((item) => item.lots.length > 0)
+  const firstItem = lottedItems[0]
+  const [form, setForm] = useState({
+    itemId: firstItem?.id ?? '',
+    lotId: firstItem?.lots[0]?.id ?? '',
+    locationId: locations[0]?.id ?? '',
+    quantity: '',
+    reference: '',
+    note: '',
+  })
+  const [itemSearch, setItemSearch] = useState('')
+  const [busy, setBusy] = useState(false)
+  const item = lottedItems.find((i) => i.id === form.itemId)
+  const lots = item?.lots ?? []
+  const lot = lots.find((l) => l.id === form.lotId)
+  const currentBalance = lot?.balances.find((b) => b.locationId === form.locationId)?.onHand ?? 0
+  const qty = Number(form.quantity || 0)
+  const newBalance = currentBalance + qty
+  const filteredItems = filterItems(lottedItems, itemSearch)
+  const canSave = Boolean(lot && form.locationId && form.quantity && qty !== 0 && form.note.trim())
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    if (!canSave) return
+    if (newBalance < 0 && !window.confirm(`ยอดจะติดลบ (${formatQuantity(newBalance)} ${item?.unit ?? ''}) ยืนยันการปรับ?`)) return
+    setBusy(true)
+    try {
+      const result = await api<{ stock: StockWorkspace }>('/api/stock/adjustments', {
+        method: 'POST',
+        body: JSON.stringify({
+          lotId: form.lotId,
+          locationId: form.locationId,
+          quantity: qty,
+          reference: form.reference.trim() || null,
+          note: form.note.trim(),
+        }),
+      })
+      onSaved(result.stock)
+      setForm({ ...form, quantity: '', reference: '', note: '' })
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'ปรับยอดไม่สำเร็จ')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!lottedItems.length) {
+    return <Notice tone="warning">ยังไม่มี lot — รับเข้าก่อนจึงจะปรับยอดได้</Notice>
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <MobilePanel>
+        <PanelTitle icon={<ScanLine />} title="1. เลือกสินค้า / Select item" detail="สแกนหรือค้น item ที่ต้องการปรับยอด" />
+        <ScanSearch
+          value={itemSearch}
+          onChange={setItemSearch}
+          placeholder="Scan / search item"
+          onPickFirst={() => {
+            const first = filteredItems[0]
+            if (first) {
+              setForm({ ...form, itemId: first.id, lotId: first.lots[0]?.id ?? '' })
+              setItemSearch('')
+            }
+          }}
+        />
+        <div className="mt-3 max-h-[400px] overflow-y-auto grid gap-2 sm:grid-cols-2">
+          {filteredItems.map((option) => (
+            <ChoiceButton
+              key={option.id}
+              selected={option.id === form.itemId}
+              title={`${option.itemCode} · ${option.name}`}
+              meta={`${option.categoryName} · ${formatQuantity(option.totalOnHand)} ${option.unit} on hand`}
+              onClick={() => setForm({ ...form, itemId: option.id, lotId: option.lots[0]?.id ?? '' })}
+            />
+          ))}
+        </div>
+      </MobilePanel>
+
+      <MobilePanel>
+        <PanelTitle icon={<CalendarDays />} title="2. เลือก Lot / Select lot" detail="รวม lot ที่ยอดคงเหลือเป็น 0" />
+        <div className="grid gap-2">
+          {lots.map((option) => (
+            <LotChoice
+              key={option.id}
+              lot={option}
+              unit={item?.unit ?? ''}
+              selected={option.id === form.lotId}
+              onClick={() => setForm({ ...form, lotId: option.id })}
+            />
+          ))}
+          {!lots.length ? (
+            <p className="rounded-md border border-dashed border-[#d5e2e3] px-3 py-7 text-center text-sm text-[#91a4a9]">ไม่มี lot</p>
+          ) : null}
+        </div>
+      </MobilePanel>
+
+      <MobilePanel>
+        <PanelTitle icon={<MapPin />} title="3. Location และจำนวน / Location and quantity" detail={`ยอดปัจจุบัน: ${formatQuantity(currentBalance)} ${item?.unit ?? ''}`} />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+              {locations.map((option) => {
+                const bal = lot?.balances.find((b) => b.locationId === option.id)?.onHand ?? 0
+                return (
+                  <ChoiceButton
+                    key={option.id}
+                    selected={option.id === form.locationId}
+                    title={option.code}
+                    meta={`${formatQuantity(bal)} ${item?.unit ?? ''}`}
+                    compact
+                    onClick={() => setForm({ ...form, locationId: option.id })}
+                  />
+                )
+              })}
+            </div>
+          </div>
+          <BigField label={`Adjustment${item ? ` (${item.unit})` : ''}`}>
+            <Input
+              required
+              inputMode="decimal"
+              type="number"
+              step="0.001"
+              className="h-14 mono text-xl font-bold"
+              value={form.quantity}
+              onChange={(event) => setForm({ ...form, quantity: event.target.value })}
+              placeholder="+10 หรือ -5"
+            />
+          </BigField>
+          <BigField label="ยอดใหม่ (preview)">
+            <div
+              className={`flex h-14 items-center rounded-md border px-3 font-mono text-xl font-bold ${
+                newBalance < 0
+                  ? 'border-red-200 bg-red-50 text-red-600'
+                  : 'border-[#d8e6e6] bg-[#f7fbfc] text-[#0b7f76]'
+              }`}
+            >
+              {form.quantity ? `${formatQuantity(newBalance)} ${item?.unit ?? ''}` : '—'}
+            </div>
+          </BigField>
+        </div>
+      </MobilePanel>
+
+      <MobilePanel>
+        <PanelTitle icon={<PackageSearch />} title="4. เหตุผล / Reason (จำเป็น)" detail="บันทึกสาเหตุที่ปรับยอด เช่น นับ stock ได้ต่างจากระบบ" />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Reference"><Input className="h-11" value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></Field>
+          <div className="sm:col-span-2">
+            <Field label="Note (จำเป็น)">
+              <Textarea
+                required
+                rows={3}
+                value={form.note}
+                onChange={(event) => setForm({ ...form, note: event.target.value })}
+                placeholder="เช่น นับ physical ได้ 48 ชิ้น ระบบแสดง 50 / ของเสียระหว่างเก็บ 2 ชิ้น"
+              />
+            </Field>
+          </div>
+        </div>
+      </MobilePanel>
+
+      <MobileActionBar>
+        <SummaryLine
+          label="Adjustment"
+          value={
+            lot && form.quantity
+              ? `${item?.itemCode} · ${qty > 0 ? '+' : ''}${form.quantity} ${item?.unit ?? ''}`
+              : 'กรอกข้อมูลให้ครบ'
+          }
+        />
+        <Button disabled={busy || !canSave} className="h-12 min-w-32">
+          <SlidersHorizontal className="size-4" /> Adjust
+        </Button>
+      </MobileActionBar>
+    </form>
   )
 }
 

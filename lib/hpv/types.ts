@@ -80,3 +80,8 @@ export interface HpvWorkspace {
   boxes: HpvStorageBox[]
   stock: StockWorkspace
 }
+
+export interface HpvDashboard {
+  storedSamples: number
+  boxesDueDestruction: number
+}

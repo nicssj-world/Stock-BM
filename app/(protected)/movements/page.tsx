@@ -2,8 +2,8 @@ import { TransactionView } from '@/components/transaction-view'
 import { requirePageActor } from '@/lib/server/auth'
 import { getStockWorkspace } from '@/lib/server/stock'
 
-type Mode = 'receive' | 'issue' | 'move'
-const MODES: Mode[] = ['receive', 'issue', 'move']
+type Mode = 'receive' | 'issue' | 'move' | 'adjust'
+const MODES: Mode[] = ['receive', 'issue', 'move', 'adjust']
 
 export default async function MovementsPage({
   searchParams,
@@ -15,6 +15,7 @@ export default async function MovementsPage({
   const initialMode: Mode = MODES.includes(params.mode as Mode) ? (params.mode as Mode) : 'receive'
   return (
     <TransactionView
+      actor={actor}
       initialMode={initialMode}
       initialData={await getStockWorkspace(actor)}
       defaultItemId={params.itemId}

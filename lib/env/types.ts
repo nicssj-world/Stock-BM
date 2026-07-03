@@ -61,6 +61,7 @@ export interface EnvCorrectiveAction {
 export interface EnvUnitCard {
   unit: EnvUnit
   todayReading: EnvReading | null
+  todayReadingCount: number
   loggedToday: boolean
   lastReading: EnvReading | null
   status: EnvCardStatus
@@ -71,6 +72,7 @@ export interface EnvUnitCard {
 export interface EnvWorkspace {
   units: EnvUnit[]
   cards: EnvUnitCard[]
+  readings: EnvReading[]
   correctiveActions: EnvCorrectiveAction[]
   today: string
   summary: {

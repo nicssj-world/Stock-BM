@@ -30,6 +30,7 @@ describe('BM stock CSV', () => {
         manufacturerBarcode: null,
         trackLot: true,
         trackExpiry: true,
+        isHpv: false,
         isActive: true,
         totalOnHand: 2,
         usableOnHand: 2,

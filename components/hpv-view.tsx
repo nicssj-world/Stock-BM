@@ -7,16 +7,21 @@ import {
   Camera,
   CheckCircle2,
   ClipboardCheck,
+  Download,
+  Flame,
   Hospital,
   PackageMinus,
+  Pencil,
   Plus,
   QrCode,
+  Search,
   ScanLine,
   Send,
+  Trash2,
   X,
 } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
-import type { HpvBoxType, HpvStorageBox, HpvWorkspace } from '@/lib/hpv/types'
+import type { HpvBoxType, HpvKitDistribution, HpvSample, HpvSiteReceipt, HpvStorageBox, HpvWorkspace } from '@/lib/hpv/types'
 import { formatHpvBoxPosition, HPV_BOX_CAPACITY } from '@/lib/hpv/rules'
 import { formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
@@ -34,6 +39,18 @@ function boxTypeLabel(type: HpvBoxType) {
 
 function normalizeScan(value: string) {
   return value.trim()
+}
+
+function downloadCsv(filename: string, rows: string[][]) {
+  const bom = '﻿'
+  const content = bom + rows.map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 function useCameraScanner(onScan: (code: string) => void, onError: (message: string) => void) {
@@ -84,8 +101,11 @@ export function HpvView({ actor, initialData }: { actor: BmActor; initialData: H
   }
 
   const storedSamples = data.boxes.flatMap((box) => box.samples).filter((sample) => sample.status === 'stored').length
+  const checkedOutTotal = data.boxes.flatMap((box) => box.samples).filter((s) => s.status === 'checked_out').length
   const dueBoxes = data.boxes.filter((box) => box.destroyDueAt && box.destroyDueAt.slice(0, 10) <= today).length
   const openBoxes = data.boxes.filter((box) => box.status === 'open').length
+  const fullBoxes = data.boxes.filter((box) => box.status === 'full').length
+  const destroyedBoxes = data.boxes.filter((box) => box.status === 'destroyed').length
   const totalOutstanding = data.summaries.reduce((sum, summary) => sum + summary.outstanding, 0)
 
   return (
@@ -106,12 +126,12 @@ export function HpvView({ actor, initialData }: { actor: BmActor; initialData: H
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Active sites" value={data.sites.filter((site) => site.isActive).length} hint="รพ.สต./หน่วยงาน" />
         <StatCard label="Outstanding kits" value={totalOutstanding} tone={totalOutstanding > 0 ? 'warning' : 'accepted'} hint="เบิกแล้วเทียบส่งกลับ" />
-        <StatCard label="Stored samples" value={storedSamples} hint="รอ checkout / ทำลาย" />
-        <StatCard label="Storage alerts" value={dueBoxes} tone={dueBoxes > 0 ? 'rejected' : 'neutral'} hint={`${openBoxes} open box`} />
+        <StatCard label="Stored samples" value={storedSamples} hint={`${checkedOutTotal} checked out`} />
+        <StatCard label="Destroy due" value={dueBoxes} tone={dueBoxes > 0 ? 'rejected' : 'neutral'} hint={`${openBoxes} open · ${fullBoxes} full · ${destroyedBoxes} destroyed`} />
       </div>
 
       {tab === 'distribution' ? <DistributionTab actor={actor} data={data} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
-      {tab === 'receipts' ? <ReceiptsTab data={data} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
+      {tab === 'receipts' ? <ReceiptsTab actor={actor} data={data} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
       {tab === 'storage' ? <StorageTab data={data} today={today} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
       {tab === 'checkout' ? <CheckoutTab data={data} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
     </div>
@@ -147,6 +167,7 @@ function DistributionTab({
     overrideReason: '',
   })
   const [siteForm, setSiteForm] = useState({ code: '', name: '', siteType: 'รพ.สต.' })
+  const [editingSite, setEditingSite] = useState<{ id: string; code: string; name: string; siteType: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const selectedSiteId = form.siteId || activeSites[0]?.id || ''
   const selectedStockKey = stockLines.some((line) => line.key === form.stockKey) ? form.stockKey : stockLines[0]?.key ?? ''
@@ -193,6 +214,45 @@ function DistributionTab({
     }
   }
 
+  async function saveSite(event: React.FormEvent) {
+    event.preventDefault()
+    if (!editingSite) return
+    setBusy(true)
+    try {
+      const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/sites', {
+        method: 'PATCH',
+        body: JSON.stringify({ id: editingSite.id, name: editingSite.name, code: editingSite.code.trim() || null, siteType: editingSite.siteType }),
+      })
+      onWorkspace(result.workspace, 'อัปเดตหน่วยงานแล้ว')
+      setEditingSite(null)
+    } catch (error) {
+      onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'อัปเดตหน่วยงานไม่สำเร็จ' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function cancelDistribution(dist: HpvKitDistribution) {
+    const reason = window.prompt(`ยืนยันยกเลิกการเบิก ${dist.quantity} ชุดให้ "${dist.siteName}"?\n\nระบุเหตุผล (จำเป็น):`)
+    if (reason === null) return
+    if (!reason.trim()) return onNotice({ tone: 'danger', text: 'กรุณาระบุเหตุผล' })
+    setBusy(true)
+    try {
+      const result = await api<{ workspace: HpvWorkspace }>(`/api/hpv/distributions/${dist.id}?reason=${encodeURIComponent(reason.trim())}`, { method: 'DELETE' })
+      onWorkspace(result.workspace, `ยกเลิกการเบิกให้ ${dist.siteName} แล้ว Stock คืนแล้ว`)
+    } catch (error) {
+      onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'ยกเลิกไม่สำเร็จ' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function exportDistributions() {
+    const headers = ['วันที่', 'หน่วยงาน', 'รหัสสินค้า', 'ชื่อสินค้า', 'Lot', 'Location', 'จำนวน', 'Note', 'บันทึกโดย']
+    const rows = data.distributions.map((d) => [d.distributedOn, d.siteName, d.itemCode ?? '', d.itemName ?? '', d.lotNumber ?? '', d.locationCode ?? '', String(d.quantity), d.note ?? '', d.createdByName ?? ''])
+    downloadCsv(`HPV_distributions_${todayKey()}.csv`, [headers, ...rows])
+  }
+
   async function toggleSite(siteId: string, isActive: boolean) {
     try {
       const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/sites', { method: 'PATCH', body: JSON.stringify({ id: siteId, isActive: !isActive }) })
@@ -203,6 +263,7 @@ function DistributionTab({
   }
 
   return (
+    <div className="space-y-4">
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
       <Card className="overflow-hidden">
         <div className="border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3">
@@ -223,9 +284,14 @@ function DistributionTab({
                     <td className="mono px-3 py-3 text-right font-bold text-[#0b7f76]">{summary?.received ?? 0}</td>
                     <td className={`mono px-3 py-3 text-right font-bold ${(summary?.outstanding ?? 0) > 0 ? 'text-[#a9700f]' : 'text-[#55727c]'}`}>{summary?.outstanding ?? 0}</td>
                     <td className="px-4 py-3">
-                      {actor.role === 'Admin'
-                        ? <button onClick={() => toggleSite(site.id, site.isActive)} className={`rounded border px-2 py-1 text-[10px] font-bold ${site.isActive ? 'border-[#c7e0c8] bg-[#f0f8f1] text-[#518058]' : 'border-[#e0d7d8] bg-[#f7f4f4] text-[#8d7b7d]'}`}>{site.isActive ? 'ACTIVE' : 'INACTIVE'}</button>
-                        : <StatusBadge tone={site.isActive ? 'accepted' : 'neutral'} label={site.isActive ? 'ACTIVE' : 'INACTIVE'} />}
+                      {actor.role === 'Admin' ? (
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => toggleSite(site.id, site.isActive)} className={`rounded border px-2 py-1 text-[10px] font-bold ${site.isActive ? 'border-[#c7e0c8] bg-[#f0f8f1] text-[#518058]' : 'border-[#e0d7d8] bg-[#f7f4f4] text-[#8d7b7d]'}`}>{site.isActive ? 'ACTIVE' : 'INACTIVE'}</button>
+                          <button onClick={() => setEditingSite({ id: site.id, code: site.code ?? '', name: site.name, siteType: site.siteType })} className="flex items-center gap-1 rounded border border-[#c7dde0] bg-[#f5f9fa] px-2 py-1 text-[10px] font-bold text-[#55727c] hover:bg-[#ebf5f6]"><Pencil className="size-3" /> แก้ไข</button>
+                        </div>
+                      ) : (
+                        <StatusBadge tone={site.isActive ? 'accepted' : 'neutral'} label={site.isActive ? 'ACTIVE' : 'INACTIVE'} />
+                      )}
                     </td>
                   </tr>
                 )
@@ -249,6 +315,19 @@ function DistributionTab({
             <Button disabled={busy || !selectedSiteId || !selectedStock}><ArrowUpFromLine className="size-4" /> บันทึกเบิกและหัก Stock</Button>
           </form>
         </Card>
+        {editingSite ? (
+          <Card className="p-4 ring-1 ring-[#0b7f76]">
+            <form onSubmit={saveSite} className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="font-bold text-[#173d50]">แก้ไขหน่วยงาน</h2>
+                <button type="button" onClick={() => setEditingSite(null)} className="text-[#8ba0a5] hover:text-[#315763]"><X className="size-4" /></button>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-[120px_1fr]"><Field label="Code"><Input value={editingSite.code} onChange={(e) => setEditingSite({ ...editingSite, code: e.target.value })} /></Field><Field label="Name"><Input required value={editingSite.name} onChange={(e) => setEditingSite({ ...editingSite, name: e.target.value })} /></Field></div>
+              <Field label="Type"><Select value={editingSite.siteType} onChange={(e) => setEditingSite({ ...editingSite, siteType: e.target.value })}><option>รพ.สต.</option><option>รพช.</option><option>คลินิก</option></Select></Field>
+              <Button disabled={busy}><CheckCircle2 className="size-4" /> บันทึกแก้ไข</Button>
+            </form>
+          </Card>
+        ) : null}
         {actor.role === 'Admin' ? (
           <Card className="p-4">
             <form onSubmit={createSite} className="space-y-3">
@@ -261,16 +340,50 @@ function DistributionTab({
         ) : null}
       </div>
     </div>
+    <Card className="overflow-hidden">
+      <div className="flex items-center justify-between border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3">
+        <h2 className="font-bold text-[#173d50]">ประวัติการเบิก</h2>
+        <button onClick={exportDistributions} className="flex items-center gap-1.5 rounded border border-[#c7dde0] bg-[#f5f9fa] px-2.5 py-1.5 text-xs font-bold text-[#55727c] hover:bg-[#ebf5f6]"><Download className="size-3.5" /> Export CSV</button>
+      </div>
+      <div className="max-h-[360px] overflow-y-auto">
+        <table className="w-full min-w-[800px] text-left text-sm">
+          <thead className="sticky top-0 bg-[#f7fafa] text-[10px] tracking-[0.08em] text-[#779097] uppercase">
+            <tr><th className="px-4 py-2.5">วันที่</th><th className="px-3 py-2.5">หน่วยงาน</th><th className="px-3 py-2.5">สินค้า · Lot</th><th className="px-3 py-2.5">Location</th><th className="px-3 py-2.5 text-right">จำนวน</th><th className="px-3 py-2.5">โดย</th>{actor.role === 'Admin' ? <th className="px-3 py-2.5" /> : null}</tr>
+          </thead>
+          <tbody className="divide-y divide-[#edf2f2]">
+            {data.distributions.map((dist) => (
+              <tr key={dist.id} className="hover:bg-[#f7fbfc]">
+                <td className="mono px-4 py-2.5 text-[#315763]">{formatDate(dist.distributedOn)}</td>
+                <td className="px-3 py-2.5 font-semibold text-[#315763]">{dist.siteName}</td>
+                <td className="px-3 py-2.5 text-xs text-[#55727c]">{dist.itemCode} · {dist.lotNumber ?? '-'}</td>
+                <td className="mono px-3 py-2.5 text-xs text-[#789097]">{dist.locationCode ?? '-'}</td>
+                <td className="mono px-3 py-2.5 text-right font-bold text-[#315763]">{dist.quantity}</td>
+                <td className="px-3 py-2.5 text-xs text-[#8ba0a5]">{dist.createdByName ?? '-'}</td>
+                {actor.role === 'Admin' ? (
+                  <td className="px-3 py-2.5">
+                    <button onClick={() => cancelDistribution(dist)} disabled={busy} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-500 hover:bg-red-100 disabled:opacity-40"><X className="size-3" /> ยกเลิก</button>
+                  </td>
+                ) : null}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!data.distributions.length ? <p className="px-4 py-10 text-center text-sm text-[#91a4a9]">ยังไม่มีประวัติการเบิก</p> : null}
+      </div>
+    </Card>
+    </div>
   )
 }
 
-function ReceiptsTab({ data, onWorkspace, onNotice }: {
+function ReceiptsTab({ actor, data, onWorkspace, onNotice }: {
+  actor: BmActor
   data: HpvWorkspace
   onWorkspace: (workspace: HpvWorkspace, text: string) => void
   onNotice: (notice: { tone: 'success' | 'danger' | 'warning' | 'info'; text: string } | null) => void
 }) {
   const activeSites = data.sites.filter((site) => site.isActive)
   const [form, setForm] = useState({ siteId: activeSites[0]?.id ?? '', receivedOn: todayKey(), sampleCount: '1', note: '' })
+  const [editingReceipt, setEditingReceipt] = useState<{ id: string; receivedOn: string; sampleCount: string; note: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const selectedSiteId = form.siteId || activeSites[0]?.id || ''
 
@@ -291,25 +404,72 @@ function ReceiptsTab({ data, onWorkspace, onNotice }: {
     }
   }
 
+  function exportReceipts() {
+    const headers = ['วันที่ส่ง', 'หน่วยงาน', 'จำนวนตัวอย่าง', 'Note', 'บันทึกโดย']
+    const rows = data.receipts.map((r: HpvSiteReceipt) => [r.receivedOn, r.siteName, String(r.sampleCount), r.note ?? '', r.createdByName ?? ''])
+    downloadCsv(`HPV_receipts_${todayKey()}.csv`, [headers, ...rows])
+  }
+
+  async function saveReceipt(event: React.FormEvent) {
+    event.preventDefault()
+    if (!editingReceipt) return
+    setBusy(true)
+    try {
+      const result = await api<{ workspace: HpvWorkspace }>(`/api/hpv/receipts/${editingReceipt.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ receivedOn: editingReceipt.receivedOn, sampleCount: Number(editingReceipt.sampleCount), note: editingReceipt.note.trim() || null }),
+      })
+      onWorkspace(result.workspace, 'แก้ไข Receive Log แล้ว')
+      setEditingReceipt(null)
+    } catch (error) {
+      onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'แก้ไขไม่สำเร็จ' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="grid gap-4 xl:grid-cols-[380px_minmax(0,1fr)]">
-      <Card className="p-4">
-        <form onSubmit={submit} className="space-y-3">
-          <h2 className="font-bold text-[#173d50]">บันทึกตัวอย่างส่งกลับ</h2>
-          <Field label="หน่วยงาน"><Select required value={selectedSiteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>{activeSites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</Select></Field>
-          <Field label="วันที่ส่ง"><Input required type="date" value={form.receivedOn} onChange={(e) => setForm({ ...form, receivedOn: e.target.value })} /></Field>
-          <Field label="จำนวนตัวอย่าง"><Input required type="number" min="1" step="1" value={form.sampleCount} onChange={(e) => setForm({ ...form, sampleCount: e.target.value })} /></Field>
-          <Field label="Note"><Textarea rows={3} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></Field>
-          <Button disabled={busy || !selectedSiteId}><ClipboardCheck className="size-4" /> Save receive log</Button>
-        </form>
+      <Card className={`p-4 ${editingReceipt ? 'ring-1 ring-[#0b7f76]' : ''}`}>
+        {editingReceipt ? (
+          <form onSubmit={saveReceipt} className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-[#173d50]">แก้ไข Receive Log</h2>
+              <button type="button" onClick={() => setEditingReceipt(null)} className="text-[#8ba0a5] hover:text-[#315763]"><X className="size-4" /></button>
+            </div>
+            <Field label="วันที่ส่ง"><Input required type="date" value={editingReceipt.receivedOn} onChange={(e) => setEditingReceipt({ ...editingReceipt, receivedOn: e.target.value })} /></Field>
+            <Field label="จำนวนตัวอย่าง"><Input required type="number" min="1" step="1" value={editingReceipt.sampleCount} onChange={(e) => setEditingReceipt({ ...editingReceipt, sampleCount: e.target.value })} /></Field>
+            <Field label="Note"><Textarea rows={3} value={editingReceipt.note} onChange={(e) => setEditingReceipt({ ...editingReceipt, note: e.target.value })} /></Field>
+            <Button disabled={busy}><CheckCircle2 className="size-4" /> บันทึกแก้ไข</Button>
+          </form>
+        ) : (
+          <form onSubmit={submit} className="space-y-3">
+            <h2 className="font-bold text-[#173d50]">บันทึกตัวอย่างส่งกลับ</h2>
+            <Field label="หน่วยงาน"><Select required value={selectedSiteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>{activeSites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</Select></Field>
+            <Field label="วันที่ส่ง"><Input required type="date" value={form.receivedOn} onChange={(e) => setForm({ ...form, receivedOn: e.target.value })} /></Field>
+            <Field label="จำนวนตัวอย่าง"><Input required type="number" min="1" step="1" value={form.sampleCount} onChange={(e) => setForm({ ...form, sampleCount: e.target.value })} /></Field>
+            <Field label="Note"><Textarea rows={3} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></Field>
+            <Button disabled={busy || !selectedSiteId}><ClipboardCheck className="size-4" /> Save receive log</Button>
+          </form>
+        )}
       </Card>
       <Card className="overflow-hidden">
-        <div className="border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3 font-bold text-[#173d50]">Recent receive logs</div>
+        <div className="flex items-center justify-between border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3">
+          <span className="font-bold text-[#173d50]">Recent receive logs</span>
+          <button onClick={exportReceipts} className="flex items-center gap-1.5 rounded border border-[#c7dde0] bg-[#f5f9fa] px-2.5 py-1.5 text-xs font-bold text-[#55727c] hover:bg-[#ebf5f6]"><Download className="size-3.5" /> Export CSV</button>
+        </div>
         <div className="divide-y divide-[#edf2f2]">
-          {data.receipts.map((receipt) => <div key={receipt.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-            <div><p className="font-bold text-[#315763]">{receipt.siteName}</p><p className="text-xs text-[#8ba0a5]">{formatDate(receipt.receivedOn)} · {receipt.createdByName ?? '-'}</p>{receipt.note ? <p className="mt-1 text-xs text-[#6f868b]">{receipt.note}</p> : null}</div>
-            <p className="mono text-lg font-bold text-[#0b7f76]">{receipt.sampleCount}</p>
-          </div>)}
+          {data.receipts.map((receipt) => (
+            <div key={receipt.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <div><p className="font-bold text-[#315763]">{receipt.siteName}</p><p className="text-xs text-[#8ba0a5]">{formatDate(receipt.receivedOn)} · {receipt.createdByName ?? '-'}</p>{receipt.note ? <p className="mt-1 text-xs text-[#6f868b]">{receipt.note}</p> : null}</div>
+              <div className="flex items-center gap-3">
+                <p className="mono text-lg font-bold text-[#0b7f76]">{receipt.sampleCount}</p>
+                {actor.role === 'Admin' ? (
+                  <button onClick={() => setEditingReceipt({ id: receipt.id, receivedOn: receipt.receivedOn, sampleCount: String(receipt.sampleCount), note: receipt.note ?? '' })} className="flex items-center gap-1 rounded border border-[#c7dde0] bg-[#f5f9fa] px-2 py-1 text-[10px] font-bold text-[#55727c] hover:bg-[#ebf5f6]"><Pencil className="size-3" /></button>
+                ) : null}
+              </div>
+            </div>
+          ))}
           {!data.receipts.length ? <p className="px-4 py-12 text-center text-sm text-[#91a4a9]">ยังไม่มี Receive Log</p> : null}
         </div>
       </Card>
@@ -325,20 +485,38 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
 }) {
   const openBoxes = data.boxes.filter((box) => box.status === 'open')
   const [selectedBoxId, setSelectedBoxId] = useState(openBoxes[0]?.id ?? data.boxes[0]?.id ?? '')
+  const [selectedPosition, setSelectedPosition] = useState<number | null>(null)
   const [barcode, setBarcode] = useState('')
   const [busy, setBusy] = useState(false)
   const [boxForm, setBoxForm] = useState({ boxCode: `HPV-${todayKey().replaceAll('-', '')}-01`, boxType: 'self_collected' as HpvBoxType })
   const effectiveBoxId = data.boxes.some((box) => box.id === selectedBoxId) ? selectedBoxId : openBoxes[0]?.id ?? data.boxes[0]?.id ?? ''
   const selectedBox = data.boxes.find((box) => box.id === effectiveBoxId) ?? data.boxes[0] ?? null
+  const scanBox = openBoxes.find((box) => box.id === effectiveBoxId) ?? openBoxes[0] ?? null
+  const [searchBarcode, setSearchBarcode] = useState('')
+  const searchResult = useMemo(() => {
+    const code = searchBarcode.trim()
+    if (!code) return null
+    for (const box of data.boxes) {
+      const sample = box.samples.find((s) => s.barcode === code)
+      if (sample) return { box, sample }
+    }
+    return 'not_found' as const
+  }, [searchBarcode, data.boxes])
+
+  useEffect(() => { setSelectedPosition(null) }, [effectiveBoxId])
 
   async function scan(codeInput = barcode) {
     const code = normalizeScan(codeInput)
-    if (!code || !selectedBox) return
+    if (!code || !scanBox) return
     setBusy(true)
     try {
-      const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/storage/scan', { method: 'POST', body: JSON.stringify({ barcode: code, boxId: selectedBox.id }) })
-      onWorkspace(result.workspace, `จัดเก็บ sample ${code} แล้ว`)
+      const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/storage/scan', {
+        method: 'POST',
+        body: JSON.stringify({ barcode: code, boxId: scanBox.id, position: selectedPosition ?? undefined }),
+      })
+      onWorkspace(result.workspace, `จัดเก็บ sample ${code}${selectedPosition ? ` ที่ ${formatHpvBoxPosition(selectedPosition)}` : ''} แล้ว`)
       setBarcode('')
+      setSelectedPosition(null)
     } catch (error) {
       onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'จัดเก็บ sample ไม่สำเร็จ' })
     } finally {
@@ -363,6 +541,80 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
     }
   }
 
+  async function moveOrSwap(sampleId: string, toPosition: number) {
+    setBusy(true)
+    try {
+      const result = await api<{ workspace: HpvWorkspace }>(`/api/hpv/storage/samples/${sampleId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ position: toPosition }),
+      })
+      onWorkspace(result.workspace, 'ย้าย sample แล้ว')
+    } catch (error) {
+      onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'ย้าย sample ไม่สำเร็จ' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function deleteSample(sample: HpvSample) {
+    if (!window.confirm(`ลบ sample "${sample.barcode}" ออกจากกล่องใช่ไหม?`)) return
+    setBusy(true)
+    try {
+      const result = await api<{ workspace: HpvWorkspace }>(`/api/hpv/storage/samples/${sample.id}`, { method: 'DELETE' })
+      onWorkspace(result.workspace, `ลบ sample ${sample.barcode} แล้ว`)
+    } catch (error) {
+      onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'ลบ sample ไม่สำเร็จ' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function closeBox(box: HpvStorageBox) {
+    if (!window.confirm(`ปิดกล่อง "${box.boxCode}" ใช่ไหม?\n\nจะเริ่มนับเวลารอทิ้ง 1 เดือนทันที`)) return
+    setBusy(true)
+    try {
+      const result = await api<{ workspace: HpvWorkspace }>(`/api/hpv/storage/boxes/${box.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ action: 'close' }),
+      })
+      onWorkspace(result.workspace, `ปิดกล่อง ${box.boxCode} แล้ว เริ่มนับเวลารอทิ้ง`)
+    } catch (error) {
+      onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'ปิดกล่องไม่สำเร็จ' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function destroyBox(box: HpvStorageBox) {
+    if (!window.confirm(`บันทึกทำลายกล่อง "${box.boxCode}" ใช่ไหม?\n\nไม่สามารถย้อนกลับได้`)) return
+    setBusy(true)
+    try {
+      const result = await api<{ workspace: HpvWorkspace }>(`/api/hpv/storage/boxes/${box.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ action: 'destroy' }),
+      })
+      onWorkspace(result.workspace, `บันทึกทำลายกล่อง ${box.boxCode} แล้ว`)
+    } catch (error) {
+      onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'บันทึกทำลายกล่องไม่สำเร็จ' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function deleteBox(box: HpvStorageBox) {
+    if (!window.confirm(`ลบกล่อง "${box.boxCode}" ใช่ไหม?\n\nถ้ามี sample อยู่ในกล่องจะลบไม่ได้`)) return
+    setBusy(true)
+    try {
+      const result = await api<{ workspace: HpvWorkspace }>(`/api/hpv/storage/boxes/${box.id}`, { method: 'DELETE' })
+      onWorkspace(result.workspace, 'ลบ storage box แล้ว')
+      setSelectedBoxId('')
+    } catch (error) {
+      onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'ลบกล่องไม่สำเร็จ' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="grid gap-4 xl:grid-cols-[390px_minmax(0,1fr)]">
       <div className="space-y-4">
@@ -377,23 +629,98 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
         <Card className="p-4">
           <form onSubmit={(e) => { e.preventDefault(); void scan() }} className="space-y-3">
             <h2 className="font-bold text-[#173d50]">ยิงบาร์โค้ดเข้า box</h2>
-            <Field label="Active box"><Select value={effectiveBoxId} onChange={(e) => setSelectedBoxId(e.target.value)}>{data.boxes.map((box) => <option key={box.id} value={box.id}>{box.boxCode} · {boxTypeLabel(box.boxType)} · {box.status}</option>)}</Select></Field>
+            <Field label="Active box">
+              {openBoxes.length ? (
+                <Select value={scanBox?.id ?? ''} onChange={(e) => { setSelectedBoxId(e.target.value) }}>{openBoxes.map((box) => <option key={box.id} value={box.id}>{box.boxCode} · {boxTypeLabel(box.boxType)}</option>)}</Select>
+              ) : (
+                <p className="rounded-md border border-dashed border-[#d7e3e5] px-3 py-2 text-sm text-[#8ba0a5]">ยังไม่มีกล่องที่เปิดอยู่ — เปิดกล่องใหม่ก่อน</p>
+              )}
+            </Field>
+            {selectedPosition ? (
+              <div className="flex items-center justify-between rounded-md border border-[#97d5cf] bg-[#eef9f7] px-3 py-2 text-sm">
+                <span className="font-semibold text-[#0b7f76]">ตำแหน่ง: <span className="mono font-bold">{formatHpvBoxPosition(selectedPosition)}</span></span>
+                <button type="button" onClick={() => setSelectedPosition(null)} className="text-[#8ba0a5] hover:text-[#315763]"><X className="size-4" /></button>
+              </div>
+            ) : (
+              <p className="text-xs text-[#8ba0a5]">กดที่ช่องว่างในกริดเพื่อเลือกตำแหน่ง หรือ auto-fill</p>
+            )}
             <div className="relative"><ScanLine className="absolute top-3 left-3 size-5 text-[#88a1a7]" /><Input autoFocus value={barcode} onChange={(e) => setBarcode(e.target.value)} className="h-12 pl-11 mono text-base" placeholder="Sample barcode" /></div>
-            <div className="flex gap-2"><Button disabled={busy || !selectedBox || selectedBox.status !== 'open'}><QrCode className="size-4" /> Store sample</Button><Button type="button" variant="secondary" onClick={() => setCameraOn((value) => !value)}>{cameraOn ? <X className="size-4" /> : <Camera className="size-4" />} Camera</Button></div>
+            <div className="flex gap-2"><Button disabled={busy || !scanBox}><QrCode className="size-4" /> Store sample</Button><Button type="button" variant="secondary" onClick={() => setCameraOn((value) => !value)}>{cameraOn ? <X className="size-4" /> : <Camera className="size-4" />} Camera</Button></div>
             {cameraOn ? <div className="overflow-hidden rounded-md border border-[#d6e2e3] bg-black"><video ref={videoRef} className="aspect-video w-full object-cover" /></div> : null}
           </form>
         </Card>
+        <Card className="p-4 space-y-3">
+          <h2 className="font-bold text-[#173d50]">ค้นหา Sample</h2>
+          <div className="relative"><Search className="absolute top-3 left-3 size-4 text-[#88a1a7]" /><Input value={searchBarcode} onChange={(e) => setSearchBarcode(e.target.value)} className="pl-9" placeholder="Sample barcode" /></div>
+          {searchBarcode.trim() && searchResult === 'not_found' ? (
+            <p className="text-xs text-red-500">ไม่พบ barcode นี้ในระบบ</p>
+          ) : searchBarcode.trim() && searchResult && searchResult !== 'not_found' ? (
+            <div className="rounded-md bg-[#eef9f7] p-3">
+              <p className="text-sm font-bold text-[#0b7f76]">{searchResult.box.boxCode}</p>
+              <p className="text-xs text-[#789097]">{formatHpvBoxPosition(searchResult.sample.position)} · {searchResult.sample.status}</p>
+              <button type="button" onClick={() => { setSelectedBoxId(searchResult.box.id); setSelectedPosition(null) }} className="mt-1.5 text-xs font-bold text-[#0b7f76] underline hover:no-underline">ไปที่กล่องนี้</button>
+            </div>
+          ) : null}
+        </Card>
       </div>
-      <BoxPanel box={selectedBox} today={today} />
+      <div className="space-y-4">
+        <Card className="overflow-hidden">
+          <div className="border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3 font-bold text-[#173d50]">
+            Storage boxes <span className="ml-1 text-sm font-normal text-[#8ba0a5]">({data.boxes.length})</span>
+          </div>
+          {data.boxes.length ? (
+            <div className="max-h-[210px] overflow-y-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="sticky top-0 bg-[#f7fafa] text-[10px] tracking-[0.08em] text-[#779097] uppercase">
+                  <tr><th className="px-4 py-2">Code</th><th className="px-2 py-2">Type</th><th className="px-2 py-2 text-center">Stored</th><th className="px-2 py-2">Status</th><th className="px-2 py-2">Destroy due</th></tr>
+                </thead>
+                <tbody className="divide-y divide-[#edf2f2]">
+                  {data.boxes.map((box) => {
+                    const isSelected = effectiveBoxId === box.id
+                    const isDue = box.destroyDueAt && box.destroyDueAt.slice(0, 10) <= today
+                    const storedCount = box.samples.filter((s) => s.status === 'stored').length
+                    return (
+                      <tr key={box.id} onClick={() => setSelectedBoxId(box.id)} className={`cursor-pointer transition-colors ${isSelected ? 'bg-[#eef9f7]' : 'hover:bg-[#f7fbfc]'}`}>
+                        <td className="mono px-4 py-2 font-bold text-[#315763]">{box.boxCode}</td>
+                        <td className="px-2 py-2 text-xs text-[#789097]">{box.boxType === 'self_collected' ? 'Self' : 'Clinician'}</td>
+                        <td className="mono px-2 py-2 text-center font-bold text-[#315763]">{storedCount}/{box.capacity}</td>
+                        <td className="px-2 py-2"><StatusBadge tone={box.status === 'open' ? 'accepted' : box.status === 'full' ? 'warning' : 'neutral'} label={box.status.toUpperCase()} /></td>
+                        <td className={`px-2 py-2 text-xs ${isDue ? 'font-bold text-red-600' : 'text-[#8ba0a5]'}`}>{box.destroyDueAt ? formatDate(box.destroyDueAt) : '-'}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="px-4 py-8 text-center text-sm text-[#91a4a9]">ยังไม่มี Storage box</p>
+          )}
+        </Card>
+        <BoxPanel box={selectedBox} today={today} selectedPosition={selectedPosition} onSelectPosition={setSelectedPosition} onMove={moveOrSwap} onClose={closeBox} onDestroy={destroyBox} onDelete={deleteBox} onDeleteSample={deleteSample} />
+      </div>
     </div>
   )
 }
 
-function BoxPanel({ box, today }: { box: HpvStorageBox | null; today: string }) {
+function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onClose, onDestroy, onDelete, onDeleteSample }: {
+  box: HpvStorageBox | null
+  today: string
+  selectedPosition?: number | null
+  onSelectPosition?: (pos: number | null) => void
+  onMove?: (sampleId: string, toPosition: number) => void
+  onClose?: (box: HpvStorageBox) => void
+  onDestroy?: (box: HpvStorageBox) => void
+  onDelete?: (box: HpvStorageBox) => void
+  onDeleteSample?: (sample: HpvSample) => void
+}) {
+  const [dragOver, setDragOver] = useState<number | null>(null)
+
   if (!box) return <Card className="flex min-h-[520px] items-center justify-center p-8 text-center text-sm text-[#789097]">ยังไม่มี Storage box</Card>
   const sampleMap = new Map(box.samples.map((sample) => [sample.position, sample]))
   const occupied = box.samples.length
   const dueTone = box.destroyDueAt && box.destroyDueAt.slice(0, 10) <= today ? 'rejected' : 'warning'
+  const canInteract = box.status === 'open'
+
   return (
     <Card className="overflow-hidden">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#e1eaeb] bg-[linear-gradient(115deg,#fafdfe,#eef9f7)] px-4 py-4">
@@ -402,9 +729,12 @@ function BoxPanel({ box, today }: { box: HpvStorageBox | null; today: string }) 
           <h2 className="mt-1 text-xl font-bold text-[#173d50]">{box.boxCode}</h2>
           <p className="mt-1 text-xs text-[#789097]">{occupied}/{HPV_BOX_CAPACITY} positions · created {formatDateTime(box.createdAt)}</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <StatusBadge tone={box.status === 'open' ? 'accepted' : box.status === 'full' ? 'warning' : 'neutral'} label={box.status.toUpperCase()} />
           {box.destroyDueAt ? <StatusBadge tone={dueTone} label={`Destroy due ${formatDate(box.destroyDueAt)}`} /> : null}
+          {onClose && box.status === 'open' ? <button onClick={() => onClose(box)} className="flex items-center gap-1 rounded border border-[#c7a850] bg-[#fdf8ed] px-2 py-1 text-[10px] font-bold text-[#8a6d1e] hover:bg-[#f9efc8]"><CheckCircle2 className="size-3" /> ปิดกล่อง</button> : null}
+          {onDestroy && box.status === 'full' ? <button onClick={() => onDestroy(box)} className="flex items-center gap-1 rounded border border-red-300 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-700 hover:bg-red-100"><Flame className="size-3" /> ทำลาย</button> : null}
+          {onDelete ? <button onClick={() => onDelete(box)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-500 hover:bg-red-100"><Trash2 className="size-3" /> ลบกล่อง</button> : null}
         </div>
       </div>
       <div className="grid gap-3 p-4 lg:grid-cols-[minmax(280px,420px)_minmax(0,1fr)]">
@@ -413,10 +743,60 @@ function BoxPanel({ box, today }: { box: HpvStorageBox | null; today: string }) 
             const position = index + 1
             const sample = sampleMap.get(position)
             const checkedOut = sample?.status === 'checked_out'
+            const isSelected = !sample && selectedPosition === position
+            const isDragTarget = dragOver === position
+
+            let cellClass = 'aspect-square rounded-md border p-2 transition-colors '
+            if (isSelected) {
+              cellClass += 'border-[#0b7f76] bg-[#d4f0ed] ring-2 ring-[#0b7f76] cursor-pointer'
+            } else if (isDragTarget) {
+              cellClass += 'border-[#0b7f76] bg-[#e5f6f4] ring-2 ring-dashed ring-[#0b7f76]'
+            } else if (sample) {
+              cellClass += checkedOut
+                ? 'border-[#d2dee0] bg-[#f6f9f9]'
+                : 'border-[#97d5cf] bg-[#eef9f7] cursor-grab active:cursor-grabbing'
+            } else {
+              cellClass += canInteract && onSelectPosition
+                ? 'border-dashed border-[#d7e3e5] bg-white hover:border-[#0b7f76] hover:bg-[#f0faf9] cursor-pointer'
+                : 'border-dashed border-[#d7e3e5] bg-white'
+            }
+
             return (
-              <div key={position} className={`aspect-square rounded-md border p-2 ${sample ? checkedOut ? 'border-[#d2dee0] bg-[#f6f9f9]' : 'border-[#97d5cf] bg-[#eef9f7]' : 'border-dashed border-[#d7e3e5] bg-white'}`}>
+              <div
+                key={position}
+                className={cellClass}
+                draggable={!!sample && sample.status === 'stored' && !!onMove}
+                onClick={() => {
+                  if (!sample && canInteract && onSelectPosition) {
+                    onSelectPosition(selectedPosition === position ? null : position)
+                  }
+                }}
+                onDragStart={(e) => {
+                  if (sample) {
+                    e.dataTransfer.setData('text/plain', sample.id)
+                    e.dataTransfer.effectAllowed = 'move'
+                  }
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
+                  setDragOver(position)
+                }}
+                onDragLeave={() => setDragOver(null)}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setDragOver(null)
+                  const sampleId = e.dataTransfer.getData('text/plain')
+                  if (sampleId && onMove) onMove(sampleId, position)
+                }}
+              >
                 <p className="mono text-[10px] font-bold text-[#789097]">{formatHpvBoxPosition(position)}</p>
-                {sample ? <p className={`mono mt-2 truncate text-xs font-bold ${checkedOut ? 'text-[#6f868b]' : 'text-[#0b7f76]'}`}>{sample.barcode}</p> : <p className="mt-2 text-xs text-[#b4c3c6]">empty</p>}
+                {sample
+                  ? <p className={`mono mt-1 truncate text-[10px] font-bold leading-tight ${checkedOut ? 'text-[#6f868b]' : 'text-[#0b7f76]'}`}>{sample.barcode}</p>
+                  : isSelected
+                    ? <p className="mt-1 text-[10px] font-bold text-[#0b7f76]">selected</p>
+                    : <p className="mt-1 text-[10px] text-[#b4c3c6]">empty</p>
+                }
               </div>
             )
           })}
@@ -424,7 +804,10 @@ function BoxPanel({ box, today }: { box: HpvStorageBox | null; today: string }) 
         <div className="max-h-[520px] overflow-y-auto rounded-md border border-[#e1eaeb]">
           {box.samples.map((sample) => <div key={sample.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf2f2] px-3 py-2 last:border-0">
             <div><p className="mono font-bold text-[#315763]">{sample.barcode}</p><p className="text-xs text-[#8ba0a5]">{formatHpvBoxPosition(sample.position)} · stored {formatDateTime(sample.storedAt)} · {sample.storedByName ?? '-'}</p></div>
-            <StatusBadge tone={sample.status === 'stored' ? 'accepted' : 'neutral'} label={sample.status} />
+            <div className="flex items-center gap-2">
+              <StatusBadge tone={sample.status === 'stored' ? 'accepted' : 'neutral'} label={sample.status} />
+              {onDeleteSample && sample.status === 'stored' ? <button onClick={() => onDeleteSample(sample)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-bold text-red-500 hover:bg-red-100"><Trash2 className="size-3" /></button> : null}
+            </div>
           </div>)}
           {!box.samples.length ? <p className="px-4 py-10 text-center text-sm text-[#91a4a9]">ยังไม่มีตัวอย่างในกล่องนี้</p> : null}
         </div>
@@ -440,16 +823,41 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
 }) {
   const [barcode, setBarcode] = useState('')
   const [note, setNote] = useState('')
+  const [destination, setDestination] = useState('Co-testing')
+  const [customDestination, setCustomDestination] = useState('')
   const [busy, setBusy] = useState(false)
+  const effectiveDestination = destination === 'อื่นๆ' ? customDestination.trim() || 'อื่นๆ' : destination
   const storedSamples = data.boxes.flatMap((box) => box.samples.map((sample) => ({ ...sample, box }))).filter((sample) => sample.status === 'stored')
+  const checkedOutSamples = useMemo(() =>
+    data.boxes
+      .flatMap((box) => box.samples.filter((s) => s.status === 'checked_out').map((sample) => ({ ...sample, box })))
+      .sort((a, b) => (b.checkedOutAt ?? '').localeCompare(a.checkedOutAt ?? '')),
+    [data.boxes],
+  )
+
+  function exportCheckout() {
+    const rows = [
+      ['Barcode', 'Box', 'Position', 'Destination', 'Note', 'Checkout At', 'By'],
+      ...checkedOutSamples.map((s) => [
+        s.barcode,
+        s.box.boxCode,
+        formatHpvBoxPosition(s.position),
+        s.checkoutDestination ?? 'Co-testing',
+        s.checkoutNote ?? '',
+        s.checkedOutAt ? formatDateTime(s.checkedOutAt) : '',
+        s.checkedOutByName ?? '',
+      ]),
+    ]
+    downloadCsv(`hpv_checkout_${new Date().toISOString().slice(0, 10)}.csv`, rows)
+  }
 
   async function checkout(codeInput = barcode) {
     const code = normalizeScan(codeInput)
     if (!code) return
     setBusy(true)
     try {
-      const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/storage/checkout', { method: 'POST', body: JSON.stringify({ barcode: code, note: note.trim() || null }) })
-      onWorkspace(result.workspace, `Checkout ${code} ไป Co-testing แล้ว`)
+      const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/storage/checkout', { method: 'POST', body: JSON.stringify({ barcode: code, destination: effectiveDestination, note: note.trim() || null }) })
+      onWorkspace(result.workspace, `Checkout ${code} ไป ${effectiveDestination} แล้ว`)
       setBarcode('')
       setNote('')
     } catch (error) {
@@ -465,23 +873,50 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
     <div className="grid gap-4 xl:grid-cols-[380px_minmax(0,1fr)]">
       <Card className="p-4">
         <form onSubmit={(e) => { e.preventDefault(); void checkout() }} className="space-y-3">
-          <h2 className="font-bold text-[#173d50]">Checkout to Co-testing</h2>
+          <h2 className="font-bold text-[#173d50]">Checkout</h2>
           <div className="relative"><ScanLine className="absolute top-3 left-3 size-5 text-[#88a1a7]" /><Input autoFocus value={barcode} onChange={(e) => setBarcode(e.target.value)} className="h-12 pl-11 mono text-base" placeholder="Sample barcode" /></div>
-          <Field label="Note"><Textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+          <Field label="Destination"><Select value={destination} onChange={(e) => setDestination(e.target.value)}><option>Co-testing</option><option>GeneXpert</option><option>PCR</option><option>อื่นๆ</option></Select></Field>
+          {destination === 'อื่นๆ' ? <Field label="ระบุ"><Input value={customDestination} onChange={(e) => setCustomDestination(e.target.value)} placeholder="ระบุปลายทาง" /></Field> : null}
+          <Field label="Note"><Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
           <div className="flex gap-2"><Button disabled={busy || !barcode.trim()}><CheckCircle2 className="size-4" /> Checkout</Button><Button type="button" variant="secondary" onClick={() => setCameraOn((value) => !value)}>{cameraOn ? <X className="size-4" /> : <Camera className="size-4" />} Camera</Button></div>
           {cameraOn ? <div className="overflow-hidden rounded-md border border-[#d6e2e3] bg-black"><video ref={videoRef} className="aspect-video w-full object-cover" /></div> : null}
         </form>
       </Card>
-      <Card className="overflow-hidden">
-        <div className="border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3 font-bold text-[#173d50]">Stored samples ready for checkout</div>
-        <div className="divide-y divide-[#edf2f2]">
-          {storedSamples.map((sample) => <button key={sample.id} onClick={() => setBarcode(sample.barcode)} className="flex w-full flex-wrap items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-[#f6fbfa]">
-            <div><p className="mono font-bold text-[#315763]">{sample.barcode}</p><p className="text-xs text-[#8ba0a5]">{sample.box.boxCode} · {formatHpvBoxPosition(sample.position)} · {boxTypeLabel(sample.box.boxType)}</p></div>
-            <Send className="size-4 text-[#0b7f76]" />
-          </button>)}
-          {!storedSamples.length ? <p className="px-4 py-12 text-center text-sm text-[#91a4a9]">ไม่มีตัวอย่างที่รอ checkout</p> : null}
-        </div>
-      </Card>
+      <div className="space-y-4">
+        <Card className="overflow-hidden">
+          <div className="border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3 font-bold text-[#173d50]">Stored samples ready for checkout</div>
+          <div className="max-h-[360px] overflow-y-auto divide-y divide-[#edf2f2]">
+            {storedSamples.map((sample) => <button key={sample.id} onClick={() => setBarcode(sample.barcode)} className="flex w-full flex-wrap items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-[#f6fbfa]">
+              <div><p className="mono font-bold text-[#315763]">{sample.barcode}</p><p className="text-xs text-[#8ba0a5]">{sample.box.boxCode} · {formatHpvBoxPosition(sample.position)} · {boxTypeLabel(sample.box.boxType)}</p></div>
+              <Send className="size-4 text-[#0b7f76]" />
+            </button>)}
+            {!storedSamples.length ? <p className="px-4 py-12 text-center text-sm text-[#91a4a9]">ไม่มีตัวอย่างที่รอ checkout</p> : null}
+          </div>
+        </Card>
+        <Card className="overflow-hidden">
+          <div className="flex items-center justify-between border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3">
+            <span className="font-bold text-[#173d50]">Checkout history ({checkedOutSamples.length})</span>
+            {checkedOutSamples.length > 0 ? <Button variant="ghost" className="gap-1 px-2 py-1 text-xs" onClick={exportCheckout}><Download className="size-3" /> Export CSV</Button> : null}
+          </div>
+          <div className="max-h-[360px] overflow-y-auto divide-y divide-[#edf2f2]">
+            {checkedOutSamples.map((sample) => (
+              <div key={sample.id} className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+                <div>
+                  <p className="mono font-bold text-[#315763]">{sample.barcode}</p>
+                  <p className="text-xs text-[#8ba0a5]">{sample.box.boxCode} · {formatHpvBoxPosition(sample.position)}</p>
+                  <p className="text-xs font-semibold text-[#0b7f76]">→ {sample.checkoutDestination ?? 'Co-testing'}</p>
+                  {sample.checkoutNote ? <p className="mt-0.5 text-xs text-[#789097]">{sample.checkoutNote}</p> : null}
+                </div>
+                <div className="text-right text-xs text-[#8ba0a5]">
+                  <p>{sample.checkedOutAt ? formatDateTime(sample.checkedOutAt) : '-'}</p>
+                  <p>{sample.checkedOutByName ?? '-'}</p>
+                </div>
+              </div>
+            ))}
+            {!checkedOutSamples.length ? <p className="px-4 py-10 text-center text-sm text-[#91a4a9]">ยังไม่มี Checkout</p> : null}
+          </div>
+        </Card>
+      </div>
     </div>
   )
 }

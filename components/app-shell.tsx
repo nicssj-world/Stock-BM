@@ -9,12 +9,18 @@ import { api } from '@/components/ui'
 type NavItem = { href: string; label: string; icon: typeof Activity }
 type NavSection = { title: string; items: NavItem[] }
 
+const homeSection: NavSection = {
+  title: 'หน้าหลัก',
+  items: [
+    { href: '/dashboard', label: 'หน้าหลัก / Home', icon: Activity },
+  ],
+}
+
 const stockSection: NavSection = {
   title: 'Stock',
   items: [
-    { href: '/dashboard', label: 'ภาพรวม / Dashboard', icon: Activity },
     { href: '/inventory', label: 'คลัง / Inventory', icon: Boxes },
-    { href: '/movements', label: 'เคลื่อนไหว / Movements', icon: MoveRight },
+    { href: '/movements', label: 'รับ-จ่าย / Movements', icon: MoveRight },
     { href: '/scan', label: 'สแกน / Scan', icon: QrCode },
     { href: '/reports', label: 'รายงาน / Reports & Audit', icon: BarChart3 },
   ],
@@ -46,7 +52,7 @@ const monitoringSection: NavSection = {
 export function AppShell({ actor, children }: { actor: BmActor; children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
-  const sections: NavSection[] = [hpvSection, qualitySection, monitoringSection, stockSection]
+  const sections: NavSection[] = [homeSection, stockSection, hpvSection, qualitySection, monitoringSection]
   if (actor.role === 'Admin') sections.push({ title: 'System', items: [{ href: '/admin', label: 'Admin', icon: Settings }] })
 
   async function logout() {
