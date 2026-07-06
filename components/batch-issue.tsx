@@ -16,8 +16,8 @@ interface BatchLine {
   error?: string
 }
 
-// Batch issue: scan many lots continuously (camera or Bluetooth scanner), one shared
-// purpose, submit once. Each line issues independently; failures are reported per line.
+// Batch issue: scan many lots continuously (camera or Bluetooth scanner), submit once.
+// Each line issues independently; failures are reported per line.
 export function BatchIssue() {
   const [lines, setLines] = useState<BatchLine[]>([])
   const [manual, setManual] = useState('')
@@ -63,7 +63,7 @@ export function BatchIssue() {
     }
   }
 
-  const { cameraOn, starting, toggle, videoRef } = useCameraScanner({
+  const { cameraOn, toggle, videoRef } = useCameraScanner({
     onScan: (text) => { void addByCode(text) },
     onError: (text) => setNotice({ tone: 'danger', text }),
   })
@@ -74,7 +74,7 @@ export function BatchIssue() {
     setLines((current) => current.filter((line) => line.key !== key))
   }
 
-  const canSubmit = lines.length > 0 && purpose.trim() !== '' && lines.every((line) => Number(line.quantity) > 0 && line.locationId)
+  const canSubmit = lines.length > 0 && lines.every((line) => Number(line.quantity) > 0 && line.locationId)
 
   async function submit() {
     if (!canSubmit) return
@@ -82,7 +82,7 @@ export function BatchIssue() {
     setNotice(null)
     try {
       const payload = {
-        purpose: purpose.trim(),
+        purpose: purpose.trim() || null,
         reference: reference.trim() || null,
         note: note.trim() || null,
         lines: lines.map((line) => ({
@@ -112,7 +112,7 @@ export function BatchIssue() {
   return (
     <div className="mx-auto max-w-3xl space-y-4 pb-28 sm:pb-5">
       <Link href="/scan" className="inline-flex items-center gap-1 text-sm font-semibold text-[#0b7f76]"><ScanLine className="size-4" /> สแกนเดี่ยว</Link>
-      <PageHeader eyebrow="ตัด stock — batch" title="ตัดหลายรายการ" description="ยิง QR หลาย lot ต่อเนื่อง ใส่ purpose ครั้งเดียว แล้วตัดพร้อมกัน" />
+      <PageHeader eyebrow="ตัด stock — batch" title="ตัดหลายรายการ" description="ยิง QR หลาย lot ต่อเนื่อง จะใส่ purpose หรือเว้นว่างก็ได้ แล้วตัดพร้อมกัน" />
 
       <Card className="p-4">
         <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
@@ -154,7 +154,7 @@ export function BatchIssue() {
 
       <Card className="p-4">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Purpose (ใช้ทั้ง batch)"><Input required value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="เช่น NIPT run" className="h-11" /></Field>
+          <Field label="Purpose (optional)"><Input value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="เว้นว่างได้ เช่น NIPT run" className="h-11" /></Field>
           <Field label="Reference"><Input value={reference} onChange={(e) => setReference(e.target.value)} className="h-11" /></Field>
           <div className="sm:col-span-2"><Field label="Note"><Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></Field></div>
         </div>

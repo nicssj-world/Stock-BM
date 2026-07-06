@@ -73,7 +73,7 @@ export function TransactionView({
     : 'ย้ายที่เก็บ / Move'
   const description =
     mode === 'receive' ? 'รับน้ำยาเข้าคลังด้วยหน้าจอมือถือ เลือก item, location, lot และจำนวน'
-    : mode === 'issue' ? 'ตัด stock จาก lot และ location ที่มีของคงเหลือ พร้อมบันทึก purpose'
+    : mode === 'issue' ? 'ตัด stock จาก lot และ location ที่มีของคงเหลือ จะระบุ purpose หรือเว้นว่างก็ได้'
     : mode === 'adjust' ? 'ปรับยอด stock โดยตรง (สำหรับ Admin) เช่น นับ physical ไม่ตรงระบบ หรือของเสีย'
     : mode === 'history' ? `${data.transactions.length} transactions — กรองและ export CSV ได้`
     : 'ย้ายยอดคงเหลือระหว่าง location'
@@ -366,7 +366,7 @@ function IssueForm({
   const lot = lots.find((candidate) => candidate.id === form.lotId)
   const balances = lot?.balances.filter((balance) => balance.onHand > 0) ?? []
   const balance = balances.find((candidate) => candidate.locationId === form.locationId)
-  const canSave = Boolean(lot && balance && form.quantity && form.purpose.trim())
+  const canSave = Boolean(lot && balance && form.quantity)
 
   function selectItem(nextItem: StockItem) {
     const nextLot = suggestedUsableLot(nextItem.lots) ?? nextItem.lots.find((candidate) => candidate.totalOnHand > 0)
@@ -388,7 +388,7 @@ function IssueForm({
     try {
       const result = await api<{ stock: StockWorkspace }>('/api/stock/issues', {
         method: 'POST',
-        body: JSON.stringify({ ...form, quantity: Number(form.quantity), expiredConfirmed: lot.expiryState === 'expired' }),
+        body: JSON.stringify({ ...form, purpose: form.purpose.trim() || null, quantity: Number(form.quantity), expiredConfirmed: lot.expiryState === 'expired' }),
       })
       onSaved(result.stock)
       setForm({ ...form, quantity: '', purpose: '', reference: '', note: '', overrideReason: '' })
@@ -458,7 +458,7 @@ function IssueForm({
       </MobilePanel>
 
       <MobilePanel>
-        <PanelTitle icon={<ArrowUpFromLine />} title="4. จำนวนและเหตุผล / Quantity and purpose" detail={balance ? `สูงสุด ${formatQuantity(balance.onHand)} ${item?.unit}` : 'เลือก lot/location ก่อน'} />
+        <PanelTitle icon={<ArrowUpFromLine />} title="4. จำนวนและเหตุผล / Quantity and purpose" detail={balance ? `สูงสุด ${formatQuantity(balance.onHand)} ${item?.unit} · purpose ไม่บังคับ` : 'เลือก lot/location ก่อน'} />
         <div className="grid gap-3 sm:grid-cols-2">
           <BigField label={`Quantity${item ? ` (${item.unit})` : ''}`}>
             <Input
@@ -473,8 +473,8 @@ function IssueForm({
               onChange={(event) => setForm({ ...form, quantity: event.target.value })}
             />
           </BigField>
-          <BigField label="Purpose">
-            <Input required className="h-14 text-base" value={form.purpose} onChange={(event) => setForm({ ...form, purpose: event.target.value })} placeholder="เช่น NIPT run, QC, validation" />
+          <BigField label="Purpose (optional)">
+            <Input className="h-14 text-base" value={form.purpose} onChange={(event) => setForm({ ...form, purpose: event.target.value })} placeholder="เว้นว่างได้ เช่น NIPT run, QC, validation" />
           </BigField>
           <Field label="Reference"><Input className="h-11" value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></Field>
           <Field label="FEFO override reason"><Input className="h-11" value={form.overrideReason} onChange={(event) => setForm({ ...form, overrideReason: event.target.value })} /></Field>

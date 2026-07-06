@@ -463,7 +463,7 @@ export async function issueStock(input: {
   lotId: string
   locationId: string
   quantity: number
-  purpose: string
+  purpose?: string | null
   reference?: string | null
   note?: string | null
   overrideReason?: string | null
@@ -473,7 +473,7 @@ export async function issueStock(input: {
     p_lot: input.lotId,
     p_location: input.locationId,
     p_quantity: input.quantity,
-    p_purpose_text: input.purpose.trim(),
+    p_purpose_text: clean(input.purpose),
     p_reference_text: clean(input.reference),
     p_note: clean(input.note),
     p_override_reason: clean(input.overrideReason),
@@ -675,12 +675,11 @@ export async function quickIssueByCode(code: string, actor: BmActor): Promise<{ 
 // independent — a failure on one does not roll back others; results report per line.
 export async function issueBatch(input: {
   lines: { lotId: string; locationId: string; quantity: number; expiredConfirmed?: boolean; overrideReason?: string | null }[]
-  purpose: string
+  purpose?: string | null
   reference?: string | null
   note?: string | null
 }, actor: BmActor): Promise<{ stock: StockWorkspace; results: { lotId: string; ok: boolean; error?: string }[] }> {
   if (!input.lines.length) throw new HttpError(400, 'No lines to issue')
-  if (!input.purpose.trim()) throw new HttpError(400, 'Purpose is required')
   const admin = getAdminClient()
   const results: { lotId: string; ok: boolean; error?: string }[] = []
   for (const line of input.lines) {
@@ -689,7 +688,7 @@ export async function issueBatch(input: {
         p_lot: line.lotId,
         p_location: line.locationId,
         p_quantity: line.quantity,
-        p_purpose_text: input.purpose.trim(),
+        p_purpose_text: clean(input.purpose),
         p_reference_text: clean(input.reference),
         p_note: clean(input.note),
         p_override_reason: clean(line.overrideReason),
@@ -697,7 +696,7 @@ export async function issueBatch(input: {
         p_actor: actor.id,
       })
       if (error) throw new Error(error.message)
-      await writeAudit(actor, 'stock.issue', 'stock-transaction', asString(data), { ...line, purpose: input.purpose, batch: true })
+      await writeAudit(actor, 'stock.issue', 'stock-transaction', asString(data), { ...line, purpose: clean(input.purpose), batch: true })
       results.push({ lotId: line.lotId, ok: true })
     } catch (lineError) {
       results.push({ lotId: line.lotId, ok: false, error: lineError instanceof Error ? lineError.message : 'failed' })

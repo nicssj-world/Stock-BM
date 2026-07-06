@@ -70,7 +70,18 @@ export function AppShell({ actor, children }: { actor: BmActor; children: React.
             <h1 className="mt-1 text-xl leading-tight font-bold">Molecular-CBH QMS</h1>
             <p className="mt-1 hidden text-xs text-[#a8c8ce] lg:block">Quality Management System</p>
           </div>
-          <span className="rounded border border-white/15 bg-white/10 px-2 py-1 text-[10px] font-bold text-[#cce7eb] lg:hidden">{actor.role}</span>
+          <div className="flex shrink-0 items-center gap-2 lg:hidden">
+            <span className="rounded border border-white/15 bg-white/10 px-2 py-1 text-[10px] font-bold text-[#cce7eb]">{actor.role}</span>
+            <button
+              type="button"
+              onClick={logout}
+              aria-label="ออกจากระบบ / Logout"
+              title="ออกจากระบบ / Logout"
+              className="inline-flex size-9 items-center justify-center rounded-md border border-white/15 bg-white/10 text-[#cce7eb] transition hover:bg-white/15 hover:text-white focus-visible:ring-2 focus-visible:ring-[#7ee3d8] focus-visible:outline-none"
+            >
+              <LogOut className="size-4" />
+            </button>
+          </div>
         </div>
         <nav className="flex gap-1 overflow-x-auto px-3 pb-3 lg:block lg:space-y-1 lg:overflow-visible lg:px-3">
           {sections.map((section) => (

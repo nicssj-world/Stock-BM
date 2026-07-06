@@ -13,7 +13,7 @@ const lineSchema = z.object({
 
 const schema = z.object({
   lines: z.array(lineSchema).min(1).max(100),
-  purpose: z.string().trim().min(1).max(180),
+  purpose: z.string().trim().max(180).nullable().optional(),
   reference: z.string().trim().max(180).nullable().optional(),
   note: z.string().trim().max(500).nullable().optional(),
 })

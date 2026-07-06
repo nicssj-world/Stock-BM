@@ -7,7 +7,7 @@ const schema = z.object({
   lotId: z.string().uuid(),
   locationId: z.string().uuid(),
   quantity: z.number().positive(),
-  purpose: z.string().trim().min(1).max(180),
+  purpose: z.string().trim().max(180).nullable().optional(),
   reference: z.string().trim().max(180).nullable().optional(),
   note: z.string().trim().max(500).nullable().optional(),
   overrideReason: z.string().trim().max(500).nullable().optional(),
@@ -17,4 +17,3 @@ const schema = z.object({
 export async function POST(request: Request) {
   return respond(async () => ({ stock: await issueStock(await readJson(request, schema), await requireActor()) }))
 }
-
