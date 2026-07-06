@@ -65,13 +65,13 @@ export function AppShell({ actor, children }: { actor: BmActor; children: React.
     <div className="min-h-screen lg:grid lg:grid-cols-[260px_minmax(0,1fr)]">
       <aside className="bg-[#123944] text-white lg:min-h-screen">
         <div className="flex items-center justify-between gap-3 px-4 py-4 lg:block lg:px-5 lg:py-6">
-          <div>
+          <div className="min-w-0">
             <p className="text-[11px] font-bold tracking-[0.2em] text-[#7ee3d8] uppercase">Chonburi Hospital</p>
             <h1 className="mt-1 text-xl leading-tight font-bold">Molecular-CBH QMS</h1>
+            <p className="mt-1 truncate text-xs text-[#a8c8ce] lg:hidden">{actor.displayName} · {actor.role}</p>
             <p className="mt-1 hidden text-xs text-[#a8c8ce] lg:block">Quality Management System</p>
           </div>
           <div className="flex shrink-0 items-center gap-2 lg:hidden">
-            <span className="rounded border border-white/15 bg-white/10 px-2 py-1 text-[10px] font-bold text-[#cce7eb]">{actor.role}</span>
             <button
               type="button"
               onClick={logout}
