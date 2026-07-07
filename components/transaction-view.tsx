@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import type { BmActor, StockItem, StockLot, StockTransaction, StockWorkspace } from '@/lib/bm/types'
 import { formatDate, formatDateTime, formatQuantity, suggestedUsableLot } from '@/lib/bm/rules'
-import { api, Button, Card, Field, Input, Notice, PageHeader, Select, Textarea } from '@/components/ui'
+import { api, Button, Card, Field, Input, Loading, Notice, PageHeader, Select, Textarea } from '@/components/ui'
 
 type Mode = 'receive' | 'issue' | 'move' | 'adjust' | 'history'
 const LAST_RECEIVE_LOCATION_KEY = 'bm-stock:last-receive-location-id'
@@ -117,6 +117,7 @@ export function TransactionView({
   defaultLotId,
   defaultLocationId,
   useLastMode,
+  initialHistoryLoaded,
 }: {
   actor?: BmActor
   initialMode: Mode
@@ -125,10 +126,13 @@ export function TransactionView({
   defaultLotId?: string
   defaultLocationId?: string
   useLastMode?: boolean
+  initialHistoryLoaded?: boolean
 }) {
   const [mode, setMode] = useState<Mode>(initialMode)
   const [data, setData] = useState(initialData)
   const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
+  const [historyLoaded, setHistoryLoaded] = useState(Boolean(initialHistoryLoaded))
+  const [historyLoading, setHistoryLoading] = useState(false)
   const activeItems = data.items.filter((item) => item.isActive)
   const activeLocations = data.locations.filter((location) => location.isActive)
   const visibleTabs = ALL_TABS.filter((tab) => !tab.adminOnly || actor?.role === 'Admin')
@@ -142,7 +146,7 @@ export function TransactionView({
     mode === 'receive' ? 'รับน้ำยาเข้าคลังด้วยหน้าจอมือถือ เลือก item, location, lot และจำนวน'
     : mode === 'issue' ? 'ตัด stock จาก lot และ location ที่มีของคงเหลือ จะระบุ purpose หรือเว้นว่างก็ได้'
     : mode === 'adjust' ? 'ปรับยอด stock โดยตรง (สำหรับ Admin) เช่น นับ physical ไม่ตรงระบบ หรือของเสีย'
-    : mode === 'history' ? `${data.transactions.length} transactions — กรองและ export CSV ได้`
+    : mode === 'history' ? (historyLoaded ? `${data.transactions.length} transactions — กรองและ export CSV ได้` : 'โหลดประวัติเมื่อเปิดแท็บ เพื่อลดเวลาเปิดหน้า Receive/Issue')
     : 'ย้ายยอดคงเหลือระหว่าง location'
 
   useEffect(() => {
@@ -152,6 +156,33 @@ export function TransactionView({
     }, 0)
     return () => window.clearTimeout(timer)
   }, [initialMode, useLastMode])
+
+  useEffect(() => {
+    if (useLastMode) return
+    setMode(initialMode)
+    setNotice(null)
+  }, [initialMode, useLastMode])
+
+  useEffect(() => {
+    if (mode !== 'history' || historyLoaded || historyLoading) return
+    let cancelled = false
+    setHistoryLoading(true)
+    api<{ transactions: StockTransaction[] }>('/api/stock/history')
+      .then((result) => {
+        if (cancelled) return
+        setData((current) => ({ ...current, transactions: result.transactions }))
+        setHistoryLoaded(true)
+      })
+      .catch((error) => {
+        if (!cancelled) setNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'โหลด history ไม่สำเร็จ' })
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [historyLoaded, historyLoading, mode])
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 pb-28 sm:pb-5">
@@ -227,12 +258,16 @@ export function TransactionView({
           onError={(text) => setNotice({ tone: 'danger', text })}
         />
       ) : null}
-      {mode === 'history' ? (
+      {mode === 'history' && historyLoading ? (
+        <Card className="p-6"><Loading label="กำลังโหลดประวัติ / Loading history" /></Card>
+      ) : null}
+      {mode === 'history' && !historyLoading ? (
         <HistoryTab
           transactions={data.transactions}
           actor={actor}
           onSaved={(stock) => {
             setData(stock)
+            setHistoryLoaded(true)
             setNotice({ tone: 'success', text: 'Reverse transaction แล้ว' })
           }}
           onError={(text) => setNotice({ tone: 'danger', text })}

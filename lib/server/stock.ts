@@ -56,8 +56,9 @@ function balanceKey(lotId: string, locationId: string) {
   return `${lotId}:${locationId}`
 }
 
-export async function getStockWorkspace(actor: BmActor): Promise<StockWorkspace> {
+export async function getStockWorkspace(actor: BmActor, options: { includeTransactions?: boolean } = {}): Promise<StockWorkspace> {
   const admin = getAdminClient()
+  const includeTransactions = options.includeTransactions ?? true
   const [
     { data: categoryData, error: categoryError },
     { data: locationData, error: locationError },
@@ -70,7 +71,9 @@ export async function getStockWorkspace(actor: BmActor): Promise<StockWorkspace>
     admin.from('bm_stock_locations').select('*').order('code'),
     admin.from('bm_stock_items').select('*').order('item_code'),
     admin.from('bm_stock_lots').select('*').order('created_at'),
-    admin.from('bm_stock_transactions').select('*').order('created_at', { ascending: false }).limit(500),
+    includeTransactions
+      ? admin.from('bm_stock_transactions').select('*').order('created_at', { ascending: false }).limit(500)
+      : Promise.resolve({ data: [], error: null }),
     admin.from('bm_stock_movement_lines').select('*').order('created_at', { ascending: false }).limit(2000),
   ])
   fail(categoryError)
