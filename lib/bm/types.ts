@@ -114,7 +114,7 @@ export interface StockWorkspace {
 }
 
 export interface ScanResolution {
-  kind: 'internal-lot' | 'manufacturer-barcode' | 'unknown'
+  kind: 'internal-lot' | 'manufacturer-barcode' | 'location' | 'unknown'
   code: string
   itemId?: string
   itemCode?: string
@@ -124,6 +124,7 @@ export interface ScanResolution {
   lotNumber?: string
   locationId?: string
   locationCode?: string
+  locationName?: string
   href?: string
 }
 

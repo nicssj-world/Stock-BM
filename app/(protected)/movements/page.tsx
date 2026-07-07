@@ -21,6 +21,7 @@ export default async function MovementsPage({
       defaultItemId={params.itemId}
       defaultLotId={params.lotId}
       defaultLocationId={params.locationId}
+      useLastMode={!params.mode}
     />
   )
 }

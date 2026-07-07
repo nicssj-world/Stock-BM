@@ -9,6 +9,15 @@ import './globals.css'
 export const metadata: Metadata = {
   title: 'Molecular-CBH QMS | Chonburi Hospital',
   description: 'Molecular laboratory quality management system (Stock, IQC, EQA, Monitoring) for Chonburi Hospital.',
+  icons: {
+    icon: [
+      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [
+      { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
+    ],
+  },
   appleWebApp: { capable: true, statusBarStyle: 'default', title: 'CBH QMS' },
 }
 

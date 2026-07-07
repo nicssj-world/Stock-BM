@@ -21,16 +21,23 @@ export function ScanView({ initialCode }: { initialCode?: string }) {
     setIssued(null)
     try {
       const response = await api<{ result: ScanResolution }>('/api/scan/resolve', { method: 'POST', body: JSON.stringify({ code: trimmed }) })
-      if (response.result.kind === 'internal-lot') {
-        const quick = await api<{ result: QuickIssueResult }>('/api/stock/issues/quick', { method: 'POST', body: JSON.stringify({ code: trimmed }) })
-        setIssued(quick.result)
-        setCode('')
-        setResult(null)
-      } else {
-        setResult(response.result)
-      }
+      setResult(response.result)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Scan failed')
+    }
+  }
+
+  async function quickIssue(scanResult: ScanResolution) {
+    const scanCode = scanResult.lotToken ?? scanResult.code
+    if (!scanCode) return
+    setError('')
+    try {
+      const quick = await api<{ result: QuickIssueResult }>('/api/stock/issues/quick', { method: 'POST', body: JSON.stringify({ code: scanCode }) })
+      setIssued(quick.result)
+      setCode('')
+      setResult(null)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Quick issue failed')
     }
   }
 
@@ -73,7 +80,7 @@ export function ScanView({ initialCode }: { initialCode?: string }) {
         {cameraOn ? <div className="mt-4 overflow-hidden rounded-md border border-[#d6e2e3] bg-black"><video ref={videoRef} autoPlay muted playsInline className="aspect-video w-full object-cover" /></div> : null}
       </Card>
       {issued ? <QuickIssueDone result={issued} /> : null}
-      {result ? <ScanResult result={result} /> : null}
+      {result ? <ScanResult result={result} onQuickIssue={quickIssue} /> : null}
     </div>
   )
 }
@@ -87,8 +94,22 @@ function QuickIssueDone({ result }: { result: QuickIssueResult }) {
   )
 }
 
-function ScanResult({ result }: { result: ScanResolution }) {
+function ScanResult({ result, onQuickIssue }: { result: ScanResolution; onQuickIssue: (result: ScanResolution) => void }) {
   if (result.kind === 'unknown') return <Notice tone="warning">ไม่พบรหัส / Unknown code: <span className="mono">{result.code}</span></Notice>
+  if (result.kind === 'location') {
+    return (
+      <Card className="p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-bold tracking-[0.16em] text-[#0b7f76] uppercase">location</p>
+            <h2 className="mt-1 text-xl font-bold text-[#173d50]">{result.locationCode ?? '-'} · {result.locationName ?? '-'}</h2>
+            <p className="mt-2 text-sm text-[#55727c]">เปิดคลังเฉพาะ location นี้</p>
+          </div>
+          <Button onClick={() => { window.location.href = result.href ?? `/inventory?locationId=${result.locationId}` }}><PackagePlus className="size-4" /> View stock</Button>
+        </div>
+      </Card>
+    )
+  }
   return (
     <Card className="p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -99,6 +120,7 @@ function ScanResult({ result }: { result: ScanResolution }) {
         </div>
         <div className="flex flex-wrap gap-2">
           {result.itemId ? <Button variant="secondary" onClick={() => { window.location.href = `/movements?mode=receive&itemId=${result.itemId}` }}><PackagePlus className="size-4" /> Receive</Button> : null}
+          {result.kind === 'internal-lot' ? <Button onClick={() => onQuickIssue(result)}><CheckCircle2 className="size-4" /> Quick issue</Button> : null}
           {result.lotToken ? <Button onClick={() => { window.location.href = `/issue/${result.lotToken}` }}><QrCode className="size-4" /> Issue</Button> : result.lotId ? <Button onClick={() => { window.location.href = `/movements?mode=issue&lotId=${result.lotId}${result.locationId ? `&locationId=${result.locationId}` : ''}` }}><QrCode className="size-4" /> Issue</Button> : null}
           {result.lotId ? <Button variant="secondary" onClick={() => { window.location.href = `/movements?mode=move&lotId=${result.lotId}${result.locationId ? `&locationId=${result.locationId}` : ''}` }}><MoveRight className="size-4" /> Move</Button> : null}
         </div>

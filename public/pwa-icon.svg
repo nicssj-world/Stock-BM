@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="CBH QMS app icon">
+  <defs>
+    <linearGradient id="bg" x1="82" y1="42" x2="430" y2="470" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#123944"/>
+      <stop offset="1" stop-color="#0b7f76"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <circle cx="392" cy="118" r="38" fill="#7ee3d8" opacity=".95"/>
+  <circle cx="344" cy="196" r="18" fill="#e8f7f5" opacity=".92"/>
+  <circle cx="422" cy="250" r="15" fill="#e8f7f5" opacity=".78"/>
+  <path d="M381 150 353 184M360 203l48 36" fill="none" stroke="#d6fbf7" stroke-width="10" stroke-linecap="round" opacity=".74"/>
+  <rect x="72" y="326" width="368" height="88" rx="32" fill="#e8f7f5" opacity=".94"/>
+  <text x="256" y="282" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="122" font-weight="800" fill="#fff">CBH</text>
+  <text x="256" y="384" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="800" letter-spacing="2" fill="#123944">MOL QMS</text>
+</svg>

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { AlertOctagon, CalendarClock, CheckCircle2, FlaskConical, MapPin, PackageSearch, QrCode, ScanLine, Thermometer } from 'lucide-react'
+import { AlertOctagon, ArrowDownToLine, ArrowUpFromLine, Boxes, CalendarClock, CheckCircle2, FlaskConical, MapPin, PackageSearch, QrCode, ScanLine, Thermometer } from 'lucide-react'
 import type { BmActor, ScanResolution, StockWorkspace } from '@/lib/bm/types'
 import type { EnvDashboard } from '@/lib/env/types'
 import type { HpvDashboard } from '@/lib/hpv/types'
@@ -43,6 +43,13 @@ export function DashboardView({ actor, stock, env, hpv }: { actor: BmActor; stoc
         description={`สวัสดี ${actor.displayName} · ${actor.role}`}
         actions={<Button onClick={() => router.push('/movements?mode=receive')}>รับเข้า / Receive</Button>}
       />
+
+      <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <QuickAction href="/movements?mode=receive" icon={<ArrowDownToLine />} label="รับเข้า" detail="Receive" />
+        <QuickAction href="/movements?mode=issue" icon={<ArrowUpFromLine />} label="ตัด stock" detail="Issue" />
+        <QuickAction href="/scan" icon={<QrCode />} label="สแกน" detail="Scan" />
+        <QuickAction href="/inventory" icon={<Boxes />} label="คงเหลือ" detail="Inventory" />
+      </section>
 
       <Card className="p-4">
         <form onSubmit={submit} className="grid gap-3 lg:grid-cols-[1fr_auto]">
@@ -141,6 +148,21 @@ export function DashboardView({ actor, stock, env, hpv }: { actor: BmActor; stoc
         </Card>
       </div>
     </div>
+  )
+}
+
+function QuickAction({ href, icon, label, detail }: { href: string; icon: React.ReactNode; label: string; detail: string }) {
+  return (
+    <Link
+      href={href}
+      className="flex min-h-20 items-center gap-3 rounded-md border border-[#d6e2e3] bg-white px-3 py-3 text-left shadow-[0_8px_24px_rgba(20,64,72,0.06)] transition hover:border-[#9fc2c3] hover:bg-[#f7fbfb] focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none"
+    >
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-[#e8f7f5] text-[#0b7f76] [&>svg]:size-5">{icon}</span>
+      <span className="min-w-0">
+        <span className="block font-bold text-[#173d50]">{label}</span>
+        <span className="block text-xs text-[#789097]">{detail}</span>
+      </span>
+    </Link>
   )
 }
 

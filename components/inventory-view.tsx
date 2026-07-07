@@ -1,27 +1,30 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { FileDown, History, PackageCheck, PackageSearch, Printer, RotateCcw } from 'lucide-react'
+import { ArrowDownToLine, ArrowUpFromLine, FileDown, History, MoveRight, PackageCheck, PackageSearch, Printer, RotateCcw, X } from 'lucide-react'
 import type { BmActor, StockItem, StockLot, StockTransaction, StockWorkspace } from '@/lib/bm/types'
 import { formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
 import { printLotLabel } from '@/lib/bm/label-print'
 import { api, Button, Card, Input, Notice, PageHeader, Select } from '@/components/ui'
 
-export function InventoryView({ actor, initialData }: { actor: BmActor; initialData: StockWorkspace }) {
+export function InventoryView({ actor, initialData, defaultLocationId }: { actor: BmActor; initialData: StockWorkspace; defaultLocationId?: string }) {
   const [data, setData] = useState(initialData)
   const [selectedItemId, setSelectedItemId] = useState(initialData.items[0]?.id ?? '')
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('all')
+  const [locationFilter, setLocationFilter] = useState(defaultLocationId && initialData.locations.some((location) => location.id === defaultLocationId) ? defaultLocationId : 'all')
   const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
+  const [actionLot, setActionLot] = useState<{ item: StockItem; lot: StockLot } | null>(null)
 
   const visibleItems = useMemo(() => {
     const term = q.trim().toLowerCase()
     return data.items.filter((item) => {
       const matches = !term || `${item.itemCode} ${item.name} ${item.categoryName}`.toLowerCase().includes(term)
       const statusOk = status === 'all' || (status === 'low' && item.isLowStock) || (status === 'expiring' && item.lots.some((lot) => lot.expiryState === 'expiring')) || (status === 'expired' && item.lots.some((lot) => lot.expiryState === 'expired'))
-      return matches && statusOk
+      const locationOk = locationFilter === 'all' || item.lots.some((lot) => lot.balances.some((balance) => balance.locationId === locationFilter && balance.onHand > 0))
+      return matches && statusOk && locationOk
     })
-  }, [data.items, q, status])
+  }, [data.items, locationFilter, q, status])
   const selectedItem = visibleItems.find((item) => item.id === selectedItemId) ?? visibleItems[0] ?? null
   const itemTransactions = selectedItem ? data.transactions.filter((tx) => tx.lines.some((line) => line.itemId === selectedItem.id)) : []
 
@@ -43,11 +46,11 @@ export function InventoryView({ actor, initialData }: { actor: BmActor; initialD
         eyebrow="Inventory ledger"
         title="คลังน้ำยา / Inventory"
         description="ยอดคงเหลือแยกตาม lot และ location พร้อม ledger แบบ append-only"
-        actions={<div className="flex flex-wrap gap-2">{actor.role === 'Admin' ? <Button variant="secondary" onClick={() => { window.location.href = '/inventory/qr' }}><Printer className="size-4" /> พิมพ์ QR lot</Button> : null}<Button variant="secondary" onClick={() => { window.location.href = '/api/stock/export?report=balances' }}><FileDown className="size-4" /> Balances CSV</Button><Button variant="secondary" onClick={() => { window.location.href = '/api/stock/export?report=movements' }}><History className="size-4" /> Ledger CSV</Button></div>}
+        actions={<div className="flex flex-wrap gap-2">{actor.role === 'Admin' ? <Button variant="secondary" onClick={() => { window.location.href = '/inventory/qr' }}><Printer className="size-4" /> พิมพ์ QR lot</Button> : null}{actor.role === 'Admin' ? <Button variant="secondary" onClick={() => { window.location.href = '/inventory/locations/qr' }}><Printer className="size-4" /> QR location</Button> : null}<Button variant="secondary" onClick={() => { window.location.href = '/api/stock/export?report=balances' }}><FileDown className="size-4" /> Balances CSV</Button><Button variant="secondary" onClick={() => { window.location.href = '/api/stock/export?report=movements' }}><History className="size-4" /> Ledger CSV</Button></div>}
       />
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
       <Card className="overflow-hidden">
-        <div className="grid gap-2 border-b border-[#e0e9ea] bg-[#fbfdfd] p-3 sm:grid-cols-[minmax(0,1fr)_170px]">
+        <div className="grid gap-2 border-b border-[#e0e9ea] bg-[#fbfdfd] p-3 sm:grid-cols-[minmax(0,1fr)_170px_190px]">
           <div className="relative"><PackageSearch className="absolute top-2.5 left-3 size-4 text-[#8ca1a5]" /><Input value={q} onChange={(event) => setQ(event.target.value)} className="pl-9" placeholder="ค้นหา item code, ชื่อ, หมวดหมู่" /></div>
           <Select value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="all">All status</option>
@@ -55,8 +58,18 @@ export function InventoryView({ actor, initialData }: { actor: BmActor; initialD
             <option value="expiring">Expiring</option>
             <option value="expired">Expired</option>
           </Select>
+          <Select value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}>
+            <option value="all">All locations</option>
+            {data.locations.map((location) => <option key={location.id} value={location.id}>{location.code} · {location.name}</option>)}
+          </Select>
         </div>
-        <div className="grid min-h-[640px] xl:grid-cols-[minmax(520px,0.9fr)_minmax(0,1.1fr)]">
+        <MobileInventoryList
+          items={visibleItems}
+          selectedItemId={selectedItem?.id ?? ''}
+          onSelect={setSelectedItemId}
+          onLotAction={setActionLot}
+        />
+        <div className="hidden min-h-[640px] xl:grid xl:grid-cols-[minmax(520px,0.9fr)_minmax(0,1.1fr)]">
           <div className="overflow-x-auto border-b border-[#e0e9ea] xl:border-r xl:border-b-0">
             <table className="w-full min-w-[640px] text-left text-sm">
               <thead className="bg-[#f7fafa] text-[10px] tracking-[0.08em] text-[#779097] uppercase"><tr><th className="px-4 py-2.5">Item</th><th className="px-3 py-2.5 text-right">On hand</th><th className="px-3 py-2.5 text-right">Usable</th><th className="px-3 py-2.5">Minimum</th><th className="px-4 py-2.5">Status</th></tr></thead>
@@ -72,14 +85,73 @@ export function InventoryView({ actor, initialData }: { actor: BmActor; initialD
             </table>
             {!visibleItems.length ? <p className="px-4 py-14 text-center text-sm text-[#91a4a9]">ไม่พบรายการ</p> : null}
           </div>
-          <StockDetail actor={actor} item={selectedItem} transactions={itemTransactions} locations={data.locations} onReverse={reverse} />
+          <StockDetail actor={actor} item={selectedItem} transactions={itemTransactions} locations={data.locations} onReverse={reverse} onLotAction={setActionLot} />
         </div>
       </Card>
+      {actionLot ? <LotActionSheet item={actionLot.item} lot={actionLot.lot} locations={data.locations} onClose={() => setActionLot(null)} /> : null}
     </div>
   )
 }
 
-function StockDetail({ actor, item, transactions, locations, onReverse }: { actor: BmActor; item: StockItem | null; transactions: StockTransaction[]; locations: StockWorkspace['locations']; onReverse: (tx: StockTransaction) => void }) {
+function MobileInventoryList({
+  items,
+  selectedItemId,
+  onSelect,
+  onLotAction,
+}: {
+  items: StockItem[]
+  selectedItemId: string
+  onSelect: (id: string) => void
+  onLotAction: (value: { item: StockItem; lot: StockLot }) => void
+}) {
+  return (
+    <div className="grid gap-2 p-3 xl:hidden">
+      {items.map((item) => {
+        const selected = item.id === selectedItemId
+        return (
+          <div key={item.id} className={`rounded-md border ${selected ? 'border-[#0b7f76] bg-[#f5fcfb]' : 'border-[#d8e6e6] bg-white'}`}>
+            <button type="button" onClick={() => onSelect(item.id)} className="flex min-h-20 w-full items-center justify-between gap-3 px-3 py-3 text-left">
+              <span className="min-w-0">
+                <span className="mono block text-xs font-bold text-[#173d50]">{item.itemCode}</span>
+                <span className="mt-0.5 block font-semibold text-[#55727c]">{item.name}</span>
+                <span className="mt-0.5 block text-[11px] text-[#91a3a7]">{item.categoryName}</span>
+              </span>
+              <span className="shrink-0 text-right">
+                <span className={`mono block text-lg font-bold ${item.isLowStock ? 'text-[#be3d49]' : 'text-[#0b7f76]'}`}>{formatQuantity(item.usableOnHand)}</span>
+                <span className="block text-[10px] font-semibold text-[#789097]">{item.unit}</span>
+              </span>
+            </button>
+            {selected ? (
+              <div className="border-t border-[#dce8e9] px-3 py-2">
+                <div className="grid gap-2">
+                  {item.lots.map((lot) => (
+                    <button key={lot.id} type="button" onClick={() => onLotAction({ item, lot })} className="rounded-md border border-[#e1eaeb] bg-white px-3 py-2 text-left">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="min-w-0">
+                          <span className="mono block truncate text-sm font-bold text-[#173d50]">{lot.lotNumber}</span>
+                          <span className="mt-0.5 block text-xs text-[#789097]">EXP {formatDate(lot.expiryDate)}</span>
+                        </span>
+                        <ExpiryBadge state={lot.expiryState} />
+                      </div>
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <span className="mono font-bold text-[#315763]">{formatQuantity(lot.totalOnHand)} {item.unit}</span>
+                        <span className="text-xs font-semibold text-[#0b7f76]">Actions</span>
+                      </div>
+                    </button>
+                  ))}
+                  {!item.lots.length ? <p className="rounded-md border border-dashed border-[#d5e2e3] px-3 py-5 text-center text-sm text-[#91a4a9]">ยังไม่มี Lot รับเข้า</p> : null}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )
+      })}
+      {!items.length ? <p className="px-4 py-14 text-center text-sm text-[#91a4a9]">ไม่พบรายการ</p> : null}
+    </div>
+  )
+}
+
+function StockDetail({ actor, item, transactions, locations, onReverse, onLotAction }: { actor: BmActor; item: StockItem | null; transactions: StockTransaction[]; locations: StockWorkspace['locations']; onReverse: (tx: StockTransaction) => void; onLotAction: (value: { item: StockItem; lot: StockLot }) => void }) {
   if (!item) return <div className="flex min-h-[520px] items-center justify-center p-8 text-center"><div><PackageSearch className="mx-auto size-10 text-[#b6c6c9]" /><p className="mt-3 text-sm text-[#82979d]">ยังไม่มีสินค้า / No items</p></div></div>
   return <div className="min-w-0">
     <div className="border-b border-[#e0e9ea] bg-[linear-gradient(115deg,#fafdfe,#f0f9f7)] px-4 py-4">
@@ -96,7 +168,7 @@ function StockDetail({ actor, item, transactions, locations, onReverse }: { acto
     <section className="border-b border-[#e0e9ea] px-4 py-4">
       <div className="flex items-center justify-between"><h3 className="font-bold text-[#173d50]">Lots / Location balances</h3><PackageCheck className="size-5 text-[#0b7f76]" /></div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        {item.lots.map((lot) => <LotCard key={lot.id} lot={lot} item={item} locations={locations} />)}
+        {item.lots.map((lot) => <LotCard key={lot.id} lot={lot} item={item} locations={locations} onLotAction={() => onLotAction({ item, lot })} />)}
         {!item.lots.length ? <p className="col-span-full rounded-md border border-dashed border-[#d5e2e3] px-3 py-7 text-center text-sm text-[#91a4a9]">ยังไม่มี Lot รับเข้า</p> : null}
       </div>
     </section>
@@ -110,14 +182,44 @@ function StockDetail({ actor, item, transactions, locations, onReverse }: { acto
   </div>
 }
 
-function LotCard({ lot, item, locations }: { lot: StockLot; item: StockItem; locations: StockWorkspace['locations'] }) {
+function LotCard({ lot, item, locations, onLotAction }: { lot: StockLot; item: StockItem; locations: StockWorkspace['locations']; onLotAction: () => void }) {
   const color = lot.expiryState === 'expired' ? 'border-[#efc7cc] bg-[#fff8f8]' : lot.expiryState === 'expiring' ? 'border-[#eed4a6] bg-[#fffdf7]' : 'border-[#d8e6e6] bg-white'
   return <div className={`rounded-md border p-3 ${color}`}>
     <div className="flex items-start justify-between gap-2"><div><p className="mono text-xs font-bold text-[#315763]">{lot.lotNumber}</p><p className="mt-1 text-[11px] text-[#8b9da2]">EXP {formatDate(lot.expiryDate)}</p></div><ExpiryBadge state={lot.expiryState} /></div>
     <p className="mono mt-3 text-lg font-bold text-[#173d50]">{formatQuantity(lot.totalOnHand)} <span className="text-[11px] font-semibold text-[#789097]">{item.unit}</span></p>
     <div className="mt-2 space-y-1">{lot.balances.map((balance) => <p key={balance.locationId} className="flex justify-between text-[11px] text-[#6f868b]"><span>{balance.locationCode}</span><span className="mono">{formatQuantity(balance.onHand)}</span></p>)}</div>
-    <Button variant="ghost" className="mt-2 px-2 py-1 text-xs" onClick={() => printLotLabel(lot, item, locations.find((location) => location.id === lot.balances[0]?.locationId))}><Printer className="size-3" /> Label</Button>
+    <div className="mt-2 flex flex-wrap gap-1">
+      <Button variant="ghost" className="px-2 py-1 text-xs" onClick={onLotAction}><MoveRight className="size-3" /> Actions</Button>
+      <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => printLotLabel(lot, item, locations.find((location) => location.id === lot.balances[0]?.locationId))}><Printer className="size-3" /> Label</Button>
+    </div>
   </div>
+}
+
+function LotActionSheet({ item, lot, locations, onClose }: { item: StockItem; lot: StockLot; locations: StockWorkspace['locations']; onClose: () => void }) {
+  const firstLocationId = lot.balances[0]?.locationId
+  const firstLocation = locations.find((location) => location.id === firstLocationId)
+  const issueHref = `/movements?mode=issue&lotId=${lot.id}${firstLocationId ? `&locationId=${firstLocationId}` : ''}`
+  const moveHref = `/movements?mode=move&lotId=${lot.id}${firstLocationId ? `&locationId=${firstLocationId}` : ''}`
+  return (
+    <div className="fixed inset-0 z-50 flex items-end bg-[#08242b]/35 p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] xl:hidden" onClick={onClose}>
+      <div className="w-full rounded-lg border border-[#d6e2e3] bg-white shadow-[0_-18px_40px_rgba(20,64,72,0.18)]" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3 border-b border-[#e0e9ea] px-4 py-3">
+          <div className="min-w-0">
+            <p className="mono text-xs font-bold text-[#0b7f76]">{item.itemCode}</p>
+            <h2 className="mt-0.5 truncate font-bold text-[#173d50]">{lot.lotNumber}</h2>
+            <p className="mt-0.5 text-xs text-[#789097]">EXP {formatDate(lot.expiryDate)} · {formatQuantity(lot.totalOnHand)} {item.unit}</p>
+          </div>
+          <button type="button" onClick={onClose} className="flex size-9 shrink-0 items-center justify-center rounded-md text-[#789097] hover:bg-[#eef5f4]"><X className="size-5" /></button>
+        </div>
+        <div className="grid gap-2 p-3">
+          <Button className="h-12 w-full" onClick={() => { window.location.href = issueHref }}><ArrowUpFromLine className="size-4" /> ตัด stock / Issue</Button>
+          <Button variant="secondary" className="h-12 w-full" onClick={() => { window.location.href = moveHref }}><MoveRight className="size-4" /> ย้ายที่ / Move</Button>
+          <Button variant="secondary" className="h-12 w-full" onClick={() => { window.location.href = `/movements?mode=receive&itemId=${item.id}` }}><ArrowDownToLine className="size-4" /> รับเพิ่ม / Receive more</Button>
+          <Button variant="ghost" className="h-11 w-full" onClick={() => printLotLabel(lot, item, firstLocation)}><Printer className="size-4" /> Print label</Button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function TransactionRow({ actor, transaction, onReverse }: { actor: BmActor; transaction: StockTransaction; onReverse: () => void }) {

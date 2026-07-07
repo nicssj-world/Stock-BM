@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Activity, BarChart3, Boxes, ClipboardCheck, Dna, GitCompareArrows, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck, Thermometer } from 'lucide-react'
+import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, Boxes, ClipboardCheck, Dna, GitCompareArrows, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck, Thermometer } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import { api } from '@/components/ui'
 
@@ -56,6 +56,15 @@ export function AppShell({ actor, children }: { actor: BmActor; children: React.
     ? [hpvSection]
     : [homeSection, stockSection, hpvSection, qualitySection, monitoringSection]
   if (actor.role === 'Admin') sections.push({ title: 'System', items: [{ href: '/admin', label: 'Admin', icon: Settings }] })
+  const mobileItems: NavItem[] = actor.role === 'Assistant'
+    ? hpvSection.items
+    : [
+        { href: '/dashboard', label: 'Home', icon: Activity },
+        { href: '/movements?mode=receive', label: 'Receive', icon: ArrowDownToLine },
+        { href: '/movements?mode=issue', label: 'Issue', icon: ArrowUpFromLine },
+        { href: '/scan', label: 'Scan', icon: QrCode },
+        { href: '/inventory', label: 'Stock', icon: Boxes },
+      ]
 
   async function logout() {
     await api('/api/auth/logout', { method: 'POST' })
@@ -117,7 +126,26 @@ export function AppShell({ actor, children }: { actor: BmActor; children: React.
           </button>
         </div>
       </aside>
-      <main className="min-w-0 px-4 py-5 sm:px-6 lg:px-7">{children}</main>
+      <main className="min-w-0 px-4 pt-5 pb-24 sm:px-6 lg:px-7 lg:pb-7">{children}</main>
+      <nav className="fixed right-0 bottom-0 left-0 z-40 border-t border-[#d6e2e3] bg-white/95 px-2 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] shadow-[0_-14px_34px_rgba(20,64,72,0.16)] backdrop-blur lg:hidden">
+        <div className={`mx-auto grid max-w-md gap-1 ${mobileItems.length === 1 ? 'grid-cols-1' : 'grid-cols-5'}`}>
+          {mobileItems.map(({ href, label, icon: Icon }) => {
+            const baseHref = href.split('?')[0]
+            const active = href.includes('?') ? false : pathname === baseHref || pathname.startsWith(`${baseHref}/`)
+            return (
+              <Link
+                key={href}
+                href={href}
+                aria-current={active ? 'page' : undefined}
+                className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-md px-1 text-[10px] font-bold transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${active ? 'bg-[#e8f7f5] text-[#0b7f76]' : 'text-[#58747d] hover:bg-[#f1f7f7]'}`}
+              >
+                <Icon className="size-5" aria-hidden="true" />
+                <span className="truncate">{label}</span>
+              </Link>
+            )
+          })}
+        </div>
+      </nav>
     </div>
   )
 }

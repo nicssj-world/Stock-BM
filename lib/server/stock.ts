@@ -536,7 +536,24 @@ export async function resolveScan(codeInput: string): Promise<ScanResolution> {
   const code = codeInput.trim()
   if (!code) return { kind: 'unknown', code }
   const token = extractLotToken(code)
+  const locationToken = extractLocationToken(code)
   const admin = getAdminClient()
+
+  if (locationToken) {
+    const { data, error } = await admin.from('bm_stock_locations').select('*').eq('id', locationToken).maybeSingle()
+    fail(error)
+    if (data) {
+      const row = data as RecordRow
+      return {
+        kind: 'location',
+        code,
+        locationId: asString(row.id),
+        locationCode: asString(row.code),
+        locationName: asString(row.name),
+        href: `/inventory?locationId=${encodeURIComponent(asString(row.id))}`,
+      }
+    }
+  }
 
   if (token) {
     const { data, error } = await admin.from('bm_stock_lots').select('*').eq('internal_qr_token', token).maybeSingle()
@@ -569,6 +586,15 @@ export function extractLotToken(value: string) {
   const match = value.match(/\/(?:scan\/lot|issue)\/([A-Za-z0-9_-]+)/)
   if (match) return match[1]
   if (/^[A-Za-z0-9_-]{18,80}$/.test(value)) return value
+  return null
+}
+
+export function extractLocationToken(value: string) {
+  const trimmed = value.trim()
+  const match = trimmed.match(/\/scan\/location\/([0-9a-fA-F-]{36})/)
+  if (match) return match[1]
+  const raw = trimmed.match(/^BMLOC:([0-9a-fA-F-]{36})$/i)
+  if (raw) return raw[1]
   return null
 }
 
