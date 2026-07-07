@@ -8,8 +8,11 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Download,
+  Eye,
+  FileUp,
   Flame,
   Hospital,
+  Loader2,
   PackageMinus,
   Pencil,
   Plus,
@@ -151,17 +154,19 @@ function DistributionTab({
 }) {
   const activeSites = data.sites.filter((site) => site.isActive)
   const distributionSites = activeSites.filter((site) => !site.selfSupplied)
-  const stockLines = useMemo(() => data.stock.items.filter((item) => item.isHpv).flatMap((item) =>
+  const stockItems = useMemo(() => data.stock.items.filter((item) => item.isHpv && item.lots.some((lot) => lot.balances.some((balance) => balance.onHand > 0))), [data.stock.items])
+  const stockLines = useMemo(() => stockItems.flatMap((item) =>
     item.lots.flatMap((lot) => lot.balances.filter((balance) => balance.onHand > 0).map((balance) => ({
       key: `${lot.id}:${balance.locationId}`,
       item,
       lot,
       balance,
     }))),
-  ), [data.stock.items])
+  ), [stockItems])
   const [form, setForm] = useState({
     siteId: distributionSites[0]?.id ?? '',
     distributedOn: todayKey(),
+    itemId: stockItems[0]?.id ?? '',
     stockKey: stockLines[0]?.key ?? '',
     quantity: '1',
     note: '',
@@ -169,10 +174,31 @@ function DistributionTab({
   })
   const [siteForm, setSiteForm] = useState({ code: '', name: '', siteType: 'รพ.สต.', selfSupplied: false })
   const [editingSite, setEditingSite] = useState<{ id: string; code: string; name: string; siteType: string; selfSupplied: boolean } | null>(null)
+  const [distributionFile, setDistributionFile] = useState<File | null>(null)
+  const distributionFileRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const selectedSiteId = form.siteId || distributionSites[0]?.id || ''
-  const selectedStockKey = stockLines.some((line) => line.key === form.stockKey) ? form.stockKey : stockLines[0]?.key ?? ''
-  const selectedStock = stockLines.find((line) => line.key === selectedStockKey)
+  const selectedItemId = stockItems.some((item) => item.id === form.itemId) ? form.itemId : stockItems[0]?.id ?? ''
+  const selectedStockLines = stockLines.filter((line) => line.item.id === selectedItemId)
+  const selectedStockKey = selectedStockLines.some((line) => line.key === form.stockKey) ? form.stockKey : selectedStockLines[0]?.key ?? ''
+  const selectedStock = selectedStockLines.find((line) => line.key === selectedStockKey)
+
+  function selectStockItem(itemId: string) {
+    const nextStockKey = stockLines.find((line) => line.item.id === itemId)?.key ?? ''
+    setForm({ ...form, itemId, stockKey: nextStockKey })
+  }
+
+  async function uploadDistributionFile(distributionId: string, file: File) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('module', 'hpv')
+    formData.append('entityType', 'hpv-distribution')
+    formData.append('entityId', distributionId)
+    formData.append('kind', 'distribution-document')
+    const response = await fetch('/api/attachments', { method: 'POST', body: formData })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(payload.error ?? 'Upload attachment failed')
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -180,7 +206,7 @@ function DistributionTab({
     setBusy(true)
     onNotice(null)
     try {
-      const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/distributions', {
+      const result = await api<{ workspace: HpvWorkspace; distributionId: string }>('/api/hpv/distributions', {
         method: 'POST',
         body: JSON.stringify({
           siteId: selectedSiteId,
@@ -192,7 +218,21 @@ function DistributionTab({
           overrideReason: form.overrideReason.trim() || null,
         }),
       })
+      let attachmentError = ''
+      if (distributionFile) {
+        try {
+          await uploadDistributionFile(result.distributionId, distributionFile)
+        } catch (uploadError) {
+          attachmentError = uploadError instanceof Error ? uploadError.message : 'Upload attachment failed'
+        }
+      }
       onWorkspace(result.workspace, 'บันทึกเบิกชุด HPV และหัก Stock กลางแล้ว')
+      if (attachmentError) {
+        onNotice({ tone: 'warning', text: `บันทึกเบิกแล้ว แต่แนบไฟล์ไม่สำเร็จ: ${attachmentError}` })
+      } else {
+        setDistributionFile(null)
+        if (distributionFileRef.current) distributionFileRef.current.value = ''
+      }
       setForm((current) => ({ ...current, quantity: '1', note: '', overrideReason: '' }))
     } catch (error) {
       onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'บันทึกเบิกไม่สำเร็จ' })
@@ -333,10 +373,25 @@ function DistributionTab({
             <Field label="หน่วยงาน / รพ.สต."><Select required value={selectedSiteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>{distributionSites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</Select></Field>
             {distributionSites.length === 0 ? <p className="text-xs text-[#789097]">ไม่มีหน่วยงานที่รับชุดตรวจจากเรา</p> : null}
             <Field label="วันที่เบิก"><Input required type="date" value={form.distributedOn} onChange={(e) => setForm({ ...form, distributedOn: e.target.value })} /></Field>
-            <Field label="Stock lot / location"><Select required value={selectedStockKey} onChange={(e) => setForm({ ...form, stockKey: e.target.value })}>{stockLines.map((line) => <option key={line.key} value={line.key}>{line.item.itemCode} · {line.item.name} · LOT {line.lot.lotNumber} · {line.balance.locationCode} ({formatQuantity(line.balance.onHand)} {line.item.unit})</option>)}</Select></Field>
+            <Field label="Stock"><Select required value={selectedItemId} onChange={(e) => selectStockItem(e.target.value)}>{stockItems.map((item) => <option key={item.id} value={item.id}>{item.itemCode} · {item.name}</option>)}</Select></Field>
+            <Field label="Lot"><Select required value={selectedStockKey} onChange={(e) => setForm({ ...form, stockKey: e.target.value })}>{selectedStockLines.map((line) => <option key={line.key} value={line.key}>LOT {line.lot.lotNumber} ({formatQuantity(line.balance.onHand)} {line.item.unit})</option>)}</Select></Field>
             <Field label="จำนวนชุด"><Input required type="number" min="1" step="1" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} /></Field>
             <Field label="FEFO override reason"><Input value={form.overrideReason} onChange={(e) => setForm({ ...form, overrideReason: e.target.value })} placeholder="กรอกเมื่อระบบแจ้งว่าไม่ใช่ lot/location ที่แนะนำ" /></Field>
             <Field label="Note"><Textarea rows={2} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></Field>
+            <Field label="PDF / รูปประกอบ">
+              <label className="flex cursor-pointer items-center justify-between gap-3 rounded-md border border-[#c9dadd] bg-white px-3 py-2 text-sm font-semibold text-[#315763] hover:border-[#7fa9ad]">
+                <span className="flex min-w-0 items-center gap-2"><FileUp className="size-4 text-[#0b7f76]" /><span className="truncate">{distributionFile ? distributionFile.name : 'เลือกไฟล์ PDF/รูป'}</span></span>
+                <span className="shrink-0 text-xs text-[#789097]">Optional</span>
+                <input
+                  ref={distributionFileRef}
+                  type="file"
+                  accept="application/pdf,image/*"
+                  className="hidden"
+                  onChange={(e) => setDistributionFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              {distributionFile ? <button type="button" onClick={() => { setDistributionFile(null); if (distributionFileRef.current) distributionFileRef.current.value = '' }} className="mt-1 text-xs font-bold text-[#789097] hover:text-[#c02a37]">ล้างไฟล์ที่เลือก</button> : null}
+            </Field>
             <Button disabled={busy || !selectedSiteId || !selectedStock}><ArrowUpFromLine className="size-4" /> บันทึกเบิกและหัก Stock</Button>
           </form>
         </Card>
@@ -383,7 +438,7 @@ function DistributionTab({
       <div className="max-h-[360px] overflow-y-auto">
         <table className="w-full min-w-[800px] text-left text-sm">
           <thead className="sticky top-0 bg-[#f7fafa] text-[10px] tracking-[0.08em] text-[#779097] uppercase">
-            <tr><th className="px-4 py-2.5">วันที่</th><th className="px-3 py-2.5">หน่วยงาน</th><th className="px-3 py-2.5">สินค้า · Lot</th><th className="px-3 py-2.5">Location</th><th className="px-3 py-2.5 text-right">จำนวน</th><th className="px-3 py-2.5">โดย</th>{actor.role === 'Admin' ? <th className="px-3 py-2.5" /> : null}</tr>
+            <tr><th className="px-4 py-2.5">วันที่</th><th className="px-3 py-2.5">หน่วยงาน</th><th className="px-3 py-2.5">สินค้า · Lot</th><th className="px-3 py-2.5">Location</th><th className="px-3 py-2.5 text-right">จำนวน</th><th className="px-3 py-2.5">โดย</th><th className="px-3 py-2.5" /></tr>
           </thead>
           <tbody className="divide-y divide-[#edf2f2]">
             {data.distributions.map((dist) => (
@@ -394,11 +449,12 @@ function DistributionTab({
                 <td className="mono px-3 py-2.5 text-xs text-[#789097]">{dist.locationCode ?? '-'}</td>
                 <td className="mono px-3 py-2.5 text-right font-bold text-[#315763]">{dist.quantity}</td>
                 <td className="px-3 py-2.5 text-xs text-[#8ba0a5]">{dist.createdByName ?? '-'}</td>
-                {actor.role === 'Admin' ? (
-                  <td className="px-3 py-2.5">
-                    <button onClick={() => cancelDistribution(dist)} disabled={busy} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-500 hover:bg-red-100 disabled:opacity-40"><X className="size-3" /> ยกเลิก</button>
-                  </td>
-                ) : null}
+                <td className="px-3 py-2.5">
+                  <div className="flex items-center gap-1.5">
+                    <DistributionAttachmentActions distributionId={dist.id} canDelete={actor.role === 'Admin'} onError={(text) => onNotice({ tone: 'danger', text })} />
+                    {actor.role === 'Admin' ? <button onClick={() => cancelDistribution(dist)} disabled={busy} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-500 hover:bg-red-100 disabled:opacity-40"><X className="size-3" /> ยกเลิก</button> : null}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -407,6 +463,121 @@ function DistributionTab({
       </div>
     </Card>
     </div>
+  )
+}
+
+interface HpvAttachment {
+  id: string
+  fileName: string
+}
+
+function DistributionAttachmentActions({ distributionId, canDelete, onError }: { distributionId: string; canDelete: boolean; onError: (text: string) => void }) {
+  const [attachments, setAttachments] = useState<HpvAttachment[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  async function refresh() {
+    try {
+      const params = new URLSearchParams({ module: 'hpv', entityType: 'hpv-distribution', entityId: distributionId })
+      const data = await api<{ attachments: HpvAttachment[] }>(`/api/attachments?${params}`)
+      setAttachments(data.attachments)
+    } catch {
+      setAttachments([])
+    }
+  }
+
+  useEffect(() => {
+    let active = true
+    const params = new URLSearchParams({ module: 'hpv', entityType: 'hpv-distribution', entityId: distributionId })
+    api<{ attachments: HpvAttachment[] }>(`/api/attachments?${params}`)
+      .then((data) => {
+        if (active) setAttachments(data.attachments)
+      })
+      .catch(() => {
+        if (active) setAttachments([])
+      })
+    return () => {
+      active = false
+    }
+  }, [distributionId])
+
+  async function upload(file: File) {
+    setBusy(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('module', 'hpv')
+      formData.append('entityType', 'hpv-distribution')
+      formData.append('entityId', distributionId)
+      formData.append('kind', 'distribution-document')
+      const response = await fetch('/api/attachments', { method: 'POST', body: formData })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error ?? 'Upload attachment failed')
+      await refresh()
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'Upload attachment failed')
+    } finally {
+      setBusy(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  async function remove(attachment: HpvAttachment) {
+    if (!window.confirm(`ลบเอกสารแนบ "${attachment.fileName}"?`)) return
+    setBusy(true)
+    try {
+      await api(`/api/attachments/${attachment.id}`, { method: 'DELETE' })
+      await refresh()
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'Delete attachment failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const firstAttachment = attachments?.[0]
+
+  return (
+    <span className="flex items-center gap-1">
+      {firstAttachment ? (
+        <a
+          href={`/api/attachments/${firstAttachment.id}`}
+          target="_blank"
+          rel="noreferrer"
+          title={firstAttachment.fileName}
+          aria-label={`View ${firstAttachment.fileName}`}
+          className="inline-flex size-7 items-center justify-center rounded border border-[#b9d7d8] bg-[#eef8f7] text-[#0b7f76] hover:bg-[#dff1ef]"
+        >
+          <Eye className="size-3.5" />
+        </a>
+      ) : null}
+      {firstAttachment && canDelete ? (
+        <button
+          type="button"
+          onClick={() => void remove(firstAttachment)}
+          disabled={busy}
+          title={`Delete ${firstAttachment.fileName}`}
+          aria-label={`Delete ${firstAttachment.fileName}`}
+          className="inline-flex size-7 items-center justify-center rounded border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 disabled:opacity-40"
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      ) : null}
+      <label className="inline-flex size-7 cursor-pointer items-center justify-center rounded border border-[#c9dadd] bg-white text-[#55727c] hover:bg-[#eef6f5]" title="Attach PDF/image">
+        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <FileUp className="size-3.5" />}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/pdf,image/*"
+          className="hidden"
+          disabled={busy}
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) void upload(file)
+          }}
+        />
+      </label>
+    </span>
   )
 }
 

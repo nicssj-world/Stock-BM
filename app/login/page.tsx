@@ -10,6 +10,6 @@ export default async function LoginPage() {
   } catch {
     actor = null
   }
-  if (actor) redirect('/dashboard')
+  if (actor) redirect(actor.role === 'Assistant' ? '/hpv' : '/dashboard')
   return <Suspense fallback={null}><LoginForm /></Suspense>
 }

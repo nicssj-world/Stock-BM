@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { redirect } from 'next/navigation'
-import type { BmActor } from '@/lib/bm/types'
+import type { BmActor, BmRole } from '@/lib/bm/types'
 import { HttpError } from '@/lib/server/errors'
 import { getAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
@@ -10,6 +10,12 @@ type RecordRow = Record<string, unknown>
 
 function asString(value: unknown) {
   return typeof value === 'string' ? value : ''
+}
+
+function asBmRole(value: unknown): BmRole {
+  const role = asString(value)
+  if (role === 'Admin' || role === 'Assistant') return role
+  return 'Staff'
 }
 
 export async function getActor(): Promise<BmActor | null> {
@@ -34,7 +40,7 @@ export async function getActor(): Promise<BmActor | null> {
     ephisId: asString(profileRow.ephis_id),
     displayName: asString(profileRow.display_name),
     genomicRole: asString(profileRow.role) === 'Admin' ? 'Admin' : 'CBH-Staff',
-    role: asString(accessRow.role) === 'Admin' ? 'Admin' : 'Staff',
+    role: asBmRole(accessRow.role),
   }
 }
 
@@ -56,9 +62,14 @@ export async function requirePageActor() {
   return actor
 }
 
-export async function requireAdminPageActor() {
+export async function requireFullPageActor() {
   const actor = await requirePageActor()
-  if (actor.role !== 'Admin') redirect('/dashboard')
+  if (actor.role === 'Assistant') redirect('/hpv')
   return actor
 }
 
+export async function requireAdminPageActor() {
+  const actor = await requirePageActor()
+  if (actor.role !== 'Admin') redirect(actor.role === 'Assistant' ? '/hpv' : '/dashboard')
+  return actor
+}

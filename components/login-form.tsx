@@ -1,12 +1,21 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { FlaskConical, KeyRound, ScanLine, ShieldCheck, UserRound } from 'lucide-react'
 import { api, Button, Input, Notice } from '@/components/ui'
 
+function safeNextPath(nextPath: string | null) {
+  if (!nextPath || !nextPath.startsWith('/') || nextPath.startsWith('//')) return '/dashboard'
+  return nextPath
+}
+
+function landingPath(role: string, nextPath: string | null) {
+  if (role === 'Assistant') return '/hpv'
+  return safeNextPath(nextPath)
+}
+
 export function LoginForm() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const [ephisId, setEphisId] = useState('')
   const [password, setPassword] = useState('')
@@ -18,9 +27,8 @@ export function LoginForm() {
     setError('')
     setBusy(true)
     try {
-      await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ ephisId, password }) })
-      router.replace(searchParams.get('next') || '/dashboard')
-      router.refresh()
+      const result = await api<{ actor: { role: string } }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ ephisId, password }) })
+      window.location.replace(landingPath(result.actor.role, searchParams.get('next')))
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'เข้าสู่ระบบไม่สำเร็จ / Login failed')
     } finally {

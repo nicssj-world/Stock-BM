@@ -7,12 +7,26 @@ import { getAdminClient } from '@/lib/supabase/admin'
 
 type RecordRow = Record<string, unknown>
 
+export type UserLookupResult = {
+  id: string
+  ephisId: string
+  displayName: string
+  genomicRole: GenomicRole
+  source: 'nipt_users' | 'profiles'
+}
+
 function fail(error: { message: string } | null, message = 'User database operation failed') {
   if (error) throw new HttpError(400, error.message || message)
 }
 
 function asString(value: unknown) {
   return typeof value === 'string' ? value : ''
+}
+
+function asBmRole(value: unknown): BmRole {
+  const role = asString(value)
+  if (role === 'Admin' || role === 'Assistant') return role
+  return 'Staff'
 }
 
 async function assertAdmin(actor: BmActor) {
@@ -36,11 +50,54 @@ export async function listUsers(): Promise<AdminUserRow[]> {
       displayName: asString(row.display_name),
       genomicRole: asString(row.role) === 'Admin' ? 'Admin' : 'CBH-Staff',
       genomicActive: Boolean(row.is_active),
-      stockRole: access ? (asString(access.role) === 'Admin' ? 'Admin' : 'Staff') : null,
+      stockRole: access ? asBmRole(access.role) : null,
       stockActive: Boolean(access?.is_active),
       createdAt: asString(row.created_at),
     }
   })
+}
+
+export async function lookupUserByEphisId(ephisIdInput: string, actor: BmActor): Promise<UserLookupResult | null> {
+  await assertAdmin(actor)
+  const admin = getAdminClient()
+  const ephisId = ephisIdInput.trim()
+
+  const { data: niptUser, error: niptError } = await admin
+    .from('nipt_users')
+    .select('id,ephis_id,display_name,role')
+    .eq('ephis_id', ephisId)
+    .maybeSingle()
+  fail(niptError)
+
+  if (niptUser) {
+    const row = niptUser as RecordRow
+    return {
+      id: asString(row.id),
+      ephisId: asString(row.ephis_id),
+      displayName: asString(row.display_name),
+      genomicRole: asString(row.role) === 'Admin' ? 'Admin' : 'CBH-Staff',
+      source: 'nipt_users',
+    }
+  }
+
+  const { data: profile } = await admin
+    .from('profiles')
+    .select('id,ephis_id,name')
+    .eq('ephis_id', ephisId)
+    .maybeSingle()
+
+  if (!profile) return null
+  const row = profile as RecordRow
+  const displayName = asString(row.name).trim()
+  if (!displayName) return null
+
+  return {
+    id: asString(row.id),
+    ephisId: asString(row.ephis_id),
+    displayName,
+    genomicRole: 'CBH-Staff',
+    source: 'profiles',
+  }
 }
 
 export async function createOrGrantUser(input: {

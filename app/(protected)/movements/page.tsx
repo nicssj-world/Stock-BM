@@ -1,5 +1,5 @@
 import { TransactionView } from '@/components/transaction-view'
-import { requirePageActor } from '@/lib/server/auth'
+import { requireFullPageActor } from '@/lib/server/auth'
 import { getStockWorkspace } from '@/lib/server/stock'
 
 type Mode = 'receive' | 'issue' | 'move' | 'adjust'
@@ -10,7 +10,7 @@ export default async function MovementsPage({
 }: {
   searchParams: Promise<{ mode?: string; itemId?: string; lotId?: string; locationId?: string }>
 }) {
-  const actor = await requirePageActor()
+  const actor = await requireFullPageActor()
   const params = await searchParams
   const initialMode: Mode = MODES.includes(params.mode as Mode) ? (params.mode as Mode) : 'receive'
   return (

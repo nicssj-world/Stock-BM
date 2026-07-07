@@ -7,7 +7,7 @@ const schema = z.object({
   ephisId: z.string().regex(/^\d+$/),
   displayName: z.string().trim().min(1).max(120),
   password: z.string().min(8).max(128),
-  stockRole: z.enum(['Admin', 'Staff']),
+  stockRole: z.enum(['Admin', 'Staff', 'Assistant']),
   genomicRole: z.enum(['Admin', 'CBH-Staff']).optional(),
 })
 
@@ -24,4 +24,3 @@ export async function POST(request: Request) {
     return { id: await createOrGrantUser(await readJson(request, schema), actor) }
   })
 }
-

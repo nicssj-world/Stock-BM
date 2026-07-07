@@ -3,7 +3,7 @@ import { listAttachments, uploadAttachment, type AttachmentModule } from '@/lib/
 import { HttpError } from '@/lib/server/errors'
 import { respond } from '@/lib/server/route'
 
-const MODULES: AttachmentModule[] = ['iqc', 'eqa', 'stock', 'env', 'lotverif']
+const MODULES: AttachmentModule[] = ['iqc', 'eqa', 'stock', 'env', 'lotverif', 'hpv']
 const MAX_BYTES = 15 * 1024 * 1024
 
 function asModule(value: string): AttachmentModule {

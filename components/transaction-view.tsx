@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -23,6 +23,7 @@ import { formatDate, formatDateTime, formatQuantity, suggestedUsableLot } from '
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, Textarea } from '@/components/ui'
 
 type Mode = 'receive' | 'issue' | 'move' | 'adjust' | 'history'
+const LAST_RECEIVE_LOCATION_KEY = 'bm-stock:last-receive-location-id'
 
 const ALL_TABS: { mode: Mode; label: string; icon: typeof ArrowDownToLine; adminOnly?: boolean }[] = [
   { mode: 'receive', label: 'รับเข้า', icon: ArrowDownToLine },
@@ -42,6 +43,33 @@ function downloadCsv(filename: string, rows: string[][]) {
   a.download = filename
   a.click()
   URL.revokeObjectURL(url)
+}
+
+function firstAvailableReceiveLocation(locations: StockWorkspace['locations'], defaultLocationId?: string) {
+  if (defaultLocationId && locations.some((location) => location.id === defaultLocationId)) {
+    return defaultLocationId
+  }
+  return locations[0]?.id ?? ''
+}
+
+function readLastReceiveLocation(locations: StockWorkspace['locations'], defaultLocationId?: string) {
+  const fallback = firstAvailableReceiveLocation(locations, defaultLocationId)
+  if (typeof window === 'undefined') return fallback
+  try {
+    const savedLocationId = window.localStorage.getItem(LAST_RECEIVE_LOCATION_KEY)
+    return savedLocationId && locations.some((location) => location.id === savedLocationId) ? savedLocationId : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function rememberReceiveLocation(locationId: string) {
+  if (!locationId || typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(LAST_RECEIVE_LOCATION_KEY, locationId)
+  } catch {
+    // Some browsers block storage in private mode; receiving should still work.
+  }
 }
 
 export function TransactionView({
@@ -107,6 +135,7 @@ export function TransactionView({
           items={activeItems}
           locations={activeLocations}
           defaultItemId={defaultItemId}
+          defaultLocationId={defaultLocationId}
           onSaved={(stock) => {
             setData(stock)
             setNotice({ tone: 'success', text: 'บันทึกรับเข้าแล้ว / Receive saved' })
@@ -169,18 +198,20 @@ function ReceiveForm({
   items,
   locations,
   defaultItemId,
+  defaultLocationId,
   onSaved,
   onError,
 }: {
   items: StockItem[]
   locations: StockWorkspace['locations']
   defaultItemId?: string
+  defaultLocationId?: string
   onSaved: (stock: StockWorkspace) => void
   onError: (text: string) => void
 }) {
   const [form, setForm] = useState({
     itemId: items.some((item) => item.id === defaultItemId) ? defaultItemId! : items[0]?.id ?? '',
-    locationId: locations[0]?.id ?? '',
+    locationId: firstAvailableReceiveLocation(locations, defaultLocationId),
     lotNumber: '',
     expiryDate: '',
     quantity: '',
@@ -191,10 +222,17 @@ function ReceiveForm({
   })
   const [itemSearch, setItemSearch] = useState('')
   const [busy, setBusy] = useState(false)
+  const locationIdsKey = locations.map((candidate) => candidate.id).join('|')
   const item = items.find((candidate) => candidate.id === form.itemId)
   const location = locations.find((candidate) => candidate.id === form.locationId)
   const filteredItems = filterItems(items, itemSearch)
   const canSave = Boolean(item && location && form.quantity && (!item.trackLot || form.lotNumber.trim()) && (!item.trackExpiry || form.expiryDate))
+
+  useEffect(() => {
+    const savedLocationId = readLastReceiveLocation(locations, defaultLocationId)
+    if (!savedLocationId) return
+    setForm((current) => current.locationId === savedLocationId ? current : { ...current, locationId: savedLocationId })
+  }, [defaultLocationId, locationIdsKey, locations])
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -210,6 +248,7 @@ function ReceiveForm({
           expiryDate: item.trackExpiry ? form.expiryDate : null,
         }),
       })
+      rememberReceiveLocation(form.locationId)
       onSaved(result.stock)
       setForm({ ...form, lotNumber: '', expiryDate: '', quantity: '', supplier: '', manufacturerBarcode: '', reference: '', note: '' })
       setItemSearch('')
@@ -263,7 +302,10 @@ function ReceiveForm({
               title={option.code}
               meta={option.name}
               compact
-              onClick={() => setForm({ ...form, locationId: option.id })}
+              onClick={() => {
+                rememberReceiveLocation(option.id)
+                setForm({ ...form, locationId: option.id })
+              }}
             />
           ))}
         </div>
@@ -701,10 +743,20 @@ function AdjustForm({
   const lots = item?.lots ?? []
   const lot = lots.find((l) => l.id === form.lotId)
   const currentBalance = lot?.balances.find((b) => b.locationId === form.locationId)?.onHand ?? 0
-  const qty = Number(form.quantity || 0)
-  const newBalance = currentBalance + qty
+  const qty = Number(form.quantity)
+  const hasValidQuantity = form.quantity.trim() !== '' && Number.isFinite(qty)
+  const newBalance = currentBalance + (hasValidQuantity ? qty : 0)
   const filteredItems = filterItems(lottedItems, itemSearch)
-  const canSave = Boolean(lot && form.locationId && form.quantity && qty !== 0 && form.note.trim())
+  const canSave = Boolean(lot && form.locationId && hasValidQuantity && qty !== 0 && form.note.trim())
+
+  function toggleAdjustmentSign() {
+    const value = form.quantity.trim()
+    if (!value) {
+      setForm({ ...form, quantity: '-' })
+      return
+    }
+    setForm({ ...form, quantity: value.startsWith('-') ? value.slice(1) : `-${value.replace(/^\+/, '')}` })
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -803,16 +855,26 @@ function AdjustForm({
             </div>
           </div>
           <BigField label={`Adjustment${item ? ` (${item.unit})` : ''}`}>
-            <Input
+            <div className="flex h-14 overflow-hidden rounded-md border border-[#b7d2d0] bg-white focus-within:ring-2 focus-within:ring-[#0b7f76]">
+              <button
+                type="button"
+                aria-label="Toggle positive or negative adjustment"
+                title="Toggle +/-"
+                onClick={toggleAdjustmentSign}
+                className="flex w-14 shrink-0 items-center justify-center border-r border-[#d8e6e6] text-[#0b7f76] transition hover:bg-[#eef7f6] active:bg-[#d9eeec]"
+              >
+                <span className="mono text-base font-bold">+/-</span>
+              </button>
+              <Input
               required
               inputMode="decimal"
-              type="number"
-              step="0.001"
-              className="h-14 mono text-xl font-bold"
+              type="text"
+              className="h-full border-0 mono text-xl font-bold focus-visible:ring-0"
               value={form.quantity}
               onChange={(event) => setForm({ ...form, quantity: event.target.value })}
               placeholder="+10 หรือ -5"
-            />
+              />
+            </div>
           </BigField>
           <BigField label="ยอดใหม่ (preview)">
             <div
@@ -822,7 +884,7 @@ function AdjustForm({
                   : 'border-[#d8e6e6] bg-[#f7fbfc] text-[#0b7f76]'
               }`}
             >
-              {form.quantity ? `${formatQuantity(newBalance)} ${item?.unit ?? ''}` : '—'}
+              {hasValidQuantity ? `${formatQuantity(newBalance)} ${item?.unit ?? ''}` : '—'}
             </div>
           </BigField>
         </div>

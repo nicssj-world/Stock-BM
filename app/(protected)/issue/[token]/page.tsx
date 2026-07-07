@@ -2,14 +2,14 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { QuickIssue } from '@/components/quick-issue'
 import { Notice, PageHeader } from '@/components/ui'
-import { requirePageActor } from '@/lib/server/auth'
+import { requireFullPageActor } from '@/lib/server/auth'
 import { resolveLotForIssue } from '@/lib/server/stock'
 import type { LotIssueContext } from '@/lib/bm/types'
 
 // QR sticker target: <app>/issue/<token>. Protected — an unauthenticated scan lands
 // on login then returns here. Renders the one-screen quick-issue for the scanned lot.
 export default async function IssueTokenPage({ params }: { params: Promise<{ token: string }> }) {
-  const actor = await requirePageActor()
+  const actor = await requireFullPageActor()
   const { token } = await params
 
   let context: LotIssueContext | null = null

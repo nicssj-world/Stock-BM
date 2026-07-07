@@ -327,7 +327,67 @@ function MasterList({ icon, title, items, children, selectedId }: { icon: React.
 
 function UsersAdmin({ actorId, users, refreshUsers, onError, onSuccess }: { actorId: string; users: AdminUserRow[] | null; refreshUsers: () => Promise<void>; onError: (text: string) => void; onSuccess: (text: string) => void }) {
   const [form, setForm] = useState({ ephisId: '', displayName: '', password: '', stockRole: 'Staff', genomicRole: 'CBH-Staff' })
+  const [displayNameEdited, setDisplayNameEdited] = useState(false)
+  const [lookupState, setLookupState] = useState<{ busy: boolean; text: string; tone: 'muted' | 'success' | 'warning' }>({ busy: false, text: '', tone: 'muted' })
   const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    const ephisId = form.ephisId.trim()
+    if (!ephisId) {
+      setLookupState({ busy: false, text: '', tone: 'muted' })
+      return
+    }
+    if (!/^\d+$/.test(ephisId)) {
+      setLookupState({ busy: false, text: 'E-Phis must be numeric', tone: 'warning' })
+      return
+    }
+
+    const listedUser = users?.find((user) => user.ephisId === ephisId)
+    if (listedUser) {
+      setLookupState({ busy: false, text: `Found: ${listedUser.displayName}`, tone: 'success' })
+      if (!displayNameEdited) {
+        setForm((current) => current.ephisId.trim() === ephisId
+          ? { ...current, displayName: listedUser.displayName, genomicRole: listedUser.genomicRole }
+          : current)
+      }
+      return
+    }
+
+    let active = true
+    const timer = window.setTimeout(async () => {
+      setLookupState({ busy: true, text: 'Looking up user...', tone: 'muted' })
+      try {
+        const result = await api<{ user: { displayName: string; genomicRole: 'Admin' | 'CBH-Staff'; source: string } | null }>(`/api/admin/users/lookup?ephisId=${encodeURIComponent(ephisId)}`)
+        if (!active) return
+        if (result.user) {
+          setLookupState({ busy: false, text: `Found: ${result.user.displayName}`, tone: 'success' })
+          if (!displayNameEdited) {
+            setForm((current) => current.ephisId.trim() === ephisId
+              ? { ...current, displayName: result.user!.displayName, genomicRole: result.user!.genomicRole }
+              : current)
+          }
+        } else {
+          setLookupState({ busy: false, text: 'No matching user found. Enter display name manually.', tone: 'warning' })
+        }
+      } catch (error) {
+        if (!active) return
+        setLookupState({ busy: false, text: error instanceof Error ? error.message : 'Lookup failed', tone: 'warning' })
+      }
+    }, 350)
+
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [displayNameEdited, form.ephisId, users])
+
+  function setEphisId(value: string) {
+    const ephisId = value.replace(/\D/g, '')
+    setDisplayNameEdited(false)
+    setLookupState({ busy: false, text: '', tone: 'muted' })
+    setForm((current) => ({ ...current, ephisId, displayName: '', genomicRole: 'CBH-Staff' }))
+  }
+
   async function create(event: React.FormEvent) {
     event.preventDefault()
     setBusy(true)
@@ -335,6 +395,8 @@ function UsersAdmin({ actorId, users, refreshUsers, onError, onSuccess }: { acto
       await api('/api/admin/users', { method: 'POST', body: JSON.stringify(form) })
       await refreshUsers()
       setForm({ ephisId: '', displayName: '', password: '', stockRole: 'Staff', genomicRole: 'CBH-Staff' })
+      setDisplayNameEdited(false)
+      setLookupState({ busy: false, text: '', tone: 'muted' })
       onSuccess('เพิ่ม/ให้สิทธิ์ผู้ใช้แล้ว')
     } catch (error) {
       onError(error instanceof Error ? error.message : 'บันทึกไม่สำเร็จ')
@@ -374,16 +436,19 @@ function UsersAdmin({ actorId, users, refreshUsers, onError, onSuccess }: { acto
   return <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
     <Card className="overflow-hidden">
       <div className="flex items-center gap-2 border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3"><UserCog className="size-4 text-[#0b7f76]" /><h2 className="font-bold">Users</h2></div>
-      {!users ? <div className="p-6"><Loading /></div> : <div className="overflow-x-auto"><table className="w-full min-w-[780px] text-left text-sm"><thead className="bg-[#f7fafa] text-[10px] tracking-[0.08em] text-[#779097] uppercase"><tr><th className="px-4 py-2.5">User</th><th className="px-3 py-2.5">E-Phis</th><th className="px-3 py-2.5">Stock role</th><th className="px-3 py-2.5">Stock</th><th className="px-4 py-2.5"></th></tr></thead><tbody className="divide-y divide-[#edf2f2]">{users.map((user) => <tr key={user.id}><td className="px-4 py-3"><p className="font-bold text-[#45636e]">{user.displayName}</p><p className="text-[10px] text-[#8ba0a5]">{user.genomicRole}{user.id === actorId ? ' · current account' : ''}</p></td><td className="mono px-3 py-3 text-xs text-[#668088]">{user.ephisId}</td><td className="px-3 py-3"><Select className="w-auto py-1 text-xs" value={user.stockRole ?? 'Staff'} onChange={(event) => patch(user, { stockRole: event.target.value as AdminUserRow['stockRole'], stockActive: true })}><option>Staff</option><option>Admin</option></Select></td><td className="px-3 py-3"><button disabled={user.id === actorId} onClick={() => patch(user, { stockActive: !user.stockActive })} className={`rounded border px-2 py-1 text-[10px] font-bold ${user.stockActive ? 'border-[#c7e0c8] bg-[#f0f8f1] text-[#518058]' : 'border-[#e0d7d8] bg-[#f7f4f4] text-[#8d7b7d]'}`}>{user.stockActive ? 'ACTIVE' : 'INACTIVE'}</button></td><td className="px-4 py-3 text-right"><div className="flex items-center justify-end gap-1"><Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => reset(user)}><KeyRound className="size-3.5" /> Reset</Button><Button disabled={user.id === actorId} variant="ghost" className="px-2 py-1 text-xs text-red-500 hover:text-red-700 disabled:opacity-30" onClick={() => revoke(user)}><Trash2 className="size-3.5" /></Button></div></td></tr>)}</tbody></table></div>}
+      {!users ? <div className="p-6"><Loading /></div> : <div className="overflow-x-auto"><table className="w-full min-w-[780px] text-left text-sm"><thead className="bg-[#f7fafa] text-[10px] tracking-[0.08em] text-[#779097] uppercase"><tr><th className="px-4 py-2.5">User</th><th className="px-3 py-2.5">E-Phis</th><th className="px-3 py-2.5">Stock role</th><th className="px-3 py-2.5">Stock</th><th className="px-4 py-2.5"></th></tr></thead><tbody className="divide-y divide-[#edf2f2]">{users.map((user) => <tr key={user.id}><td className="px-4 py-3"><p className="font-bold text-[#45636e]">{user.displayName}</p><p className="text-[10px] text-[#8ba0a5]">{user.genomicRole}{user.id === actorId ? ' · current account' : ''}</p></td><td className="mono px-3 py-3 text-xs text-[#668088]">{user.ephisId}</td><td className="px-3 py-3"><Select className="w-auto py-1 text-xs" value={user.stockRole ?? 'Staff'} onChange={(event) => patch(user, { stockRole: event.target.value as AdminUserRow['stockRole'], stockActive: true })}><option>Staff</option><option>Assistant</option><option>Admin</option></Select></td><td className="px-3 py-3"><button disabled={user.id === actorId} onClick={() => patch(user, { stockActive: !user.stockActive })} className={`rounded border px-2 py-1 text-[10px] font-bold ${user.stockActive ? 'border-[#c7e0c8] bg-[#f0f8f1] text-[#518058]' : 'border-[#e0d7d8] bg-[#f7f4f4] text-[#8d7b7d]'}`}>{user.stockActive ? 'ACTIVE' : 'INACTIVE'}</button></td><td className="px-4 py-3 text-right"><div className="flex items-center justify-end gap-1"><Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => reset(user)}><KeyRound className="size-3.5" /> Reset</Button><Button disabled={user.id === actorId} variant="ghost" className="px-2 py-1 text-xs text-red-500 hover:text-red-700 disabled:opacity-30" onClick={() => revoke(user)}><Trash2 className="size-3.5" /></Button></div></td></tr>)}</tbody></table></div>}
     </Card>
     <Card className="p-4">
-      <form onSubmit={create} className="space-y-3">
+      <form onSubmit={create} className="space-y-3" autoComplete="off">
         <h2 className="font-bold text-[#173d50]">เพิ่ม/ให้สิทธิ์ผู้ใช้</h2>
-        <Field label="E-Phis"><Input required inputMode="numeric" value={form.ephisId} onChange={(event) => setForm({ ...form, ephisId: event.target.value })} /></Field>
-        <Field label="ชื่อที่แสดง"><Input required value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} /></Field>
-        <Field label="Initial password"><Input required type="password" minLength={8} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
-        <div className="grid gap-3 sm:grid-cols-2"><Field label="Stock role"><Select value={form.stockRole} onChange={(event) => setForm({ ...form, stockRole: event.target.value })}><option>Staff</option><option>Admin</option></Select></Field><Field label="Genomic role"><Select value={form.genomicRole} onChange={(event) => setForm({ ...form, genomicRole: event.target.value })}><option>CBH-Staff</option><option>Admin</option></Select></Field></div>
-        <Button disabled={busy}><Plus className="size-4" /> Save user</Button>
+        <Field label="E-Phis"><Input required inputMode="numeric" autoComplete="off" value={form.ephisId} onChange={(event) => setEphisId(event.target.value)} /></Field>
+        <Field label="ชื่อที่แสดง">
+          <Input required autoComplete="off" value={form.displayName} onChange={(event) => { setDisplayNameEdited(true); setForm({ ...form, displayName: event.target.value }) }} />
+          {lookupState.text ? <p className={`mt-1 text-[11px] ${lookupState.tone === 'success' ? 'text-[#0b7f76]' : lookupState.tone === 'warning' ? 'text-[#a36b10]' : 'text-[#7f949b]'}`}>{lookupState.text}</p> : null}
+        </Field>
+        <Field label="Initial password"><Input required type="password" minLength={8} autoComplete="new-password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
+        <div className="grid gap-3 sm:grid-cols-2"><Field label="Stock role"><Select value={form.stockRole} onChange={(event) => setForm({ ...form, stockRole: event.target.value })}><option>Staff</option><option>Assistant</option><option>Admin</option></Select></Field><Field label="Genomic role"><Select value={form.genomicRole} onChange={(event) => setForm({ ...form, genomicRole: event.target.value })}><option>CBH-Staff</option><option>Admin</option></Select></Field></div>
+        <Button disabled={busy || lookupState.busy}><Plus className="size-4" /> Save user</Button>
       </form>
     </Card>
   </div>

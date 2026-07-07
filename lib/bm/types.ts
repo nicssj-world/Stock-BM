@@ -1,4 +1,4 @@
-export type BmRole = 'Admin' | 'Staff'
+export type BmRole = 'Admin' | 'Staff' | 'Assistant'
 export type GenomicRole = 'Admin' | 'CBH-Staff'
 export type StockTransactionType = 'receive' | 'issue' | 'move' | 'adjustment' | 'reversal'
 export type ExpiryState = 'ok' | 'expiring' | 'expired' | 'none'

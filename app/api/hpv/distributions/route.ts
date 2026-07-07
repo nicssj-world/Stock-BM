@@ -14,5 +14,5 @@ const schema = z.object({
 })
 
 export async function POST(request: Request) {
-  return respond(async () => ({ workspace: await createHpvDistribution(await readJson(request, schema), await requireActor()) }))
+  return respond(async () => createHpvDistribution(await readJson(request, schema), await requireActor()))
 }

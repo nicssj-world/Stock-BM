@@ -2,14 +2,14 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { EnvQuickLog } from '@/components/env-quick-log'
 import { Card, Notice, PageHeader } from '@/components/ui'
-import { requirePageActor } from '@/lib/server/auth'
+import { requireFullPageActor } from '@/lib/server/auth'
 import { resolveEnvToken } from '@/lib/server/environment'
 import type { EnvUnit } from '@/lib/env/types'
 
 // QR sticker target: <app>/environment/u/<token>. Protected, so an unauthenticated
 // scan lands on login then returns here. Renders a fast single-unit entry form.
 export default async function EnvUnitTokenPage({ params }: { params: Promise<{ token: string }> }) {
-  await requirePageActor()
+  await requireFullPageActor()
   const { token } = await params
 
   let unit: EnvUnit | null = null

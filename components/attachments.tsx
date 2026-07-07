@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Download, FileUp, Loader2, Paperclip, Trash2 } from 'lucide-react'
 import { api } from '@/components/ui'
 
-type AttachmentModule = 'iqc' | 'eqa' | 'stock' | 'env' | 'lotverif'
+type AttachmentModule = 'iqc' | 'eqa' | 'stock' | 'env' | 'lotverif' | 'hpv'
 
 interface Attachment {
   id: string

@@ -306,8 +306,9 @@ export async function createHpvDistribution(input: {
     .select('id')
     .single()
   fail(error)
-  await writeAudit(actor, 'hpv.distribution.create', 'hpv-distribution', asString((data as RecordRow).id), { ...input, stockTransactionId: txId })
-  return getHpvWorkspace(actor)
+  const distributionId = asString((data as RecordRow).id)
+  await writeAudit(actor, 'hpv.distribution.create', 'hpv-distribution', distributionId, { ...input, stockTransactionId: txId })
+  return { workspace: await getHpvWorkspace(actor), distributionId }
 }
 
 export async function updateHpvReceipt(input: { id: string; receivedOn?: string; sampleCount?: number; note?: string | null }, actor: BmActor) {

@@ -52,7 +52,9 @@ const monitoringSection: NavSection = {
 export function AppShell({ actor, children }: { actor: BmActor; children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
-  const sections: NavSection[] = [homeSection, stockSection, hpvSection, qualitySection, monitoringSection]
+  const sections: NavSection[] = actor.role === 'Assistant'
+    ? [hpvSection]
+    : [homeSection, stockSection, hpvSection, qualitySection, monitoringSection]
   if (actor.role === 'Admin') sections.push({ title: 'System', items: [{ href: '/admin', label: 'Admin', icon: Settings }] })
 
   async function logout() {

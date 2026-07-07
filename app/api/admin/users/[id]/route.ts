@@ -7,7 +7,7 @@ const schema = z.object({
   displayName: z.string().trim().min(1).max(120).optional(),
   genomicRole: z.enum(['Admin', 'CBH-Staff']).optional(),
   genomicActive: z.boolean().optional(),
-  stockRole: z.enum(['Admin', 'Staff']).optional(),
+  stockRole: z.enum(['Admin', 'Staff', 'Assistant']).optional(),
   stockActive: z.boolean().optional(),
 })
 
@@ -24,4 +24,3 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     return { ok: true }
   })
 }
-
