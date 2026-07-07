@@ -7,7 +7,7 @@ import { getStockWorkspace } from '@/lib/server/stock'
 export default async function DashboardPage() {
   const actor = await requireFullPageActor()
   const [stock, env, hpv] = await Promise.all([
-    getStockWorkspace(actor),
+    getStockWorkspace(actor, { includeTransactions: false }),
     getEnvDashboardData(actor),
     getHpvDashboardData(),
   ])
