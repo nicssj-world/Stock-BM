@@ -24,17 +24,19 @@ export function RangeChart({
   maxLimit,
   unit,
   label,
+  metricLabel = 'Temperature',
 }: {
   points: EnvReadingPoint[]
   minLimit: number | null
   maxLimit: number | null
   unit: string
   label: string
+  metricLabel?: string
 }) {
   const values = points.map((p) => p.value)
   const bounds = [...values, ...(minLimit != null ? [minLimit] : []), ...(maxLimit != null ? [maxLimit] : [])]
   if (!bounds.length) {
-    return <p className="rounded-md border border-[#e3ebec] bg-[#f8fbfb] px-3 py-6 text-center text-xs text-[#91a4a9]">ยังไม่มีข้อมูล / No readings yet</p>
+    return <p className="rounded-md border border-[#e3ebec] bg-[#f8fbfb] px-3 py-6 text-center text-xs text-[#91a4a9]">ยังไม่มีข้อมูล / No {metricLabel.toLowerCase()} readings yet</p>
   }
   const rawMax = Math.max(...bounds)
   const rawMin = Math.min(...bounds)
@@ -55,8 +57,8 @@ export function RangeChart({
   const bandBottom = minLimit != null ? yAt(minLimit) : PAD.top + PLOT_H
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={`Temperature trend for ${label}`}>
-      <title>{`Temperature trend: ${label}`}</title>
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={`${metricLabel} trend for ${label}`}>
+      <title>{`${metricLabel} trend: ${label}`}</title>
       {/* out-of-range background */}
       <rect x={PAD.left} y={PAD.top} width={PLOT_W} height={PLOT_H} fill="#fdecee" />
       {/* acceptable band */}

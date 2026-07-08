@@ -169,6 +169,7 @@ function QuickAction({ href, icon, label, detail }: { href: string; icon: React.
 function TempRow({ card }: { card: EnvDashboard['cards'][number] }) {
   const isOutOfRange = card.status === 'out-of-range'
   const value = card.todayReading?.readingValue ?? card.lastReading?.readingValue
+  const humidity = card.unit.trackHumidity ? (card.todayReading?.humidityPercent ?? card.lastReading?.humidityPercent) : null
   return (
     <div className="flex items-center justify-between gap-3 px-4 py-3">
       <div className="flex items-center gap-2">
@@ -178,6 +179,7 @@ function TempRow({ card }: { card: EnvDashboard['cards'][number] }) {
           <p className="mt-0.5 text-xs text-[#7b9298]">
             {card.unit.code}
             {isOutOfRange && value != null ? ` · ${value} ${card.unit.unit} (ช่วง ${card.unit.minLimit ?? '—'}–${card.unit.maxLimit ?? '—'})` : ' · ยังไม่บันทึกวันนี้'}
+            {humidity != null ? ` · RH ${humidity}%` : ''}
           </p>
         </div>
       </div>

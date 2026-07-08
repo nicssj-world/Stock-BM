@@ -3,10 +3,10 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { AlertTriangle, Bell, ClipboardList, Download, History, LayoutGrid, Lock, Pencil, Plus, QrCode as QrCodeIcon, Settings2, Thermometer, Trash2, Unlock, X } from 'lucide-react'
+import { AlertTriangle, Bell, ClipboardList, Download, Droplets, History, LayoutGrid, Lock, Pencil, Plus, QrCode as QrCodeIcon, Settings2, Thermometer, Trash2, Unlock, X } from 'lucide-react'
 import { QrCode } from '@/components/qr-code'
 import type { BmActor } from '@/lib/bm/types'
-import type { EnvCardStatus, EnvPeriodIndex, EnvUnit, EnvWorkspace } from '@/lib/env/types'
+import type { EnvCardStatus, EnvPeriodIndex, EnvReadingStatus, EnvUnit, EnvWorkspace } from '@/lib/env/types'
 import { envPeriodLabel, envPeriodOptions } from '@/lib/env/types'
 import { formatDate, formatDateTime } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Textarea, type StatusTone, Tabs } from '@/components/ui'
@@ -135,6 +135,7 @@ function UnitCard({ card, onChanged }: { card: EnvWorkspace['cards'][number]; on
             {unit.code} · {KIND_LABEL[unit.kind] ?? unit.kind}
             {unit.locationCode ? ` · Location ${unit.locationCode}` : ''}
             {unit.locationName ? ` (${unit.locationName})` : ''} · ช่วง {unit.minLimit ?? '—'}–{unit.maxLimit ?? '—'} {unit.unit}
+            {unit.trackHumidity ? ` · RH ${unit.humidityMinLimit ?? '—'}–${unit.humidityMaxLimit ?? '—'}%` : ''}
           </p>
           <p className="mt-0.5 text-[11px] text-[#8ba0a5]">
             {unit.thermometerId ? `Thermometer ${unit.thermometerId}` : ''}
@@ -149,6 +150,7 @@ function UnitCard({ card, onChanged }: { card: EnvWorkspace['cards'][number]; on
           <p className="mono text-lg font-bold tabular-nums text-[#173d50]">
             {card.lastReading ? `${card.lastReading.readingValue} ${unit.unit}` : '—'}
           </p>
+          {card.lastReading?.humidityPercent != null ? <p className="mono text-[11px] font-semibold text-[#58747d]">RH {card.lastReading.humidityPercent}%</p> : null}
           <p className="text-[11px] text-[#8ba0a5]">{card.lastReading ? formatDate(card.lastReading.readingDate) : 'ยังไม่มีข้อมูล'}</p>
         </div>
       </div>
@@ -156,6 +158,25 @@ function UnitCard({ card, onChanged }: { card: EnvWorkspace['cards'][number]; on
       <div className="mt-3">
         <RangeChart points={card.points} minLimit={unit.minLimit} maxLimit={unit.maxLimit} unit={unit.unit} label={unit.name} />
       </div>
+      {unit.trackHumidity ? (
+        <div className="mt-3 rounded-md border border-[#e3ebec] bg-[#fbfefe] p-2">
+          <p className="mb-1 flex items-center gap-1.5 text-xs font-bold text-[#315763]"><Droplets className="size-3.5 text-[#0b7f76]" /> Relative humidity</p>
+          <RangeChart
+            points={card.points
+              .filter((point) => point.humidityValue != null)
+              .map((point) => ({
+                ...point,
+                value: point.humidityValue as number,
+                status: rangeStatus(point.humidityValue as number, unit.humidityMinLimit, unit.humidityMaxLimit),
+              }))}
+            minLimit={unit.humidityMinLimit}
+            maxLimit={unit.humidityMaxLimit}
+            unit="%"
+            label={`${unit.name} RH`}
+            metricLabel="Relative humidity"
+          />
+        </div>
+      ) : null}
 
       <div className="mt-3 flex items-center justify-between gap-2">
         <span className="text-[11px] text-[#8ba0a5]">
@@ -255,6 +276,12 @@ function sd(values: number[]) {
   return Math.sqrt(variance)
 }
 
+function rangeStatus(value: number, minLimit: number | null, maxLimit: number | null): EnvReadingStatus {
+  if (minLimit != null && value < minLimit) return 'out-of-range'
+  if (maxLimit != null && value > maxLimit) return 'out-of-range'
+  return 'in-range'
+}
+
 function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmActor; onChanged: () => void }) {
   const isAdmin = actor.role === 'Admin'
   const [unitId, setUnitId] = useState(data.units[0]?.id ?? '')
@@ -286,19 +313,24 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
     const stdev = sd(values)
     const minObs = Math.min(...values)
     const maxObs = Math.max(...values)
+    const humidities = valid.map((r) => r.humidityPercent).filter((value): value is number => value != null)
+    const humidityMean = humidities.length ? humidities.reduce((a, b) => a + b, 0) / humidities.length : null
+    const humidityMin = humidities.length ? Math.min(...humidities) : null
+    const humidityMax = humidities.length ? Math.max(...humidities) : null
     const oor = valid.filter((r) => r.status === 'out-of-range').length
     const uniqueDays = new Set(valid.map((r) => r.readingDate)).size
     const totalDays = daysInYearMonth(month)
-    return { mean, stdev, minObs, maxObs, oor, oorPct: (oor / valid.length) * 100, daysLogged: uniqueDays, totalDays, count: valid.length }
+    return { mean, stdev, minObs, maxObs, humidityMean, humidityMin, humidityMax, oor, oorPct: (oor / valid.length) * 100, daysLogged: uniqueDays, totalDays, count: valid.length }
   }, [readings, month])
 
   function exportCsv() {
     const rows: string[][] = [
-      ['วันที่', 'รอบ', `ค่า (${unit?.unit ?? ''})`, `Min`, `Max`, 'สถานะ', 'หมายเหตุ', 'บันทึกโดย', 'Voided'],
+      ['วันที่', 'รอบ', `ค่า (${unit?.unit ?? ''})`, 'Humidity (%)', `Min`, `Max`, 'สถานะ', 'หมายเหตุ', 'บันทึกโดย', 'Voided'],
       ...readings.map((r) => [
         r.readingDate,
         r.periodLabel,
         String(r.readingValue),
+        r.humidityPercent != null ? String(r.humidityPercent) : '',
         r.recordedMin != null ? String(r.recordedMin) : '',
         r.recordedMax != null ? String(r.recordedMax) : '',
         r.status,
@@ -323,10 +355,10 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
       const date = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
       const rs = byDate.get(date) ?? []
       if (rs.length === 0) {
-        dayRows.push([date, '', '', '', '', 'ไม่มีข้อมูล', '', ''])
+        dayRows.push([date, '', '', '', '', '', 'ไม่มีข้อมูล', '', ''])
       } else {
         for (const r of rs) {
-          dayRows.push([date, r.periodLabel, String(r.readingValue), r.recordedMin != null ? String(r.recordedMin) : '', r.recordedMax != null ? String(r.recordedMax) : '', r.status === 'out-of-range' ? 'นอกช่วง' : r.status === 'corrected' ? 'แก้ไขแล้ว' : 'ปกติ', r.note ?? '', r.recordedByName ?? ''])
+          dayRows.push([date, r.periodLabel, String(r.readingValue), r.humidityPercent != null ? String(r.humidityPercent) : '', r.recordedMin != null ? String(r.recordedMin) : '', r.recordedMax != null ? String(r.recordedMax) : '', r.status === 'out-of-range' ? 'นอกช่วง' : r.status === 'corrected' ? 'แก้ไขแล้ว' : 'ปกติ', r.note ?? '', r.recordedByName ?? ''])
         }
       }
     }
@@ -336,13 +368,15 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
       [`Review: ${monthlyReview ? `Locked by ${monthlyReview.reviewedByName ?? '-'} at ${formatDateTime(monthlyReview.reviewedAt)}` : 'Not reviewed'}`],
       monthlyReview?.note ? [`Review note: ${monthlyReview.note}`] : [],
       [],
-      ['วันที่', 'รอบ', `ค่า (${unit.unit})`, 'Min', 'Max', 'สถานะ', 'หมายเหตุ', 'บันทึกโดย'],
+      ['วันที่', 'รอบ', `ค่า (${unit.unit})`, 'Humidity (%)', 'Min', 'Max', 'สถานะ', 'หมายเหตุ', 'บันทึกโดย'],
       ...dayRows,
       [],
       ['สรุป'],
       ['วันที่บันทึก', `${stats.daysLogged}/${stats.totalDays} วัน`],
       ['จำนวน reading', String(stats.count)],
       ['ค่าเฉลี่ย (Mean)', stats.mean.toFixed(2)],
+      ['Humidity mean (%)', stats.humidityMean != null ? stats.humidityMean.toFixed(1) : '-'],
+      ['Humidity min-max (%)', stats.humidityMin != null && stats.humidityMax != null ? `${stats.humidityMin}-${stats.humidityMax}` : '-'],
       ['SD', stats.stdev != null ? stats.stdev.toFixed(2) : '-'],
       ['ต่ำสุดที่บันทึก', String(stats.minObs)],
       ['สูงสุดที่บันทึก', String(stats.maxObs)],
@@ -460,19 +494,20 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
       </Card>
 
       {stats ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
           <StatBox label="วันที่บันทึก" value={`${stats.daysLogged}/${stats.totalDays}`} unit="วัน" />
           <StatBox label="Reading" value={String(stats.count)} unit="ครั้ง" />
           <StatBox label="Mean" value={stats.mean.toFixed(2)} unit={unit?.unit} />
           <StatBox label="SD" value={stats.stdev != null ? stats.stdev.toFixed(2) : '—'} unit={unit?.unit} />
           <StatBox label="Min (obs)" value={String(stats.minObs)} unit={unit?.unit} />
           <StatBox label="Max (obs)" value={String(stats.maxObs)} unit={unit?.unit} />
+          {unit?.trackHumidity ? <StatBox label="Humidity" value={stats.humidityMean != null ? stats.humidityMean.toFixed(1) : '—'} unit="%" /> : null}
           <StatBox label="นอกช่วง" value={`${stats.oor} (${stats.oorPct.toFixed(1)}%)`} tone={stats.oor > 0 ? 'danger' : 'normal'} />
         </div>
       ) : null}
 
       {readings.length > 0 && unit ? (
-        <Card className="p-4">
+        <Card className="space-y-4 p-4">
           <RangeChart
             points={readings
               .filter((r) => !r.isVoided)
@@ -484,6 +519,31 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
             unit={unit.unit}
             label={unit.name}
           />
+          {unit.trackHumidity ? (
+            <div className="border-t border-[#e3ebec] pt-4">
+              <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-[#315763]"><Droplets className="size-3.5 text-[#0b7f76]" /> Relative humidity trend</p>
+              <RangeChart
+                points={readings
+                  .filter((r) => !r.isVoided && r.humidityPercent != null)
+                  .slice()
+                  .reverse()
+                  .map((r) => ({
+                    id: r.id,
+                    readingDate: r.readingDate,
+                    periodIndex: r.periodIndex,
+                    value: r.humidityPercent as number,
+                    humidityValue: r.humidityPercent,
+                    status: rangeStatus(r.humidityPercent as number, unit.humidityMinLimit, unit.humidityMaxLimit),
+                    isVoided: r.isVoided,
+                  }))}
+                minLimit={unit.humidityMinLimit}
+                maxLimit={unit.humidityMaxLimit}
+                unit="%"
+                label={`${unit.name} RH`}
+                metricLabel="Relative humidity"
+              />
+            </div>
+          ) : null}
         </Card>
       ) : null}
 
@@ -498,6 +558,7 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
                   <th className="px-4 py-2.5 text-left">วันที่</th>
                   <th className="px-4 py-2.5 text-left">รอบ</th>
                   <th className="px-4 py-2.5 text-right">ค่า ({unit?.unit})</th>
+                  <th className="px-4 py-2.5 text-right">Humidity (%)</th>
                   <th className="px-4 py-2.5 text-right">Min</th>
                   <th className="px-4 py-2.5 text-right">Max</th>
                   <th className="px-4 py-2.5 text-left">สถานะ</th>
@@ -512,6 +573,7 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
                     <td className="mono px-4 py-2.5 text-xs text-[#244854]">{formatDate(r.readingDate)}</td>
                     <td className="px-4 py-2.5 text-xs text-[#58747d]">{r.periodLabel}</td>
                     <td className="mono px-4 py-2.5 text-right font-semibold text-[#173d50]">{r.readingValue}</td>
+                    <td className="mono px-4 py-2.5 text-right text-xs text-[#58747d]">{r.humidityPercent != null ? `${r.humidityPercent}%` : '—'}</td>
                     <td className="mono px-4 py-2.5 text-right text-xs text-[#789097]">{r.recordedMin ?? '—'}</td>
                     <td className="mono px-4 py-2.5 text-right text-xs text-[#789097]">{r.recordedMax ?? '—'}</td>
                     <td className="px-4 py-2.5">
@@ -545,9 +607,9 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
 }
 
 function UnitsAdmin({ data, origin, onChanged }: { data: EnvWorkspace; origin: string; onChanged: () => void }) {
-  const [form, setForm] = useState({ code: '', name: '', kind: 'fridge', locationId: '', readingsPerDay: '1', minLimit: '', maxLimit: '', unit: '°C', thermometerId: '', dataloggerId: '', calibrationDueDate: '', availabilityStatus: 'active', unavailableFrom: '', unavailableUntil: '', unavailableNote: '' })
+  const [form, setForm] = useState({ code: '', name: '', kind: 'fridge', locationId: '', readingsPerDay: '1', minLimit: '', maxLimit: '', unit: '°C', trackHumidity: false, humidityMinLimit: '', humidityMaxLimit: '', thermometerId: '', dataloggerId: '', calibrationDueDate: '', availabilityStatus: 'active', unavailableFrom: '', unavailableUntil: '', unavailableNote: '' })
   const [editingUnit, setEditingUnit] = useState<EnvUnit | null>(null)
-  const [editForm, setEditForm] = useState({ name: '', kind: 'fridge', locationId: '', readingsPerDay: '1', minLimit: '', maxLimit: '', unit: '°C', thermometerId: '', dataloggerId: '', calibrationDueDate: '', availabilityStatus: 'active', unavailableFrom: '', unavailableUntil: '', unavailableNote: '' })
+  const [editForm, setEditForm] = useState({ name: '', kind: 'fridge', locationId: '', readingsPerDay: '1', minLimit: '', maxLimit: '', unit: '°C', trackHumidity: false, humidityMinLimit: '', humidityMaxLimit: '', thermometerId: '', dataloggerId: '', calibrationDueDate: '', availabilityStatus: 'active', unavailableFrom: '', unavailableUntil: '', unavailableNote: '' })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const activeLocations = data.locations.filter((location) => location.isActive)
@@ -572,6 +634,9 @@ function UnitsAdmin({ data, origin, onChanged }: { data: EnvWorkspace; origin: s
       minLimit: unit.minLimit != null ? String(unit.minLimit) : '',
       maxLimit: unit.maxLimit != null ? String(unit.maxLimit) : '',
       unit: unit.unit,
+      trackHumidity: unit.trackHumidity,
+      humidityMinLimit: unit.humidityMinLimit != null ? String(unit.humidityMinLimit) : '',
+      humidityMaxLimit: unit.humidityMaxLimit != null ? String(unit.humidityMaxLimit) : '',
       thermometerId: unit.thermometerId ?? '',
       dataloggerId: unit.dataloggerId ?? '',
       calibrationDueDate: unit.calibrationDueDate ?? '',
@@ -599,6 +664,9 @@ function UnitsAdmin({ data, origin, onChanged }: { data: EnvWorkspace; origin: s
           minLimit: form.minLimit === '' ? null : Number(form.minLimit),
           maxLimit: form.maxLimit === '' ? null : Number(form.maxLimit),
           unit: form.unit.trim() || null,
+          trackHumidity: form.trackHumidity,
+          humidityMinLimit: form.trackHumidity && form.humidityMinLimit !== '' ? Number(form.humidityMinLimit) : null,
+          humidityMaxLimit: form.trackHumidity && form.humidityMaxLimit !== '' ? Number(form.humidityMaxLimit) : null,
           thermometerId: form.thermometerId.trim() || null,
           dataloggerId: form.dataloggerId.trim() || null,
           calibrationDueDate: form.calibrationDueDate || null,
@@ -608,7 +676,7 @@ function UnitsAdmin({ data, origin, onChanged }: { data: EnvWorkspace; origin: s
           unavailableNote: form.unavailableNote.trim() || null,
         }),
       })
-      setForm({ code: '', name: '', kind: 'fridge', locationId: '', readingsPerDay: '1', minLimit: '', maxLimit: '', unit: '°C', thermometerId: '', dataloggerId: '', calibrationDueDate: '', availabilityStatus: 'active', unavailableFrom: '', unavailableUntil: '', unavailableNote: '' })
+      setForm({ code: '', name: '', kind: 'fridge', locationId: '', readingsPerDay: '1', minLimit: '', maxLimit: '', unit: '°C', trackHumidity: false, humidityMinLimit: '', humidityMaxLimit: '', thermometerId: '', dataloggerId: '', calibrationDueDate: '', availabilityStatus: 'active', unavailableFrom: '', unavailableUntil: '', unavailableNote: '' })
       onChanged()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'เพิ่มตู้ไม่สำเร็จ')
@@ -633,6 +701,9 @@ function UnitsAdmin({ data, origin, onChanged }: { data: EnvWorkspace; origin: s
           minLimit: editForm.minLimit === '' ? null : Number(editForm.minLimit),
           maxLimit: editForm.maxLimit === '' ? null : Number(editForm.maxLimit),
           unit: editForm.unit.trim() || null,
+          trackHumidity: editForm.trackHumidity,
+          humidityMinLimit: editForm.trackHumidity && editForm.humidityMinLimit !== '' ? Number(editForm.humidityMinLimit) : null,
+          humidityMaxLimit: editForm.trackHumidity && editForm.humidityMaxLimit !== '' ? Number(editForm.humidityMaxLimit) : null,
           thermometerId: editForm.thermometerId.trim() || null,
           dataloggerId: editForm.dataloggerId.trim() || null,
           calibrationDueDate: editForm.calibrationDueDate || null,
@@ -713,6 +784,18 @@ function UnitsAdmin({ data, origin, onChanged }: { data: EnvWorkspace; origin: s
                 <Field label="Max"><Input type="number" step="any" value={editForm.maxLimit} onChange={(e) => setEditForm({ ...editForm, maxLimit: e.target.value })} placeholder="8" /></Field>
                 <Field label="หน่วย"><Input value={editForm.unit} onChange={(e) => setEditForm({ ...editForm, unit: e.target.value })} /></Field>
               </div>
+              <div className="rounded-md border border-[#d6e2e3] bg-[#f8fbfb] p-3">
+                <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-[#315763]">
+                  <input type="checkbox" checked={editForm.trackHumidity} onChange={(e) => setEditForm({ ...editForm, trackHumidity: e.target.checked })} className="size-4" />
+                  Track relative humidity
+                </label>
+                {editForm.trackHumidity ? (
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <Field label="RH Min (%)"><Input type="number" min="0" max="100" step="any" value={editForm.humidityMinLimit} onChange={(e) => setEditForm({ ...editForm, humidityMinLimit: e.target.value })} placeholder="40" /></Field>
+                    <Field label="RH Max (%)"><Input type="number" min="0" max="100" step="any" value={editForm.humidityMaxLimit} onChange={(e) => setEditForm({ ...editForm, humidityMaxLimit: e.target.value })} placeholder="70" /></Field>
+                  </div>
+                ) : null}
+              </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 <Field label="Thermometer ID"><Input value={editForm.thermometerId} onChange={(e) => setEditForm({ ...editForm, thermometerId: e.target.value })} placeholder="เช่น TM-001" /></Field>
                 <Field label="Datalogger ID"><Input value={editForm.dataloggerId} onChange={(e) => setEditForm({ ...editForm, dataloggerId: e.target.value })} placeholder="เช่น DL-001" /></Field>
@@ -775,6 +858,18 @@ function UnitsAdmin({ data, origin, onChanged }: { data: EnvWorkspace; origin: s
                 <Field label="Max"><Input type="number" step="any" value={form.maxLimit} onChange={(e) => setForm({ ...form, maxLimit: e.target.value })} placeholder="8" /></Field>
                 <Field label="หน่วย"><Input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} /></Field>
               </div>
+              <div className="rounded-md border border-[#d6e2e3] bg-[#f8fbfb] p-3">
+                <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-[#315763]">
+                  <input type="checkbox" checked={form.trackHumidity} onChange={(e) => setForm({ ...form, trackHumidity: e.target.checked })} className="size-4" />
+                  Track relative humidity
+                </label>
+                {form.trackHumidity ? (
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <Field label="RH Min (%)"><Input type="number" min="0" max="100" step="any" value={form.humidityMinLimit} onChange={(e) => setForm({ ...form, humidityMinLimit: e.target.value })} placeholder="40" /></Field>
+                    <Field label="RH Max (%)"><Input type="number" min="0" max="100" step="any" value={form.humidityMaxLimit} onChange={(e) => setForm({ ...form, humidityMaxLimit: e.target.value })} placeholder="70" /></Field>
+                  </div>
+                ) : null}
+              </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 <Field label="Thermometer ID"><Input value={form.thermometerId} onChange={(e) => setForm({ ...form, thermometerId: e.target.value })} placeholder="เช่น TM-001" /></Field>
                 <Field label="Datalogger ID"><Input value={form.dataloggerId} onChange={(e) => setForm({ ...form, dataloggerId: e.target.value })} placeholder="เช่น DL-001" /></Field>
@@ -817,6 +912,7 @@ function UnitsAdmin({ data, origin, onChanged }: { data: EnvWorkspace; origin: s
                   <p className="font-semibold text-[#173d50]">{unit.name} <span className="mono text-xs text-[#789097]">{unit.code}</span></p>
                   <p className="text-[11px] text-[#8ba0a5]">
                     {KIND_LABEL[unit.kind] ?? unit.kind} · {unit.minLimit ?? '—'}–{unit.maxLimit ?? '—'} {unit.unit}
+                    {unit.trackHumidity ? ` · RH ${unit.humidityMinLimit ?? '—'}–${unit.humidityMaxLimit ?? '—'}%` : ''}
                     {` · ${unit.readingsPerDay} รอบ/วัน`}
                     {unit.locationCode ? ` · Location ${unit.locationCode}` : ''}
                     {unit.calibrationDueDate ? ` · Cal ${formatDate(unit.calibrationDueDate)}` : ''}

@@ -37,7 +37,7 @@ function recorderNames(readings: EnvReading[]) {
   return [...new Set(readings.map((reading) => reading.recordedByName).filter(Boolean))].join(', ')
 }
 
-function TableBlock({ days, readingsByKey, readingsByDay }: { days: number[]; readingsByKey: Map<string, EnvReading>; readingsByDay: Map<number, EnvReading[]> }) {
+function TableBlock({ days, readingsByKey, readingsByDay, showHumidity }: { days: number[]; readingsByKey: Map<string, EnvReading>; readingsByDay: Map<number, EnvReading[]>; showHumidity: boolean }) {
   const periods: EnvPeriodIndex[] = [1, 2, 3]
   return (
     <table className="temp-table">
@@ -59,6 +59,13 @@ function TableBlock({ days, readingsByKey, readingsByDay }: { days: number[]; re
             return <td key={`${day}-${period}`} className={reading?.status === 'out-of-range' ? 'oor' : ''}>{fmt(reading?.readingValue)}</td>
           }))}
         </tr>
+        {showHumidity ? <tr>
+          <th className="label-cell">RH (%)</th>
+          {days.flatMap((day) => periods.map((period) => {
+            const reading = readingsByKey.get(readingKey(day, period))
+            return <td key={`${day}-${period}`}>{fmt(reading?.humidityPercent)}</td>
+          }))}
+        </tr> : null}
         <tr>
           <th className="label-cell">mean</th>
           {days.map((day) => {
@@ -144,8 +151,8 @@ export default async function EnvMonthlyReportPage({ searchParams }: { searchPar
             <span className="short-fill">{unit.locationCode ?? ''} {unit.locationName ?? ''}</span>
           </div>
 
-          <TableBlock days={firstHalf} readingsByKey={readingsByKey} readingsByDay={readingsByDay} />
-          <TableBlock days={secondHalf} readingsByKey={readingsByKey} readingsByDay={readingsByDay} />
+          <TableBlock days={firstHalf} readingsByKey={readingsByKey} readingsByDay={readingsByDay} showHumidity={unit.trackHumidity} />
+          <TableBlock days={secondHalf} readingsByKey={readingsByKey} readingsByDay={readingsByDay} showHumidity={unit.trackHumidity} />
 
           <div className="lower-grid">
             <div className="instructions">

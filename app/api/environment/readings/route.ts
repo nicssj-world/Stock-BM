@@ -6,6 +6,7 @@ import { readJson, respond } from '@/lib/server/route'
 const schema = z.object({
   unitId: z.string().uuid(),
   readingValue: z.number(),
+  humidityPercent: z.number().min(0).max(100).nullable().optional(),
   recordedMin: z.number().nullable().optional(),
   recordedMax: z.number().nullable().optional(),
   periodIndex: z.number().int().min(1).max(3).nullable().optional(),

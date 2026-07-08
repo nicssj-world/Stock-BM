@@ -185,7 +185,7 @@ export function TransactionView({
   }, [historyLoaded, historyLoading, mode])
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 pb-28 sm:pb-5">
+    <div className="mx-auto max-w-5xl space-y-4 pb-48 sm:pb-5">
       <PageHeader eyebrow="Stock movement" title={title} description={description} />
       <div className="inline-flex flex-wrap gap-1 rounded-lg border border-[#d6e2e3] bg-white p-1" role="tablist" aria-label="ประเภทการเคลื่อนไหว stock">
         {visibleTabs.map(({ mode: tabMode, label, icon: Icon }) => {
@@ -1175,7 +1175,7 @@ function BigField({ label, children }: { label: string; children: React.ReactNod
 
 function MobileActionBar({ children }: { children: React.ReactNode }) {
   return (
-    <div className="fixed right-0 bottom-0 left-0 z-30 border-t border-[#d6e2e3] bg-white/95 px-4 py-3 shadow-[0_-18px_40px_rgba(20,64,72,0.14)] backdrop-blur sm:static sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:shadow-none sm:backdrop-blur-0">
+    <div className="fixed right-0 bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] left-0 z-50 border-t border-[#d6e2e3] bg-white/95 px-4 py-3 shadow-[0_-18px_40px_rgba(20,64,72,0.14)] backdrop-blur sm:static sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:shadow-none sm:backdrop-blur-0">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">{children}</div>
     </div>
   )

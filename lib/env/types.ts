@@ -44,6 +44,9 @@ export interface EnvUnit {
   maxLimit: number | null
   unit: string
   readingsPerDay: number
+  trackHumidity: boolean
+  humidityMinLimit: number | null
+  humidityMaxLimit: number | null
   thermometerId: string | null
   dataloggerId: string | null
   calibrationDueDate: string | null
@@ -61,6 +64,7 @@ export interface EnvReading {
   periodIndex: EnvPeriodIndex
   periodLabel: string
   readingValue: number
+  humidityPercent: number | null
   recordedMin: number | null
   recordedMax: number | null
   status: EnvReadingStatus
@@ -76,6 +80,7 @@ export interface EnvReadingPoint {
   readingDate: string
   periodIndex: EnvPeriodIndex
   value: number
+  humidityValue?: number | null
   status: EnvReadingStatus
   isVoided: boolean
 }

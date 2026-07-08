@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckCircle2, ChevronDown, Thermometer } from 'lucide-react'
+import { CheckCircle2, ChevronDown, Droplets, Thermometer } from 'lucide-react'
 import type { EnvPeriodIndex, EnvReading, EnvUnit } from '@/lib/env/types'
 import { envPeriodLabel, envPeriodOptions } from '@/lib/env/types'
 import { api, Button, Field, Input, Notice, Select, Textarea } from '@/components/ui'
@@ -29,6 +29,7 @@ function unitUnavailableToday(unit: EnvUnit) {
 // dashboard cards. On an out-of-range value it reveals a corrective-action form.
 export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex }: { unit: EnvUnit; onLogged?: () => void; autoFocus?: boolean; defaultPeriodIndex?: EnvPeriodIndex }) {
   const [value, setValue] = useState('')
+  const [humidityPercent, setHumidityPercent] = useState('')
   const [note, setNote] = useState('')
   const [readingDate, setReadingDate] = useState(localToday)
   const [periodIndex, setPeriodIndex] = useState<EnvPeriodIndex>(defaultPeriodIndex ?? currentPeriodIndex(unit.readingsPerDay))
@@ -63,8 +64,18 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex }: {
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     const numeric = Number(value)
+    const hasHumidity = humidityPercent.trim() !== ''
+    const humidityValue = hasHumidity ? Number(humidityPercent) : null
     if (value.trim() === '' || Number.isNaN(numeric)) {
       setError('กรอกค่าตัวเลข / Enter a numeric value')
+      return
+    }
+    if (unit.trackHumidity && !hasHumidity) {
+      setError('Enter relative humidity (%RH)')
+      return
+    }
+    if (hasHumidity && (humidityValue == null || Number.isNaN(humidityValue) || humidityValue < 0 || humidityValue > 100)) {
+      setError('Humidity must be between 0 and 100%')
       return
     }
     setBusy(true)
@@ -75,6 +86,7 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex }: {
         body: JSON.stringify({
           unitId: unit.id,
           readingValue: numeric,
+          humidityPercent: humidityValue,
           readingDate,
           periodIndex,
           recordedMin: recordedMin !== '' ? Number(recordedMin) : null,
@@ -83,7 +95,14 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex }: {
         }),
       })
       setLogged(env.reading)
-      if (env.outOfRange) setProblem(`อุณหภูมิ ${numeric}${unit.unit} อยู่นอกช่วง ${limitText}`)
+      if (env.outOfRange) {
+        const issues = []
+        if ((unit.minLimit != null && numeric < unit.minLimit) || (unit.maxLimit != null && numeric > unit.maxLimit)) issues.push(`อุณหภูมิ ${numeric}${unit.unit} อยู่นอกช่วง ${limitText}`)
+        if (unit.trackHumidity && humidityValue != null && ((unit.humidityMinLimit != null && humidityValue < unit.humidityMinLimit) || (unit.humidityMaxLimit != null && humidityValue > unit.humidityMaxLimit))) {
+          issues.push(`Relative humidity ${humidityValue}% อยู่นอกช่วง ${unit.humidityMinLimit ?? '—'}–${unit.humidityMaxLimit ?? '—'}%`)
+        }
+        setProblem(issues.join(' / ') || `Reading out of range`)
+      }
       onLogged?.()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'บันทึกไม่สำเร็จ')
@@ -118,6 +137,7 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex }: {
       <div className="space-y-3" role="status" aria-live="polite">
         <Notice tone={outOfRange ? 'danger' : 'success'}>
           บันทึกแล้ว: <span className="mono font-bold">{logged.readingValue} {unit.unit}</span>
+          {logged.humidityPercent != null ? <span className="ml-1 text-[11px] opacity-75">Humidity {logged.humidityPercent}%</span> : null}
           <span className="ml-1 text-[11px] opacity-75">({logged.periodLabel})</span>
           {isBackdate ? <span className="ml-1 text-[11px] opacity-75">({logged.readingDate})</span> : ''}
           {' '}— {outOfRange ? 'นอกช่วง / Out of range' : 'อยู่ในช่วง / In range'}
@@ -166,6 +186,23 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex }: {
           />
         </div>
       </Field>
+      {unit.trackHumidity ? <Field label="Relative humidity (%RH)">
+        <div className="relative">
+          <Droplets className="absolute top-2.5 left-3 size-5 text-[#7b979c]" />
+          <Input
+            type="number"
+            min="0"
+            max="100"
+            step="any"
+            inputMode="decimal"
+            value={humidityPercent}
+            onChange={(e) => setHumidityPercent(e.target.value)}
+            className="h-12 pl-11 text-xl"
+            placeholder="%"
+            required
+          />
+        </div>
+      </Field> : null}
       <Field label="หมายเหตุ / Note"><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="ถ้ามี" /></Field>
 
       <button

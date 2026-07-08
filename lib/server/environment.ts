@@ -112,6 +112,9 @@ function mapUnit(row: RecordRow, locations: Map<string, StockLocation>): EnvUnit
     maxLimit: nullableNumber(row.max_limit),
     unit: asString(row.unit) || '°C',
     readingsPerDay: normalizeEnvReadingsPerDay(Number(row.readings_per_day ?? 1)),
+    trackHumidity: Boolean(row.track_humidity),
+    humidityMinLimit: nullableNumber(row.humidity_min_limit),
+    humidityMaxLimit: nullableNumber(row.humidity_max_limit),
     thermometerId: nullableString(row.thermometer_id),
     dataloggerId: nullableString(row.datalogger_id),
     calibrationDueDate: nullableString(row.calibration_due_date),
@@ -131,6 +134,7 @@ function mapReading(row: RecordRow, names: Map<string, string>): EnvReading {
     periodIndex: envPeriodIndex(row.period_index),
     periodLabel: envPeriodLabel(Number(row.period_index ?? 1)),
     readingValue: Number(row.reading_value),
+    humidityPercent: nullableNumber(row.humidity_percent),
     recordedMin: nullableNumber(row.recorded_min),
     recordedMax: nullableNumber(row.recorded_max),
     status: asString(row.status) as EnvReadingStatus,
@@ -158,6 +162,13 @@ export function evaluateReading(value: number, minLimit: number | null, maxLimit
   if (minLimit != null && value < minLimit) return 'out-of-range'
   if (maxLimit != null && value > maxLimit) return 'out-of-range'
   return 'in-range'
+}
+
+function isHumidityOutOfRange(unit: Pick<EnvUnit, 'trackHumidity' | 'humidityMinLimit' | 'humidityMaxLimit'>, value: number | null) {
+  if (!unit.trackHumidity || value == null) return false
+  if (unit.humidityMinLimit != null && value < unit.humidityMinLimit) return true
+  if (unit.humidityMaxLimit != null && value > unit.humidityMaxLimit) return true
+  return false
 }
 
 async function loadStockLocations(): Promise<StockLocation[]> {
@@ -363,7 +374,7 @@ export async function getEnvironmentWorkspace(actor: BmActor): Promise<EnvWorksp
         .filter((reading) => !reading.isVoided)
         .slice(0, ENV_TREND_POINTS)
         .reverse()
-        .map((reading) => ({ id: reading.id, readingDate: reading.readingDate, periodIndex: reading.periodIndex, value: reading.readingValue, status: reading.status, isVoided: reading.isVoided }))
+        .map((reading) => ({ id: reading.id, readingDate: reading.readingDate, periodIndex: reading.periodIndex, value: reading.readingValue, humidityValue: reading.humidityPercent, status: reading.status, isVoided: reading.isVoided }))
       return {
         unit,
         todayReading,
@@ -454,6 +465,7 @@ export async function resolveEnvToken(token: string): Promise<EnvUnit> {
 interface LogReadingInput {
   unitId: string
   readingValue: number
+  humidityPercent?: number | null
   recordedMin?: number | null
   recordedMax?: number | null
   periodIndex?: number | null
@@ -472,7 +484,12 @@ export async function logReading(input: LogReadingInput, actor: BmActor): Promis
   if (unitUnavailableOn(unit, readingDate)) throw new HttpError(409, 'ตู้นี้อยู่ในสถานะซ่อม/พักใช้งานในวันที่เลือก จึงไม่ต้องบันทึกอุณหภูมิ')
   await assertMonthUnlocked(unit.id, yearMonth(readingDate))
   const periodIndex = Math.min(Math.max(Number(input.periodIndex ?? 1), 1), unit.readingsPerDay)
-  const status = evaluateReading(input.readingValue, unit.minLimit, unit.maxLimit)
+  const humidityPercent = input.humidityPercent ?? null
+  if (unit.trackHumidity && humidityPercent == null) throw new HttpError(400, 'Relative humidity is required for this unit')
+  if (humidityPercent != null && (humidityPercent < 0 || humidityPercent > 100)) throw new HttpError(400, 'Humidity must be between 0 and 100%')
+  const temperatureStatus = evaluateReading(input.readingValue, unit.minLimit, unit.maxLimit)
+  const humidityOutOfRange = isHumidityOutOfRange(unit, humidityPercent)
+  const status: EnvReadingStatus = temperatureStatus === 'out-of-range' || humidityOutOfRange ? 'out-of-range' : 'in-range'
 
   const { data, error } = await admin
     .from('env_readings')
@@ -481,6 +498,7 @@ export async function logReading(input: LogReadingInput, actor: BmActor): Promis
       reading_date: readingDate,
       period_index: periodIndex,
       reading_value: input.readingValue,
+      humidity_percent: humidityPercent,
       recorded_min: input.recordedMin ?? null,
       recorded_max: input.recordedMax ?? null,
       status,
@@ -498,6 +516,7 @@ export async function logReading(input: LogReadingInput, actor: BmActor): Promis
   await writeAudit(actor, 'env.reading.log', 'env-reading', reading.id, {
     unitCode: unit.code,
     value: input.readingValue,
+    humidityPercent,
     status,
     readingDate,
     periodIndex,
@@ -528,6 +547,9 @@ interface UnitInput {
   maxLimit?: number | null
   unit?: string | null
   readingsPerDay?: number | null
+  trackHumidity?: boolean | null
+  humidityMinLimit?: number | null
+  humidityMaxLimit?: number | null
   thermometerId?: string | null
   dataloggerId?: string | null
   calibrationDueDate?: string | null
@@ -551,6 +573,9 @@ export async function createUnit(input: UnitInput, actor: BmActor): Promise<EnvU
       max_limit: input.maxLimit ?? null,
       unit: clean(input.unit) ?? '°C',
       readings_per_day: normalizeEnvReadingsPerDay(Number(input.readingsPerDay ?? 1)),
+      track_humidity: Boolean(input.trackHumidity),
+      humidity_min_limit: input.humidityMinLimit ?? null,
+      humidity_max_limit: input.humidityMaxLimit ?? null,
       thermometer_id: clean(input.thermometerId),
       datalogger_id: clean(input.dataloggerId),
       calibration_due_date: input.calibrationDueDate || null,
@@ -577,6 +602,9 @@ interface UnitUpdate {
   maxLimit?: number | null
   unit?: string | null
   readingsPerDay?: number | null
+  trackHumidity?: boolean | null
+  humidityMinLimit?: number | null
+  humidityMaxLimit?: number | null
   thermometerId?: string | null
   dataloggerId?: string | null
   calibrationDueDate?: string | null
@@ -597,6 +625,9 @@ export async function updateUnit(id: string, patch: UnitUpdate, actor: BmActor):
   if (patch.maxLimit !== undefined) update.max_limit = patch.maxLimit
   if (patch.unit !== undefined) update.unit = clean(patch.unit) ?? '°C'
   if (patch.readingsPerDay !== undefined) update.readings_per_day = normalizeEnvReadingsPerDay(Number(patch.readingsPerDay ?? 1))
+  if (patch.trackHumidity !== undefined) update.track_humidity = Boolean(patch.trackHumidity)
+  if (patch.humidityMinLimit !== undefined) update.humidity_min_limit = patch.humidityMinLimit
+  if (patch.humidityMaxLimit !== undefined) update.humidity_max_limit = patch.humidityMaxLimit
   if (patch.thermometerId !== undefined) update.thermometer_id = clean(patch.thermometerId)
   if (patch.dataloggerId !== undefined) update.datalogger_id = clean(patch.dataloggerId)
   if (patch.calibrationDueDate !== undefined) update.calibration_due_date = patch.calibrationDueDate || null
