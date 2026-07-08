@@ -50,6 +50,15 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex }: {
   const limitText = `${unit.minLimit ?? '—'} ถึง ${unit.maxLimit ?? '—'} ${unit.unit}`
   const unavailableToday = unitUnavailableToday(unit)
 
+  function toggleSign(current: string, setNext: (value: string) => void) {
+    const trimmed = current.trim()
+    if (!trimmed) {
+      setNext('-')
+      return
+    }
+    setNext(trimmed.startsWith('-') ? trimmed.slice(1) : `-${trimmed.replace(/^\+/, '')}`)
+  }
+
   if (unavailableToday) {
     const reason = unit.availabilityStatus === 'maintenance' ? 'ซ่อม' : 'พักใช้งาน'
     const dates = [unit.unavailableFrom, unit.unavailableUntil].filter(Boolean).join(' ถึง ')
@@ -171,19 +180,29 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex }: {
         </Field>
       ) : null}
       <Field label={`อุณหภูมิ / Temperature (${unit.unit})`}>
-        <div className="relative">
-          <Thermometer className="absolute top-2.5 left-3 size-5 text-[#7b979c]" />
-          <Input
-            autoFocus={autoFocus}
-            type="number"
-            step="any"
-            inputMode="decimal"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            className="h-14 pl-11 text-2xl"
-            placeholder="0.0"
-            required
-          />
+        <div className="flex h-14 overflow-hidden rounded-md border border-[#b7d2d0] bg-white focus-within:ring-2 focus-within:ring-[#0b7f76]">
+          <button
+            type="button"
+            aria-label="Toggle temperature sign"
+            title="Toggle +/-"
+            onClick={() => toggleSign(value, setValue)}
+            className="flex w-14 shrink-0 items-center justify-center border-r border-[#d8e6e6] text-[#0b7f76] transition hover:bg-[#eef7f6] active:bg-[#d9eeec]"
+          >
+            <span className="mono text-base font-bold">+/-</span>
+          </button>
+          <div className="relative min-w-0 flex-1">
+            <Thermometer className="absolute top-2.5 left-3 size-5 text-[#7b979c]" />
+            <Input
+              autoFocus={autoFocus}
+              type="text"
+              inputMode="decimal"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              className="h-full border-0 pl-11 text-2xl focus-visible:ring-0"
+              placeholder="0.0"
+              required
+            />
+          </div>
         </div>
       </Field>
       {unit.trackHumidity ? <Field label="Relative humidity (%RH)">
@@ -220,10 +239,20 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex }: {
             <Input type="date" value={readingDate} onChange={(e) => setReadingDate(e.target.value)} required />
           </Field>
           <Field label={`Min (${unit.unit})`}>
-            <Input type="number" step="any" value={recordedMin} onChange={(e) => setRecordedMin(e.target.value)} placeholder="—" />
+            <div className="flex h-11 overflow-hidden rounded-md border border-[#c9dadd] bg-white focus-within:ring-2 focus-within:ring-[#0b7f76]">
+              <button type="button" aria-label="Toggle min sign" title="Toggle +/-" onClick={() => toggleSign(recordedMin, setRecordedMin)} className="flex w-11 shrink-0 items-center justify-center border-r border-[#d8e6e6] text-[#0b7f76] hover:bg-[#eef7f6]">
+                <span className="mono text-xs font-bold">+/-</span>
+              </button>
+              <Input type="text" inputMode="decimal" value={recordedMin} onChange={(e) => setRecordedMin(e.target.value)} placeholder="—" className="h-full border-0 focus-visible:ring-0" />
+            </div>
           </Field>
           <Field label={`Max (${unit.unit})`}>
-            <Input type="number" step="any" value={recordedMax} onChange={(e) => setRecordedMax(e.target.value)} placeholder="—" />
+            <div className="flex h-11 overflow-hidden rounded-md border border-[#c9dadd] bg-white focus-within:ring-2 focus-within:ring-[#0b7f76]">
+              <button type="button" aria-label="Toggle max sign" title="Toggle +/-" onClick={() => toggleSign(recordedMax, setRecordedMax)} className="flex w-11 shrink-0 items-center justify-center border-r border-[#d8e6e6] text-[#0b7f76] hover:bg-[#eef7f6]">
+                <span className="mono text-xs font-bold">+/-</span>
+              </button>
+              <Input type="text" inputMode="decimal" value={recordedMax} onChange={(e) => setRecordedMax(e.target.value)} placeholder="—" className="h-full border-0 focus-visible:ring-0" />
+            </div>
           </Field>
         </div>
       ) : null}
