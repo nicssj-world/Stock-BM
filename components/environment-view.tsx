@@ -3,12 +3,13 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { AlertTriangle, ClipboardList, Download, History, LayoutGrid, Pencil, Plus, QrCode as QrCodeIcon, Settings2, Thermometer, X } from 'lucide-react'
+import { AlertTriangle, Bell, ClipboardList, Download, History, LayoutGrid, Lock, Pencil, Plus, QrCode as QrCodeIcon, Settings2, Thermometer, Trash2, Unlock, X } from 'lucide-react'
 import { QrCode } from '@/components/qr-code'
 import type { BmActor } from '@/lib/bm/types'
-import type { EnvCardStatus, EnvUnit, EnvWorkspace } from '@/lib/env/types'
-import { formatDate } from '@/lib/bm/rules'
-import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, type StatusTone, Tabs } from '@/components/ui'
+import type { EnvCardStatus, EnvPeriodIndex, EnvUnit, EnvWorkspace } from '@/lib/env/types'
+import { envPeriodLabel, envPeriodOptions } from '@/lib/env/types'
+import { formatDate, formatDateTime } from '@/lib/bm/rules'
+import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Textarea, type StatusTone, Tabs } from '@/components/ui'
 
 function downloadCsv(filename: string, rows: string[][]) {
   const bom = '﻿'
@@ -28,15 +29,29 @@ import { AttachmentList } from '@/components/attachments'
 type TabKey = 'dashboard' | 'corrective' | 'units' | 'history'
 
 const KIND_LABEL: Record<string, string> = { fridge: 'ตู้เย็น', freezer: 'ตู้แช่แข็ง', room: 'ห้อง', incubator: 'ตู้บ่ม', other: 'อื่นๆ' }
+const AVAILABILITY_LABEL: Record<string, string> = { active: 'ใช้งาน', maintenance: 'ซ่อม', paused: 'พักใช้งาน' }
 
 function cardTone(status: EnvCardStatus): StatusTone {
   if (status === 'out-of-range') return 'rejected'
   if (status === 'pending') return 'warning'
   if (status === 'corrected') return 'warning'
+  if (status === 'unavailable') return 'neutral'
   return 'accepted'
 }
 function cardLabel(status: EnvCardStatus): string {
-  return status === 'out-of-range' ? 'นอกช่วง' : status === 'pending' ? 'ยังไม่บันทึก' : status === 'corrected' ? 'แก้ไขแล้ว' : 'ปกติ'
+  return status === 'out-of-range' ? 'นอกช่วง' : status === 'pending' ? 'ยังไม่บันทึก' : status === 'corrected' ? 'แก้ไขแล้ว' : status === 'unavailable' ? 'หยุดชั่วคราว' : 'ปกติ'
+}
+
+function unitUnavailableText(unit: EnvUnit) {
+  if (unit.availabilityStatus === 'active') return ''
+  const dates = [unit.unavailableFrom, unit.unavailableUntil].filter(Boolean).join(' ถึง ')
+  return `${AVAILABILITY_LABEL[unit.availabilityStatus] ?? unit.availabilityStatus}${dates ? ` (${dates})` : ''}${unit.unavailableNote ? ` · ${unit.unavailableNote}` : ''}`
+}
+
+function nextMissingPeriod(unit: EnvUnit, loggedPeriods: EnvPeriodIndex[]): EnvPeriodIndex {
+  return envPeriodOptions(unit.readingsPerDay).find((option) => !loggedPeriods.includes(option.periodIndex))?.periodIndex
+    ?? envPeriodOptions(unit.readingsPerDay)[0]?.periodIndex
+    ?? 1
 }
 
 export function EnvironmentView({ actor, initialData, origin }: { actor: BmActor; initialData: EnvWorkspace; origin: string }) {
@@ -63,10 +78,20 @@ export function EnvironmentView({ actor, initialData, origin }: { actor: BmActor
         </Notice>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {data.summary.dueNowCount > 0 ? (
+        <Notice tone="warning">
+          <span>
+            <span className="inline-flex items-center gap-1 font-semibold"><Bell className="size-4" /> Reminder:</span>
+            {' '}ถึงรอบบันทึกแล้ว {data.summary.dueNowCount} ตู้ / {data.summary.dueNowPeriodCount} รอบ
+          </span>
+        </Notice>
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard label="ตู้ทั้งหมด" value={data.summary.unitCount} />
         <StatCard label="บันทึกแล้ววันนี้" value={data.summary.loggedToday} tone="accepted" />
         <StatCard label="ยังไม่บันทึก" value={data.summary.pendingToday} tone={data.summary.pendingToday ? 'warning' : 'neutral'} />
+        <StatCard label="ถึงรอบแล้ว" value={data.summary.dueNowCount} tone={data.summary.dueNowCount ? 'warning' : 'neutral'} hint={`${data.summary.dueNowPeriodCount} รอบ`} />
         <StatCard label="นอกช่วงวันนี้" value={data.summary.outOfRangeToday} tone={data.summary.outOfRangeToday ? 'rejected' : 'neutral'} />
       </div>
 
@@ -108,8 +133,17 @@ function UnitCard({ card, onChanged }: { card: EnvWorkspace['cards'][number]; on
           </div>
           <p className="mt-0.5 text-xs text-[#789097]">
             {unit.code} · {KIND_LABEL[unit.kind] ?? unit.kind}
-            {unit.locationName ? ` · ${unit.locationName}` : ''} · ช่วง {unit.minLimit ?? '—'}–{unit.maxLimit ?? '—'} {unit.unit}
+            {unit.locationCode ? ` · Location ${unit.locationCode}` : ''}
+            {unit.locationName ? ` (${unit.locationName})` : ''} · ช่วง {unit.minLimit ?? '—'}–{unit.maxLimit ?? '—'} {unit.unit}
           </p>
+          <p className="mt-0.5 text-[11px] text-[#8ba0a5]">
+            {unit.thermometerId ? `Thermometer ${unit.thermometerId}` : ''}
+            {unit.thermometerId && unit.dataloggerId ? ' · ' : ''}
+            {unit.dataloggerId ? `Datalogger ${unit.dataloggerId}` : ''}
+            {(unit.thermometerId || unit.dataloggerId) && unit.calibrationDueDate ? ' · ' : ''}
+            {unit.calibrationDueDate ? `Cal due ${formatDate(unit.calibrationDueDate)}` : ''}
+          </p>
+          {unit.availabilityStatus !== 'active' ? <p className="mt-0.5 text-[11px] font-semibold text-[#a9700f]">{unitUnavailableText(unit)}</p> : null}
         </div>
         <div className="text-right">
           <p className="mono text-lg font-bold tabular-nums text-[#173d50]">
@@ -125,9 +159,17 @@ function UnitCard({ card, onChanged }: { card: EnvWorkspace['cards'][number]; on
 
       <div className="mt-3 flex items-center justify-between gap-2">
         <span className="text-[11px] text-[#8ba0a5]">
-          {card.openCorrectiveActions > 0 ? <span className="inline-flex items-center gap-1 text-[#c02a37]"><AlertTriangle className="size-3" /> {card.openCorrectiveActions} CA ค้าง</span> : ''}
+          {card.openCorrectiveActions > 0 ? <span className="inline-flex items-center gap-1 text-[#c02a37]"><AlertTriangle className="size-3" /> {card.openCorrectiveActions} CA ค้าง</span> : null}
+          {card.duePeriodIndexes.length > 0 && !card.openCorrectiveActions ? (
+            <span className="inline-flex items-center gap-1 font-semibold text-[#a9700f]"><Bell className="size-3" /> ถึงรอบ: {card.duePeriodIndexes.map(envPeriodLabel).join(', ')}</span>
+          ) : null}
+          {unit.readingsPerDay > 1 && !card.openCorrectiveActions && !card.duePeriodIndexes.length ? (
+            <span>{card.todayPeriodIndexes.length ? `บันทึกแล้ว: ${card.todayPeriodIndexes.map(envPeriodLabel).join(', ')}` : 'ยังไม่บันทึกรอบวันนี้'}</span>
+          ) : null}
         </span>
-        {card.loggedToday ? (
+        {card.status === 'unavailable' ? (
+          <span className="text-xs font-semibold text-[#789097]">{AVAILABILITY_LABEL[unit.availabilityStatus] ?? 'หยุดชั่วคราว'}</span>
+        ) : card.loggedToday ? (
           <span className="text-xs font-semibold text-[#2f7d44]">
             บันทึกวันนี้แล้ว{card.unit.readingsPerDay > 1 ? ` (${card.todayReadingCount}/${card.unit.readingsPerDay})` : ''}
           </span>
@@ -141,7 +183,7 @@ function UnitCard({ card, onChanged }: { card: EnvWorkspace['cards'][number]; on
 
       {logging && !card.loggedToday ? (
         <div className="mt-3 rounded-md border border-[#d6e2e3] bg-[#f8fbfb] p-3">
-          <EnvQuickLog unit={unit} autoFocus onLogged={onChanged} />
+          <EnvQuickLog unit={unit} autoFocus defaultPeriodIndex={nextMissingPeriod(unit, card.todayPeriodIndexes)} onLogged={onChanged} />
         </div>
       ) : null}
     </Card>
@@ -218,11 +260,16 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
   const [unitId, setUnitId] = useState(data.units[0]?.id ?? '')
   const [month, setMonth] = useState(currentYearMonth)
   const [showVoided, setShowVoided] = useState(false)
+  const [reviewNote, setReviewNote] = useState('')
+  const [reviewBusy, setReviewBusy] = useState(false)
+  const [reviewError, setReviewError] = useState('')
   const unit = data.units.find((u) => u.id === unitId)
+  const monthlyReview = data.monthlyReviews.find((review) => review.unitId === unitId && review.yearMonth === month) ?? null
+  const isLocked = Boolean(monthlyReview)
 
   const allUnitReadings = useMemo(
     () => data.readings.filter((r) => r.unitId === unitId && (showVoided || !r.isVoided))
-      .sort((a, b) => b.readingDate.localeCompare(a.readingDate) || b.createdAt.localeCompare(a.createdAt)),
+      .sort((a, b) => b.readingDate.localeCompare(a.readingDate) || a.periodIndex - b.periodIndex || b.createdAt.localeCompare(a.createdAt)),
     [data.readings, unitId, showVoided],
   )
 
@@ -247,9 +294,10 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
 
   function exportCsv() {
     const rows: string[][] = [
-      ['วันที่', `ค่า (${unit?.unit ?? ''})`, `Min`, `Max`, 'สถานะ', 'หมายเหตุ', 'บันทึกโดย', 'Voided'],
+      ['วันที่', 'รอบ', `ค่า (${unit?.unit ?? ''})`, `Min`, `Max`, 'สถานะ', 'หมายเหตุ', 'บันทึกโดย', 'Voided'],
       ...readings.map((r) => [
         r.readingDate,
+        r.periodLabel,
         String(r.readingValue),
         r.recordedMin != null ? String(r.recordedMin) : '',
         r.recordedMax != null ? String(r.recordedMax) : '',
@@ -275,18 +323,20 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
       const date = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
       const rs = byDate.get(date) ?? []
       if (rs.length === 0) {
-        dayRows.push([date, '', '', '', 'ไม่มีข้อมูล', '', ''])
+        dayRows.push([date, '', '', '', '', 'ไม่มีข้อมูล', '', ''])
       } else {
         for (const r of rs) {
-          dayRows.push([date, String(r.readingValue), r.recordedMin != null ? String(r.recordedMin) : '', r.recordedMax != null ? String(r.recordedMax) : '', r.status === 'out-of-range' ? 'นอกช่วง' : r.status === 'corrected' ? 'แก้ไขแล้ว' : 'ปกติ', r.note ?? '', r.recordedByName ?? ''])
+          dayRows.push([date, r.periodLabel, String(r.readingValue), r.recordedMin != null ? String(r.recordedMin) : '', r.recordedMax != null ? String(r.recordedMax) : '', r.status === 'out-of-range' ? 'นอกช่วง' : r.status === 'corrected' ? 'แก้ไขแล้ว' : 'ปกติ', r.note ?? '', r.recordedByName ?? ''])
         }
       }
     }
     const rows: string[][] = [
       [`รายงานอุณหภูมิรายเดือน — ${unit.name} (${unit.code})`],
       [`เดือน: ${month}  |  ช่วงอนุญาต: ${unit.minLimit ?? '—'} ถึง ${unit.maxLimit ?? '—'} ${unit.unit}`],
+      [`Review: ${monthlyReview ? `Locked by ${monthlyReview.reviewedByName ?? '-'} at ${formatDateTime(monthlyReview.reviewedAt)}` : 'Not reviewed'}`],
+      monthlyReview?.note ? [`Review note: ${monthlyReview.note}`] : [],
       [],
-      ['วันที่', `ค่า (${unit.unit})`, 'Min', 'Max', 'สถานะ', 'หมายเหตุ', 'บันทึกโดย'],
+      ['วันที่', 'รอบ', `ค่า (${unit.unit})`, 'Min', 'Max', 'สถานะ', 'หมายเหตุ', 'บันทึกโดย'],
       ...dayRows,
       [],
       ['สรุป'],
@@ -302,10 +352,40 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
   }
 
   async function voidReading(id: string) {
+    if (isLocked) return
     const reason = window.prompt('เหตุผลที่ void reading:')
     if (!reason?.trim()) return
     await api(`/api/environment/readings/${id}/void`, { method: 'POST', body: JSON.stringify({ reason }) })
     onChanged()
+  }
+
+  async function lockMonth() {
+    if (!unit) return
+    setReviewBusy(true)
+    setReviewError('')
+    try {
+      await api('/api/environment/monthly-reviews', { method: 'POST', body: JSON.stringify({ unitId: unit.id, yearMonth: month, note: reviewNote.trim() || null }) })
+      setReviewNote('')
+      onChanged()
+    } catch (requestError) {
+      setReviewError(requestError instanceof Error ? requestError.message : 'Review/lock ไม่สำเร็จ')
+    } finally {
+      setReviewBusy(false)
+    }
+  }
+
+  async function unlockMonth() {
+    if (!unit || !window.confirm(`ปลดล็อก ${unit.name} เดือน ${month} ใช่ไหม?`)) return
+    setReviewBusy(true)
+    setReviewError('')
+    try {
+      await api('/api/environment/monthly-reviews', { method: 'DELETE', body: JSON.stringify({ unitId: unit.id, yearMonth: month }) })
+      onChanged()
+    } catch (requestError) {
+      setReviewError(requestError instanceof Error ? requestError.message : 'ปลดล็อกไม่สำเร็จ')
+    } finally {
+      setReviewBusy(false)
+    }
   }
 
   const statusLabel: Record<string, string> = { 'in-range': 'ปกติ', 'out-of-range': 'นอกช่วง', corrected: 'แก้ไขแล้ว' }
@@ -326,6 +406,15 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
             </label>
           </div>
           <div className="flex gap-2">
+            {unit ? (
+              <Link
+                href={`/environment/report?unitId=${encodeURIComponent(unit.id)}&month=${encodeURIComponent(month)}`}
+                target="_blank"
+                className="inline-flex min-h-8 items-center justify-center gap-2 rounded-md border border-[#c9dadd] bg-white px-3 py-1.5 text-xs font-semibold text-[#244854] transition hover:border-[#7fa9ad] hover:bg-[#f7fbfb]"
+              >
+                <Download className="size-3.5" /> แบบฟอร์ม PDF
+              </Link>
+            ) : null}
             <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" onClick={exportMonthlyReport} disabled={!stats}>
               <Download className="size-3.5" /> รายงานรายเดือน
             </Button>
@@ -333,6 +422,40 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
               <Download className="size-3.5" /> Raw CSV
             </Button>
           </div>
+        </div>
+      </Card>
+
+      <Card className={`p-4 ${isLocked ? 'border-[#c6e2ca] bg-[#f7fcf8]' : ''}`}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="font-bold text-[#173d50]">Monthly review / lock</h3>
+              {isLocked ? <StatusBadge tone="accepted" label="Locked" /> : <StatusBadge tone="warning" label="Not reviewed" />}
+            </div>
+            <p className="mt-1 text-sm text-[#58747d]">
+              {isLocked
+                ? `Reviewed by ${monthlyReview?.reviewedByName ?? '-'} · ${monthlyReview ? formatDateTime(monthlyReview.reviewedAt) : ''}`
+                : 'ตรวจรายงานเดือนนี้แล้ว lock เพื่อกันการบันทึก/แก้ไขย้อนหลัง'}
+            </p>
+            {monthlyReview?.note ? <p className="mt-1 text-xs text-[#789097]">Note: {monthlyReview.note}</p> : null}
+            {reviewError ? <div className="mt-2"><Notice tone="danger">{reviewError}</Notice></div> : null}
+          </div>
+          {isAdmin ? (
+            isLocked ? (
+              <Button type="button" variant="secondary" disabled={reviewBusy} onClick={unlockMonth}>
+                <Unlock className="size-4" /> {reviewBusy ? 'กำลังปลดล็อก…' : 'Unlock'}
+              </Button>
+            ) : (
+              <div className="w-full space-y-2 lg:max-w-md">
+                <Field label="Review note">
+                  <Textarea rows={2} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Optional" />
+                </Field>
+                <Button type="button" disabled={reviewBusy || !unit} onClick={lockMonth}>
+                  <Lock className="size-4" /> {reviewBusy ? 'กำลัง lock…' : 'Review & Lock'}
+                </Button>
+              </div>
+            )
+          ) : null}
         </div>
       </Card>
 
@@ -355,7 +478,7 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
               .filter((r) => !r.isVoided)
               .slice()
               .reverse()
-              .map((r) => ({ id: r.id, readingDate: r.readingDate, value: r.readingValue, status: r.status, isVoided: r.isVoided }))}
+              .map((r) => ({ id: r.id, readingDate: r.readingDate, periodIndex: r.periodIndex, value: r.readingValue, status: r.status, isVoided: r.isVoided }))}
             minLimit={unit.minLimit}
             maxLimit={unit.maxLimit}
             unit={unit.unit}
@@ -373,6 +496,7 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
               <thead className="border-b border-[#e3ebec] bg-[#f6f9fa] text-xs text-[#58747d]">
                 <tr>
                   <th className="px-4 py-2.5 text-left">วันที่</th>
+                  <th className="px-4 py-2.5 text-left">รอบ</th>
                   <th className="px-4 py-2.5 text-right">ค่า ({unit?.unit})</th>
                   <th className="px-4 py-2.5 text-right">Min</th>
                   <th className="px-4 py-2.5 text-right">Max</th>
@@ -386,6 +510,7 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
                 {readings.map((r) => (
                   <tr key={r.id} className={r.isVoided ? 'opacity-40 line-through' : 'hover:bg-[#f8fbfb]'}>
                     <td className="mono px-4 py-2.5 text-xs text-[#244854]">{formatDate(r.readingDate)}</td>
+                    <td className="px-4 py-2.5 text-xs text-[#58747d]">{r.periodLabel}</td>
                     <td className="mono px-4 py-2.5 text-right font-semibold text-[#173d50]">{r.readingValue}</td>
                     <td className="mono px-4 py-2.5 text-right text-xs text-[#789097]">{r.recordedMin ?? '—'}</td>
                     <td className="mono px-4 py-2.5 text-right text-xs text-[#789097]">{r.recordedMax ?? '—'}</td>
@@ -398,7 +523,9 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
                     <td className="px-4 py-2.5 text-xs text-[#789097]">{r.recordedByName ?? '—'}</td>
                     {isAdmin ? (
                       <td className="px-4 py-2.5 text-right">
-                        {!r.isVoided ? (
+                        {isLocked ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-[#789097]"><Lock className="size-3" /> locked</span>
+                        ) : !r.isVoided ? (
                           <button type="button" onClick={() => voidReading(r.id)} className="text-[11px] text-[#a83541] hover:underline">void</button>
                         ) : (
                           <span className="text-[11px] text-[#789097]">voided</span>
@@ -418,20 +545,40 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
 }
 
 function UnitsAdmin({ data, origin, onChanged }: { data: EnvWorkspace; origin: string; onChanged: () => void }) {
-  const [form, setForm] = useState({ code: '', name: '', kind: 'fridge', minLimit: '', maxLimit: '', unit: '°C' })
+  const [form, setForm] = useState({ code: '', name: '', kind: 'fridge', locationId: '', readingsPerDay: '1', minLimit: '', maxLimit: '', unit: '°C', thermometerId: '', dataloggerId: '', calibrationDueDate: '', availabilityStatus: 'active', unavailableFrom: '', unavailableUntil: '', unavailableNote: '' })
   const [editingUnit, setEditingUnit] = useState<EnvUnit | null>(null)
-  const [editForm, setEditForm] = useState({ name: '', kind: 'fridge', minLimit: '', maxLimit: '', unit: '°C' })
+  const [editForm, setEditForm] = useState({ name: '', kind: 'fridge', locationId: '', readingsPerDay: '1', minLimit: '', maxLimit: '', unit: '°C', thermometerId: '', dataloggerId: '', calibrationDueDate: '', availabilityStatus: 'active', unavailableFrom: '', unavailableUntil: '', unavailableNote: '' })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const activeLocations = data.locations.filter((location) => location.isActive)
+
+  function selectCreateLocation(locationId: string) {
+    const location = data.locations.find((candidate) => candidate.id === locationId)
+    setForm((current) => ({
+      ...current,
+      locationId,
+      code: location && !current.code.trim() ? location.code : current.code,
+      name: location && !current.name.trim() ? location.name : current.name,
+    }))
+  }
 
   function startEdit(unit: EnvUnit) {
     setEditingUnit(unit)
     setEditForm({
       name: unit.name,
       kind: unit.kind,
+      locationId: unit.locationId ?? '',
+      readingsPerDay: String(unit.readingsPerDay),
       minLimit: unit.minLimit != null ? String(unit.minLimit) : '',
       maxLimit: unit.maxLimit != null ? String(unit.maxLimit) : '',
       unit: unit.unit,
+      thermometerId: unit.thermometerId ?? '',
+      dataloggerId: unit.dataloggerId ?? '',
+      calibrationDueDate: unit.calibrationDueDate ?? '',
+      availabilityStatus: unit.availabilityStatus,
+      unavailableFrom: unit.unavailableFrom ?? '',
+      unavailableUntil: unit.unavailableUntil ?? '',
+      unavailableNote: unit.unavailableNote ?? '',
     })
     setError('')
   }
@@ -447,12 +594,21 @@ function UnitsAdmin({ data, origin, onChanged }: { data: EnvWorkspace; origin: s
           code: form.code.trim(),
           name: form.name.trim(),
           kind: form.kind,
+          locationId: form.locationId || null,
+          readingsPerDay: Number(form.readingsPerDay),
           minLimit: form.minLimit === '' ? null : Number(form.minLimit),
           maxLimit: form.maxLimit === '' ? null : Number(form.maxLimit),
           unit: form.unit.trim() || null,
+          thermometerId: form.thermometerId.trim() || null,
+          dataloggerId: form.dataloggerId.trim() || null,
+          calibrationDueDate: form.calibrationDueDate || null,
+          availabilityStatus: form.availabilityStatus,
+          unavailableFrom: form.unavailableFrom || null,
+          unavailableUntil: form.unavailableUntil || null,
+          unavailableNote: form.unavailableNote.trim() || null,
         }),
       })
-      setForm({ code: '', name: '', kind: 'fridge', minLimit: '', maxLimit: '', unit: '°C' })
+      setForm({ code: '', name: '', kind: 'fridge', locationId: '', readingsPerDay: '1', minLimit: '', maxLimit: '', unit: '°C', thermometerId: '', dataloggerId: '', calibrationDueDate: '', availabilityStatus: 'active', unavailableFrom: '', unavailableUntil: '', unavailableNote: '' })
       onChanged()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'เพิ่มตู้ไม่สำเร็จ')
@@ -472,9 +628,18 @@ function UnitsAdmin({ data, origin, onChanged }: { data: EnvWorkspace; origin: s
         body: JSON.stringify({
           name: editForm.name.trim(),
           kind: editForm.kind,
+          locationId: editForm.locationId || null,
+          readingsPerDay: Number(editForm.readingsPerDay),
           minLimit: editForm.minLimit === '' ? null : Number(editForm.minLimit),
           maxLimit: editForm.maxLimit === '' ? null : Number(editForm.maxLimit),
           unit: editForm.unit.trim() || null,
+          thermometerId: editForm.thermometerId.trim() || null,
+          dataloggerId: editForm.dataloggerId.trim() || null,
+          calibrationDueDate: editForm.calibrationDueDate || null,
+          availabilityStatus: editForm.availabilityStatus,
+          unavailableFrom: editForm.unavailableFrom || null,
+          unavailableUntil: editForm.unavailableUntil || null,
+          unavailableNote: editForm.unavailableNote.trim() || null,
         }),
       })
       setEditingUnit(null)
@@ -489,6 +654,21 @@ function UnitsAdmin({ data, origin, onChanged }: { data: EnvWorkspace; origin: s
   async function toggleActive(unit: EnvUnit) {
     await api(`/api/environment/units/${unit.id}`, { method: 'PATCH', body: JSON.stringify({ isActive: !unit.isActive }) })
     onChanged()
+  }
+
+  async function remove(unit: EnvUnit) {
+    if (!window.confirm(`ลบตู้ "${unit.name}" ใช่ไหม?\n\nถ้ามีประวัติการบันทึกอุณหภูมิแล้ว ระบบจะไม่ให้ลบ เพื่อรักษาประวัติย้อนหลัง`)) return
+    setBusy(true)
+    setError('')
+    try {
+      await api(`/api/environment/units/${unit.id}`, { method: 'DELETE' })
+      if (editingUnit?.id === unit.id) setEditingUnit(null)
+      onChanged()
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'ลบตู้ไม่สำเร็จ')
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -512,11 +692,48 @@ function UnitsAdmin({ data, origin, onChanged }: { data: EnvWorkspace; origin: s
                   <option value="other">อื่นๆ</option>
                 </Select>
               </Field>
+              <Field label="Stock Location">
+                <Select value={editForm.locationId} onChange={(e) => setEditForm({ ...editForm, locationId: e.target.value })}>
+                  <option value="">ไม่เชื่อม Location</option>
+                  {data.locations
+                    .filter((location) => location.isActive || location.id === editForm.locationId)
+                    .map((location) => <option key={location.id} value={location.id}>{location.code} · {location.name}</option>)}
+                </Select>
+              </Field>
+              <Field label="จำนวนรอบ / วัน">
+                <Select value={editForm.readingsPerDay} onChange={(e) => setEditForm({ ...editForm, readingsPerDay: e.target.value })}>
+                  <option value="1">1 รอบ / วัน</option>
+                  <option value="2">2 รอบ: เช้า, บ่าย</option>
+                  <option value="3">3 รอบ: เช้า, บ่าย, ดึก</option>
+                </Select>
+                <p className="mt-1 text-[11px] text-[#789097]">{envPeriodOptions(Number(editForm.readingsPerDay)).map((option) => option.label).join(' · ')}</p>
+              </Field>
               <div className="grid grid-cols-3 gap-2">
                 <Field label="Min"><Input type="number" step="any" value={editForm.minLimit} onChange={(e) => setEditForm({ ...editForm, minLimit: e.target.value })} placeholder="2" /></Field>
                 <Field label="Max"><Input type="number" step="any" value={editForm.maxLimit} onChange={(e) => setEditForm({ ...editForm, maxLimit: e.target.value })} placeholder="8" /></Field>
                 <Field label="หน่วย"><Input value={editForm.unit} onChange={(e) => setEditForm({ ...editForm, unit: e.target.value })} /></Field>
               </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Field label="Thermometer ID"><Input value={editForm.thermometerId} onChange={(e) => setEditForm({ ...editForm, thermometerId: e.target.value })} placeholder="เช่น TM-001" /></Field>
+                <Field label="Datalogger ID"><Input value={editForm.dataloggerId} onChange={(e) => setEditForm({ ...editForm, dataloggerId: e.target.value })} placeholder="เช่น DL-001" /></Field>
+              </div>
+              <Field label="Calibration due date"><Input type="date" value={editForm.calibrationDueDate} onChange={(e) => setEditForm({ ...editForm, calibrationDueDate: e.target.value })} /></Field>
+              <Field label="สถานะตู้">
+                <Select value={editForm.availabilityStatus} onChange={(e) => setEditForm({ ...editForm, availabilityStatus: e.target.value })}>
+                  <option value="active">ใช้งาน</option>
+                  <option value="maintenance">ซ่อม</option>
+                  <option value="paused">พักใช้งานชั่วคราว</option>
+                </Select>
+              </Field>
+              {editForm.availabilityStatus !== 'active' ? (
+                <div className="space-y-2 rounded-md border border-[#eed4a6] bg-[#fffaf0] p-3">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Field label="ตั้งแต่"><Input type="date" value={editForm.unavailableFrom} onChange={(e) => setEditForm({ ...editForm, unavailableFrom: e.target.value })} /></Field>
+                    <Field label="ถึง"><Input type="date" value={editForm.unavailableUntil} onChange={(e) => setEditForm({ ...editForm, unavailableUntil: e.target.value })} /></Field>
+                  </div>
+                  <Field label="หมายเหตุ"><Textarea rows={2} value={editForm.unavailableNote} onChange={(e) => setEditForm({ ...editForm, unavailableNote: e.target.value })} placeholder="เช่น ส่งซ่อม / งดใช้ระหว่างรอ calibration" /></Field>
+                </div>
+              ) : null}
               {error ? <Notice tone="danger">{error}</Notice> : null}
               <div className="flex gap-2">
                 <Button type="submit" disabled={busy}>{busy ? 'กำลังบันทึก…' : 'บันทึก'}</Button>
@@ -539,11 +756,46 @@ function UnitsAdmin({ data, origin, onChanged }: { data: EnvWorkspace; origin: s
                   <option value="other">อื่นๆ</option>
                 </Select>
               </Field>
+              <Field label="Stock Location">
+                <Select value={form.locationId} onChange={(e) => selectCreateLocation(e.target.value)}>
+                  <option value="">ไม่เชื่อม Location</option>
+                  {activeLocations.map((location) => <option key={location.id} value={location.id}>{location.code} · {location.name}</option>)}
+                </Select>
+              </Field>
+              <Field label="จำนวนรอบ / วัน">
+                <Select value={form.readingsPerDay} onChange={(e) => setForm({ ...form, readingsPerDay: e.target.value })}>
+                  <option value="1">1 รอบ / วัน</option>
+                  <option value="2">2 รอบ: เช้า, บ่าย</option>
+                  <option value="3">3 รอบ: เช้า, บ่าย, ดึก</option>
+                </Select>
+                <p className="mt-1 text-[11px] text-[#789097]">{envPeriodOptions(Number(form.readingsPerDay)).map((option) => option.label).join(' · ')}</p>
+              </Field>
               <div className="grid grid-cols-3 gap-2">
                 <Field label="Min"><Input type="number" step="any" value={form.minLimit} onChange={(e) => setForm({ ...form, minLimit: e.target.value })} placeholder="2" /></Field>
                 <Field label="Max"><Input type="number" step="any" value={form.maxLimit} onChange={(e) => setForm({ ...form, maxLimit: e.target.value })} placeholder="8" /></Field>
                 <Field label="หน่วย"><Input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} /></Field>
               </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Field label="Thermometer ID"><Input value={form.thermometerId} onChange={(e) => setForm({ ...form, thermometerId: e.target.value })} placeholder="เช่น TM-001" /></Field>
+                <Field label="Datalogger ID"><Input value={form.dataloggerId} onChange={(e) => setForm({ ...form, dataloggerId: e.target.value })} placeholder="เช่น DL-001" /></Field>
+              </div>
+              <Field label="Calibration due date"><Input type="date" value={form.calibrationDueDate} onChange={(e) => setForm({ ...form, calibrationDueDate: e.target.value })} /></Field>
+              <Field label="สถานะตู้">
+                <Select value={form.availabilityStatus} onChange={(e) => setForm({ ...form, availabilityStatus: e.target.value })}>
+                  <option value="active">ใช้งาน</option>
+                  <option value="maintenance">ซ่อม</option>
+                  <option value="paused">พักใช้งานชั่วคราว</option>
+                </Select>
+              </Field>
+              {form.availabilityStatus !== 'active' ? (
+                <div className="space-y-2 rounded-md border border-[#eed4a6] bg-[#fffaf0] p-3">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Field label="ตั้งแต่"><Input type="date" value={form.unavailableFrom} onChange={(e) => setForm({ ...form, unavailableFrom: e.target.value })} /></Field>
+                    <Field label="ถึง"><Input type="date" value={form.unavailableUntil} onChange={(e) => setForm({ ...form, unavailableUntil: e.target.value })} /></Field>
+                  </div>
+                  <Field label="หมายเหตุ"><Textarea rows={2} value={form.unavailableNote} onChange={(e) => setForm({ ...form, unavailableNote: e.target.value })} placeholder="เช่น ส่งซ่อม / งดใช้ระหว่างรอ calibration" /></Field>
+                </div>
+              ) : null}
               {error ? <Notice tone="danger">{error}</Notice> : null}
               <Button type="submit" disabled={busy}>{busy ? 'กำลังบันทึก…' : 'เพิ่มตู้'}</Button>
             </form>
@@ -563,7 +815,17 @@ function UnitsAdmin({ data, origin, onChanged }: { data: EnvWorkspace; origin: s
                 {origin ? <a href={`/environment/u/${unit.qrToken}`} target="_blank" rel="noreferrer" title="เปิดฟอร์มบันทึก"><QrCode value={`${origin}/environment/u/${unit.qrToken}`} size={56} /></a> : <div className="size-14" />}
                 <div>
                   <p className="font-semibold text-[#173d50]">{unit.name} <span className="mono text-xs text-[#789097]">{unit.code}</span></p>
-                  <p className="text-[11px] text-[#8ba0a5]">{KIND_LABEL[unit.kind] ?? unit.kind} · {unit.minLimit ?? '—'}–{unit.maxLimit ?? '—'} {unit.unit}</p>
+                  <p className="text-[11px] text-[#8ba0a5]">
+                    {KIND_LABEL[unit.kind] ?? unit.kind} · {unit.minLimit ?? '—'}–{unit.maxLimit ?? '—'} {unit.unit}
+                    {` · ${unit.readingsPerDay} รอบ/วัน`}
+                    {unit.locationCode ? ` · Location ${unit.locationCode}` : ''}
+                    {unit.calibrationDueDate ? ` · Cal ${formatDate(unit.calibrationDueDate)}` : ''}
+                  </p>
+                  {unit.thermometerId || unit.dataloggerId || unit.availabilityStatus !== 'active' ? (
+                    <p className="mt-0.5 text-[11px] text-[#8ba0a5]">
+                      {[unit.thermometerId ? `Thermometer ${unit.thermometerId}` : '', unit.dataloggerId ? `Datalogger ${unit.dataloggerId}` : '', unitUnavailableText(unit)].filter(Boolean).join(' · ')}
+                    </p>
+                  ) : null}
                 </div>
               </div>
               <div className="flex gap-1.5">
@@ -571,6 +833,7 @@ function UnitsAdmin({ data, origin, onChanged }: { data: EnvWorkspace; origin: s
                 <Button variant={unit.isActive ? 'secondary' : 'primary'} className="min-h-8 px-3 py-1.5 text-xs" onClick={() => toggleActive(unit)}>
                   {unit.isActive ? 'ปิดใช้งาน' : 'เปิดใช้งาน'}
                 </Button>
+                <Button variant="danger" className="min-h-8 px-2.5 py-1.5 text-xs" disabled={busy} onClick={() => remove(unit)} title="ลบตู้"><Trash2 className="size-3" /></Button>
               </div>
             </div>
           ))}

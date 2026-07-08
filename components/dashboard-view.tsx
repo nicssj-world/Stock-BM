@@ -31,7 +31,7 @@ export function DashboardView({ actor, stock, env, hpv }: { actor: BmActor; stoc
     .filter(({ lot }) => lot.totalOnHand > 0 && (lot.expiryState === 'expiring' || lot.expiryState === 'expired'))
     .slice(0, 8)
 
-  const pendingCards = env.cards.filter((c) => !c.loggedToday)
+  const pendingCards = env.cards.filter((c) => c.status === 'pending')
   const outOfRangeCards = env.cards.filter((c) => c.status === 'out-of-range')
   const attentionCards = [...outOfRangeCards, ...pendingCards.filter((c) => c.status !== 'out-of-range')].slice(0, 6)
 

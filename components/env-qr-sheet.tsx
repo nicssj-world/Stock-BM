@@ -35,6 +35,9 @@ export function EnvQrSheet({ units, origin }: { units: EnvUnit[]; origin: string
                 <p className="font-bold text-[#173d50]">{unit.name}</p>
                 <p className="mono text-xs text-[#789097]">{unit.code} · {KIND_LABEL[unit.kind] ?? unit.kind}</p>
                 <p className="mono text-xs text-[#789097]">ช่วง {unit.minLimit ?? '—'}–{unit.maxLimit ?? '—'} {unit.unit}</p>
+                {unit.thermometerId ? <p className="mono text-xs text-[#789097]">TM {unit.thermometerId}</p> : null}
+                {unit.dataloggerId ? <p className="mono text-xs text-[#789097]">DL {unit.dataloggerId}</p> : null}
+                {unit.calibrationDueDate ? <p className="mono text-xs text-[#789097]">Cal {unit.calibrationDueDate}</p> : null}
               </div>
             </Card>
           ))}

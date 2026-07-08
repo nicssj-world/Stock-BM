@@ -2,19 +2,36 @@
 
 import { useState } from 'react'
 import { CheckCircle2, ChevronDown, Thermometer } from 'lucide-react'
-import type { EnvReading, EnvUnit } from '@/lib/env/types'
-import { api, Button, Field, Input, Notice, Textarea } from '@/components/ui'
+import type { EnvPeriodIndex, EnvReading, EnvUnit } from '@/lib/env/types'
+import { envPeriodLabel, envPeriodOptions } from '@/lib/env/types'
+import { api, Button, Field, Input, Notice, Select, Textarea } from '@/components/ui'
 
 function localToday() {
   return new Date().toLocaleDateString('en-CA')
 }
 
+function currentPeriodIndex(readingsPerDay: number): EnvPeriodIndex {
+  const hour = new Date().getHours()
+  if (readingsPerDay >= 3 && hour < 8) return 3
+  if (readingsPerDay >= 2 && hour >= 16) return 2
+  return 1
+}
+
+function unitUnavailableToday(unit: EnvUnit) {
+  if (unit.availabilityStatus === 'active') return false
+  const today = localToday()
+  if (unit.unavailableFrom && today < unit.unavailableFrom) return false
+  if (unit.unavailableUntil && today > unit.unavailableUntil) return false
+  return true
+}
+
 // Fast single-unit temperature entry. Used by the QR deep-link page and the
 // dashboard cards. On an out-of-range value it reveals a corrective-action form.
-export function EnvQuickLog({ unit, onLogged, autoFocus }: { unit: EnvUnit; onLogged?: () => void; autoFocus?: boolean }) {
+export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex }: { unit: EnvUnit; onLogged?: () => void; autoFocus?: boolean; defaultPeriodIndex?: EnvPeriodIndex }) {
   const [value, setValue] = useState('')
   const [note, setNote] = useState('')
   const [readingDate, setReadingDate] = useState(localToday)
+  const [periodIndex, setPeriodIndex] = useState<EnvPeriodIndex>(defaultPeriodIndex ?? currentPeriodIndex(unit.readingsPerDay))
   const [recordedMin, setRecordedMin] = useState('')
   const [recordedMax, setRecordedMax] = useState('')
   const [showExtra, setShowExtra] = useState(false)
@@ -30,6 +47,18 @@ export function EnvQuickLog({ unit, onLogged, autoFocus }: { unit: EnvUnit; onLo
   const [caBusy, setCaBusy] = useState(false)
 
   const limitText = `${unit.minLimit ?? '—'} ถึง ${unit.maxLimit ?? '—'} ${unit.unit}`
+  const unavailableToday = unitUnavailableToday(unit)
+
+  if (unavailableToday) {
+    const reason = unit.availabilityStatus === 'maintenance' ? 'ซ่อม' : 'พักใช้งาน'
+    const dates = [unit.unavailableFrom, unit.unavailableUntil].filter(Boolean).join(' ถึง ')
+    return (
+      <Notice tone="warning">
+        ตู้นี้อยู่ในสถานะ{reason}{dates ? ` (${dates})` : ''} จึงไม่ต้องบันทึกอุณหภูมิในช่วงนี้
+        {unit.unavailableNote ? ` · ${unit.unavailableNote}` : ''}
+      </Notice>
+    )
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -47,6 +76,7 @@ export function EnvQuickLog({ unit, onLogged, autoFocus }: { unit: EnvUnit; onLo
           unitId: unit.id,
           readingValue: numeric,
           readingDate,
+          periodIndex,
           recordedMin: recordedMin !== '' ? Number(recordedMin) : null,
           recordedMax: recordedMax !== '' ? Number(recordedMax) : null,
           note: note.trim() || null,
@@ -88,6 +118,7 @@ export function EnvQuickLog({ unit, onLogged, autoFocus }: { unit: EnvUnit; onLo
       <div className="space-y-3" role="status" aria-live="polite">
         <Notice tone={outOfRange ? 'danger' : 'success'}>
           บันทึกแล้ว: <span className="mono font-bold">{logged.readingValue} {unit.unit}</span>
+          <span className="ml-1 text-[11px] opacity-75">({logged.periodLabel})</span>
           {isBackdate ? <span className="ml-1 text-[11px] opacity-75">({logged.readingDate})</span> : ''}
           {' '}— {outOfRange ? 'นอกช่วง / Out of range' : 'อยู่ในช่วง / In range'}
         </Notice>
@@ -110,8 +141,15 @@ export function EnvQuickLog({ unit, onLogged, autoFocus }: { unit: EnvUnit; onLo
     <form onSubmit={submit} className="space-y-3">
       <div className="flex items-baseline justify-between gap-2">
         <p className="text-sm font-bold text-[#173d50]">{unit.name}</p>
-        <span className="mono text-[11px] text-[#789097]">ช่วง {limitText}</span>
+        <span className="text-[11px] text-[#789097]">{envPeriodLabel(periodIndex)} · ช่วง {limitText}</span>
       </div>
+      {unit.readingsPerDay > 1 ? (
+        <Field label="รอบการบันทึก / Shift">
+          <Select value={String(periodIndex)} onChange={(e) => setPeriodIndex(Number(e.target.value) as EnvPeriodIndex)}>
+            {envPeriodOptions(unit.readingsPerDay).map((option) => <option key={option.periodIndex} value={option.periodIndex}>{option.label}</option>)}
+          </Select>
+        </Field>
+      ) : null}
       <Field label={`อุณหภูมิ / Temperature (${unit.unit})`}>
         <div className="relative">
           <Thermometer className="absolute top-2.5 left-3 size-5 text-[#7b979c]" />
