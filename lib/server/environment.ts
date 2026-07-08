@@ -559,8 +559,16 @@ interface UnitInput {
   unavailableNote?: string | null
 }
 
+function assertLimitOrder(minLimit: number | null | undefined, maxLimit: number | null | undefined, label: string) {
+  if (minLimit != null && maxLimit != null && minLimit > maxLimit) {
+    throw new HttpError(400, `${label} Min ต้องน้อยกว่าหรือเท่ากับ Max / Min must be less than or equal to Max`)
+  }
+}
+
 export async function createUnit(input: UnitInput, actor: BmActor): Promise<EnvUnit> {
   assertAdmin(actor)
+  assertLimitOrder(input.minLimit, input.maxLimit, 'Temperature')
+  assertLimitOrder(input.humidityMinLimit, input.humidityMaxLimit, 'Humidity')
   const admin = getAdminClient()
   const { data, error } = await admin
     .from('env_monitored_units')
@@ -617,6 +625,21 @@ interface UnitUpdate {
 
 export async function updateUnit(id: string, patch: UnitUpdate, actor: BmActor): Promise<EnvUnit> {
   assertAdmin(actor)
+  const admin = getAdminClient()
+  const { data: currentRow, error: currentError } = await admin
+    .from('env_monitored_units')
+    .select('min_limit,max_limit,humidity_min_limit,humidity_max_limit')
+    .eq('id', id)
+    .maybeSingle()
+  fail(currentError)
+  if (!currentRow) throw new HttpError(404, 'Monitored unit not found')
+  const current = currentRow as RecordRow
+  const nextMinLimit = patch.minLimit !== undefined ? patch.minLimit : nullableNumber(current.min_limit)
+  const nextMaxLimit = patch.maxLimit !== undefined ? patch.maxLimit : nullableNumber(current.max_limit)
+  const nextHumidityMinLimit = patch.humidityMinLimit !== undefined ? patch.humidityMinLimit : nullableNumber(current.humidity_min_limit)
+  const nextHumidityMaxLimit = patch.humidityMaxLimit !== undefined ? patch.humidityMaxLimit : nullableNumber(current.humidity_max_limit)
+  assertLimitOrder(nextMinLimit, nextMaxLimit, 'Temperature')
+  assertLimitOrder(nextHumidityMinLimit, nextHumidityMaxLimit, 'Humidity')
   const update: RecordRow = { updated_at: new Date().toISOString() }
   if (patch.name !== undefined) update.name = patch.name.trim()
   if (patch.kind !== undefined) update.kind = patch.kind
@@ -636,7 +659,6 @@ export async function updateUnit(id: string, patch: UnitUpdate, actor: BmActor):
   if (patch.unavailableUntil !== undefined) update.unavailable_until = patch.unavailableUntil || null
   if (patch.unavailableNote !== undefined) update.unavailable_note = clean(patch.unavailableNote)
   if (patch.isActive !== undefined) update.is_active = patch.isActive
-  const admin = getAdminClient()
   const { data, error } = await admin.from('env_monitored_units').update(update).eq('id', id).select('*').single()
   if (error) throw new HttpError(400, error.message || 'Could not update unit')
   const locations = await loadStockLocations()
