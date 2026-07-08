@@ -9,7 +9,7 @@ import type { EnvUnit } from '@/lib/env/types'
 // QR sticker target: <app>/environment/u/<token>. Protected, so an unauthenticated
 // scan lands on login then returns here. Renders a fast single-unit entry form.
 export default async function EnvUnitTokenPage({ params }: { params: Promise<{ token: string }> }) {
-  await requireFullPageActor()
+  const actor = await requireFullPageActor()
   const { token } = await params
 
   let unit: EnvUnit | null = null
@@ -25,7 +25,7 @@ export default async function EnvUnitTokenPage({ params }: { params: Promise<{ t
       <PageHeader eyebrow="บันทึกอุณหภูมิ" title="Temperature log" description="สแกน QR ที่ตู้แล้วบันทึกค่าได้ทันที" />
       {unit ? (
         <Card className="p-4">
-          <EnvQuickLog unit={unit} autoFocus />
+          <EnvQuickLog unit={unit} autoFocus allowBackdate={actor.role === 'Admin'} />
         </Card>
       ) : (
         <Notice tone="danger">ไม่พบตู้สำหรับ QR นี้ หรือตู้ถูกปิดใช้งาน / Unit not found or inactive</Notice>

@@ -42,6 +42,14 @@ function cardLabel(status: EnvCardStatus): string {
   return status === 'out-of-range' ? 'นอกช่วง' : status === 'pending' ? 'ยังไม่บันทึก' : status === 'corrected' ? 'แก้ไขแล้ว' : status === 'unavailable' ? 'หยุดชั่วคราว' : 'ปกติ'
 }
 
+function unitCardShell(status: EnvCardStatus): string {
+  if (status === 'out-of-range') return 'border-l-4 border-l-[#c02a37] shadow-[0_16px_36px_rgba(192,42,55,0.10)]'
+  if (status === 'pending') return 'border-l-4 border-l-[#d48624] shadow-[0_16px_36px_rgba(212,134,36,0.10)]'
+  if (status === 'corrected') return 'border-l-4 border-l-[#d48624]'
+  if (status === 'unavailable') return 'border-l-4 border-l-[#91a4a9] opacity-90'
+  return 'border-l-4 border-l-[#2f9b68] shadow-[0_14px_32px_rgba(11,127,118,0.08)]'
+}
+
 function unitUnavailableText(unit: EnvUnit) {
   if (unit.availabilityStatus === 'active') return ''
   const dates = [unit.unavailableFrom, unit.unavailableUntil].filter(Boolean).join(' ถึง ')
@@ -80,9 +88,10 @@ export function EnvironmentView({ actor, initialData, origin }: { actor: BmActor
 
       {data.summary.dueNowCount > 0 ? (
         <Notice tone="warning">
-          <span>
-            <span className="inline-flex items-center gap-1 font-semibold"><Bell className="size-4" /> Reminder:</span>
-            {' '}ถึงรอบบันทึกแล้ว {data.summary.dueNowCount} ตู้ / {data.summary.dueNowPeriodCount} รอบ
+          <span className="inline-flex items-center gap-1.5 leading-none">
+            <Bell className="size-4 shrink-0" />
+            <span className="font-semibold">Reminder:</span>
+            <span>ถึงรอบบันทึกแล้ว {data.summary.dueNowCount} ตู้ / {data.summary.dueNowPeriodCount} รอบ</span>
           </span>
         </Notice>
       ) : null}
@@ -101,7 +110,7 @@ export function EnvironmentView({ actor, initialData, origin }: { actor: BmActor
         data.cards.length ? (
           <div className="grid gap-4 lg:grid-cols-2">
             {data.cards.map((card) => (
-              <UnitCard key={card.unit.id} card={card} onChanged={() => router.refresh()} />
+              <UnitCard key={card.unit.id} card={card} isAdmin={isAdmin} onChanged={() => router.refresh()} />
             ))}
           </div>
         ) : (
@@ -120,11 +129,11 @@ export function EnvironmentView({ actor, initialData, origin }: { actor: BmActor
   )
 }
 
-function UnitCard({ card, onChanged }: { card: EnvWorkspace['cards'][number]; onChanged: () => void }) {
+function UnitCard({ card, isAdmin, onChanged }: { card: EnvWorkspace['cards'][number]; isAdmin: boolean; onChanged: () => void }) {
   const [logging, setLogging] = useState(false)
   const { unit } = card
   return (
-    <Card className="p-4">
+    <Card className={`p-4 transition-shadow duration-200 hover:shadow-md ${unitCardShell(card.status)}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -155,11 +164,11 @@ function UnitCard({ card, onChanged }: { card: EnvWorkspace['cards'][number]; on
         </div>
       </div>
 
-      <div className="mt-3">
-        <RangeChart points={card.points} minLimit={unit.minLimit} maxLimit={unit.maxLimit} unit={unit.unit} label={unit.name} />
+      <div className="mt-3 rounded-md border border-[#d6e6e7] bg-gradient-to-b from-white to-[#f7fbfb] p-2 shadow-inner">
+        <RangeChart points={card.points} minLimit={unit.minLimit} maxLimit={unit.maxLimit} unit={unit.unit} label={unit.name} showPeriodLabels={unit.readingsPerDay > 1} />
       </div>
       {unit.trackHumidity ? (
-        <div className="mt-3 rounded-md border border-[#e3ebec] bg-[#fbfefe] p-2">
+        <div className="mt-3 rounded-md border border-[#cde3ea] bg-gradient-to-b from-[#fbfefe] to-[#f3fafc] p-2 shadow-inner">
           <p className="mb-1 flex items-center gap-1.5 text-xs font-bold text-[#315763]"><Droplets className="size-3.5 text-[#0b7f76]" /> Relative humidity</p>
           <RangeChart
             points={card.points
@@ -174,6 +183,7 @@ function UnitCard({ card, onChanged }: { card: EnvWorkspace['cards'][number]; on
             unit="%"
             label={`${unit.name} RH`}
             metricLabel="Relative humidity"
+            showPeriodLabels={unit.readingsPerDay > 1}
           />
         </div>
       ) : null}
@@ -188,23 +198,23 @@ function UnitCard({ card, onChanged }: { card: EnvWorkspace['cards'][number]; on
             <span>{card.todayPeriodIndexes.length ? `บันทึกแล้ว: ${card.todayPeriodIndexes.map(envPeriodLabel).join(', ')}` : 'ยังไม่บันทึกรอบวันนี้'}</span>
           ) : null}
         </span>
-        {card.status === 'unavailable' ? (
+        {card.status === 'unavailable' && !isAdmin ? (
           <span className="text-xs font-semibold text-[#789097]">{AVAILABILITY_LABEL[unit.availabilityStatus] ?? 'หยุดชั่วคราว'}</span>
-        ) : card.loggedToday ? (
+        ) : card.loggedToday && !isAdmin ? (
           <span className="text-xs font-semibold text-[#2f7d44]">
             บันทึกวันนี้แล้ว{card.unit.readingsPerDay > 1 ? ` (${card.todayReadingCount}/${card.unit.readingsPerDay})` : ''}
           </span>
         ) : (
           <Button className="min-h-8 px-3 py-1.5 text-xs" onClick={() => setLogging((v) => !v)}>
             <Thermometer className="size-3.5" />
-            บันทึก{card.unit.readingsPerDay > 1 ? ` (${card.todayReadingCount}/${card.unit.readingsPerDay})` : 'วันนี้'}
+            {card.loggedToday || card.status === 'unavailable' ? 'บันทึกย้อนหลัง' : `บันทึก${card.unit.readingsPerDay > 1 ? ` (${card.todayReadingCount}/${card.unit.readingsPerDay})` : 'วันนี้'}`}
           </Button>
         )}
       </div>
 
-      {logging && !card.loggedToday ? (
+      {logging && (!card.loggedToday || isAdmin) ? (
         <div className="mt-3 rounded-md border border-[#d6e2e3] bg-[#f8fbfb] p-3">
-          <EnvQuickLog unit={unit} autoFocus defaultPeriodIndex={nextMissingPeriod(unit, card.todayPeriodIndexes)} onLogged={onChanged} />
+          <EnvQuickLog unit={unit} autoFocus defaultPeriodIndex={nextMissingPeriod(unit, card.todayPeriodIndexes)} allowBackdate={isAdmin} onLogged={onChanged} />
         </div>
       ) : null}
     </Card>
@@ -507,7 +517,7 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
       ) : null}
 
       {readings.length > 0 && unit ? (
-        <Card className="space-y-4 p-4">
+        <Card className="space-y-4 border-l-4 border-l-[#0b7f76] bg-gradient-to-b from-white to-[#f8fbfb] p-4 shadow-sm">
           <RangeChart
             points={readings
               .filter((r) => !r.isVoided)
@@ -518,9 +528,10 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
             maxLimit={unit.maxLimit}
             unit={unit.unit}
             label={unit.name}
+            showPeriodLabels={unit.readingsPerDay > 1}
           />
           {unit.trackHumidity ? (
-            <div className="border-t border-[#e3ebec] pt-4">
+            <div className="rounded-md border border-[#cde3ea] bg-gradient-to-b from-[#fbfefe] to-[#f3fafc] p-3 shadow-inner">
               <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-[#315763]"><Droplets className="size-3.5 text-[#0b7f76]" /> Relative humidity trend</p>
               <RangeChart
                 points={readings
@@ -541,6 +552,7 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
                 unit="%"
                 label={`${unit.name} RH`}
                 metricLabel="Relative humidity"
+                showPeriodLabels={unit.readingsPerDay > 1}
               />
             </div>
           ) : null}

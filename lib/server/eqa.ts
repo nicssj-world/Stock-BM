@@ -178,6 +178,18 @@ export async function createProvider(input: { name: string }, actor: BmActor) {
   return getEqaWorkspace(actor)
 }
 
+export async function deleteProvider(id: string, actor: BmActor) {
+  assertAdmin(actor)
+  const admin = getAdminClient()
+  const { data: schemeRows, error: schemeError } = await admin.from('eqa_schemes').select('id').eq('provider_id', id).limit(1)
+  fail(schemeError)
+  if ((schemeRows ?? []).length > 0) throw new HttpError(409, 'ลบ provider ไม่ได้ เพราะมี scheme ผูกอยู่')
+  const { error } = await admin.from('eqa_providers').delete().eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'eqa.provider.delete', 'eqa-provider', id, {})
+  return getEqaWorkspace(actor)
+}
+
 export async function createScheme(input: { providerId: string; name: string; code?: string | null; analyteScope?: string | null; roundsPerYear?: number | null }, actor: BmActor) {
   assertAdmin(actor)
   const { data, error } = await getAdminClient().from('eqa_schemes').insert({

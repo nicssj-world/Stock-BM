@@ -480,7 +480,10 @@ export async function logReading(input: LogReadingInput, actor: BmActor): Promis
   if (!unitRow || !(unitRow as RecordRow).is_active) throw new HttpError(404, 'Active monitored unit not found')
   const unit = mapUnit(unitRow as RecordRow, new Map<string, StockLocation>())
 
-  const readingDate = clean(input.readingDate) ?? todayBangkok()
+  const today = todayBangkok()
+  const readingDate = clean(input.readingDate) ?? today
+  if (actor.role !== 'Admin' && readingDate !== today) throw new HttpError(403, 'Only Admin can backdate temperature readings')
+  if (readingDate > today) throw new HttpError(400, 'Reading date cannot be in the future')
   if (unitUnavailableOn(unit, readingDate)) throw new HttpError(409, 'ตู้นี้อยู่ในสถานะซ่อม/พักใช้งานในวันที่เลือก จึงไม่ต้องบันทึกอุณหภูมิ')
   await assertMonthUnlocked(unit.id, yearMonth(readingDate))
   const periodIndex = Math.min(Math.max(Number(input.periodIndex ?? 1), 1), unit.readingsPerDay)

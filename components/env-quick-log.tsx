@@ -27,7 +27,7 @@ function unitUnavailableToday(unit: EnvUnit) {
 
 // Fast single-unit temperature entry. Used by the QR deep-link page and the
 // dashboard cards. On an out-of-range value it reveals a corrective-action form.
-export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex }: { unit: EnvUnit; onLogged?: () => void; autoFocus?: boolean; defaultPeriodIndex?: EnvPeriodIndex }) {
+export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex, allowBackdate = false }: { unit: EnvUnit; onLogged?: () => void; autoFocus?: boolean; defaultPeriodIndex?: EnvPeriodIndex; allowBackdate?: boolean }) {
   const [value, setValue] = useState('')
   const [humidityPercent, setHumidityPercent] = useState('')
   const [note, setNote] = useState('')
@@ -59,7 +59,7 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex }: {
     setNext(trimmed.startsWith('-') ? trimmed.slice(1) : `-${trimmed.replace(/^\+/, '')}`)
   }
 
-  if (unavailableToday) {
+  if (unavailableToday && !allowBackdate) {
     const reason = unit.availabilityStatus === 'maintenance' ? 'ซ่อม' : 'พักใช้งาน'
     const dates = [unit.unavailableFrom, unit.unavailableUntil].filter(Boolean).join(' ถึง ')
     return (
@@ -223,6 +223,11 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex }: {
         </div>
       </Field> : null}
       <Field label="หมายเหตุ / Note"><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="ถ้ามี" /></Field>
+      {allowBackdate ? (
+        <Field label="วันที่บันทึก">
+          <Input type="date" value={readingDate} onChange={(e) => setReadingDate(e.target.value)} required />
+        </Field>
+      ) : null}
 
       <button
         type="button"
@@ -230,14 +235,11 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex }: {
         className="flex items-center gap-1 text-xs font-semibold text-[#58747d] hover:text-[#0b7f76]"
       >
         <ChevronDown className={`size-3.5 transition-transform ${showExtra ? 'rotate-180' : ''}`} />
-        {showExtra ? 'ซ่อนตัวเลือกเพิ่ม' : 'บันทึกย้อนหลัง / Min–Max datalogger'}
+        {showExtra ? 'ซ่อน Min-Max datalogger' : 'Min-Max datalogger (ไม่บังคับ)'}
       </button>
 
       {showExtra ? (
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="วันที่บันทึก">
-            <Input type="date" value={readingDate} onChange={(e) => setReadingDate(e.target.value)} required />
-          </Field>
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label={`Min (${unit.unit})`}>
             <div className="flex h-11 overflow-hidden rounded-md border border-[#c9dadd] bg-white focus-within:ring-2 focus-within:ring-[#0b7f76]">
               <button type="button" aria-label="Toggle min sign" title="Toggle +/-" onClick={() => toggleSign(recordedMin, setRecordedMin)} className="flex w-11 shrink-0 items-center justify-center border-r border-[#d8e6e6] text-[#0b7f76] hover:bg-[#eef7f6]">

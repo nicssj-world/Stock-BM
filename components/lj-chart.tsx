@@ -7,8 +7,8 @@ import { formatDateTime } from '@/lib/bm/rules'
 import { Button, StatusBadge } from '@/components/ui'
 
 const W = 720
-const H = 280
-const PAD = { top: 16, right: 16, bottom: 28, left: 52 }
+const H = 310
+const PAD = { top: 30, right: 28, bottom: 46, left: 74 }
 const PLOT_W = W - PAD.left - PAD.right
 const PLOT_H = H - PAD.top - PAD.bottom
 
@@ -19,6 +19,30 @@ function fmt(value: number) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 }).format(value)
 }
 
+function runDate(value: string) {
+  return new Date(value)
+}
+
+function formatRunDay(value: string) {
+  return new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { day: 'numeric', month: 'short' }).format(runDate(value))
+}
+
+function formatRunMonth(value: string) {
+  return new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { month: 'short', year: 'numeric' }).format(runDate(value))
+}
+
+function xTickIndexes(length: number) {
+  if (length <= 0) return []
+  if (length <= 4) return Array.from({ length }, (_, i) => i)
+  return Array.from(new Set([0, Math.floor((length - 1) / 3), Math.floor(((length - 1) * 2) / 3), length - 1]))
+}
+
+function chartShell(status: IqcChart['status']) {
+  if (status === 'rejected') return 'border-l-4 border-l-[#dc2626] shadow-[0_18px_44px_rgba(220,38,38,0.08)]'
+  if (status === 'warning') return 'border-l-4 border-l-[#d97706] shadow-[0_18px_44px_rgba(217,119,6,0.08)]'
+  return 'border-l-4 border-l-[#0d9488] shadow-[0_18px_44px_rgba(13,148,136,0.06)]'
+}
+
 export function LjChart({ chart }: { chart: IqcChart }) {
   const [showTable, setShowTable] = useState(false)
   const { mean, sd, points } = chart
@@ -27,6 +51,10 @@ export function LjChart({ chart }: { chart: IqcChart }) {
 
   const limitLabel = chart.activeLimit === 'lab' ? 'Lab mean/SD' : 'Assigned'
   const scaleHint = chart.scale === 'log10' ? ' · log10' : ''
+  const xTicks = xTickIndexes(visible.length)
+  const monthLabel = visible[0]?.runDatetime ? formatRunMonth(visible[0].runDatetime) : null
+  const yTicks = hasStats ? [-3, -2, -1, 0, 1, 2, 3] : []
+  const unitLabel = chart.unit ? ` (${chart.unit})` : ''
 
   function xAt(index: number) {
     if (visible.length <= 1) return PAD.left + PLOT_W / 2
@@ -50,7 +78,7 @@ export function LjChart({ chart }: { chart: IqcChart }) {
     : []
 
   return (
-    <div className="paper rounded-lg p-4">
+    <div className={`paper rounded-lg p-4 transition-shadow duration-200 hover:shadow-md ${chartShell(chart.status)}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -90,14 +118,60 @@ export function LjChart({ chart }: { chart: IqcChart }) {
       {!showTable ? (
         <svg viewBox={`0 0 ${W} ${H}`} className="mt-3 w-full" role="img" aria-label={`Levey-Jennings chart for ${chart.analyteName}`}>
           <title>{`Levey-Jennings: ${chart.analyteName} (${chart.lotNumber})`}</title>
+          <text x={PAD.left} y={16} fontSize={12} fontWeight={700} fill="#173d50">
+            Value{unitLabel}
+          </text>
+          {monthLabel ? (
+            <text x={PAD.left + PLOT_W} y={16} textAnchor="end" fontSize={12} fontWeight={700} fill="#173d50">
+              {monthLabel}
+            </text>
+          ) : null}
+          <text x={PAD.left + PLOT_W} y={H - 9} textAnchor="end" fontSize={11} fontWeight={700} fill="#6d8389">
+            Run date
+          </text>
+          <rect x={PAD.left} y={PAD.top} width={PLOT_W} height={PLOT_H} rx={8} fill="#fcfefe" stroke="#d5e5e7" />
           {zones.map((zone) =>
             [1, -1].map((sign) => {
               const top = yAt(mean! + sign * zone.to * sd!)
               const bottom = yAt(mean! + sign * zone.from * sd!)
               const y = Math.min(top, bottom)
-              return <rect key={`${zone.from}-${sign}`} x={PAD.left} y={y} width={PLOT_W} height={Math.abs(bottom - top)} fill={zone.fill} />
+              return <rect key={`${zone.from}-${sign}`} x={PAD.left + 1} y={y} width={PLOT_W - 2} height={Math.abs(bottom - top)} fill={zone.fill} />
             }),
           )}
+          {hasStats
+            ? yTicks.map((k) => {
+                const value = mean! + k * sd!
+                const y = yAt(value)
+                return (
+                  <g key={`ytick-${k}`}>
+                    <line x1={PAD.left} x2={PAD.left + PLOT_W} y1={y} y2={y} stroke="#dbe7e9" strokeWidth={0.8} />
+                    <text x={PAD.left - 8} y={y - 2} textAnchor="end" fontSize={9} fill="#42616a">
+                      {fmt(value)}
+                    </text>
+                    <text x={PAD.left - 8} y={y + 10} textAnchor="end" fontSize={8} fill="#91a4a9">
+                      {k === 0 ? 'mean' : `${k > 0 ? '+' : ''}${k}SD`}
+                    </text>
+                  </g>
+                )
+              })
+            : null}
+          <line x1={PAD.left} x2={PAD.left + PLOT_W} y1={PAD.top + PLOT_H} y2={PAD.top + PLOT_H} stroke="#aebfc4" />
+          <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={PAD.top + PLOT_H} stroke="#aebfc4" />
+          {xTicks.map((index) => {
+            const point = visible[index]
+            if (!point) return null
+            const x = xAt(index)
+            const textAnchor = index === 0 ? 'start' : index === visible.length - 1 ? 'end' : 'middle'
+            return (
+              <g key={`xtick-${point.resultId}`}>
+                <line x1={x} x2={x} y1={PAD.top} y2={PAD.top + PLOT_H} stroke="#e7eff1" strokeWidth={0.8} />
+                <line x1={x} x2={x} y1={PAD.top + PLOT_H} y2={PAD.top + PLOT_H + 4} stroke="#aebfc4" />
+                <text x={x} y={PAD.top + PLOT_H + 17} textAnchor={textAnchor} fontSize={9} fill="#5f757b">
+                  {formatRunDay(point.runDatetime)}
+                </text>
+              </g>
+            )
+          })}
           {hasStats
             ? [-3, -2, -1, 1, 2, 3].map((k) => (
                 <line
@@ -114,14 +188,6 @@ export function LjChart({ chart }: { chart: IqcChart }) {
             : null}
           {hasStats ? <line x1={PAD.left} x2={PAD.left + PLOT_W} y1={yAt(mean!)} y2={yAt(mean!)} stroke="#16a34a" strokeWidth={1.5} /> : null}
 
-          {hasStats
-            ? [-3, -2, -1, 0, 1, 2, 3].map((k) => (
-                <text key={k} x={PAD.left - 6} y={yAt(mean! + k * sd!) + 3} textAnchor="end" fontSize={9} fill="#8aa0a6">
-                  {k === 0 ? 'x̄' : `${k > 0 ? '+' : ''}${k}s`}
-                </text>
-              ))
-            : null}
-
           {chart.lotChanges.map((change, i) => {
             const idx = visible.findIndex((p) => p.runDatetime === change.runDatetime)
             if (idx < 0) return null
@@ -137,8 +203,10 @@ export function LjChart({ chart }: { chart: IqcChart }) {
           <polyline
             points={visible.filter((p) => !p.isVoided).map((p) => `${xAt(visible.indexOf(p))},${yAt(p.statValue)}`).join(' ')}
             fill="none"
-            stroke="#9fb6bd"
-            strokeWidth={1.2}
+            stroke="#88a8af"
+            strokeWidth={1.8}
+            strokeLinecap="round"
+            strokeLinejoin="round"
           />
 
           {visible.map((p, i) => {
@@ -155,7 +223,7 @@ export function LjChart({ chart }: { chart: IqcChart }) {
               ) : p.status === 'warning' && !p.isVoided ? (
                 <polygon points={`${x},${y - 4} ${x + 4},${y + 3.5} ${x - 4},${y + 3.5}`} fill={color} />
               ) : (
-                <circle cx={x} cy={y} r={3.2} fill={color} opacity={p.isVoided ? 0.4 : 1} />
+                <circle cx={x} cy={y} r={4} fill={color} stroke="white" strokeWidth={1.4} opacity={p.isVoided ? 0.4 : 1} />
               )
             return (
               <g key={p.resultId}>

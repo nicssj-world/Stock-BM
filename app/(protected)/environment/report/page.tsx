@@ -37,7 +37,23 @@ function recorderNames(readings: EnvReading[]) {
   return [...new Set(readings.map((reading) => reading.recordedByName).filter(Boolean))].join(', ')
 }
 
-function TableBlock({ days, readingsByKey, readingsByDay, showHumidity }: { days: number[]; readingsByKey: Map<string, EnvReading>; readingsByDay: Map<number, EnvReading[]>; showHumidity: boolean }) {
+type ReportMetric = 'temperature' | 'humidity'
+
+function metricValue(reading: EnvReading | undefined, metric: ReportMetric) {
+  return metric === 'humidity' ? reading?.humidityPercent : reading?.readingValue
+}
+
+function metricLabel(metric: ReportMetric) {
+  return metric === 'humidity' ? 'ความชื้น' : 'อุณหภูมิ'
+}
+
+function metricOutOfRange(reading: EnvReading | undefined, metric: ReportMetric) {
+  if (!reading) return false
+  if (metric === 'temperature') return reading.status === 'out-of-range'
+  return reading.humidityPercent != null && reading.status === 'out-of-range'
+}
+
+function TableBlock({ days, readingsByKey, readingsByDay, metric }: { days: number[]; readingsByKey: Map<string, EnvReading>; readingsByDay: Map<number, EnvReading[]>; metric: ReportMetric }) {
   const periods: EnvPeriodIndex[] = [1, 2, 3]
   return (
     <table className="temp-table">
@@ -47,7 +63,7 @@ function TableBlock({ days, readingsByKey, readingsByDay, showHumidity }: { days
           {days.map((day) => <th key={day} colSpan={3}>{day}</th>)}
         </tr>
         <tr>
-          <th className="label-cell">อุณหภูมิ</th>
+          <th className="label-cell">{metricLabel(metric)}</th>
           {days.flatMap((day) => periods.map((period) => <th key={`${day}-${period}`} className="period-cell">{period}</th>))}
         </tr>
       </thead>
@@ -56,21 +72,14 @@ function TableBlock({ days, readingsByKey, readingsByDay, showHumidity }: { days
           <th className="label-cell">ค่า</th>
           {days.flatMap((day) => periods.map((period) => {
             const reading = readingsByKey.get(readingKey(day, period))
-            return <td key={`${day}-${period}`} className={reading?.status === 'out-of-range' ? 'oor' : ''}>{fmt(reading?.readingValue)}</td>
+            return <td key={`${day}-${period}`} className={metricOutOfRange(reading, metric) ? 'oor' : ''}>{fmt(metricValue(reading, metric))}</td>
           }))}
         </tr>
-        {showHumidity ? <tr>
-          <th className="label-cell">RH (%)</th>
-          {days.flatMap((day) => periods.map((period) => {
-            const reading = readingsByKey.get(readingKey(day, period))
-            return <td key={`${day}-${period}`}>{fmt(reading?.humidityPercent)}</td>
-          }))}
-        </tr> : null}
         <tr>
           <th className="label-cell">mean</th>
           {days.map((day) => {
-            const readings = readingsByDay.get(day) ?? []
-            const mean = readings.length ? readings.reduce((sum, reading) => sum + reading.readingValue, 0) / readings.length : null
+            const values = (readingsByDay.get(day) ?? []).map((reading) => metricValue(reading, metric)).filter((value): value is number => value != null)
+            const mean = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null
             return <td key={day} colSpan={3}>{fmt(mean)}</td>
           })}
         </tr>
@@ -151,8 +160,8 @@ export default async function EnvMonthlyReportPage({ searchParams }: { searchPar
             <span className="short-fill">{unit.locationCode ?? ''} {unit.locationName ?? ''}</span>
           </div>
 
-          <TableBlock days={firstHalf} readingsByKey={readingsByKey} readingsByDay={readingsByDay} showHumidity={unit.trackHumidity} />
-          <TableBlock days={secondHalf} readingsByKey={readingsByKey} readingsByDay={readingsByDay} showHumidity={unit.trackHumidity} />
+          <TableBlock days={firstHalf} readingsByKey={readingsByKey} readingsByDay={readingsByDay} metric="temperature" />
+          <TableBlock days={secondHalf} readingsByKey={readingsByKey} readingsByDay={readingsByDay} metric="temperature" />
 
           <div className="lower-grid">
             <div className="instructions">
@@ -193,6 +202,69 @@ export default async function EnvMonthlyReportPage({ searchParams }: { searchPar
         </section>
       )}
 
+      {unit?.trackHumidity ? (
+        <section className="sheet sheet-break">
+          <div className="doc-code">Fm-WI-E-OV01/02</div>
+          <h1>แบบฟอร์มบันทึกความชื้นสัมพัทธ์</h1>
+          <p className="subhead">งานอณูชีววิทยา กลุ่มงานเทคนิคการแพทย์ โรงพยาบาลชลบุรี</p>
+
+          <EquipmentLine unit={unit} />
+          <div className="field-row">
+            <span className="check">□</span>
+            <span>บันทึกความชื้น ช่วงความชื้นที่ยอมรับ :</span>
+            <span className="short-fill">{unit.humidityMinLimit ?? ''} - {unit.humidityMaxLimit ?? ''}</span>
+            <span>% เดือน :</span>
+            <span className="short-fill">{thaiMonthYear(month)}</span>
+          </div>
+          <div className="field-row small">
+            <span>Calibration due date :</span>
+            <span className="short-fill">{formatDate(unit.calibrationDueDate)}</span>
+            <span>Location :</span>
+            <span className="short-fill">{unit.locationCode ?? ''} {unit.locationName ?? ''}</span>
+          </div>
+
+          <TableBlock days={firstHalf} readingsByKey={readingsByKey} readingsByDay={readingsByDay} metric="humidity" />
+          <TableBlock days={secondHalf} readingsByKey={readingsByKey} readingsByDay={readingsByDay} metric="humidity" />
+
+          <div className="lower-grid">
+            <div className="instructions">
+              <p className="section-title">ข้อปฏิบัติ :</p>
+              <p>1. ใส่ค่าความชื้นสัมพัทธ์ในช่องรอบที่บันทึก</p>
+              <p>2. ความถี่ของการบันทึกค่าความชื้นสัมพัทธ์ 3 ครั้งในรอบ 24 ชั่วโมง</p>
+              <p>3. กรณีพบความชื้นไม่อยู่ในช่วงค่าที่กำหนด ให้เฝ้าระวังและดำเนิน corrective action ตามระบบ</p>
+            </div>
+            <table className="ca-table">
+              <thead>
+                <tr>
+                  <th>ว/ด/ป</th>
+                  <th>ปัญหาที่พบ</th>
+                  <th>corrective action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(correctiveActions.length ? correctiveActions : Array.from({ length: 4 }, () => null)).slice(0, 5).map((ca, index) => (
+                  <tr key={ca?.id ?? index}>
+                    <td>{ca ? formatDate(ca.readingDate) : ''}</td>
+                    <td>{ca?.problem ?? ''}</td>
+                    <td>{ca ? [ca.rootCause, ca.actionTaken].filter(Boolean).join(' / ') : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="review-row">
+            <span>ผู้ตรวจสอบ :</span>
+            <span className="signature">{monthlyReview?.reviewedByName ?? ''}</span>
+            <span>วันที่</span>
+            <span className="date-line">{monthlyReview ? formatDate(monthlyReview.reviewedAt.slice(0, 10)) : ''}</span>
+            <span className="role">(ผู้จัดการวิชาการ)</span>
+          </div>
+          {monthlyReview?.note ? <p className="review-note">หมายเหตุการตรวจสอบ: {monthlyReview.note}</p> : null}
+          <p className="footer-note">เอกสารนี้เป็นสมบัติของกลุ่มงานเทคนิคการแพทย์ โรงพยาบาลชลบุรี ห้ามนำออกไปใช้ภายนอกหรือทำซ้ำโดยไม่ได้รับอนุญาต</p>
+        </section>
+      ) : null}
+
       <script dangerouslySetInnerHTML={{ __html: "document.getElementById('print-report')?.addEventListener('click',()=>window.print())" }} />
       <style>{`
         @page { size: A4 landscape; margin: 8mm; }
@@ -201,6 +273,8 @@ export default async function EnvMonthlyReportPage({ searchParams }: { searchPar
         .toolbar { display: flex; justify-content: space-between; align-items: center; margin: 0 auto 12px; max-width: 1120px; }
         .back-link, #print-report { border: 1px solid #b8c8cc; background: white; border-radius: 6px; padding: 8px 12px; color: #173d50; font-weight: 700; font-size: 13px; }
         .sheet { position: relative; width: 1120px; min-height: 780px; margin: 0 auto; background: white; padding: 22px 24px 16px; box-shadow: 0 10px 40px rgba(20, 64, 72, 0.16); }
+        .sheet + .sheet { margin-top: 18px; }
+        .sheet-break { break-before: page; page-break-before: always; }
         h1 { margin: 0; text-align: center; font-size: 18px; font-weight: 800; }
         .subhead { margin: 2px 0 8px; text-align: center; font-size: 12px; }
         .doc-code { position: absolute; right: 24px; top: 18px; font-size: 11px; font-weight: 700; }
@@ -233,6 +307,8 @@ export default async function EnvMonthlyReportPage({ searchParams }: { searchPar
           body { background: white; }
           .print-hidden { display: none !important; }
           .sheet { width: auto; min-height: auto; margin: 0; padding: 0; box-shadow: none; }
+          .sheet + .sheet { margin-top: 0; }
+          .sheet-break { break-before: page; page-break-before: always; }
           .doc-code { right: 0; top: 0; }
           .footer-note { position: fixed; bottom: 0; left: 0; right: 0; }
         }

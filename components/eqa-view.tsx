@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { CalendarClock, ClipboardList, FolderOpen, Settings } from 'lucide-react'
+import { CalendarClock, ClipboardList, FolderOpen, Settings, Trash2 } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { EqaRound, EqaWorkspace } from '@/lib/eqa/types'
 import { formatDate } from '@/lib/bm/rules'
@@ -236,9 +236,19 @@ function ManageTab({ data, onOk, onErr }: { data: EqaWorkspace; onOk: (t: string
       return false
     }
   }
+  async function remove(url: string, okText: string) {
+    try {
+      const result = await api<{ eqa: EqaWorkspace }>(url, { method: 'DELETE' })
+      onOk(okText, result.eqa)
+      return true
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : 'ลบไม่สำเร็จ')
+      return false
+    }
+  }
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <ProviderForm onSubmit={(b) => post('/api/eqa/providers', b, 'เพิ่ม provider แล้ว')} data={data} />
+      <ProviderForm onSubmit={(b) => post('/api/eqa/providers', b, 'เพิ่ม provider แล้ว')} onDelete={(id) => remove(`/api/eqa/providers/${id}`, 'ลบ provider แล้ว')} data={data} />
       <SchemeForm onSubmit={(b) => post('/api/eqa/schemes', b, 'เพิ่ม scheme แล้ว')} data={data} />
       <RoundForm onSubmit={(b) => post('/api/eqa/rounds', b, 'เพิ่ม round แล้ว')} data={data} />
       <AnnualSummary data={data} />
@@ -246,9 +256,20 @@ function ManageTab({ data, onOk, onErr }: { data: EqaWorkspace; onOk: (t: string
   )
 }
 
-function ProviderForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean>; data: EqaWorkspace }) {
+function ProviderForm({ onSubmit, onDelete, data }: { onSubmit: (b: unknown) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; data: EqaWorkspace }) {
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
+  const [deletingId, setDeletingId] = useState('')
+  const schemeCounts = new Map<string, number>()
+  for (const scheme of data.schemes) schemeCounts.set(scheme.providerId, (schemeCounts.get(scheme.providerId) ?? 0) + 1)
+
+  async function removeProvider(id: string, providerName: string) {
+    if (!window.confirm(`ลบ provider "${providerName}" ใช่ไหม?`)) return
+    setDeletingId(id)
+    await onDelete(id)
+    setDeletingId('')
+  }
+
   return (
     <Card className="space-y-3 p-4">
       <h2 className="font-bold text-[#173d50]">Provider ({data.providers.length})</h2>
@@ -256,6 +277,29 @@ function ProviderForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<bo
         <div className="flex-1"><Field label="ชื่อ provider"><Input value={name} onChange={(e) => setName(e.target.value)} required /></Field></div>
         <Button disabled={busy}>เพิ่ม</Button>
       </form>
+      <div className="space-y-2">
+        {data.providers.map((provider) => {
+          const schemeCount = schemeCounts.get(provider.id) ?? 0
+          return (
+            <div key={provider.id} className="flex items-center justify-between gap-3 rounded-md border border-[#e3ebec] bg-[#fbfefe] px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-[#173d50]">{provider.name}</p>
+                <p className="text-[11px] text-[#789097]">{schemeCount ? `${schemeCount} scheme` : 'ยังไม่มี scheme'}</p>
+              </div>
+              <Button
+                type="button"
+                variant="danger"
+                className="min-h-8 px-2.5 py-1.5 text-xs"
+                disabled={deletingId === provider.id || schemeCount > 0}
+                title={schemeCount > 0 ? 'ลบไม่ได้ เพราะมี scheme ผูกอยู่' : 'ลบ provider'}
+                onClick={() => removeProvider(provider.id, provider.name)}
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            </div>
+          )
+        })}
+      </div>
     </Card>
   )
 }
