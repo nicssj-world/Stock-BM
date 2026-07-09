@@ -10,10 +10,16 @@ export interface HpvReceiptLike {
   sampleCount: number
 }
 
+export interface HpvReturnLike {
+  siteId: string
+  quantity: number
+}
+
 export interface HpvSiteSummary {
   siteId: string
   issued: number
   received: number
+  returned: number
   outstanding: number
   selfSupplied: boolean
 }
@@ -34,10 +40,10 @@ export function addOneMonth(date: Date) {
   return new Date(date.getFullYear(), date.getMonth() + 1, date.getDate(), date.getHours(), date.getMinutes(), date.getSeconds(), date.getMilliseconds())
 }
 
-export function summarizeHpvSites(distributions: HpvDistributionLike[], receipts: HpvReceiptLike[]): Record<string, HpvSiteSummary> {
+export function summarizeHpvSites(distributions: HpvDistributionLike[], receipts: HpvReceiptLike[], returns: HpvReturnLike[] = []): Record<string, HpvSiteSummary> {
   const summaries: Record<string, HpvSiteSummary> = {}
   function ensure(siteId: string) {
-    summaries[siteId] ??= { siteId, issued: 0, received: 0, outstanding: 0, selfSupplied: false }
+    summaries[siteId] ??= { siteId, issued: 0, received: 0, returned: 0, outstanding: 0, selfSupplied: false }
     return summaries[siteId]
   }
 
@@ -49,8 +55,12 @@ export function summarizeHpvSites(distributions: HpvDistributionLike[], receipts
     const summary = ensure(receipt.siteId)
     summary.received += receipt.sampleCount
   }
+  for (const kitReturn of returns) {
+    const summary = ensure(kitReturn.siteId)
+    summary.returned += kitReturn.quantity
+  }
   for (const summary of Object.values(summaries)) {
-    summary.outstanding = summary.selfSupplied ? 0 : summary.issued - summary.received
+    summary.outstanding = summary.selfSupplied ? 0 : summary.issued - summary.received - summary.returned
   }
   return summaries
 }

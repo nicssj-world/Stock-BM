@@ -6,9 +6,12 @@ import { readJson, respond } from '@/lib/server/route'
 const schema = z.object({
   siteId: z.string().uuid(),
   distributedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  lotId: z.string().uuid(),
-  locationId: z.string().uuid(),
+  kitType: z.enum(['self_collected', 'clinician_collected']),
   quantity: z.number().int().positive(),
+  lines: z.array(z.object({
+    lotId: z.string().uuid(),
+    locationId: z.string().uuid(),
+  })).min(1),
   note: z.string().trim().max(500).nullable().optional(),
   overrideReason: z.string().trim().max(500).nullable().optional(),
 })

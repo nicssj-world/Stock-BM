@@ -17,6 +17,7 @@ import {
   Pencil,
   Plus,
   QrCode,
+  RotateCcw,
   Search,
   ScanLine,
   Send,
@@ -29,7 +30,7 @@ import { formatHpvBoxPosition, HPV_BOX_CAPACITY } from '@/lib/hpv/rules'
 import { formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
 
-type Tab = 'distribution' | 'receipts' | 'storage' | 'checkout'
+type Tab = 'distribution' | 'returns' | 'receipts' | 'storage' | 'checkout'
 
 function todayKey() {
   const now = new Date()
@@ -119,6 +120,7 @@ export function HpvView({ actor, initialData }: { actor: BmActor; initialData: H
         description="เบิก-จ่ายชุดเก็บตัวอย่าง รพ.สต. และจัดเก็บ sample storage box 5x5"
         actions={<Tabs tabs={[
           { key: 'distribution', label: 'เบิก-จ่าย', icon: PackageMinus },
+          { key: 'returns', label: 'คืนชุดตรวจ', icon: RotateCcw },
           { key: 'receipts', label: 'Receive Log', icon: ClipboardCheck },
           { key: 'storage', label: 'Sample Storage', icon: Boxes },
           { key: 'checkout', label: 'Checkout', icon: Send },
@@ -134,6 +136,7 @@ export function HpvView({ actor, initialData }: { actor: BmActor; initialData: H
       </div>
 
       {tab === 'distribution' ? <DistributionTab actor={actor} data={data} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
+      {tab === 'returns' ? <ReturnsTab data={data} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
       {tab === 'receipts' ? <ReceiptsTab actor={actor} data={data} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
       {tab === 'storage' ? <StorageTab data={data} today={today} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
       {tab === 'checkout' ? <CheckoutTab data={data} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
@@ -154,39 +157,41 @@ function DistributionTab({
 }) {
   const activeSites = data.sites.filter((site) => site.isActive)
   const distributionSites = activeSites.filter((site) => !site.selfSupplied)
-  const stockItems = useMemo(() => data.stock.items.filter((item) => item.isHpv && item.lots.some((lot) => lot.balances.some((balance) => balance.onHand > 0))), [data.stock.items])
-  const stockLines = useMemo(() => stockItems.flatMap((item) =>
+  const [kitType, setKitType] = useState<'self_collected' | 'clinician_collected' | ''>('')
+  const stockItems = useMemo(() => data.stock.items.filter((item) =>
+    item.isHpv
+    && (kitType === 'self_collected' ? item.hpvSelfCollected : kitType === 'clinician_collected' ? item.hpvClinicianCollected : false)
+    && item.isActive
+  ).sort((a, b) => a.itemCode.localeCompare(b.itemCode)), [data.stock.items, kitType])
+  const stockLinesByItem = useMemo(() => new Map(stockItems.map((item) => [
+    item.id,
     item.lots.flatMap((lot) => lot.balances.filter((balance) => balance.onHand > 0).map((balance) => ({
       key: `${lot.id}:${balance.locationId}`,
       item,
       lot,
       balance,
     }))),
-  ), [stockItems])
+  ])), [stockItems])
   const [form, setForm] = useState({
     siteId: distributionSites[0]?.id ?? '',
     distributedOn: todayKey(),
-    itemId: stockItems[0]?.id ?? '',
-    stockKey: stockLines[0]?.key ?? '',
     quantity: '1',
     note: '',
     overrideReason: '',
   })
+  const [selectedLineKeys, setSelectedLineKeys] = useState<Record<string, string>>({})
   const [siteForm, setSiteForm] = useState({ code: '', name: '', siteType: 'รพ.สต.', selfSupplied: false })
   const [editingSite, setEditingSite] = useState<{ id: string; code: string; name: string; siteType: string; selfSupplied: boolean } | null>(null)
   const [distributionFile, setDistributionFile] = useState<File | null>(null)
   const distributionFileRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const selectedSiteId = form.siteId || distributionSites[0]?.id || ''
-  const selectedItemId = stockItems.some((item) => item.id === form.itemId) ? form.itemId : stockItems[0]?.id ?? ''
-  const selectedStockLines = stockLines.filter((line) => line.item.id === selectedItemId)
-  const selectedStockKey = selectedStockLines.some((line) => line.key === form.stockKey) ? form.stockKey : selectedStockLines[0]?.key ?? ''
-  const selectedStock = selectedStockLines.find((line) => line.key === selectedStockKey)
-
-  function selectStockItem(itemId: string) {
-    const nextStockKey = stockLines.find((line) => line.item.id === itemId)?.key ?? ''
-    setForm({ ...form, itemId, stockKey: nextStockKey })
-  }
+  const selectedBundleLines = stockItems.map((item) => {
+    const itemLines = stockLinesByItem.get(item.id) ?? []
+    const selectedKey = itemLines.some((line) => line.key === selectedLineKeys[item.id]) ? selectedLineKeys[item.id] : itemLines[0]?.key ?? ''
+    return { item, itemLines, selectedKey, selectedLine: itemLines.find((line) => line.key === selectedKey) ?? null }
+  })
+  const canSubmitBundle = Boolean(selectedSiteId && kitType && stockItems.length && selectedBundleLines.every((line) => line.selectedLine))
 
   async function uploadDistributionFile(distributionId: string, file: File) {
     const formData = new FormData()
@@ -202,18 +207,24 @@ function DistributionTab({
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
-    if (!selectedStock) return
+    if (!canSubmitBundle) return
     setBusy(true)
     onNotice(null)
     try {
+      const distributionLines = selectedBundleLines
+        .map((line) => line.selectedLine)
+        .filter((line): line is NonNullable<typeof line> => Boolean(line))
       const result = await api<{ workspace: HpvWorkspace; distributionId: string }>('/api/hpv/distributions', {
         method: 'POST',
         body: JSON.stringify({
           siteId: selectedSiteId,
           distributedOn: form.distributedOn,
-          lotId: selectedStock.lot.id,
-          locationId: selectedStock.balance.locationId,
+          kitType,
           quantity: Number(form.quantity),
+          lines: distributionLines.map((line) => ({
+            lotId: line.lot.id,
+            locationId: line.balance.locationId,
+          })),
           note: form.note.trim() || null,
           overrideReason: form.overrideReason.trim() || null,
         }),
@@ -234,6 +245,7 @@ function DistributionTab({
         if (distributionFileRef.current) distributionFileRef.current.value = ''
       }
       setForm((current) => ({ ...current, quantity: '1', note: '', overrideReason: '' }))
+      setSelectedLineKeys({})
     } catch (error) {
       onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'บันทึกเบิกไม่สำเร็จ' })
     } finally {
@@ -289,8 +301,18 @@ function DistributionTab({
   }
 
   function exportDistributions() {
-    const headers = ['วันที่', 'หน่วยงาน', 'รหัสสินค้า', 'ชื่อสินค้า', 'Lot', 'Location', 'จำนวน', 'Note', 'บันทึกโดย']
-    const rows = data.distributions.map((d) => [d.distributedOn, d.siteName, d.itemCode ?? '', d.itemName ?? '', d.lotNumber ?? '', d.locationCode ?? '', String(d.quantity), d.note ?? '', d.createdByName ?? ''])
+    const headers = ['วันที่', 'หน่วยงาน', 'หมวด', 'รายการในชุด', 'Lot', 'Location', 'จำนวนชุด', 'Note', 'บันทึกโดย']
+    const rows = data.distributions.map((d) => [
+      d.distributedOn,
+      d.siteName,
+      d.kitType ? boxTypeLabel(d.kitType) : '',
+      d.lines.map((line) => [line.itemCode, line.itemName].filter(Boolean).join(' · ')).join('; '),
+      d.lines.map((line) => line.lotNumber ?? '-').join('; '),
+      d.lines.map((line) => line.locationCode ?? '-').join('; '),
+      String(d.quantity),
+      d.note ?? '',
+      d.createdByName ?? '',
+    ])
     downloadCsv(`HPV_distributions_${todayKey()}.csv`, [headers, ...rows])
   }
 
@@ -322,7 +344,7 @@ function DistributionTab({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead className="bg-[#f7fafa] text-[10px] tracking-[0.08em] text-[#779097] uppercase">
-              <tr><th className="px-4 py-2.5">หน่วยงาน</th><th className="px-3 py-2.5 text-right">เบิก</th><th className="px-3 py-2.5 text-right">ส่งกลับ</th><th className="px-3 py-2.5 text-right">คงค้าง</th><th className="px-4 py-2.5">สถานะ</th></tr>
+              <tr><th className="px-4 py-2.5">หน่วยงาน</th><th className="px-3 py-2.5 text-right">เบิก</th><th className="px-3 py-2.5 text-right">ส่งกลับ</th><th className="px-3 py-2.5 text-right">คืนชุดตรวจ</th><th className="px-3 py-2.5 text-right">คงค้าง</th><th className="px-4 py-2.5">สถานะ</th></tr>
             </thead>
             <tbody className="divide-y divide-[#edf2f2]">
               {data.sites.map((site) => {
@@ -338,6 +360,7 @@ function DistributionTab({
                     </td>
                     <td className="mono px-3 py-3 text-right font-bold">{site.selfSupplied ? '—' : (summary?.issued ?? 0)}</td>
                     <td className="mono px-3 py-3 text-right font-bold text-[#0b7f76]">{summary?.received ?? 0}</td>
+                    <td className="mono px-3 py-3 text-right font-bold text-[#3a6fa8]">{summary?.returned ?? 0}</td>
                     <td className="mono px-3 py-3 text-right font-bold">
                       {site.selfSupplied
                         ? <span className="text-xs font-normal text-[#91a3a7]">N/A</span>
@@ -373,8 +396,61 @@ function DistributionTab({
             <Field label="หน่วยงาน / รพ.สต."><Select required value={selectedSiteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>{distributionSites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</Select></Field>
             {distributionSites.length === 0 ? <p className="text-xs text-[#789097]">ไม่มีหน่วยงานที่รับชุดตรวจจากเรา</p> : null}
             <Field label="วันที่เบิก"><Input required type="date" value={form.distributedOn} onChange={(e) => setForm({ ...form, distributedOn: e.target.value })} /></Field>
-            <Field label="Stock"><Select required value={selectedItemId} onChange={(e) => selectStockItem(e.target.value)}>{stockItems.map((item) => <option key={item.id} value={item.id}>{item.itemCode} · {item.name}</option>)}</Select></Field>
-            <Field label="Lot"><Select required value={selectedStockKey} onChange={(e) => setForm({ ...form, stockKey: e.target.value })}>{selectedStockLines.map((line) => <option key={line.key} value={line.key}>LOT {line.lot.lotNumber} ({formatQuantity(line.balance.onHand)} {line.item.unit})</option>)}</Select></Field>
+            <Field label="หมวดชุดตรวจ">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => { setKitType('self_collected'); setSelectedLineKeys({}) }}
+                  className={`flex items-center justify-between rounded-md border px-3 py-2 text-left text-sm font-bold transition ${kitType === 'self_collected' ? 'border-[#0b7f76] bg-[#eef9f7] text-[#0b7f76]' : 'border-[#c9dadd] bg-white text-[#315763] hover:border-[#7fa9ad]'}`}
+                >
+                  Self-collected
+                  {kitType === 'self_collected' ? <CheckCircle2 className="size-4" /> : null}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setKitType('clinician_collected'); setSelectedLineKeys({}) }}
+                  className={`flex items-center justify-between rounded-md border px-3 py-2 text-left text-sm font-bold transition ${kitType === 'clinician_collected' ? 'border-[#0b7f76] bg-[#eef9f7] text-[#0b7f76]' : 'border-[#c9dadd] bg-white text-[#315763] hover:border-[#7fa9ad]'}`}
+                >
+                  Clinician-collected
+                  {kitType === 'clinician_collected' ? <CheckCircle2 className="size-4" /> : null}
+                </button>
+              </div>
+            </Field>
+            {kitType ? (
+              <>
+                <div className="space-y-2 rounded-md border border-[#d8e5e7] bg-[#fbfdfd] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-bold tracking-[0.08em] text-[#789097] uppercase">Stock bundle</p>
+                    <span className="rounded-full bg-[#eef9f7] px-2 py-0.5 text-[10px] font-bold text-[#0b7f76]">{stockItems.length} item{stockItems.length === 1 ? '' : 's'}</span>
+                  </div>
+                  {selectedBundleLines.map(({ item, itemLines, selectedKey, selectedLine }) => (
+                    <div key={item.id} className="rounded-md border border-[#e1eaeb] bg-white p-2">
+                      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-bold text-[#315763]">{item.itemCode}</p>
+                          <p className="text-xs text-[#789097]">{item.name}</p>
+                        </div>
+                        {selectedLine ? <span className="mono text-xs font-bold text-[#0b7f76]">ตัด {formatQuantity(Number(form.quantity) || 0)} {item.unit}</span> : <span className="text-xs font-bold text-[#a9700f]">ไม่มี stock</span>}
+                      </div>
+                      <Select
+                        required
+                        value={selectedKey}
+                        disabled={!itemLines.length}
+                        onChange={(e) => setSelectedLineKeys((current) => ({ ...current, [item.id]: e.target.value }))}
+                      >
+                        {itemLines.map((line) => (
+                          <option key={line.key} value={line.key}>LOT {line.lot.lotNumber} · {line.balance.locationCode} ({formatQuantity(line.balance.onHand)} {item.unit})</option>
+                        ))}
+                        {!itemLines.length ? <option value="">ไม่มี lot ที่มียอดคงเหลือ</option> : null}
+                      </Select>
+                    </div>
+                  ))}
+                </div>
+                {!stockItems.length ? <p className="text-xs text-[#a9700f]">ยังไม่มี Stock item ที่เชื่อมกับหมวดนี้</p> : null}
+              </>
+            ) : (
+              <p className="rounded-md border border-dashed border-[#c9dadd] px-3 py-3 text-xs text-[#789097]">เลือกหมวดชุดตรวจก่อน แล้วระบบจะแสดง Stock และ Lot ที่เกี่ยวข้อง</p>
+            )}
             <Field label="จำนวนชุด"><Input required type="number" min="1" step="1" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} /></Field>
             <Field label="FEFO override reason"><Input value={form.overrideReason} onChange={(e) => setForm({ ...form, overrideReason: e.target.value })} placeholder="กรอกเมื่อระบบแจ้งว่าไม่ใช่ lot/location ที่แนะนำ" /></Field>
             <Field label="Note"><Textarea rows={2} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></Field>
@@ -392,7 +468,7 @@ function DistributionTab({
               </label>
               {distributionFile ? <button type="button" onClick={() => { setDistributionFile(null); if (distributionFileRef.current) distributionFileRef.current.value = '' }} className="mt-1 text-xs font-bold text-[#789097] hover:text-[#c02a37]">ล้างไฟล์ที่เลือก</button> : null}
             </Field>
-            <Button disabled={busy || !selectedSiteId || !selectedStock}><ArrowUpFromLine className="size-4" /> บันทึกเบิกและหัก Stock</Button>
+            <Button disabled={busy || !canSubmitBundle}><ArrowUpFromLine className="size-4" /> บันทึกเบิกและหัก Stock</Button>
           </form>
         </Card>
         {editingSite ? (
@@ -445,8 +521,14 @@ function DistributionTab({
               <tr key={dist.id} className="hover:bg-[#f7fbfc]">
                 <td className="mono px-4 py-2.5 text-[#315763]">{formatDate(dist.distributedOn)}</td>
                 <td className="px-3 py-2.5 font-semibold text-[#315763]">{dist.siteName}</td>
-                <td className="px-3 py-2.5 text-xs text-[#55727c]">{dist.itemCode} · {dist.lotNumber ?? '-'}</td>
-                <td className="mono px-3 py-2.5 text-xs text-[#789097]">{dist.locationCode ?? '-'}</td>
+                <td className="px-3 py-2.5 text-xs text-[#55727c]">
+                  <div className="space-y-0.5">
+                    {dist.lines.map((line, index) => (
+                      <p key={`${line.stockLotId}:${line.stockLocationId}:${index}`}><span className="font-bold">{line.itemCode ?? '-'}</span> · LOT {line.lotNumber ?? '-'}</p>
+                    ))}
+                  </div>
+                </td>
+                <td className="mono px-3 py-2.5 text-xs text-[#789097]">{dist.lines.map((line) => line.locationCode ?? '-').join(', ')}</td>
                 <td className="mono px-3 py-2.5 text-right font-bold text-[#315763]">{dist.quantity}</td>
                 <td className="px-3 py-2.5 text-xs text-[#8ba0a5]">{dist.createdByName ?? '-'}</td>
                 <td className="px-3 py-2.5">
@@ -578,6 +660,174 @@ function DistributionAttachmentActions({ distributionId, canDelete, onError }: {
         />
       </label>
     </span>
+  )
+}
+
+function ReturnsTab({ data, onWorkspace, onNotice }: {
+  data: HpvWorkspace
+  onWorkspace: (workspace: HpvWorkspace, text: string) => void
+  onNotice: (notice: { tone: 'success' | 'danger' | 'warning' | 'info'; text: string } | null) => void
+}) {
+  const activeSites = data.sites.filter((site) => site.isActive)
+  const [form, setForm] = useState({ siteId: activeSites[0]?.id ?? '', returnedOn: todayKey(), note: '' })
+  const [quantities, setQuantities] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState(false)
+  const today = todayKey()
+
+  const returnedByDistributionLine = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const kitReturn of data.kitReturns) {
+      for (const line of kitReturn.lines) {
+        if (!line.distributionLineId) continue
+        map.set(line.distributionLineId, (map.get(line.distributionLineId) ?? 0) + line.quantity)
+      }
+    }
+    return map
+  }, [data.kitReturns])
+
+  const candidates = useMemo(() => data.distributions
+    .filter((distribution) => distribution.siteId === form.siteId)
+    .flatMap((distribution) => distribution.lines.map((line) => {
+      const alreadyReturned = line.id ? (returnedByDistributionLine.get(line.id) ?? 0) : 0
+      const remaining = line.quantity - alreadyReturned
+      const daysToExpiry = line.expiryDate ? Math.ceil((Date.parse(line.expiryDate) - Date.parse(today)) / 86400000) : null
+      return { distribution, line, alreadyReturned, remaining, daysToExpiry }
+    }))
+    .filter((item) => item.line.id && item.remaining > 0)
+    .sort((a, b) => {
+      const aExpiry = a.line.expiryDate ?? '9999-12-31'
+      const bExpiry = b.line.expiryDate ?? '9999-12-31'
+      return aExpiry.localeCompare(bExpiry) || a.distribution.distributedOn.localeCompare(b.distribution.distributedOn)
+    }), [data.distributions, form.siteId, returnedByDistributionLine, today])
+
+  const selectedLines = candidates
+    .map((item) => ({ ...item, quantity: Number(quantities[item.line.id ?? ''] ?? 0) }))
+    .filter((item) => Number.isInteger(item.quantity) && item.quantity > 0)
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    if (!selectedLines.length) return
+    const invalid = selectedLines.find((item) => item.quantity > item.remaining)
+    if (invalid) {
+      onNotice({ tone: 'danger', text: 'จำนวนคืนมากกว่ายอดที่ยังคืนได้' })
+      return
+    }
+    setBusy(true)
+    onNotice(null)
+    try {
+      const result = await api<{ workspace: HpvWorkspace; returnId: string }>('/api/hpv/returns', {
+        method: 'POST',
+        body: JSON.stringify({
+          siteId: form.siteId,
+          returnedOn: form.returnedOn,
+          note: form.note.trim() || null,
+          lines: selectedLines.map((item) => ({
+            distributionId: item.distribution.id,
+            distributionLineId: item.line.id,
+            lotId: item.line.stockLotId,
+            locationId: item.line.stockLocationId,
+            quantity: item.quantity,
+          })),
+        }),
+      })
+      onWorkspace(result.workspace, 'บันทึกคืนชุดตรวจและคืนเข้า Stock เดิมแล้ว')
+      setQuantities({})
+      setForm((current) => ({ ...current, note: '' }))
+    } catch (error) {
+      onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'บันทึกคืนชุดตรวจไม่สำเร็จ' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+      <Card className="overflow-hidden">
+        <div className="border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3">
+          <h2 className="flex items-center gap-2 font-bold text-[#173d50]"><RotateCcw className="size-4 text-[#0b7f76]" /> คืนชุดตรวจจากหน่วยตรวจ</h2>
+          <p className="mt-1 text-xs text-[#789097]">คืนกลับ lot และ location เดิม พร้อมปรับ balance ใน Stock อัตโนมัติ</p>
+        </div>
+        <form onSubmit={submit} className="space-y-4 p-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <Field label="หน่วยตรวจ / Site">
+              <Select value={form.siteId} onChange={(e) => { setForm((current) => ({ ...current, siteId: e.target.value })); setQuantities({}) }}>
+                {activeSites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
+              </Select>
+            </Field>
+            <Field label="วันที่คืน">
+              <Input type="date" value={form.returnedOn} onChange={(e) => setForm((current) => ({ ...current, returnedOn: e.target.value }))} />
+            </Field>
+          </div>
+
+          <div className="overflow-hidden rounded-md border border-[#d7e3e5]">
+            <div className="grid grid-cols-[minmax(0,1fr)_92px] gap-3 bg-[#f7fafa] px-3 py-2 text-[10px] font-bold tracking-[0.08em] text-[#779097] uppercase">
+              <span>ชุดตรวจที่ยังคืนได้</span>
+              <span className="text-right">จำนวนคืน</span>
+            </div>
+            <div className="max-h-[430px] divide-y divide-[#edf2f2] overflow-y-auto">
+              {candidates.map(({ distribution, line, alreadyReturned, remaining, daysToExpiry }) => {
+                const key = line.id ?? ''
+                const nearExpiry = daysToExpiry !== null && daysToExpiry <= 90
+                const expired = daysToExpiry !== null && daysToExpiry < 0
+                return (
+                  <div key={key} className="grid grid-cols-[minmax(0,1fr)_92px] items-center gap-3 px-3 py-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-bold text-[#315763]">{[line.itemCode, line.itemName].filter(Boolean).join(' · ')}</p>
+                        {expired ? <StatusBadge tone="rejected" label="expired" /> : nearExpiry ? <StatusBadge tone="warning" label="ใกล้หมดอายุ" /> : null}
+                      </div>
+                      <p className="mono mt-0.5 text-xs text-[#789097]">Lot {line.lotNumber ?? '-'} · {line.locationCode ?? '-'} · exp {line.expiryDate ? formatDate(line.expiryDate) : '-'}</p>
+                      <p className="text-xs text-[#91a4a9]">เบิก {formatDate(distribution.distributedOn)} · คืนแล้ว {alreadyReturned} · คืนได้ {remaining} {line.unit ?? 'ชุด'}</p>
+                    </div>
+                    <Input
+                      inputMode="numeric"
+                      type="number"
+                      min={0}
+                      max={remaining}
+                      value={quantities[key] ?? ''}
+                      onChange={(e) => setQuantities((current) => ({ ...current, [key]: e.target.value }))}
+                      className="text-right mono"
+                      placeholder="0"
+                    />
+                  </div>
+                )
+              })}
+              {!candidates.length ? <p className="px-4 py-10 text-center text-sm text-[#91a4a9]">ไม่มีชุดตรวจที่ยังคืนได้สำหรับหน่วยตรวจนี้</p> : null}
+            </div>
+          </div>
+
+          <Field label="Note"><Textarea rows={2} value={form.note} onChange={(e) => setForm((current) => ({ ...current, note: e.target.value }))} /></Field>
+          <Button disabled={busy || !selectedLines.length} className="w-full justify-center"><RotateCcw className="size-4" /> บันทึกคืนชุดตรวจ</Button>
+        </form>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <div className="border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3 font-bold text-[#173d50]">ประวัติคืนชุดตรวจ</div>
+        <div className="max-h-[620px] divide-y divide-[#edf2f2] overflow-y-auto">
+          {data.kitReturns.map((kitReturn) => (
+            <div key={kitReturn.id} className="space-y-2 px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-bold text-[#315763]">{kitReturn.siteName}</p>
+                  <p className="text-xs text-[#8ba0a5]">{formatDate(kitReturn.returnedOn)} · {kitReturn.createdByName ?? '-'}</p>
+                </div>
+                <StatusBadge tone="accepted" label={`${kitReturn.quantity} ชุด`} />
+              </div>
+              <div className="space-y-1">
+                {kitReturn.lines.map((line) => (
+                  <p key={line.id} className="text-xs text-[#55727c]">
+                    <span className="font-bold">{line.itemCode ?? line.itemName ?? '-'}</span>
+                    <span className="mono"> · LOT {line.lotNumber ?? '-'} · {line.locationCode ?? '-'} · {line.quantity}</span>
+                  </p>
+                ))}
+              </div>
+              {kitReturn.note ? <p className="text-xs text-[#789097]">{kitReturn.note}</p> : null}
+            </div>
+          ))}
+          {!data.kitReturns.length ? <p className="px-4 py-10 text-center text-sm text-[#91a4a9]">ยังไม่มีประวัติคืนชุดตรวจ</p> : null}
+        </div>
+      </Card>
+    </div>
   )
 }
 

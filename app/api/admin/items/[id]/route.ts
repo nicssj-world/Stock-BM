@@ -19,6 +19,8 @@ const itemSchema = z.object({
   trackLot: z.boolean().optional(),
   trackExpiry: z.boolean().optional(),
   isHpv: z.boolean().optional(),
+  hpvSelfCollected: z.boolean().optional(),
+  hpvClinicianCollected: z.boolean().optional(),
   isActive: z.boolean().optional(),
 })
 

@@ -165,23 +165,18 @@ export function TransactionView({
 
   useEffect(() => {
     if (mode !== 'history' || historyLoaded || historyLoading) return
-    let cancelled = false
     setHistoryLoading(true)
     api<{ transactions: StockTransaction[] }>('/api/stock/history')
       .then((result) => {
-        if (cancelled) return
         setData((current) => ({ ...current, transactions: result.transactions }))
         setHistoryLoaded(true)
       })
       .catch((error) => {
-        if (!cancelled) setNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'โหลด history ไม่สำเร็จ' })
+        setNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'โหลด history ไม่สำเร็จ' })
       })
       .finally(() => {
-        if (!cancelled) setHistoryLoading(false)
+        setHistoryLoading(false)
       })
-    return () => {
-      cancelled = true
-    }
   }, [historyLoaded, historyLoading, mode])
 
   return (

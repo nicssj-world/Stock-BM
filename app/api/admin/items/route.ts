@@ -19,6 +19,8 @@ const itemSchema = z.object({
   trackLot: z.boolean(),
   trackExpiry: z.boolean(),
   isHpv: z.boolean().optional(),
+  hpvSelfCollected: z.boolean().optional(),
+  hpvClinicianCollected: z.boolean().optional(),
 })
 
 export async function POST(request: Request) {

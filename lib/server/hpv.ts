@@ -6,6 +6,9 @@ import type {
   HpvBoxType,
   HpvDashboard,
   HpvKitDistribution,
+  HpvKitDistributionLine,
+  HpvKitReturn,
+  HpvKitReturnLine,
   HpvSample,
   HpvSite,
   HpvSiteReceipt,
@@ -70,15 +73,18 @@ function siteName(row: RecordRow) {
   return asString(nested?.name)
 }
 
-function distributionFromRow(row: RecordRow, names: Map<string, string>): HpvKitDistribution {
+function distributionFromRow(row: RecordRow, names: Map<string, string>, linesByDistribution = new Map<string, HpvKitDistributionLine[]>()): HpvKitDistribution {
   const lot = row.bm_stock_lots as RecordRow | null
   const item = lot?.bm_stock_items as RecordRow | null
   const location = row.bm_stock_locations as RecordRow | null
+  const nestedLines = Array.isArray(row.bm_hpv_kit_distribution_lines) ? row.bm_hpv_kit_distribution_lines as RecordRow[] : []
+  const lines = linesByDistribution.get(asString(row.id)) ?? nestedLines.map(distributionLineFromRow)
   return {
     id: asString(row.id),
     siteId: asString(row.site_id),
     siteName: siteName(row),
     distributedOn: asString(row.distributed_on),
+    kitType: nullableString(row.kit_type) as HpvKitDistribution['kitType'],
     quantity: asNumber(row.quantity),
     stockLotId: asString(row.stock_lot_id),
     stockLocationId: asString(row.stock_location_id),
@@ -90,6 +96,59 @@ function distributionFromRow(row: RecordRow, names: Map<string, string>): HpvKit
     note: nullableString(row.note),
     createdByName: names.get(asString(row.created_by)) ?? null,
     createdAt: asString(row.created_at),
+    lines: lines.length ? lines : [{
+      id: null,
+      distributionId: asString(row.id),
+      stockLotId: asString(row.stock_lot_id),
+      stockLocationId: asString(row.stock_location_id),
+      itemCode: nullableString(item?.item_code),
+      itemName: nullableString(item?.name),
+      lotNumber: nullableString(lot?.lot_number),
+      expiryDate: null,
+      locationCode: nullableString(location?.code),
+      unit: null,
+      quantity: asNumber(row.quantity),
+    }],
+  }
+}
+
+function distributionLineFromRow(row: RecordRow): HpvKitDistributionLine {
+  const lot = row.bm_stock_lots as RecordRow | null
+  const item = lot?.bm_stock_items as RecordRow | null
+  const location = row.bm_stock_locations as RecordRow | null
+  return {
+    id: nullableString(row.id),
+    distributionId: asString(row.distribution_id),
+    stockLotId: asString(row.stock_lot_id),
+    stockLocationId: asString(row.stock_location_id),
+    itemCode: nullableString(item?.item_code),
+    itemName: nullableString(item?.name),
+    lotNumber: nullableString(lot?.lot_number),
+    expiryDate: nullableString(lot?.expiry_date),
+    locationCode: nullableString(location?.code),
+    unit: nullableString(item?.unit),
+    quantity: asNumber(row.quantity),
+  }
+}
+
+function kitReturnFromRow(row: RecordRow, names: Map<string, string>, linesByReturn = new Map<string, HpvKitReturnLine[]>()): HpvKitReturn {
+  const id = asString(row.id)
+  const lines = linesByReturn.get(id) ?? []
+  const quantityByDistribution = new Map<string, number>()
+  for (const line of lines) {
+    quantityByDistribution.set(line.distributionId, Math.max(quantityByDistribution.get(line.distributionId) ?? 0, line.quantity))
+  }
+  return {
+    id,
+    siteId: asString(row.site_id),
+    siteName: siteName(row),
+    returnedOn: asString(row.returned_on),
+    quantity: [...quantityByDistribution.values()].reduce((sum, quantity) => sum + quantity, 0),
+    stockTransactionId: asString(row.stock_transaction_id),
+    note: nullableString(row.note),
+    createdByName: names.get(asString(row.created_by)) ?? null,
+    createdAt: asString(row.created_at),
+    lines,
   }
 }
 
@@ -143,6 +202,9 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
   const [
     { data: siteData, error: siteError },
     { data: distributionData, error: distributionError },
+    { data: distributionLineData, error: distributionLineError },
+    { data: kitReturnData, error: kitReturnError },
+    { data: kitReturnLineData, error: kitReturnLineError },
     { data: receiptData, error: receiptError },
     { data: boxData, error: boxError },
     { data: sampleData, error: sampleError },
@@ -154,6 +216,9 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
       .select('*, bm_hpv_sites(name), bm_stock_lots(lot_number, bm_stock_items(item_code, name)), bm_stock_locations(code)')
       .order('created_at', { ascending: false })
       .limit(200),
+    admin.from('bm_hpv_kit_distribution_lines').select('*'),
+    admin.from('bm_hpv_kit_returns').select('*, bm_hpv_sites(name)').order('created_at', { ascending: false }).limit(200),
+    admin.from('bm_hpv_kit_return_lines').select('*'),
     admin.from('bm_hpv_site_receipts').select('*, bm_hpv_sites(name)').order('created_at', { ascending: false }).limit(200),
     admin.from('bm_hpv_storage_boxes').select('*').order('created_at', { ascending: false }).limit(100),
     admin.from('bm_hpv_samples').select('*').order('stored_at', { ascending: false }).limit(2500),
@@ -161,17 +226,24 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
   ])
   fail(siteError)
   fail(distributionError)
+  if (distributionLineError && !distributionLineError.message.includes('bm_hpv_kit_distribution_lines')) fail(distributionLineError)
+  if (kitReturnError && !kitReturnError.message.includes('bm_hpv_kit_returns')) fail(kitReturnError)
+  if (kitReturnLineError && !kitReturnLineError.message.includes('bm_hpv_kit_return_lines')) fail(kitReturnLineError)
   fail(receiptError)
   fail(boxError)
   fail(sampleError)
 
   const siteRows = (siteData ?? []) as RecordRow[]
   const distributionRows = (distributionData ?? []) as RecordRow[]
+  const distributionLineRows = distributionLineError ? [] : (distributionLineData ?? []) as RecordRow[]
+  const kitReturnRows = kitReturnError ? [] : (kitReturnData ?? []) as RecordRow[]
+  const kitReturnLineRows = kitReturnLineError ? [] : (kitReturnLineData ?? []) as RecordRow[]
   const receiptRows = (receiptData ?? []) as RecordRow[]
   const sampleRows = (sampleData ?? []) as RecordRow[]
   const boxRows = (boxData ?? []) as RecordRow[]
   const names = await getNameMap([
     ...distributionRows.map((row) => asString(row.created_by)),
+    ...kitReturnRows.map((row) => asString(row.created_by)),
     ...receiptRows.map((row) => asString(row.created_by)),
     ...sampleRows.map((row) => asString(row.stored_by)),
     ...sampleRows.map((row) => asString(row.checked_out_by)),
@@ -180,14 +252,63 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
   const samples = sampleRows.map((row) => sampleFromRow(row, names))
   const samplesByBox = new Map<string, HpvSample[]>()
   for (const sample of samples) samplesByBox.set(sample.boxId, [...(samplesByBox.get(sample.boxId) ?? []), sample])
-  const distributions = distributionRows.map((row) => distributionFromRow(row, names))
+  const locationsById = new Map(stock.locations.map((location) => [location.id, location]))
+  const lotsById = new Map(stock.items.flatMap((item) => item.lots.map((lot) => [lot.id, { item, lot }] as const)))
+  const linesByDistribution = new Map<string, HpvKitDistributionLine[]>()
+  for (const row of distributionLineRows) {
+    const distributionId = asString(row.distribution_id)
+    const lotId = asString(row.stock_lot_id)
+    const locationId = asString(row.stock_location_id)
+    const lotInfo = lotsById.get(lotId)
+    const locationInfo = locationsById.get(locationId)
+    const line: HpvKitDistributionLine = {
+      id: asString(row.id),
+      distributionId,
+      stockLotId: lotId,
+      stockLocationId: locationId,
+      itemCode: lotInfo?.item.itemCode ?? null,
+      itemName: lotInfo?.item.name ?? null,
+      lotNumber: lotInfo?.lot.lotNumber ?? null,
+      expiryDate: lotInfo?.lot.expiryDate ?? null,
+      locationCode: locationInfo?.code ?? null,
+      unit: lotInfo?.item.unit ?? null,
+      quantity: asNumber(row.quantity),
+    }
+    linesByDistribution.set(distributionId, [...(linesByDistribution.get(distributionId) ?? []), line])
+  }
+  const linesByReturn = new Map<string, HpvKitReturnLine[]>()
+  for (const row of kitReturnLineRows) {
+    const returnId = asString(row.return_id)
+    const lotId = asString(row.stock_lot_id)
+    const locationId = asString(row.stock_location_id)
+    const lotInfo = lotsById.get(lotId)
+    const locationInfo = locationsById.get(locationId)
+    const line: HpvKitReturnLine = {
+      id: asString(row.id),
+      returnId,
+      distributionId: asString(row.distribution_id),
+      distributionLineId: nullableString(row.distribution_line_id),
+      stockLotId: lotId,
+      stockLocationId: locationId,
+      itemCode: lotInfo?.item.itemCode ?? null,
+      itemName: lotInfo?.item.name ?? null,
+      lotNumber: lotInfo?.lot.lotNumber ?? null,
+      expiryDate: lotInfo?.lot.expiryDate ?? null,
+      locationCode: locationInfo?.code ?? null,
+      unit: lotInfo?.item.unit ?? null,
+      quantity: asNumber(row.quantity),
+    }
+    linesByReturn.set(returnId, [...(linesByReturn.get(returnId) ?? []), line])
+  }
+  const distributions = distributionRows.map((row) => distributionFromRow(row, names, linesByDistribution))
+  const kitReturns = kitReturnRows.map((row) => kitReturnFromRow(row, names, linesByReturn))
   const receipts = receiptRows.map((row) => receiptFromRow(row, names))
-  const summaryMap = summarizeHpvSites(distributions, receipts)
+  const summaryMap = summarizeHpvSites(distributions, receipts, kitReturns)
   const sites = siteRows.map(siteFromRow)
   const selfSuppliedIds = new Set(sites.filter((s) => s.selfSupplied).map((s) => s.id))
   // Ensure every site has a summary entry, then annotate self-supplied flag
   for (const site of sites) {
-    summaryMap[site.id] ??= { siteId: site.id, issued: 0, received: 0, outstanding: 0, selfSupplied: false }
+    summaryMap[site.id] ??= { siteId: site.id, issued: 0, received: 0, returned: 0, outstanding: 0, selfSupplied: false }
     summaryMap[site.id].selfSupplied = selfSuppliedIds.has(site.id)
     if (selfSuppliedIds.has(site.id)) summaryMap[site.id].outstanding = 0
   }
@@ -196,6 +317,7 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
     sites,
     summaries: Object.values(summaryMap).sort((a, b) => b.outstanding - a.outstanding),
     distributions,
+    kitReturns,
     receipts,
     boxes: boxRows.map((row) => boxFromRow(row, samplesByBox.get(asString(row.id)) ?? [])),
     stock,
@@ -265,22 +387,69 @@ export async function cancelHpvDistribution(id: string, reason: string, actor: B
 export async function createHpvDistribution(input: {
   siteId: string
   distributedOn: string
-  lotId: string
-  locationId: string
+  kitType: 'self_collected' | 'clinician_collected'
   quantity: number
+  lines: { lotId: string; locationId: string }[]
   note?: string | null
   overrideReason?: string | null
 }, actor: BmActor) {
   const admin = getAdminClient()
-  const { data: site, error: siteError } = await admin.from('bm_hpv_sites').select('id,name,code,is_active').eq('id', input.siteId).maybeSingle()
+  const { data: site, error: siteError } = await admin.from('bm_hpv_sites').select('id,name,code,is_active,self_supplied').eq('id', input.siteId).maybeSingle()
   fail(siteError)
   const siteRow = site as RecordRow | null
   if (!siteRow?.is_active) throw new HttpError(400, 'Active HPV site not found')
+  if (siteRow.self_supplied) throw new HttpError(400, 'หน่วยงานนี้ใช้ชุดตรวจเอง จึงไม่ต้องเบิกจาก Stock กลาง')
 
-  const { data: transactionId, error: issueError } = await admin.rpc('issue_bm_stock', {
-    p_lot: input.lotId,
-    p_location: input.locationId,
-    p_quantity: input.quantity,
+  const kitColumn = input.kitType === 'self_collected' ? 'hpv_self_collected' : 'hpv_clinician_collected'
+  const { data: requiredItems, error: itemError } = await admin
+    .from('bm_stock_items')
+    .select('id,item_code,name')
+    .eq('is_active', true)
+    .eq('is_hpv', true)
+    .eq(kitColumn, true)
+    .order('item_code')
+  fail(itemError)
+  const requiredItemRows = (requiredItems ?? []) as RecordRow[]
+  if (!requiredItemRows.length) throw new HttpError(400, 'ยังไม่ได้กำหนด Stock item สำหรับหมวด HPV นี้')
+
+  const lotIds = input.lines.map((line) => line.lotId)
+  if (!lotIds.length) throw new HttpError(400, 'กรุณาเลือก lot สำหรับชุดเบิก')
+  if (new Set(lotIds).size !== lotIds.length) throw new HttpError(400, 'เลือก lot ซ้ำในชุดเดียวกันไม่ได้')
+  const { data: lotRowsData, error: lotError } = await admin
+    .from('bm_stock_lots')
+    .select('id,item_id,bm_stock_items(is_hpv,is_active,hpv_self_collected,hpv_clinician_collected)')
+    .in('id', lotIds)
+  fail(lotError)
+  const lotRows = (lotRowsData ?? []) as RecordRow[]
+  const lotById = new Map(lotRows.map((row) => [asString(row.id), row]))
+  if (lotRows.length !== lotIds.length) throw new HttpError(400, 'พบ lot ที่ไม่ถูกต้องในชุดเบิก')
+
+  const requiredItemIds = new Set(requiredItemRows.map((row) => asString(row.id)))
+  const selectedItemIds = new Set<string>()
+  for (const line of input.lines) {
+    const lotRow = lotById.get(line.lotId)
+    const itemRow = (lotRow?.bm_stock_items as RecordRow | null) ?? null
+    const itemId = asString(lotRow?.item_id)
+    if (!itemRow?.is_active) throw new HttpError(400, 'Active stock item not found')
+    if (!itemRow.is_hpv) throw new HttpError(400, 'เลือกได้เฉพาะ Stock item ที่เชื่อมกับ HPV Management')
+    if (input.kitType === 'self_collected' && !itemRow.hpv_self_collected) throw new HttpError(400, 'Stock item นี้ไม่ได้เชื่อมกับ HPV Self-collected')
+    if (input.kitType === 'clinician_collected' && !itemRow.hpv_clinician_collected) throw new HttpError(400, 'Stock item นี้ไม่ได้เชื่อมกับ HPV Clinician-collected')
+    if (!requiredItemIds.has(itemId)) throw new HttpError(400, 'Stock item ในชุดไม่ตรงกับหมวด HPV ที่เลือก')
+    if (selectedItemIds.has(itemId)) throw new HttpError(400, 'เลือก lot ได้ item ละ 1 รายการต่อการเบิกหนึ่งครั้ง')
+    selectedItemIds.add(itemId)
+  }
+  const missingItems = requiredItemRows.filter((row) => !selectedItemIds.has(asString(row.id)))
+  if (missingItems.length) {
+    throw new HttpError(400, `กรุณาเลือก lot ให้ครบทุก item ในชุด: ${missingItems.map((row) => asString(row.item_code)).join(', ')}`)
+  }
+
+  const issueLines = input.lines.map((line) => ({
+    lot_id: line.lotId,
+    location_id: line.locationId,
+    quantity: input.quantity,
+  }))
+  const { data: transactionId, error: issueError } = await admin.rpc('issue_bm_stock_bundle', {
+    p_lines: issueLines,
     p_purpose_text: `HPV kit distribution: ${asString(siteRow.name)}`,
     p_reference_text: `HPV-${input.distributedOn}-${asString(siteRow.code) || asString(siteRow.name)}`,
     p_note: clean(input.note),
@@ -291,14 +460,16 @@ export async function createHpvDistribution(input: {
   fail(issueError)
 
   const txId = asString(transactionId)
+  const primaryLine = input.lines[0]
   const { data, error } = await admin
     .from('bm_hpv_kit_distributions')
     .insert({
       site_id: input.siteId,
       distributed_on: input.distributedOn,
+      kit_type: input.kitType,
       quantity: input.quantity,
-      stock_lot_id: input.lotId,
-      stock_location_id: input.locationId,
+      stock_lot_id: primaryLine.lotId,
+      stock_location_id: primaryLine.locationId,
       stock_transaction_id: txId,
       note: clean(input.note),
       created_by: actor.id,
@@ -307,6 +478,15 @@ export async function createHpvDistribution(input: {
     .single()
   fail(error)
   const distributionId = asString((data as RecordRow).id)
+  const { error: lineError } = await admin
+    .from('bm_hpv_kit_distribution_lines')
+    .insert(input.lines.map((line) => ({
+      distribution_id: distributionId,
+      stock_lot_id: line.lotId,
+      stock_location_id: line.locationId,
+      quantity: input.quantity,
+    })))
+  fail(lineError)
   await writeAudit(actor, 'hpv.distribution.create', 'hpv-distribution', distributionId, { ...input, stockTransactionId: txId })
   return { workspace: await getHpvWorkspace(actor), distributionId }
 }
@@ -339,6 +519,119 @@ export async function createHpvReceipt(input: { siteId: string; receivedOn: stri
   fail(error)
   await writeAudit(actor, 'hpv.receipt.create', 'hpv-receipt', asString((data as RecordRow).id), input)
   return getHpvWorkspace(actor)
+}
+
+export async function createHpvKitReturn(input: {
+  siteId: string
+  returnedOn: string
+  lines: {
+    distributionId: string
+    distributionLineId: string
+    lotId: string
+    locationId: string
+    quantity: number
+  }[]
+  note?: string | null
+}, actor: BmActor) {
+  const admin = getAdminClient()
+  const { data: site, error: siteError } = await admin
+    .from('bm_hpv_sites')
+    .select('id,name,code,is_active')
+    .eq('id', input.siteId)
+    .maybeSingle()
+  fail(siteError)
+  const siteRow = site as RecordRow | null
+  if (!siteRow?.is_active) throw new HttpError(400, 'Active HPV site not found')
+
+  if (!input.lines.length) throw new HttpError(400, 'Return lines are required')
+  const distributionIds = [...new Set(input.lines.map((line) => line.distributionId))]
+  const distributionLineIds = [...new Set(input.lines.map((line) => line.distributionLineId))]
+  if (distributionLineIds.length !== input.lines.length) throw new HttpError(400, 'Return each issued line only once per save')
+
+  for (const line of input.lines) {
+    if (!line.distributionId || !line.distributionLineId || !line.lotId || !line.locationId) throw new HttpError(400, 'Return line is incomplete')
+    if (!Number.isInteger(line.quantity) || line.quantity <= 0) throw new HttpError(400, 'Return quantity must be greater than zero')
+  }
+
+  const { data: distributionData, error: distributionError } = await admin
+    .from('bm_hpv_kit_distributions')
+    .select('id,site_id')
+    .in('id', distributionIds)
+  fail(distributionError)
+  const distributions = (distributionData ?? []) as RecordRow[]
+  if (distributions.length !== distributionIds.length) throw new HttpError(400, 'Selected HPV distribution was not found')
+  for (const distribution of distributions) {
+    if (asString(distribution.site_id) !== input.siteId) throw new HttpError(400, 'Return lines must belong to the selected site')
+  }
+
+  const { data: issuedLineData, error: issuedLineError } = await admin
+    .from('bm_hpv_kit_distribution_lines')
+    .select('id,distribution_id,stock_lot_id,stock_location_id,quantity')
+    .in('distribution_id', distributionIds)
+  fail(issuedLineError)
+  const issuedLines = (issuedLineData ?? []) as RecordRow[]
+  if (!issuedLines.length) throw new HttpError(400, 'Selected issued stock line was not found')
+  const issuedLineById = new Map(issuedLines.map((row) => [asString(row.id), row]))
+  const allIssuedLineIds = issuedLines.map((row) => asString(row.id))
+
+  const { data: returnedLineData, error: returnedLineError } = await admin
+    .from('bm_hpv_kit_return_lines')
+    .select('distribution_line_id,quantity')
+    .in('distribution_line_id', allIssuedLineIds)
+  fail(returnedLineError)
+  const returnedByLine = new Map<string, number>()
+  for (const row of (returnedLineData ?? []) as RecordRow[]) {
+    const key = asString(row.distribution_line_id)
+    returnedByLine.set(key, (returnedByLine.get(key) ?? 0) + asNumber(row.quantity))
+  }
+
+  const selectedByDistribution = new Map<string, typeof input.lines>()
+  for (const line of input.lines) {
+    selectedByDistribution.set(line.distributionId, [...(selectedByDistribution.get(line.distributionId) ?? []), line])
+  }
+  for (const [distributionId, selectedLines] of selectedByDistribution) {
+    const issuedForDistribution = issuedLines.filter((line) => asString(line.distribution_id) === distributionId)
+    const returnableIssuedLines = issuedForDistribution.filter((line) => asNumber(line.quantity) - (returnedByLine.get(asString(line.id)) ?? 0) > 0)
+    if (selectedLines.length !== returnableIssuedLines.length) {
+      throw new HttpError(400, 'Return every stock item in the same HPV kit distribution together')
+    }
+    const quantities = new Set(selectedLines.map((line) => line.quantity))
+    if (quantities.size !== 1) throw new HttpError(400, 'Return quantity must be the same for every stock item in the kit')
+  }
+
+  const rpcLines = input.lines.map((line) => {
+    const issuedLine = issuedLineById.get(line.distributionLineId)
+    if (!issuedLine) throw new HttpError(400, 'Selected issued stock line was not found')
+    if (asString(issuedLine.distribution_id) !== line.distributionId) throw new HttpError(400, 'Return line does not match selected distribution')
+    if (asString(issuedLine.stock_lot_id) !== line.lotId || asString(issuedLine.stock_location_id) !== line.locationId) {
+      throw new HttpError(400, 'Return must go back to the original lot and location')
+    }
+    const alreadyReturned = returnedByLine.get(line.distributionLineId) ?? 0
+    const remaining = asNumber(issuedLine.quantity) - alreadyReturned
+    if (line.quantity > remaining) throw new HttpError(400, 'Return quantity is greater than remaining issued quantity')
+    return {
+      distribution_id: line.distributionId,
+      distribution_line_id: line.distributionLineId,
+      lot_id: line.lotId,
+      location_id: line.locationId,
+      quantity: line.quantity,
+    }
+  })
+
+  const reference = `HPV-return-${input.returnedOn}-${asString(siteRow.code) || asString(siteRow.name)}`
+  const { data: returnId, error: returnError } = await admin.rpc('return_hpv_kit_bundle', {
+    p_site_id: input.siteId,
+    p_returned_on: input.returnedOn,
+    p_lines: rpcLines,
+    p_reference_text: reference,
+    p_note: clean(input.note),
+    p_actor: actor.id,
+  })
+  fail(returnError)
+
+  const id = asString(returnId)
+  await writeAudit(actor, 'hpv.kit_return.create', 'hpv-kit-return', id, input)
+  return { workspace: await getHpvWorkspace(actor), returnId: id }
 }
 
 export async function createHpvStorageBox(input: { boxCode: string; boxType: HpvBoxType }, actor: BmActor) {

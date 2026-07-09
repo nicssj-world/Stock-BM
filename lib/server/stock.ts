@@ -179,6 +179,8 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
       trackLot: Boolean(row.track_lot),
       trackExpiry: Boolean(row.track_expiry),
       isHpv: Boolean(row.is_hpv),
+      hpvSelfCollected: Boolean(row.hpv_self_collected),
+      hpvClinicianCollected: Boolean(row.hpv_clinician_collected),
       isActive: Boolean(row.is_active),
       totalOnHand,
       usableOnHand,
@@ -353,6 +355,8 @@ export async function createItem(input: {
   trackLot: boolean
   trackExpiry: boolean
   isHpv?: boolean
+  hpvSelfCollected?: boolean
+  hpvClinicianCollected?: boolean
 }, actor: BmActor) {
   await assertAdmin(actor)
   assertTracking(input.trackLot, input.trackExpiry)
@@ -374,7 +378,9 @@ export async function createItem(input: {
       manufacturer_barcode: clean(input.manufacturerBarcode),
       track_lot: input.trackLot,
       track_expiry: input.trackExpiry,
-      is_hpv: input.isHpv ?? false,
+      is_hpv: input.isHpv ?? Boolean(input.hpvSelfCollected || input.hpvClinicianCollected),
+      hpv_self_collected: input.hpvSelfCollected ?? false,
+      hpv_clinician_collected: input.hpvClinicianCollected ?? false,
       created_by: actor.id,
     })
     .select('id')
@@ -417,7 +423,13 @@ export async function updateItem(itemId: string, input: Partial<Parameters<typeo
   if (input.manufacturerBarcode !== undefined) updates.manufacturer_barcode = clean(input.manufacturerBarcode)
   if (input.trackLot !== undefined) updates.track_lot = input.trackLot
   if (input.trackExpiry !== undefined) updates.track_expiry = input.trackExpiry
-  if (input.isHpv !== undefined) updates.is_hpv = input.isHpv
+  if (input.isHpv !== undefined || input.hpvSelfCollected !== undefined || input.hpvClinicianCollected !== undefined) {
+    const hpvSelfCollected = input.hpvSelfCollected ?? Boolean(currentRow.hpv_self_collected)
+    const hpvClinicianCollected = input.hpvClinicianCollected ?? Boolean(currentRow.hpv_clinician_collected)
+    updates.is_hpv = input.isHpv ?? Boolean(hpvSelfCollected || hpvClinicianCollected)
+    if (input.hpvSelfCollected !== undefined) updates.hpv_self_collected = input.hpvSelfCollected
+    if (input.hpvClinicianCollected !== undefined) updates.hpv_clinician_collected = input.hpvClinicianCollected
+  }
   if (input.isActive !== undefined) updates.is_active = input.isActive
   const { error } = await getAdminClient().from('bm_stock_items').update(updates).eq('id', itemId)
   fail(error)
@@ -427,11 +439,61 @@ export async function updateItem(itemId: string, input: Partial<Parameters<typeo
 
 export async function deleteItem(id: string, actor: BmActor) {
   await assertAdmin(actor)
-  const { error } = await getAdminClient().from('bm_stock_items').delete().eq('id', id)
-  if (error?.code === '23503') throw new HttpError(409, 'ลบ item ไม่ได้ มี lot หรือ transaction ที่อ้างถึง item นี้อยู่')
+  const admin = getAdminClient()
+  const { data: item, error: itemError } = await admin.from('bm_stock_items').select('id,item_code,name').eq('id', id).maybeSingle()
+  fail(itemError)
+  if (!item) throw new HttpError(404, 'Item not found')
+
+  const { data: lots, error: lotsError } = await admin.from('bm_stock_lots').select('id').eq('item_id', id)
+  fail(lotsError)
+  const lotIds = ((lots ?? []) as RecordRow[]).map((row) => asString(row.id)).filter(Boolean)
+
+  const { count: materialCount, error: materialError } = await admin
+    .from('iqc_control_materials')
+    .select('id', { count: 'exact', head: true })
+    .eq('stock_item_id', id)
+  fail(materialError)
+  if (materialCount) throw new HttpError(409, 'ลบ item ไม่ได้ เพราะถูกผูกกับ IQC control material แล้ว ให้ปิดใช้งานแทน')
+
+  if (lotIds.length) {
+    const referenced = await hasLotReferences(lotIds)
+    if (referenced) {
+      throw new HttpError(409, 'ลบ item ไม่ได้ เพราะมี lot ที่ถูกใช้งานใน stock/HPV/IQC/Lot verification แล้ว ให้ปิดใช้งานแทน')
+    }
+    const { error: lotDeleteError } = await admin.from('bm_stock_lots').delete().in('id', lotIds)
+    if (lotDeleteError?.code === '23503') throw new HttpError(409, 'ลบ item ไม่ได้ เพราะมี lot ที่ถูกอ้างอิงอยู่ ให้ปิดใช้งานแทน')
+    fail(lotDeleteError)
+  }
+
+  const { error } = await admin.from('bm_stock_items').delete().eq('id', id)
+  if (error?.code === '23503') throw new HttpError(409, 'ลบ item ไม่ได้ มีข้อมูลอื่นอ้างถึง item นี้อยู่ ให้ปิดใช้งานแทน')
   fail(error)
   await writeAudit(actor, 'item.delete', 'stock-item', id, {})
   return getStockWorkspace(actor)
+}
+
+async function hasAnyRows(table: string, column: string, values: string[]) {
+  if (!values.length) return false
+  const { count, error } = await getAdminClient()
+    .from(table)
+    .select('id', { count: 'exact', head: true })
+    .in(column, values)
+  if (error?.code === '42P01' || error?.code === '42703') return false
+  fail(error)
+  return Boolean(count)
+}
+
+async function hasLotReferences(lotIds: string[]) {
+  const checks = await Promise.all([
+    hasAnyRows('bm_stock_movement_lines', 'lot_id', lotIds),
+    hasAnyRows('bm_hpv_kit_distributions', 'stock_lot_id', lotIds),
+    hasAnyRows('bm_hpv_kit_distribution_lines', 'stock_lot_id', lotIds),
+    hasAnyRows('iqc_control_lots', 'stock_lot_id', lotIds),
+    hasAnyRows('iqc_run_consumables', 'stock_lot_id', lotIds),
+    hasAnyRows('lot_verifications', 'new_stock_lot_id', lotIds),
+    hasAnyRows('lot_verifications', 'old_stock_lot_id', lotIds),
+  ])
+  return checks.some(Boolean)
 }
 
 export async function receiveStock(input: {

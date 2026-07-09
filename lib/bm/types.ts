@@ -65,6 +65,8 @@ export interface StockItem {
   trackLot: boolean
   trackExpiry: boolean
   isHpv: boolean
+  hpvSelfCollected: boolean
+  hpvClinicianCollected: boolean
   isActive: boolean
   totalOnHand: number
   usableOnHand: number

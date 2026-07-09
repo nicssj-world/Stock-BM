@@ -60,6 +60,8 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
     trackLot: true,
     trackExpiry: true,
     isHpv: false,
+    hpvSelfCollected: false,
+    hpvClinicianCollected: false,
   }
   const [form, setForm] = useState(emptyForm)
   const [editingItemId, setEditingItemId] = useState<string | null>(null)
@@ -93,6 +95,8 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
       trackLot: item.trackLot,
       trackExpiry: item.trackExpiry,
       isHpv: item.isHpv,
+      hpvSelfCollected: item.hpvSelfCollected,
+      hpvClinicianCollected: item.hpvClinicianCollected,
     })
   }
 
@@ -100,7 +104,15 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
     event.preventDefault()
     setBusy(true)
     try {
-      const payload = { ...form, minimumStock: Number(form.minimumStock), expiryWarningDays: Number(form.expiryWarningDays), defaultIssueQty: form.defaultIssueQty === '' ? null : Number(form.defaultIssueQty) }
+      const payload = {
+        ...form,
+        isHpv: form.isHpv || form.hpvSelfCollected || form.hpvClinicianCollected,
+        hpvSelfCollected: form.isHpv ? form.hpvSelfCollected : false,
+        hpvClinicianCollected: form.isHpv ? form.hpvClinicianCollected : false,
+        minimumStock: Number(form.minimumStock),
+        expiryWarningDays: Number(form.expiryWarningDays),
+        defaultIssueQty: form.defaultIssueQty === '' ? null : Number(form.defaultIssueQty),
+      }
       const result = await api<{ stock: StockWorkspace }>(editingItemId ? `/api/admin/items/${editingItemId}` : '/api/admin/items', {
         method: editingItemId ? 'PATCH' : 'POST',
         body: JSON.stringify(payload),
@@ -172,7 +184,41 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
         <Field label="Manufacturer barcode"><Input value={form.manufacturerBarcode} onChange={(event) => setForm({ ...form, manufacturerBarcode: event.target.value })} /></Field>
         <label className="flex items-center gap-2 text-xs font-semibold text-[#58747d]"><input type="checkbox" checked={form.trackLot} onChange={(event) => setForm({ ...form, trackLot: event.target.checked, trackExpiry: event.target.checked ? form.trackExpiry : false })} /> Track lot</label>
         <label className="flex items-center gap-2 text-xs font-semibold text-[#58747d]"><input type="checkbox" disabled={!form.trackLot} checked={form.trackExpiry} onChange={(event) => setForm({ ...form, trackExpiry: event.target.checked })} /> Track expiry</label>
-        <label className="flex items-center gap-2 text-xs font-semibold text-[#58747d]"><input type="checkbox" checked={form.isHpv} onChange={(event) => setForm({ ...form, isHpv: event.target.checked })} /> HPV Management item</label>
+        <div className="rounded-md border border-[#d8e6e6] bg-[#f8fbfc] p-3">
+          <label className="flex items-center gap-2 text-xs font-semibold text-[#58747d]">
+            <input
+              type="checkbox"
+              checked={form.isHpv}
+              onChange={(event) => setForm({
+                ...form,
+                isHpv: event.target.checked,
+                hpvSelfCollected: event.target.checked ? form.hpvSelfCollected : false,
+                hpvClinicianCollected: event.target.checked ? form.hpvClinicianCollected : false,
+              })}
+            />
+            HPV Management item
+          </label>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <label className="flex items-center gap-2 text-xs font-semibold text-[#58747d]">
+              <input
+                type="checkbox"
+                disabled={!form.isHpv}
+                checked={form.hpvSelfCollected}
+                onChange={(event) => setForm({ ...form, isHpv: true, hpvSelfCollected: event.target.checked })}
+              />
+              HPV Self-collected
+            </label>
+            <label className="flex items-center gap-2 text-xs font-semibold text-[#58747d]">
+              <input
+                type="checkbox"
+                disabled={!form.isHpv}
+                checked={form.hpvClinicianCollected}
+                onChange={(event) => setForm({ ...form, isHpv: true, hpvClinicianCollected: event.target.checked })}
+              />
+              HPV Clinician-collected
+            </label>
+          </div>
+        </div>
         {editingItem ? <Notice tone="info">ถ้า item นี้มี transaction แล้ว ระบบอาจไม่อนุญาตให้เปลี่ยน Lot/Expiry tracking เพื่อป้องกัน ledger เพี้ยน</Notice> : null}
         <Button disabled={busy || !categoryOptions.length}>{editingItem ? <Pencil className="size-4" /> : <Plus className="size-4" />}{editingItem ? 'บันทึกแก้ไข / Save edit' : 'เพิ่ม / Add'}</Button>
       </form>

@@ -26,7 +26,17 @@ describe('HPV site summary rules', () => {
       [{ siteId: 'a', quantity: 10 }, { siteId: 'a', quantity: 5 }, { siteId: 'b', quantity: 3 }],
       [{ siteId: 'a', sampleCount: 4 }, { siteId: 'b', sampleCount: 5 }],
     )
-    expect(summaries.a).toEqual({ siteId: 'a', issued: 15, received: 4, outstanding: 11 })
-    expect(summaries.b).toEqual({ siteId: 'b', issued: 3, received: 5, outstanding: -2 })
+    expect(summaries.a).toEqual({ siteId: 'a', issued: 15, received: 4, returned: 0, outstanding: 11, selfSupplied: false })
+    expect(summaries.b).toEqual({ siteId: 'b', issued: 3, received: 5, returned: 0, outstanding: -2, selfSupplied: false })
+  })
+
+  it('subtracts returned kits from outstanding quantities', () => {
+    const summaries = summarizeHpvSites(
+      [{ siteId: 'a', quantity: 15 }],
+      [{ siteId: 'a', sampleCount: 4 }],
+      [{ siteId: 'a', quantity: 3 }],
+    )
+    expect(summaries.a.outstanding).toBe(8)
+    expect(summaries.a.returned).toBe(3)
   })
 })

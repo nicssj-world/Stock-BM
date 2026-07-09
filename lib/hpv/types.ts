@@ -21,6 +21,7 @@ export interface HpvKitDistribution {
   siteId: string
   siteName: string
   distributedOn: string
+  kitType: HpvBoxType | null
   quantity: number
   stockLotId: string
   stockLocationId: string
@@ -32,6 +33,50 @@ export interface HpvKitDistribution {
   note: string | null
   createdByName: string | null
   createdAt: string
+  lines: HpvKitDistributionLine[]
+}
+
+export interface HpvKitDistributionLine {
+  id: string | null
+  distributionId: string
+  stockLotId: string
+  stockLocationId: string
+  itemCode: string | null
+  itemName: string | null
+  lotNumber: string | null
+  expiryDate: string | null
+  locationCode: string | null
+  unit: string | null
+  quantity: number
+}
+
+export interface HpvKitReturn {
+  id: string
+  siteId: string
+  siteName: string
+  returnedOn: string
+  quantity: number
+  stockTransactionId: string
+  note: string | null
+  createdByName: string | null
+  createdAt: string
+  lines: HpvKitReturnLine[]
+}
+
+export interface HpvKitReturnLine {
+  id: string
+  returnId: string
+  distributionId: string
+  distributionLineId: string | null
+  stockLotId: string
+  stockLocationId: string
+  itemCode: string | null
+  itemName: string | null
+  lotNumber: string | null
+  expiryDate: string | null
+  locationCode: string | null
+  unit: string | null
+  quantity: number
 }
 
 export interface HpvSiteReceipt {
@@ -77,6 +122,7 @@ export interface HpvWorkspace {
   sites: HpvSite[]
   summaries: HpvSiteSummary[]
   distributions: HpvKitDistribution[]
+  kitReturns: HpvKitReturn[]
   receipts: HpvSiteReceipt[]
   boxes: HpvStorageBox[]
   stock: StockWorkspace
