@@ -55,6 +55,21 @@ function assertAdmin(actor: BmActor) {
   if (actor.role !== 'Admin') throw new HttpError(403, 'Admin permission required')
 }
 
+async function countIqcReferences(table: string, column: string, id: string) {
+  const { count, error } = await getAdminClient()
+    .from(table)
+    .select('id', { count: 'exact', head: true })
+    .eq(column, id)
+  fail(error)
+  return count ?? 0
+}
+
+async function assertNoIqcReferences(refs: { table: string; column: string }[], id: string, message: string) {
+  for (const ref of refs) {
+    if ((await countIqcReferences(ref.table, ref.column, id)) > 0) throw new HttpError(409, message)
+  }
+}
+
 async function getNameMap(userIds: string[]) {
   const ids = [...new Set(userIds.filter(Boolean))]
   if (!ids.length) return new Map<string, string>()
@@ -532,12 +547,50 @@ export async function updateControlLot(id: string, input: { isActive: boolean },
 }
 
 const IQC_ENTITY = { analyte: 'iqc_analytes', instrument: 'iqc_instruments', material: 'iqc_control_materials' } as const
+const IQC_DELETE_MESSAGE = 'รายการนี้มีข้อมูลอ้างอิงใน IQC/Lot verification แล้ว ให้ปิดใช้งานแทนการลบ'
 
 export async function setIqcEntityActive(entity: keyof typeof IQC_ENTITY, id: string, isActive: boolean, actor: BmActor) {
   assertAdmin(actor)
   const { error } = await getAdminClient().from(IQC_ENTITY[entity]).update({ is_active: isActive }).eq('id', id)
   fail(error)
   await writeAudit(actor, `iqc.${entity}.setActive`, `iqc-${entity}`, id, { isActive })
+  return getIqcWorkspace(actor)
+}
+
+export async function deleteIqcEntity(entity: keyof typeof IQC_ENTITY, id: string, actor: BmActor) {
+  assertAdmin(actor)
+  if (entity === 'analyte') {
+    await assertNoIqcReferences([
+      { table: 'iqc_control_specs', column: 'analyte_id' },
+      { table: 'iqc_result_values', column: 'analyte_id' },
+      { table: 'iqc_corrective_actions', column: 'analyte_id' },
+      { table: 'iqc_tea_specs', column: 'analyte_id' },
+      { table: 'iqc_uncertainty_budgets', column: 'analyte_id' },
+      { table: 'lotverif_measurements', column: 'analyte_id' },
+    ], id, IQC_DELETE_MESSAGE)
+  } else if (entity === 'instrument') {
+    await assertNoIqcReferences([{ table: 'iqc_runs', column: 'instrument_id' }], id, IQC_DELETE_MESSAGE)
+  } else {
+    await assertNoIqcReferences([{ table: 'iqc_control_lots', column: 'control_material_id' }], id, IQC_DELETE_MESSAGE)
+  }
+
+  const { error } = await getAdminClient().from(IQC_ENTITY[entity]).delete().eq('id', id)
+  fail(error)
+  await writeAudit(actor, `iqc.${entity}.delete`, `iqc-${entity}`, id, {})
+  return getIqcWorkspace(actor)
+}
+
+export async function deleteControlLot(id: string, actor: BmActor) {
+  assertAdmin(actor)
+  await assertNoIqcReferences([
+    { table: 'iqc_control_specs', column: 'control_lot_id' },
+    { table: 'iqc_result_values', column: 'control_lot_id' },
+    { table: 'lotverif_verifications', column: 'new_control_lot_id' },
+    { table: 'lotverif_verifications', column: 'old_control_lot_id' },
+  ], id, IQC_DELETE_MESSAGE)
+  const { error } = await getAdminClient().from('iqc_control_lots').delete().eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'iqc.lot.delete', 'iqc-control-lot', id, {})
   return getIqcWorkspace(actor)
 }
 

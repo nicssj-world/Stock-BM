@@ -696,9 +696,9 @@ function CorrectiveTab({ data, actor, onOk, onErr }: { data: IqcWorkspace; actor
 }
 
 function ManageTab({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void }) {
-  async function post(url: string, body: unknown, okText: string, method: 'POST' | 'PATCH' = 'POST') {
+  async function request(url: string, body: unknown, okText: string, method: 'POST' | 'PATCH' | 'DELETE' = 'POST') {
     try {
-      const result = await api<{ iqc: IqcWorkspace }>(url, { method, body: JSON.stringify(body) })
+      const result = await api<{ iqc: IqcWorkspace }>(url, { method, body: method === 'DELETE' ? undefined : JSON.stringify(body) })
       onOk(okText, result.iqc)
       return true
     } catch (e) {
@@ -706,14 +706,17 @@ function ManageTab({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: string
       return false
     }
   }
+  const post = (url: string, body: unknown, okText: string, method: 'POST' | 'PATCH' = 'POST') => request(url, body, okText, method)
+  const remove = (url: string, okText: string) => request(url, null, okText, 'DELETE')
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <AnalyteForm onSubmit={(b) => post('/api/iqc/analytes', b, 'เพิ่ม analyte แล้ว')} onToggle={(id, a) => post(`/api/iqc/analytes/${id}`, { isActive: a }, a ? 'เปิดใช้ analyte แล้ว' : 'ปิด analyte แล้ว', 'PATCH')} analytes={data.analytes} />
-      <InstrumentForm onSubmit={(b) => post('/api/iqc/instruments', b, 'เพิ่ม instrument แล้ว')} onToggle={(id, a) => post(`/api/iqc/instruments/${id}`, { isActive: a }, a ? 'เปิดใช้ instrument แล้ว' : 'ปิด instrument แล้ว', 'PATCH')} instruments={data.instruments} />
-      <MaterialForm onSubmit={(b) => post('/api/iqc/materials', b, 'เพิ่ม control material แล้ว')} onToggle={(id, a) => post(`/api/iqc/materials/${id}`, { isActive: a }, a ? 'เปิดใช้ material แล้ว' : 'ปิด material แล้ว', 'PATCH')} materials={data.controlMaterials} />
+      <AnalyteForm onSubmit={(b) => post('/api/iqc/analytes', b, 'เพิ่ม analyte แล้ว')} onToggle={(id, a) => post(`/api/iqc/analytes/${id}`, { isActive: a }, a ? 'เปิดใช้ analyte แล้ว' : 'ปิด analyte แล้ว', 'PATCH')} onDelete={(id) => remove(`/api/iqc/analytes/${id}`, 'ลบ analyte แล้ว')} analytes={data.analytes} />
+      <InstrumentForm onSubmit={(b) => post('/api/iqc/instruments', b, 'เพิ่ม instrument แล้ว')} onToggle={(id, a) => post(`/api/iqc/instruments/${id}`, { isActive: a }, a ? 'เปิดใช้ instrument แล้ว' : 'ปิด instrument แล้ว', 'PATCH')} onDelete={(id) => remove(`/api/iqc/instruments/${id}`, 'ลบ instrument แล้ว')} instruments={data.instruments} />
+      <MaterialForm onSubmit={(b) => post('/api/iqc/materials', b, 'เพิ่ม control material แล้ว')} onToggle={(id, a) => post(`/api/iqc/materials/${id}`, { isActive: a }, a ? 'เปิดใช้ material แล้ว' : 'ปิด material แล้ว', 'PATCH')} onDelete={(id) => remove(`/api/iqc/materials/${id}`, 'ลบ control material แล้ว')} materials={data.controlMaterials} />
       <LotForm
         onSubmit={(b) => post('/api/iqc/lots', b, 'เพิ่ม control lot แล้ว')}
         onToggle={(id, isActive) => post(`/api/iqc/lots/${id}`, { isActive }, isActive ? 'เปิดใช้ lot แล้ว' : 'ปิด lot แล้ว', 'PATCH')}
+        onDelete={(id) => remove(`/api/iqc/lots/${id}`, 'ลบ control lot แล้ว')}
         data={data}
       />
       <SpecForm onSubmit={(b) => post('/api/iqc/specs', b, 'บันทึก spec แล้ว')} data={data} />
@@ -748,7 +751,7 @@ function TeaForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean
   )
 }
 
-function AnalyteForm({ onSubmit, onToggle, analytes }: { onSubmit: (b: unknown) => Promise<boolean>; onToggle: (id: string, isActive: boolean) => Promise<boolean>; analytes: IqcWorkspace['analytes'] }) {
+function AnalyteForm({ onSubmit, onToggle, onDelete, analytes }: { onSubmit: (b: unknown) => Promise<boolean>; onToggle: (id: string, isActive: boolean) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; analytes: IqcWorkspace['analytes'] }) {
   const [form, setForm] = useState({ code: '', name: '', dataType: 'quantitative', scale: 'linear', isAbsolute: false, unit: '', groupLabel: '' })
   const [busy, setBusy] = useState(false)
   return (
@@ -766,12 +769,12 @@ function AnalyteForm({ onSubmit, onToggle, analytes }: { onSubmit: (b: unknown) 
         <label className="flex items-center gap-2 text-sm text-[#3f5c64]"><input type="checkbox" checked={form.isAbsolute} onChange={(e) => setForm({ ...form, isAbsolute: e.target.checked })} /> เป็นค่า absolute count (เช่น AbsCD4 — Trucount มีผล)</label>
         <Button disabled={busy}>เพิ่ม analyte</Button>
       </form>
-      <ManagedList noun="Analyte" onToggle={onToggle} items={analytes.map((a) => ({ id: a.id, label: a.code, sublabel: `${a.name}${a.groupLabel ? ` · ${a.groupLabel}` : ''}`, isActive: a.isActive }))} />
+      <ManagedList noun="Analyte" onToggle={onToggle} onDelete={(id) => onDelete(id)} items={analytes.map((a) => ({ id: a.id, label: a.code, sublabel: `${a.name}${a.groupLabel ? ` · ${a.groupLabel}` : ''}`, isActive: a.isActive }))} />
     </Card>
   )
 }
 
-function InstrumentForm({ onSubmit, onToggle, instruments }: { onSubmit: (b: unknown) => Promise<boolean>; onToggle: (id: string, isActive: boolean) => Promise<boolean>; instruments: IqcWorkspace['instruments'] }) {
+function InstrumentForm({ onSubmit, onToggle, onDelete, instruments }: { onSubmit: (b: unknown) => Promise<boolean>; onToggle: (id: string, isActive: boolean) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; instruments: IqcWorkspace['instruments'] }) {
   const [form, setForm] = useState({ code: '', name: '', model: '' })
   const [busy, setBusy] = useState(false)
   return (
@@ -783,12 +786,12 @@ function InstrumentForm({ onSubmit, onToggle, instruments }: { onSubmit: (b: unk
         <Field label="Model"><Input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} placeholder="cobas 6800" /></Field>
         <div className="col-span-3"><Button disabled={busy}>เพิ่ม instrument</Button></div>
       </form>
-      <ManagedList noun="Instrument" onToggle={onToggle} items={instruments.map((i) => ({ id: i.id, label: i.code, sublabel: `${i.name}${i.model ? ` · ${i.model}` : ''}`, isActive: i.isActive }))} />
+      <ManagedList noun="Instrument" onToggle={onToggle} onDelete={(id) => onDelete(id)} items={instruments.map((i) => ({ id: i.id, label: i.code, sublabel: `${i.name}${i.model ? ` · ${i.model}` : ''}`, isActive: i.isActive }))} />
     </Card>
   )
 }
 
-function MaterialForm({ onSubmit, onToggle, materials }: { onSubmit: (b: unknown) => Promise<boolean>; onToggle: (id: string, isActive: boolean) => Promise<boolean>; materials: IqcWorkspace['controlMaterials'] }) {
+function MaterialForm({ onSubmit, onToggle, onDelete, materials }: { onSubmit: (b: unknown) => Promise<boolean>; onToggle: (id: string, isActive: boolean) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; materials: IqcWorkspace['controlMaterials'] }) {
   const [form, setForm] = useState({ name: '', level: '', manufacturer: '' })
   const [busy, setBusy] = useState(false)
   return (
@@ -800,12 +803,12 @@ function MaterialForm({ onSubmit, onToggle, materials }: { onSubmit: (b: unknown
         <Field label="Manufacturer"><Input value={form.manufacturer} onChange={(e) => setForm({ ...form, manufacturer: e.target.value })} /></Field>
         <div className="col-span-3"><Button disabled={busy}>เพิ่ม material</Button></div>
       </form>
-      <ManagedList noun="Control material" onToggle={onToggle} items={materials.map((m) => ({ id: m.id, label: m.name, sublabel: [m.level, m.manufacturer].filter(Boolean).join(' · ') || undefined, isActive: m.isActive }))} />
+      <ManagedList noun="Control material" onToggle={onToggle} onDelete={(id) => onDelete(id)} items={materials.map((m) => ({ id: m.id, label: m.name, sublabel: [m.level, m.manufacturer].filter(Boolean).join(' · ') || undefined, isActive: m.isActive }))} />
     </Card>
   )
 }
 
-function LotForm({ onSubmit, onToggle, data }: { onSubmit: (b: unknown) => Promise<boolean>; onToggle: (id: string, isActive: boolean) => Promise<boolean>; data: IqcWorkspace }) {
+function LotForm({ onSubmit, onToggle, onDelete, data }: { onSubmit: (b: unknown) => Promise<boolean>; onToggle: (id: string, isActive: boolean) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; data: IqcWorkspace }) {
   const [form, setForm] = useState({ controlMaterialId: '', lotNumber: '', expiryDate: '' })
   const [busy, setBusy] = useState(false)
   return (
@@ -820,6 +823,7 @@ function LotForm({ onSubmit, onToggle, data }: { onSubmit: (b: unknown) => Promi
       <ManagedList
         noun="Control lot"
         onToggle={onToggle}
+        onDelete={(id) => onDelete(id)}
         items={data.controlLots.map((l) => ({ id: l.id, label: l.lotNumber, sublabel: `${l.controlMaterialName}${l.level ? ` ${l.level}` : ''}${l.expiryDate ? ` · exp ${formatDate(l.expiryDate)}` : ''}`, isActive: l.isActive }))}
       />
     </Card>

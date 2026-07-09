@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { Trash2 } from 'lucide-react'
 import { Button, Input, StatusBadge } from '@/components/ui'
 
 export interface ManagedItem {
@@ -16,11 +17,13 @@ export interface ManagedItem {
 export function ManagedList({
   items,
   onToggle,
+  onDelete,
   searchThreshold = 6,
   noun = 'รายการ',
 }: {
   items: ManagedItem[]
   onToggle: (id: string, isActive: boolean) => Promise<boolean>
+  onDelete?: (id: string, label: string) => Promise<boolean>
   searchThreshold?: number
   noun?: string
 }) {
@@ -61,6 +64,23 @@ export function ManagedList({
               <Button variant="ghost" className="min-h-7 px-2 py-1 text-xs" disabled={busy === i.id} onClick={async () => { setBusy(i.id); await onToggle(i.id, !i.isActive); setBusy(null) }}>
                 {i.isActive ? 'ปิด' : 'เปิดใช้'}
               </Button>
+              {onDelete ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="min-h-7 px-2 py-1 text-xs text-red-500 hover:text-red-700"
+                  disabled={busy === i.id}
+                  onClick={async () => {
+                    if (!window.confirm(`ลบ ${noun} "${i.label}" ใช่ไหม?\n\nถ้ารายการนี้มีประวัติใช้งาน ระบบจะไม่ให้ลบและควรใช้ปิดแทน`)) return
+                    setBusy(i.id)
+                    await onDelete(i.id, i.label)
+                    setBusy(null)
+                  }}
+                  aria-label={`ลบ ${i.label}`}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              ) : null}
             </span>
           </div>
         ))}

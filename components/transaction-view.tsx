@@ -881,10 +881,11 @@ function AdjustForm({
 }) {
   const lottedItems = items.filter((item) => item.lots.length > 0)
   const firstItem = lottedItems[0]
+  const firstLot = firstItem?.lots[0]
   const [form, setForm] = useState({
     itemId: firstItem?.id ?? '',
-    lotId: firstItem?.lots[0]?.id ?? '',
-    locationId: locations[0]?.id ?? '',
+    lotId: firstLot?.id ?? '',
+    locationId: firstLot?.balances[0]?.locationId ?? locations[0]?.id ?? '',
     quantity: '',
     reference: '',
     note: '',
@@ -898,8 +899,18 @@ function AdjustForm({
   const qty = Number(form.quantity)
   const hasValidQuantity = form.quantity.trim() !== '' && Number.isFinite(qty)
   const newBalance = currentBalance + (hasValidQuantity ? qty : 0)
+  const newLotTotal = (lot?.totalOnHand ?? 0) + (hasValidQuantity ? qty : 0)
   const filteredItems = filterItems(lottedItems, itemSearch)
   const canSave = Boolean(lot && form.locationId && hasValidQuantity && qty !== 0 && form.note.trim())
+
+  function preferredLocationId(nextLot: StockLot | undefined, fallbackLocationId = form.locationId) {
+    if (!nextLot) return fallbackLocationId || locations[0]?.id || ''
+    return nextLot.balances.find((balance) => balance.locationId === fallbackLocationId)?.locationId
+      ?? nextLot.balances[0]?.locationId
+      ?? fallbackLocationId
+      ?? locations[0]?.id
+      ?? ''
+  }
 
   function toggleAdjustmentSign() {
     const value = form.quantity.trim()
@@ -950,7 +961,8 @@ function AdjustForm({
           onPickFirst={() => {
             const first = filteredItems[0]
             if (first) {
-              setForm({ ...form, itemId: first.id, lotId: first.lots[0]?.id ?? '' })
+              const nextLot = first.lots[0]
+              setForm({ ...form, itemId: first.id, lotId: nextLot?.id ?? '', locationId: preferredLocationId(nextLot, '') })
               setItemSearch('')
             }
           }}
@@ -962,7 +974,10 @@ function AdjustForm({
               selected={option.id === form.itemId}
               title={`${option.itemCode} · ${option.name}`}
               meta={`${option.categoryName} · ${formatQuantity(option.totalOnHand)} ${option.unit} on hand`}
-              onClick={() => setForm({ ...form, itemId: option.id, lotId: option.lots[0]?.id ?? '' })}
+              onClick={() => {
+                const nextLot = option.lots[0]
+                setForm({ ...form, itemId: option.id, lotId: nextLot?.id ?? '', locationId: preferredLocationId(nextLot, '') })
+              }}
             />
           ))}
         </div>
@@ -977,7 +992,7 @@ function AdjustForm({
               lot={option}
               unit={item?.unit ?? ''}
               selected={option.id === form.lotId}
-              onClick={() => setForm({ ...form, lotId: option.id })}
+              onClick={() => setForm({ ...form, lotId: option.id, locationId: preferredLocationId(option) })}
             />
           ))}
           {!lots.length ? (
@@ -1030,13 +1045,18 @@ function AdjustForm({
           </BigField>
           <BigField label="ยอดใหม่ (preview)">
             <div
-              className={`flex h-14 items-center rounded-md border px-3 font-mono text-xl font-bold ${
+              className={`flex min-h-14 flex-col justify-center rounded-md border px-3 py-2 ${
                 newBalance < 0
                   ? 'border-red-200 bg-red-50 text-red-600'
                   : 'border-[#d8e6e6] bg-[#f7fbfc] text-[#0b7f76]'
               }`}
             >
-              {hasValidQuantity ? `${formatQuantity(newBalance)} ${item?.unit ?? ''}` : '—'}
+              <span className="font-mono text-xl font-bold">{hasValidQuantity ? `${formatQuantity(newBalance)} ${item?.unit ?? ''}` : '—'}</span>
+              {hasValidQuantity && lot ? (
+                <span className="mt-0.5 text-[11px] font-semibold text-[#789097]">
+                  รวม lot หลังปรับ: {formatQuantity(newLotTotal)} {item?.unit ?? ''}
+                </span>
+              ) : null}
             </div>
           </BigField>
         </div>
