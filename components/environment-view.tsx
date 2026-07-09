@@ -62,6 +62,11 @@ function nextMissingPeriod(unit: EnvUnit, loggedPeriods: EnvPeriodIndex[]): EnvP
     ?? 1
 }
 
+function displayHistoryLoggedAt(reading: { readingDate: string; readingTime?: string | null; createdAt?: string | null }) {
+  if (reading.readingTime) return `${formatDate(reading.readingDate)} ${reading.readingTime}`
+  return reading.createdAt ? formatDateTime(reading.createdAt) : formatDate(reading.readingDate)
+}
+
 export function EnvironmentView({ actor, initialData, origin }: { actor: BmActor; initialData: EnvWorkspace; origin: string }) {
   const router = useRouter()
   const [tab, setTab] = useState<TabKey>('dashboard')
@@ -578,7 +583,7 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
                   <th className="px-4 py-2.5 text-left">สถานะ</th>
                   <th className="px-4 py-2.5 text-left">หมายเหตุ</th>
                   <th className="px-4 py-2.5 text-left">บันทึกโดย</th>
-                  <th className="px-4 py-2.5 text-left">บันทึก</th>
+                  <th className="px-4 py-2.5 text-left">วันที่บันทึก</th>
                   {isAdmin ? <th className="px-4 py-2.5" /> : null}
                 </tr>
               </thead>
@@ -601,7 +606,9 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
                     </td>
                     <td className="px-4 py-2.5 text-xs text-[#58747d]">{r.note ?? ''}</td>
                     <td className="px-4 py-2.5 text-xs text-[#789097]">{r.recordedByName ?? '—'}</td>
-                    <td className="px-4 py-2.5 text-xs text-[#789097]">{r.createdAt ? formatDateTime(r.createdAt) : '—'}</td>
+                    <td className="px-4 py-2.5 text-xs text-[#789097]" title={r.createdAt ? `เวลาที่กด Save ในระบบ: ${formatDateTime(r.createdAt)}` : undefined}>
+                      {displayHistoryLoggedAt(r)}
+                    </td>
                     {isAdmin ? (
                       <td className="px-4 py-2.5 text-right">
                         {isLocked ? (

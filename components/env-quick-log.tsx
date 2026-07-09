@@ -233,11 +233,9 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex, all
           <Field label="วันที่ของค่า">
             <Input type="date" value={readingDate} onChange={(e) => setReadingDate(e.target.value)} required />
           </Field>
-          {isBackdateEntry ? (
-            <Field label="เวลาของค่า">
-              <Input type="time" value={readingTime} onChange={(e) => setReadingTime(e.target.value)} required={isBackdateEntry} />
-            </Field>
-          ) : null}
+          <Field label="เวลาของค่า" hint={isBackdateEntry ? 'จำเป็นเมื่อบันทึกย้อนหลัง' : 'ใช้เฉพาะบันทึกย้อนหลัง'}>
+            <Input type="time" value={readingTime} onChange={(e) => setReadingTime(e.target.value)} required={isBackdateEntry} />
+          </Field>
         </div>
       ) : null}
 
