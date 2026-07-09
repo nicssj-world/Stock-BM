@@ -1,26 +1,202 @@
-// Seed the CD4 IQC dataset from the Google Sheet (BD FACSlyric, BD Multi-Check).
-// Two control lots (sheet tabs): BM0426L (May-Jun) and BM0526L (Jun onward).
-// The "Lot.No." column (25290) is the BD Trucount tube lot (a consumable that
-// affects absolute counts), NOT the control lot — recorded per run.
-// Usage: npm run seed:iqc-cd4 -- --ephis 9495 [--force]
+// Reset IQC data and seed CD4 IQC from two Excel workbooks.
+//
+// Dry-run parser:
+//   npm run seed:iqc-cd4
+//
+// Apply to Supabase (destructive for IQC-domain tables only):
+//   npm run seed:iqc-cd4 -- --ephis 9495 --apply
+//
+// Optional custom files:
+//   npm run seed:iqc-cd4 -- --normal "C:\path\normal.xlsx" --low "C:\path\low.xlsx"
+
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import zlib from 'node:zlib'
 import { createClient } from '@supabase/supabase-js'
 
-function argument(name) {
+const ZERO_UUID = '00000000-0000-0000-0000-000000000000'
+const DEFAULT_NORMAL = path.join(os.homedir(), 'Downloads', '(normal) COE_131.xlsx')
+const DEFAULT_LOW = path.join(os.homedir(), 'Downloads', '(Low) BM0526L.xlsx')
+const TRUCOUNT_LOT = '25290'
+const APPLY = process.argv.includes('--apply')
+
+function argument(name, fallback) {
   const index = process.argv.indexOf(`--${name}`)
-  return index >= 0 ? process.argv[index + 1] : undefined
+  return index >= 0 ? process.argv[index + 1] : fallback
 }
+
 function required(value, message) {
   if (!value) throw new Error(message)
   return value
 }
 
-const envHint = 'Configure .env.local before running this command.'
-const url = required(process.env.NEXT_PUBLIC_BM_SUPABASE_URL, `Missing NEXT_PUBLIC_BM_SUPABASE_URL. ${envHint}`)
-const serviceRoleKey = required(process.env.BM_SUPABASE_SERVICE_ROLE_KEY, `Missing BM_SUPABASE_SERVICE_ROLE_KEY. ${envHint}`)
-const ephisId = required(argument('ephis'), 'Use --ephis <employee-code> (an existing Molecular-CBH QMS user)')
-const force = process.argv.includes('--force')
+function envValue(name) {
+  return process.env[name] ?? process.env[`\uFEFF${name}`]
+}
 
-// ---- Westgard (mirrors lib/iqc/westgard.ts), evaluated against assigned mean/SD ----
+function decode(buffer) {
+  return Buffer.from(buffer).toString('utf8')
+}
+
+function readUInt16(buffer, offset) {
+  return buffer.readUInt16LE(offset)
+}
+
+function readUInt32(buffer, offset) {
+  return buffer.readUInt32LE(offset)
+}
+
+function unzipXlsx(buffer) {
+  const entries = {}
+  const endSignature = 0x06054b50
+  let endOffset = -1
+  for (let i = buffer.length - 22; i >= 0; i -= 1) {
+    if (readUInt32(buffer, i) === endSignature) {
+      endOffset = i
+      break
+    }
+  }
+  if (endOffset < 0) throw new Error('Invalid XLSX: end of central directory not found')
+
+  const entryCount = readUInt16(buffer, endOffset + 10)
+  let offset = readUInt32(buffer, endOffset + 16)
+  for (let i = 0; i < entryCount; i += 1) {
+    if (readUInt32(buffer, offset) !== 0x02014b50) throw new Error('Invalid XLSX: central directory entry not found')
+    const method = readUInt16(buffer, offset + 10)
+    const compressedSize = readUInt32(buffer, offset + 20)
+    const fileNameLength = readUInt16(buffer, offset + 28)
+    const extraLength = readUInt16(buffer, offset + 30)
+    const commentLength = readUInt16(buffer, offset + 32)
+    const localOffset = readUInt32(buffer, offset + 42)
+    const fileName = decode(buffer.subarray(offset + 46, offset + 46 + fileNameLength)).replace(/\\/g, '/')
+
+    const localNameLength = readUInt16(buffer, localOffset + 26)
+    const localExtraLength = readUInt16(buffer, localOffset + 28)
+    const dataStart = localOffset + 30 + localNameLength + localExtraLength
+    const compressed = buffer.subarray(dataStart, dataStart + compressedSize)
+    if (method === 0) {
+      entries[fileName] = compressed
+    } else if (method === 8) {
+      entries[fileName] = zlib.inflateRawSync(compressed)
+    } else {
+      throw new Error(`Unsupported XLSX compression method ${method} for ${fileName}`)
+    }
+    offset += 46 + fileNameLength + extraLength + commentLength
+  }
+  return entries
+}
+
+function xmlEscape(text) {
+  return String(text ?? '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+}
+
+function attr(xml, name) {
+  const match = xml.match(new RegExp(`\\s${name}="([^"]*)"`, 'i'))
+  return match ? xmlEscape(match[1]) : ''
+}
+
+function colIndex(cellRef) {
+  const letters = cellRef.match(/[A-Z]+/i)?.[0] ?? ''
+  return letters.toUpperCase().split('').reduce((sum, ch) => sum * 26 + ch.charCodeAt(0) - 64, 0)
+}
+
+function excelSerialToDate(serial) {
+  const ms = Math.round((Number(serial) - 25569) * 86400 * 1000)
+  return new Date(ms)
+}
+
+function bangkokIso(date) {
+  const y = date.getUTCFullYear()
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0')
+  const d = String(date.getUTCDate()).padStart(2, '0')
+  return new Date(`${y}-${m}-${d}T08:00:00+07:00`).toISOString()
+}
+
+function isoDateOnly(date) {
+  const y = date.getUTCFullYear()
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0')
+  const d = String(date.getUTCDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function parseDmy(value) {
+  const months = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 }
+  const match = String(value).match(/(\d{1,2})-([A-Za-z]{3})-(\d{2,4})/)
+  if (!match) return null
+  const year = Number(match[3].length === 2 ? `20${match[3]}` : match[3])
+  const month = months[match[2].toUpperCase()]
+  if (month == null) return null
+  return new Date(Date.UTC(year, month, Number(match[1])))
+}
+
+function parseSharedStrings(zip) {
+  const file = zip['xl/sharedStrings.xml']
+  if (!file) return []
+  const xml = decode(file)
+  return [...xml.matchAll(/<si\b[\s\S]*?<\/si>/g)].map(([si]) =>
+    [...si.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map((m) => xmlEscape(m[1])).join(''),
+  )
+}
+
+function parseWorkbook(zip) {
+  const workbook = decode(zip['xl/workbook.xml'])
+  const rels = decode(zip['xl/_rels/workbook.xml.rels'])
+  const targets = new Map([...rels.matchAll(/<Relationship\b[^>]*>/g)].map(([rel]) => [attr(rel, 'Id'), attr(rel, 'Target')]))
+  return [...workbook.matchAll(/<sheet\b[^>]*>/g)].map(([sheet]) => {
+    const relId = attr(sheet, 'r:id')
+    const target = targets.get(relId)
+    return {
+      name: attr(sheet, 'name'),
+      path: `xl/${target?.replace(/^\//, '') ?? ''}`,
+    }
+  })
+}
+
+function parseSheet(zip, sheetPath, sharedStrings) {
+  const xml = decode(zip[sheetPath])
+  const rows = new Map()
+  for (const match of xml.matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)) {
+    const header = match[1]
+    const body = match[2]
+    const ref = attr(`<c ${header}>`, 'r')
+    const rowNo = Number(ref.match(/\d+/)?.[0])
+    const colNo = colIndex(ref)
+    const type = attr(`<c ${header}>`, 't')
+    let value = null
+    if (type === 'inlineStr') {
+      value = [...body.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map((m) => xmlEscape(m[1])).join('')
+    } else {
+      const raw = body.match(/<v>([\s\S]*?)<\/v>/)?.[1]
+      if (raw == null) continue
+      value = type === 's' ? sharedStrings[Number(raw)] : Number(raw)
+      if (Number.isNaN(value)) value = xmlEscape(raw)
+    }
+    if (!rows.has(rowNo)) rows.set(rowNo, new Map())
+    rows.get(rowNo).set(colNo, value)
+  }
+  return rows
+}
+
+function cell(rows, row, col) {
+  return rows.get(row)?.get(col) ?? null
+}
+
+function mean(values) {
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
+function sampleSd(values) {
+  if (values.length < 2) return 0
+  const m = mean(values)
+  return Math.sqrt(values.reduce((sum, value) => sum + (value - m) ** 2, 0) / (values.length - 1))
+}
+
 const REJECT = new Set(['1-3s', '2-2s', 'R-4s', '4-1s', '10x'])
 function evaluateLatest(series, m, s) {
   if (!(s > 0)) return { z: 0, violatedRules: [], status: 'accepted' }
@@ -43,134 +219,286 @@ function evaluateLatest(series, m, s) {
     if (w.every((x) => x > 0) || w.every((x) => x < 0)) rules.push('10x')
   }
   if (Math.abs(z) > 2 && !rules.includes('1-3s')) rules.push('1-2s')
-  const status = rules.some((r) => REJECT.has(r)) ? 'rejected' : rules.includes('1-2s') ? 'warning' : 'accepted'
-  return { z, violatedRules: rules, status }
+  return { z, violatedRules: rules, status: rules.some((r) => REJECT.has(r)) ? 'rejected' : rules.includes('1-2s') ? 'warning' : 'accepted' }
 }
 
-const MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 }
-function isoDate(ddMonYy) {
-  const [d, mon, yy] = ddMonYy.split('-')
-  return new Date(`${2000 + Number(yy)}-${String(MONTHS[mon] + 1).padStart(2, '0')}-${String(Number(d)).padStart(2, '0')}T08:00:00+07:00`).toISOString()
-}
-
-// ---- reference data ----
-const TRUCOUNT_LOT = '25290'
 const ANALYTES = [
-  { code: '%CD3', name: '%CD3', is_absolute: false, unit: '%' },
-  { code: 'AbsCD3', name: 'Absolute CD3', is_absolute: true, unit: 'cells/uL' },
-  { code: '%CD4', name: '%CD4', is_absolute: false, unit: '%' },
-  { code: 'AbsCD4', name: 'Absolute CD4', is_absolute: true, unit: 'cells/uL' },
+  { code: '%CD3', name: '%CD3', is_absolute: false, unit: '%', group_label: 'CD4 Panel' },
+  { code: '%CD4', name: '%CD4', is_absolute: false, unit: '%', group_label: 'CD4 Panel' },
+  { code: 'AbsCD3', name: 'Absolute CD3', is_absolute: true, unit: 'cells/uL', group_label: 'CD4 Panel' },
+  { code: 'AbsCD4', name: 'Absolute CD4', is_absolute: true, unit: 'cells/uL', group_label: 'CD4 Panel' },
 ]
-const ORDER = ['%CD3', 'AbsCD3', '%CD4', 'AbsCD4'] // column order in rows below
-const LOTS = [
+
+const FILES = [
   {
-    lot: 'BM0426L',
-    expiry: '2026-06-16',
-    assigned: { '%CD3': [57.5, 5.0], AbsCD3: [792.9, 87.25], '%CD4': [11.5, 2.0], AbsCD4: [158.6, 31.7] },
-    rows: [
-      ['18-May-26', 57.79, 857, 11.4, 169], ['19-May-26', 55.78, 868, 11.64, 181], ['20-May-26', 58.26, 867, 12.2, 182],
-      ['21-May-26', 59.43, 727, 12.19, 149], ['22-May-26', 54.64, 858, 11.12, 175], ['26-May-26', 56.12, 842, 11.41, 171],
-      ['27-May-26', 56.74, 894, 11.84, 187], ['28-May-26', 55.86, 812, 11.29, 164], ['29-May-26', 59.31, 763, 12.01, 155],
-      ['2-Jun-26', 55.38, 833, 11.28, 170], ['3-Jun-26', 55.92, 743, 11.24, 149], ['4-Jun-26', 57.11, 851, 11.5, 171],
-      ['5-Jun-26', 55.47, 795, 11.9, 171], ['8-Jun-26', 55.58, 890, 10.76, 172], ['9-Jun-26', 57.44, 775, 11.4, 154],
-      ['10-Jun-26', 55.02, 814, 11.2, 166], ['12-Jun-26', 57.78, 823, 12.08, 172], ['15-Jun-26', 54.64, 814, 11.29, 168],
-      ['16-Jun-26', 55.34, 756, 11.64, 159],
+    key: 'normal',
+    path: argument('normal', DEFAULT_NORMAL),
+    materialName: 'COE',
+    level: 'Normal',
+    manufacturer: 'COE',
+    analyteColumns: [
+      { col: 3, code: '%CD3' },
+      { col: 4, code: '%CD4' },
     ],
   },
   {
-    lot: 'BM0526L',
-    expiry: '2026-07-17',
-    assigned: { '%CD3': [56.3, 5.0], AbsCD3: [701.5, 91.2], '%CD4': [10.0, 2.0], AbsCD4: [124.6, 24.9] },
-    rows: [
-      ['17-Jun-26', 52.89, 812, 10.8, 166], ['18-Jun-26', 58.35, 793, 11, 149],
+    key: 'low',
+    path: argument('low', DEFAULT_LOW),
+    materialName: 'BD Multi-Check CD4 Low Control',
+    level: 'Low',
+    manufacturer: 'BD',
+    analyteColumns: [
+      { col: 3, code: '%CD3' },
+      { col: 4, code: 'AbsCD3' },
+      { col: 5, code: '%CD4' },
+      { col: 6, code: 'AbsCD4' },
     ],
+    trucountColumn: 7,
   },
 ]
 
-const admin = createClient(url, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } })
+function parseControlWorkbook(config) {
+  if (!fs.existsSync(config.path)) throw new Error(`File not found: ${config.path}`)
+  const zip = unzipXlsx(fs.readFileSync(config.path))
+  const sharedStrings = parseSharedStrings(zip)
+  const sheet = parseWorkbook(zip)[0]
+  const rows = parseSheet(zip, sheet.path, sharedStrings)
+  const lotExp = String(cell(rows, 1, 2) ?? '')
+  const lotNumber = lotExp.split(/\s+Exp\./i)[0].trim()
+  const expiryDate = parseDmy(lotExp)?.toISOString().slice(0, 10) ?? null
+  const instrumentModel = String(cell(rows, 3, 1) ?? '').replace(/^Machine model\s*:\s*/i, '').trim() || 'BD FACSlyric'
+  const parsedRuns = []
+  for (let row = 9; row <= 45; row += 1) {
+    const runNo = cell(rows, row, 1)
+    const dateSerial = cell(rows, row, 2)
+    if (dateSerial == null) continue
+    const values = {}
+    for (const column of config.analyteColumns) {
+      const value = cell(rows, row, column.col)
+      if (typeof value === 'number') values[column.code] = value
+    }
+    if (!Object.keys(values).length) continue
+    const trucountLot = config.trucountColumn ? String(cell(rows, row, config.trucountColumn) ?? '').trim() : null
+    parsedRuns.push({
+      runNo: Number(runNo),
+      runDatetime: bangkokIso(excelSerialToDate(dateSerial)),
+      values,
+      trucountLot: trucountLot || null,
+    })
+  }
+  const stats = {}
+  for (const column of config.analyteColumns) {
+    const values = parsedRuns.map((run) => run.values[column.code]).filter((value) => typeof value === 'number')
+    stats[column.code] = { mean: mean(values), sd: sampleSd(values), n: values.length }
+  }
+  return {
+    ...config,
+    sheetName: sheet.name,
+    lotNumber,
+    expiryDate,
+    instrumentModel,
+    runs: parsedRuns,
+    stats,
+  }
+}
 
-const { data: user, error: userError } = await admin.from('nipt_users').select('id').eq('ephis_id', ephisId).maybeSingle()
-if (userError) throw userError
-const actorId = required(user?.id, `No nipt_users with ephis_id ${ephisId}`)
+async function deleteAll(admin, table) {
+  const { error } = await admin.from(table).delete().neq('id', ZERO_UUID)
+  if (error) throw new Error(`Could not clear ${table}: ${error.message}`)
+}
 
-async function ensureAnalyte(a) {
-  const { data: existing } = await admin.from('iqc_analytes').select('id').eq('code', a.code).maybeSingle()
-  if (existing) return existing.id
-  const { data, error } = await admin.from('iqc_analytes').insert({
-    code: a.code, name: a.name, data_type: 'quantitative', scale: 'linear', is_absolute: a.is_absolute, unit: a.unit, group_label: 'CD4 Panel', created_by: actorId,
-  }).select('id').single()
-  if (error) throw error
+async function countRows(query, label) {
+  const { count, error } = await query
+  if (error) throw new Error(`Could not preflight ${label}: ${error.message}`)
+  return count ?? 0
+}
+
+async function assertNoExternalIqcReferences(admin) {
+  const newLotRefs = await countRows(
+    admin.from('lotverif_verifications').select('id', { count: 'exact', head: true }).not('new_control_lot_id', 'is', null),
+    'lotverif_verifications.new_control_lot_id',
+  )
+  const oldLotRefs = await countRows(
+    admin.from('lotverif_verifications').select('id', { count: 'exact', head: true }).not('old_control_lot_id', 'is', null),
+    'lotverif_verifications.old_control_lot_id',
+  )
+  const analyteRefs = await countRows(
+    admin.from('lotverif_measurements').select('id', { count: 'exact', head: true }).not('analyte_id', 'is', null),
+    'lotverif_measurements.analyte_id',
+  )
+  if (newLotRefs + oldLotRefs + analyteRefs > 0) {
+    throw new Error(
+      `IQC reset blocked: Lot Verification still references IQC data ` +
+        `(${newLotRefs + oldLotRefs} control-lot refs, ${analyteRefs} analyte refs). ` +
+        `Clear or archive those Lot Verification records first, or extend this script intentionally to reset Lot Verification too.`,
+    )
+  }
+}
+
+async function insertOne(admin, table, payload) {
+  const { data, error } = await admin.from(table).insert(payload).select('id').single()
+  if (error) throw new Error(`Could not insert ${table}: ${error.message}`)
   return data.id
 }
-const analyteId = {}
-for (const a of ANALYTES) analyteId[a.code] = await ensureAnalyte(a)
 
-let { data: material } = await admin.from('iqc_control_materials').select('id').eq('name', 'BD Multi-Check CD3/CD4').maybeSingle()
-if (!material) {
-  const { data, error } = await admin.from('iqc_control_materials').insert({ name: 'BD Multi-Check CD3/CD4', level: 'Normal', manufacturer: 'BD', created_by: actorId }).select('id').single()
-  if (error) throw error
-  material = data
-}
+async function applyImport(datasets) {
+  const envHint = 'Configure .env.local before running this command.'
+  const url = required(envValue('NEXT_PUBLIC_BM_SUPABASE_URL'), `Missing NEXT_PUBLIC_BM_SUPABASE_URL. ${envHint}`)
+  const serviceRoleKey = required(envValue('BM_SUPABASE_SERVICE_ROLE_KEY'), `Missing BM_SUPABASE_SERVICE_ROLE_KEY. ${envHint}`)
+  const ephisId = required(argument('ephis'), 'Use --ephis <employee-code> (an existing Molecular-CBH QMS user)')
+  const admin = createClient(url, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } })
 
-let { data: instrument } = await admin.from('iqc_instruments').select('id').eq('code', 'FACSLYRIC').maybeSingle()
-if (!instrument) {
-  const { data } = await admin.from('iqc_instruments').insert({ code: 'FACSLYRIC', name: 'BD FACSlyric', model: 'FACSLyric', created_by: actorId }).select('id').single()
-  instrument = data
-}
+  const { data: user, error: userError } = await admin.from('nipt_users').select('id').eq('ephis_id', ephisId).maybeSingle()
+  if (userError) throw userError
+  const actorId = required(user?.id, `No nipt_users with ephis_id ${ephisId}`)
 
-// ---- cleanup: remove the lot "25290" mistakenly seeded as a control lot ----
-const { data: wrongLot } = await admin.from('iqc_control_lots').select('id').eq('control_material_id', material.id).eq('lot_number', TRUCOUNT_LOT).maybeSingle()
-if (wrongLot) {
-  const { data: wrongResults } = await admin.from('iqc_result_values').select('run_id').eq('control_lot_id', wrongLot.id)
-  const runIds = [...new Set((wrongResults ?? []).map((r) => r.run_id))]
-  if (runIds.length) await admin.from('iqc_runs').delete().in('id', runIds) // cascades result_values + consumables
-  await admin.from('iqc_control_specs').delete().eq('control_lot_id', wrongLot.id)
-  await admin.from('iqc_control_lots').delete().eq('id', wrongLot.id)
-  console.log(`Cleaned up mis-seeded control lot "${TRUCOUNT_LOT}" (${runIds.length} runs).`)
-}
+  await assertNoExternalIqcReferences(admin)
 
-let totalImported = 0
-for (const cfg of LOTS) {
-  let { data: lot } = await admin.from('iqc_control_lots').select('id').eq('control_material_id', material.id).eq('lot_number', cfg.lot).maybeSingle()
-  if (!lot) {
-    const { data, error } = await admin.from('iqc_control_lots').insert({ control_material_id: material.id, lot_number: cfg.lot, expiry_date: cfg.expiry, created_by: actorId }).select('id').single()
-    if (error) throw error
-    lot = data
-  } else if (cfg.expiry) {
-    await admin.from('iqc_control_lots').update({ expiry_date: cfg.expiry }).eq('id', lot.id)
+  console.log('Clearing IQC-domain data...')
+  const { error: attachmentError } = await admin.from('bm_attachments').delete().eq('module', 'iqc')
+  if (attachmentError) throw new Error(`Could not clear IQC attachments: ${attachmentError.message}`)
+  for (const table of [
+    'iqc_corrective_actions',
+    'iqc_result_values',
+    'iqc_run_consumables',
+    'iqc_runs',
+    'iqc_uncertainty_components',
+    'iqc_uncertainty_budgets',
+    'iqc_tea_specs',
+    'iqc_control_specs',
+    'iqc_control_lots',
+    'iqc_control_materials',
+    'iqc_instruments',
+    'iqc_analytes',
+  ]) {
+    await deleteAll(admin, table)
   }
 
-  for (const code of ORDER) {
-    const [m, s] = cfg.assigned[code]
-    const { data: spec } = await admin.from('iqc_control_specs').select('id').eq('control_lot_id', lot.id).eq('analyte_id', analyteId[code]).maybeSingle()
-    if (spec) await admin.from('iqc_control_specs').update({ assigned_mean: m, assigned_sd: s, updated_at: new Date().toISOString() }).eq('id', spec.id)
-    else await admin.from('iqc_control_specs').insert({ control_lot_id: lot.id, analyte_id: analyteId[code], assigned_mean: m, assigned_sd: s, created_by: actorId })
-  }
+  const instrumentId = await insertOne(admin, 'iqc_instruments', {
+    code: 'FACSLYRIC',
+    name: 'BD FACSlyric',
+    model: datasets[0]?.instrumentModel ?? 'BD FACSlyric',
+    created_by: actorId,
+  })
 
-  const { count } = await admin.from('iqc_result_values').select('id', { count: 'exact', head: true }).eq('control_lot_id', lot.id)
-  if (count && !force) {
-    console.log(`Lot ${cfg.lot} already has ${count} result values — skipping runs (use --force).`)
-    continue
-  }
-
-  const series = { '%CD3': [], AbsCD3: [], '%CD4': [], AbsCD4: [] }
-  for (const [date, ...values] of cfg.rows) {
-    const { data: run, error: runError } = await admin.from('iqc_runs').insert({ instrument_id: instrument?.id ?? null, run_datetime: isoDate(date), entered_by: actorId, note: `Imported from CD4 Google Sheet (${cfg.lot})` }).select('id').single()
-    if (runError) throw runError
-    await admin.from('iqc_run_consumables').insert({ run_id: run.id, kind: 'trucount-tube', lot_number: TRUCOUNT_LOT, applies_scope: 'absolute-only' })
-    const valueRows = ORDER.map((code, i) => {
-      const v = values[i]
-      const [m, s] = cfg.assigned[code]
-      const next = [...series[code], v]
-      const point = evaluateLatest(next, m, s)
-      if (point.status !== 'rejected') series[code] = next
-      return { run_id: run.id, control_lot_id: lot.id, analyte_id: analyteId[code], numeric_value: v, stat_value: v, z_score: point.z, violated_rules: point.violatedRules, status: point.status }
+  const analyteIds = {}
+  for (const analyte of ANALYTES) {
+    analyteIds[analyte.code] = await insertOne(admin, 'iqc_analytes', {
+      ...analyte,
+      data_type: 'quantitative',
+      scale: 'linear',
+      created_by: actorId,
     })
-    const { error } = await admin.from('iqc_result_values').insert(valueRows)
-    if (error) throw error
-    totalImported += 1
   }
-  console.log(`Imported ${cfg.rows.length} runs for control lot ${cfg.lot}.`)
+
+  let runCount = 0
+  let valueCount = 0
+  let trucountCount = 0
+  for (const dataset of datasets) {
+    const materialId = await insertOne(admin, 'iqc_control_materials', {
+      name: dataset.materialName,
+      level: dataset.level,
+      manufacturer: dataset.manufacturer,
+      created_by: actorId,
+    })
+    const controlLotId = await insertOne(admin, 'iqc_control_lots', {
+      control_material_id: materialId,
+      lot_number: dataset.lotNumber,
+      expiry_date: dataset.expiryDate,
+      created_by: actorId,
+    })
+    for (const column of dataset.analyteColumns) {
+      const stat = dataset.stats[column.code]
+      await insertOne(admin, 'iqc_control_specs', {
+        control_lot_id: controlLotId,
+        analyte_id: analyteIds[column.code],
+        assigned_mean: null,
+        assigned_sd: null,
+        lab_mean: stat.mean,
+        lab_sd: stat.sd,
+        lab_n: stat.n,
+        lab_locked_at: null,
+        active_limit: 'lab',
+        created_by: actorId,
+      })
+    }
+
+    const series = Object.fromEntries(dataset.analyteColumns.map((column) => [column.code, []]))
+    for (const run of dataset.runs) {
+      const runId = await insertOne(admin, 'iqc_runs', {
+        instrument_id: instrumentId,
+        run_no: run.runNo,
+        run_datetime: run.runDatetime,
+        note: `Imported from ${path.basename(dataset.path)}`,
+        entered_by: actorId,
+      })
+      runCount += 1
+      if (run.trucountLot) {
+        await insertOne(admin, 'iqc_run_consumables', {
+          run_id: runId,
+          kind: 'trucount-tube',
+          lot_number: run.trucountLot,
+          applies_scope: 'absolute-only',
+        })
+        trucountCount += 1
+      }
+      const resultRows = []
+      for (const column of dataset.analyteColumns) {
+        const value = run.values[column.code]
+        if (value == null) continue
+        const stat = dataset.stats[column.code]
+        const next = [...series[column.code], value]
+        const point = evaluateLatest(next, stat.mean, stat.sd)
+        if (point.status !== 'rejected') series[column.code] = next
+        resultRows.push({
+          run_id: runId,
+          control_lot_id: controlLotId,
+          analyte_id: analyteIds[column.code],
+          numeric_value: value,
+          stat_value: value,
+          z_score: point.z,
+          violated_rules: point.violatedRules,
+          status: point.status,
+        })
+      }
+      const { error: valueError } = await admin.from('iqc_result_values').insert(resultRows)
+      if (valueError) throw new Error(`Could not insert iqc_result_values: ${valueError.message}`)
+      valueCount += resultRows.length
+    }
+  }
+  return { runCount, valueCount, trucountCount }
 }
 
-console.log(`Done. ${totalImported} runs total. Trucount tube lot ${TRUCOUNT_LOT} recorded per run (absolute-only).`)
+function printSummary(datasets) {
+  let totalRuns = 0
+  let totalValues = 0
+  let totalTrucount = 0
+  for (const dataset of datasets) {
+    const valueCount = dataset.runs.reduce((sum, run) => sum + Object.keys(run.values).length, 0)
+    const trucountCount = dataset.runs.filter((run) => run.trucountLot).length
+    totalRuns += dataset.runs.length
+    totalValues += valueCount
+    totalTrucount += trucountCount
+    console.log(`\n${dataset.level}: ${dataset.materialName} · ${dataset.lotNumber} · EXP ${dataset.expiryDate}`)
+    console.log(`  file: ${dataset.path}`)
+    console.log(`  sheet: ${dataset.sheetName}`)
+    console.log(`  runs: ${dataset.runs.length}`)
+    console.log(`  result values: ${valueCount}`)
+    if (trucountCount) console.log(`  Trucount tube lot ${TRUCOUNT_LOT}: ${trucountCount} runs`)
+    for (const column of dataset.analyteColumns) {
+      const stat = dataset.stats[column.code]
+      console.log(`  ${column.code}: mean=${stat.mean.toFixed(6)} sd=${stat.sd.toFixed(6)} n=${stat.n}`)
+    }
+  }
+  console.log(`\nTOTAL: ${totalRuns} runs, ${totalValues} result values, ${totalTrucount} Trucount consumables`)
+}
+
+const datasets = FILES.map(parseControlWorkbook)
+printSummary(datasets)
+
+if (!APPLY) {
+  console.log('\nDry run only. Add --apply --ephis <employee-code> to clear IQC data and import this dataset.')
+} else {
+  const result = await applyImport(datasets)
+  console.log(`\nImported to Supabase: ${result.runCount} runs, ${result.valueCount} result values, ${result.trucountCount} Trucount consumables.`)
+}

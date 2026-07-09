@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Trash2 } from 'lucide-react'
+import { Pencil, Trash2 } from 'lucide-react'
 import { Button, Input, StatusBadge } from '@/components/ui'
 
 export interface ManagedItem {
@@ -17,12 +17,14 @@ export interface ManagedItem {
 export function ManagedList({
   items,
   onToggle,
+  onEdit,
   onDelete,
   searchThreshold = 6,
   noun = 'รายการ',
 }: {
   items: ManagedItem[]
   onToggle: (id: string, isActive: boolean) => Promise<boolean>
+  onEdit?: (id: string) => void
   onDelete?: (id: string, label: string) => Promise<boolean>
   searchThreshold?: number
   noun?: string
@@ -64,6 +66,11 @@ export function ManagedList({
               <Button variant="ghost" className="min-h-7 px-2 py-1 text-xs" disabled={busy === i.id} onClick={async () => { setBusy(i.id); await onToggle(i.id, !i.isActive); setBusy(null) }}>
                 {i.isActive ? 'ปิด' : 'เปิดใช้'}
               </Button>
+              {onEdit ? (
+                <Button type="button" variant="ghost" className="min-h-7 px-2 py-1 text-xs" disabled={busy === i.id} onClick={() => onEdit(i.id)} aria-label={`แก้ไข ${i.label}`}>
+                  <Pencil className="size-3.5" />
+                </Button>
+              ) : null}
               {onDelete ? (
                 <Button
                   type="button"

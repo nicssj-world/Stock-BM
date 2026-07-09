@@ -487,6 +487,32 @@ export async function createAnalyte(input: {
   return getIqcWorkspace(actor)
 }
 
+export async function updateAnalyte(id: string, input: {
+  code?: string
+  name?: string
+  dataType?: AnalyteDataType
+  scale?: AnalyteScale
+  isAbsolute?: boolean
+  unit?: string | null
+  groupLabel?: string | null
+  isActive?: boolean
+}, actor: BmActor) {
+  assertAdmin(actor)
+  const payload: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (input.code !== undefined) payload.code = input.code.trim()
+  if (input.name !== undefined) payload.name = input.name.trim()
+  if (input.dataType !== undefined) payload.data_type = input.dataType
+  if (input.scale !== undefined) payload.scale = input.scale
+  if (input.isAbsolute !== undefined) payload.is_absolute = Boolean(input.isAbsolute)
+  if (input.unit !== undefined) payload.unit = clean(input.unit)
+  if (input.groupLabel !== undefined) payload.group_label = clean(input.groupLabel)
+  if (input.isActive !== undefined) payload.is_active = input.isActive
+  const { error } = await getAdminClient().from('iqc_analytes').update(payload).eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'iqc.analyte.update', 'iqc-analyte', id, input)
+  return getIqcWorkspace(actor)
+}
+
 export async function createInstrument(input: { code: string; name: string; model?: string | null }, actor: BmActor) {
   assertAdmin(actor)
   const { data, error } = await getAdminClient().from('iqc_instruments').insert({
@@ -497,6 +523,19 @@ export async function createInstrument(input: { code: string; name: string; mode
   }).select('id').single()
   fail(error)
   await writeAudit(actor, 'iqc.instrument.create', 'iqc-instrument', asString((data as RecordRow).id), input)
+  return getIqcWorkspace(actor)
+}
+
+export async function updateInstrument(id: string, input: { code?: string; name?: string; model?: string | null; isActive?: boolean }, actor: BmActor) {
+  assertAdmin(actor)
+  const payload: Record<string, unknown> = {}
+  if (input.code !== undefined) payload.code = input.code.trim()
+  if (input.name !== undefined) payload.name = input.name.trim()
+  if (input.model !== undefined) payload.model = clean(input.model)
+  if (input.isActive !== undefined) payload.is_active = input.isActive
+  const { error } = await getAdminClient().from('iqc_instruments').update(payload).eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'iqc.instrument.update', 'iqc-instrument', id, input)
   return getIqcWorkspace(actor)
 }
 
@@ -519,6 +558,26 @@ export async function createControlMaterial(input: {
   return getIqcWorkspace(actor)
 }
 
+export async function updateControlMaterial(id: string, input: {
+  name?: string
+  level?: string | null
+  manufacturer?: string | null
+  stockItemId?: string | null
+  isActive?: boolean
+}, actor: BmActor) {
+  assertAdmin(actor)
+  const payload: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (input.name !== undefined) payload.name = input.name.trim()
+  if (input.level !== undefined) payload.level = clean(input.level)
+  if (input.manufacturer !== undefined) payload.manufacturer = clean(input.manufacturer)
+  if (input.stockItemId !== undefined) payload.stock_item_id = input.stockItemId || null
+  if (input.isActive !== undefined) payload.is_active = input.isActive
+  const { error } = await getAdminClient().from('iqc_control_materials').update(payload).eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'iqc.material.update', 'iqc-control-material', id, input)
+  return getIqcWorkspace(actor)
+}
+
 export async function createControlLot(input: {
   controlMaterialId: string
   lotNumber: string
@@ -538,9 +597,15 @@ export async function createControlLot(input: {
   return getIqcWorkspace(actor)
 }
 
-export async function updateControlLot(id: string, input: { isActive: boolean }, actor: BmActor) {
+export async function updateControlLot(id: string, input: { controlMaterialId?: string; lotNumber?: string; expiryDate?: string | null; stockLotId?: string | null; isActive?: boolean }, actor: BmActor) {
   assertAdmin(actor)
-  const { error } = await getAdminClient().from('iqc_control_lots').update({ is_active: input.isActive }).eq('id', id)
+  const payload: Record<string, unknown> = {}
+  if (input.controlMaterialId !== undefined) payload.control_material_id = input.controlMaterialId
+  if (input.lotNumber !== undefined) payload.lot_number = input.lotNumber.trim()
+  if (input.expiryDate !== undefined) payload.expiry_date = input.expiryDate || null
+  if (input.stockLotId !== undefined) payload.stock_lot_id = input.stockLotId || null
+  if (input.isActive !== undefined) payload.is_active = input.isActive
+  const { error } = await getAdminClient().from('iqc_control_lots').update(payload).eq('id', id)
   fail(error)
   await writeAudit(actor, 'iqc.lot.update', 'iqc-control-lot', id, input)
   return getIqcWorkspace(actor)

@@ -325,15 +325,6 @@ function DistributionTab({
     }
   }
 
-  async function toggleSelfSupplied(siteId: string, current: boolean) {
-    try {
-      const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/sites', { method: 'PATCH', body: JSON.stringify({ id: siteId, selfSupplied: !current }) })
-      onWorkspace(result.workspace, `อัปเดต ${!current ? 'เป็นชุดตรวจเอง' : 'เป็นรับชุดตรวจจากเรา'} แล้ว`)
-    } catch (error) {
-      onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'อัปเดตหน่วยงานไม่สำเร็จ' })
-    }
-  }
-
   return (
     <div className="space-y-4">
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
@@ -354,7 +345,7 @@ function DistributionTab({
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <p className="font-bold text-[#315763]">{site.name}</p>
-                        {site.selfSupplied ? <span className="rounded-full border border-[#a6c6e8] bg-[#eef4fb] px-2 py-0.5 text-[10px] font-bold text-[#3a6fa8]">ชุดตรวจเอง</span> : null}
+                        {site.selfSupplied ? <span className="rounded-full border border-[#a6c6e8] bg-[#eef4fb] px-2 py-0.5 text-[10px] font-bold text-[#3a6fa8]">ชุดตรวจตัวเอง</span> : null}
                       </div>
                       <p className="mono text-xs text-[#91a3a7]">{site.code ?? '-'} · {site.siteType}</p>
                     </td>
@@ -370,13 +361,13 @@ function DistributionTab({
                       {actor.role === 'Admin' ? (
                         <div className="flex flex-wrap items-center gap-1.5">
                           <button onClick={() => toggleSite(site.id, site.isActive)} className={`rounded border px-2 py-1 text-[10px] font-bold ${site.isActive ? 'border-[#c7e0c8] bg-[#f0f8f1] text-[#518058]' : 'border-[#e0d7d8] bg-[#f7f4f4] text-[#8d7b7d]'}`}>{site.isActive ? 'ACTIVE' : 'INACTIVE'}</button>
-                          <button onClick={() => toggleSelfSupplied(site.id, site.selfSupplied)} className={`rounded border px-2 py-1 text-[10px] font-bold ${site.selfSupplied ? 'border-[#a6c6e8] bg-[#eef4fb] text-[#3a6fa8]' : 'border-[#c7dde0] bg-[#f5f9fa] text-[#55727c]'}`}>{site.selfSupplied ? 'ชุดตรวจเอง' : 'รับจากเรา'}</button>
+                          <span className={`rounded border px-2 py-1 text-[10px] font-bold ${site.selfSupplied ? 'border-[#a6c6e8] bg-[#eef4fb] text-[#3a6fa8]' : 'border-[#c7dde0] bg-[#f5f9fa] text-[#55727c]'}`}>{site.selfSupplied ? 'ชุดตรวจตัวเอง' : 'รับจากเรา'}</span>
                           <button onClick={() => setEditingSite({ id: site.id, code: site.code ?? '', name: site.name, siteType: site.siteType, selfSupplied: site.selfSupplied })} className="flex items-center gap-1 rounded border border-[#c7dde0] bg-[#f5f9fa] px-2 py-1 text-[10px] font-bold text-[#55727c] hover:bg-[#ebf5f6]"><Pencil className="size-3" /> แก้ไข</button>
                         </div>
                       ) : (
                         <div className="flex flex-wrap items-center gap-1.5">
                           <StatusBadge tone={site.isActive ? 'accepted' : 'neutral'} label={site.isActive ? 'ACTIVE' : 'INACTIVE'} />
-                          {site.selfSupplied ? <StatusBadge tone="warning" label="ชุดตรวจเอง" /> : null}
+                          {site.selfSupplied ? <StatusBadge tone="warning" label="ชุดตรวจตัวเอง" /> : null}
                         </div>
                       )}
                     </td>

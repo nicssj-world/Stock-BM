@@ -324,11 +324,17 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
   }
 }
 
-export async function createHpvSite(input: { code?: string | null; name: string; siteType?: string | null }, actor: BmActor) {
+export async function createHpvSite(input: { code?: string | null; name: string; siteType?: string | null; selfSupplied?: boolean }, actor: BmActor) {
   assertAdmin(actor)
   const { data, error } = await getAdminClient()
     .from('bm_hpv_sites')
-    .insert({ code: clean(input.code), name: input.name.trim(), site_type: clean(input.siteType) ?? 'รพ.สต.', created_by: actor.id })
+    .insert({
+      code: clean(input.code),
+      name: input.name.trim(),
+      site_type: clean(input.siteType) ?? 'รพ.สต.',
+      self_supplied: Boolean(input.selfSupplied),
+      created_by: actor.id,
+    })
     .select('id')
     .single()
   fail(error)
@@ -398,7 +404,7 @@ export async function createHpvDistribution(input: {
   fail(siteError)
   const siteRow = site as RecordRow | null
   if (!siteRow?.is_active) throw new HttpError(400, 'Active HPV site not found')
-  if (siteRow.self_supplied) throw new HttpError(400, 'หน่วยงานนี้ใช้ชุดตรวจเอง จึงไม่ต้องเบิกจาก Stock กลาง')
+  if (siteRow.self_supplied) throw new HttpError(400, 'หน่วยงานนี้ใช้ชุดตรวจตัวเอง จึงไม่ต้องเบิกจาก Stock กลาง')
 
   const kitColumn = input.kitType === 'self_collected' ? 'hpv_self_collected' : 'hpv_clinician_collected'
   const { data: requiredItems, error: itemError } = await admin

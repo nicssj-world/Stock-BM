@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Calculator, ClipboardList, Gauge, Lock, LineChart, PlusCircle, Printer, Settings, Sigma, Trash2, Wrench } from 'lucide-react'
+import { AlertTriangle, CalendarClock, Calculator, ClipboardList, Eye, Gauge, Layers3, Lock, LineChart, ListFilter, PlusCircle, Printer, Search, Settings, Sigma, Trash2, Wrench } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { IqcUncertaintyBudget, IqcWorkspace } from '@/lib/iqc/types'
 import { formatDate, formatDateTime } from '@/lib/bm/rules'
@@ -89,7 +89,7 @@ export function IqcView({ actor, initialData }: { actor: BmActor; initialData: I
 
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
 
-      {tab === 'charts' ? <ChartsTab data={scoped} isAdmin={isAdmin} onOk={ok} onErr={err} /> : null}
+      {tab === 'charts' ? <ChartsOverviewTab data={scoped} isAdmin={isAdmin} onOk={ok} onErr={err} /> : null}
       {tab === 'enter' ? <EnterTab data={scoped} onOk={ok} onErr={err} onDone={() => setTab('charts')} /> : null}
       {tab === 'sixsigma' ? <SixSigmaTab data={scoped} /> : null}
       {tab === 'uncertainty' ? <UncertaintyTab data={scoped} isAdmin={isAdmin} onOk={ok} onErr={err} /> : null}
@@ -99,6 +99,220 @@ export function IqcView({ actor, initialData }: { actor: BmActor; initialData: I
   )
 }
 
+type ChartStatusFilter = 'attention' | 'all' | 'accepted' | 'warning' | 'rejected' | 'unlocked' | 'expiring'
+
+function chartStatusRank(status: IqcWorkspace['charts'][number]['status']) {
+  return status === 'rejected' ? 0 : status === 'warning' ? 1 : 2
+}
+
+function daysUntil(dateText: string | null) {
+  if (!dateText) return null
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const date = new Date(`${dateText}T00:00:00`)
+  const diff = Math.ceil((date.getTime() - today.getTime()) / 86400000)
+  return Number.isFinite(diff) ? diff : null
+}
+
+function fmtCompact(value: number | null) {
+  if (value == null) return '—'
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value)
+}
+
+function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace; isAdmin: boolean; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void }) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState<ChartStatusFilter>('all')
+  const [query, setQuery] = useState('')
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+
+  async function lock(controlLotId: string, analyteId: string, eligible: boolean) {
+    let overrideReason: string | undefined
+    if (!eligible) {
+      const reason = window.prompt('จุดยังไม่ครบ 20 — ระบุเหตุผลในการ override lock:')
+      if (reason == null || !reason.trim()) return
+      overrideReason = reason.trim()
+    }
+    setBusy(`${controlLotId}:${analyteId}`)
+    try {
+      const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/lock', { method: 'POST', body: JSON.stringify({ controlLotId, analyteId, overrideReason }) })
+      onOk(eligible ? 'Lock lab mean/SD แล้ว' : 'Lock (override) แล้ว', result.iqc)
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : 'Lock ไม่สำเร็จ')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (!data.charts.length) {
+    return <Card className="p-8 text-center text-sm text-[#8198a0]">ยังไม่มีข้อมูล IQC — เพิ่ม analyte/control แล้วบันทึกผลที่แท็บบันทึกผล</Card>
+  }
+
+  const lotsById = new Map(data.controlLots.map((lot) => [lot.id, lot]))
+  const expiringLotIds = new Set(data.controlLots.filter((lot) => {
+    const days = daysUntil(lot.expiryDate)
+    return days != null && days >= 0 && days <= 30
+  }).map((lot) => lot.id))
+  const attentionKeys = new Set(data.charts.filter((chart) => chart.status !== 'accepted' || chart.activeLimit !== 'lab' || expiringLotIds.has(chart.controlLotId)).map((chart) => chart.key))
+  const rejectedCount = data.charts.filter((chart) => chart.status === 'rejected').length
+  const warningCount = data.charts.filter((chart) => chart.status === 'warning').length
+  const unlockedCount = data.charts.filter((chart) => chart.activeLimit !== 'lab').length
+  const expiringCount = new Set(data.charts.filter((chart) => expiringLotIds.has(chart.controlLotId)).map((chart) => chart.controlLotId)).size
+  const q = query.trim().toLowerCase()
+  const filteredCharts = data.charts
+    .filter((chart) => {
+      if (statusFilter === 'attention' && !attentionKeys.has(chart.key)) return false
+      if (statusFilter === 'accepted' && chart.status !== 'accepted') return false
+      if (statusFilter === 'warning' && chart.status !== 'warning') return false
+      if (statusFilter === 'rejected' && chart.status !== 'rejected') return false
+      if (statusFilter === 'unlocked' && chart.activeLimit === 'lab') return false
+      if (statusFilter === 'expiring' && !expiringLotIds.has(chart.controlLotId)) return false
+      if (!q) return true
+      return [chart.controlMaterialName, chart.level, chart.lotNumber, chart.analyteCode, chart.analyteName, chart.groupLabel]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(q)
+    })
+    .sort((a, b) => chartStatusRank(a.status) - chartStatusRank(b.status) || a.controlMaterialName.localeCompare(b.controlMaterialName) || a.lotNumber.localeCompare(b.lotNumber) || a.analyteCode.localeCompare(b.analyteCode))
+  const selectedChart = filteredCharts.find((chart) => chart.key === selectedKey) ?? null
+  const grouped = filteredCharts.reduce((map, chart) => {
+    const current = map.get(chart.controlLotId) ?? []
+    current.push(chart)
+    map.set(chart.controlLotId, current)
+    return map
+  }, new Map<string, IqcWorkspace['charts']>())
+
+  return (
+    <div className="space-y-4">
+      <Card className="overflow-hidden">
+        <div className="grid gap-px bg-[#dbe8e9] sm:grid-cols-2 xl:grid-cols-5">
+          <button type="button" onClick={() => { setStatusFilter('attention'); setSelectedKey(null) }} className={`bg-white p-4 text-left transition hover:bg-[#f7fbfb] ${statusFilter === 'attention' ? 'ring-2 ring-inset ring-[#0b7f76]' : ''}`}>
+            <div className="flex items-center gap-2 text-[11px] font-bold tracking-[0.14em] text-[#789097] uppercase"><ListFilter className="size-4" /> Needs attention</div>
+            <div className="mono mt-2 text-2xl font-bold text-[#173d50]">{attentionKeys.size}</div>
+            <p className="mt-1 text-xs text-[#789097]">warning, rejected, expiring, unlocked</p>
+          </button>
+          <button type="button" onClick={() => { setStatusFilter('rejected'); setSelectedKey(null) }} className={`bg-white p-4 text-left transition hover:bg-[#fff7f7] ${statusFilter === 'rejected' ? 'ring-2 ring-inset ring-[#c02a37]' : ''}`}>
+            <div className="flex items-center gap-2 text-[11px] font-bold tracking-[0.14em] text-[#789097] uppercase"><AlertTriangle className="size-4" /> Rejected</div>
+            <div className="mono mt-2 text-2xl font-bold text-[#c02a37]">{rejectedCount}</div>
+            <p className="mt-1 text-xs text-[#789097]">out of control</p>
+          </button>
+          <button type="button" onClick={() => { setStatusFilter('warning'); setSelectedKey(null) }} className={`bg-white p-4 text-left transition hover:bg-[#fffaf0] ${statusFilter === 'warning' ? 'ring-2 ring-inset ring-[#a9700f]' : ''}`}>
+            <div className="flex items-center gap-2 text-[11px] font-bold tracking-[0.14em] text-[#789097] uppercase"><AlertTriangle className="size-4" /> Warning</div>
+            <div className="mono mt-2 text-2xl font-bold text-[#a9700f]">{warningCount}</div>
+            <p className="mt-1 text-xs text-[#789097]">Westgard watch</p>
+          </button>
+          <button type="button" onClick={() => { setStatusFilter('expiring'); setSelectedKey(null) }} className={`bg-white p-4 text-left transition hover:bg-[#f7fbfb] ${statusFilter === 'expiring' ? 'ring-2 ring-inset ring-[#0b7f76]' : ''}`}>
+            <div className="flex items-center gap-2 text-[11px] font-bold tracking-[0.14em] text-[#789097] uppercase"><CalendarClock className="size-4" /> Expiring lots</div>
+            <div className="mono mt-2 text-2xl font-bold text-[#173d50]">{expiringCount}</div>
+            <p className="mt-1 text-xs text-[#789097]">within 30 days</p>
+          </button>
+          <button type="button" onClick={() => { setStatusFilter('unlocked'); setSelectedKey(null) }} className={`bg-white p-4 text-left transition hover:bg-[#f7fbfb] ${statusFilter === 'unlocked' ? 'ring-2 ring-inset ring-[#0b7f76]' : ''}`}>
+            <div className="flex items-center gap-2 text-[11px] font-bold tracking-[0.14em] text-[#789097] uppercase"><Lock className="size-4" /> Not lab-locked</div>
+            <div className="mono mt-2 text-2xl font-bold text-[#173d50]">{unlockedCount}</div>
+            <p className="mt-1 text-xs text-[#789097]">needs admin review</p>
+          </button>
+        </div>
+      </Card>
+
+      <Card className="p-3">
+        <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
+          <label className="relative block">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-[#789097]" />
+            <Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder="Search control, lot, analyte" />
+          </label>
+          <Select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as ChartStatusFilter); setSelectedKey(null) }}>
+            <option value="attention">Needs attention</option>
+            <option value="all">All charts</option>
+            <option value="rejected">Rejected</option>
+            <option value="warning">Warning</option>
+            <option value="accepted">Accepted</option>
+            <option value="expiring">Expiring lots</option>
+            <option value="unlocked">Not lab-locked</option>
+          </Select>
+        </div>
+      </Card>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(520px,1.25fr)]">
+        <div className="space-y-3">
+          {filteredCharts.length ? [...grouped.entries()].map(([lotId, charts]) => {
+            const lot = lotsById.get(lotId)
+            const worst = charts.some((chart) => chart.status === 'rejected') ? 'rejected' : charts.some((chart) => chart.status === 'warning') ? 'warning' : 'accepted'
+            const days = daysUntil(lot?.expiryDate ?? null)
+            return (
+              <Card key={lotId} className="overflow-hidden">
+                <div className="border-b border-[#e3ebec] bg-[#fbfefe] p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-bold text-[#173d50]">{charts[0]?.controlMaterialName}</h3>
+                        {charts[0]?.level ? <span className="rounded-full border border-[#d2dee0] px-2 py-0.5 text-[11px] font-bold text-[#55727c]">{charts[0].level}</span> : null}
+                        <StatusBadge tone={worst} label={worst} />
+                      </div>
+                      <p className="mono mt-1 text-xs text-[#5f7880]">Lot {charts[0]?.lotNumber}</p>
+                    </div>
+                    <div className="text-right text-xs text-[#789097]">
+                      <div>{charts.length} analyte{charts.length > 1 ? 's' : ''}</div>
+                      {lot?.expiryDate ? <div className={days != null && days <= 30 ? 'font-bold text-[#a9700f]' : ''}>EXP {formatDate(lot.expiryDate)}</div> : null}
+                    </div>
+                  </div>
+                </div>
+                <div className="divide-y divide-[#eef3f3]">
+                  {charts.map((chart) => {
+                    const latest = [...chart.points].reverse().find((point) => !point.isVoided)
+                    const selected = selectedChart?.key === chart.key
+                    return (
+                      <button key={chart.key} type="button" onClick={() => setSelectedKey(chart.key)} className={`grid w-full gap-2 px-4 py-3 text-left transition hover:bg-[#f7fbfb] sm:grid-cols-[1fr_auto] ${selected ? 'bg-[#edf8f6] ring-2 ring-inset ring-[#0b7f76]/45' : 'bg-white'}`}>
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-bold text-[#173d50]">{chart.analyteCode}</span>
+                            <StatusBadge tone={chart.status} label={chart.status} />
+                            {chart.activeLimit !== 'lab' ? <span className="rounded-full border border-[#eed4a6] bg-[#fff9ed] px-2 py-0.5 text-[11px] font-bold text-[#a9700f]">not locked</span> : null}
+                          </div>
+                          <p className="mt-1 text-xs text-[#789097]">
+                            n {chart.n} · mean {fmtCompact(chart.mean)} · SD {fmtCompact(chart.sd)}
+                            {latest ? ` · latest ${fmtCompact(latest.value)} (${formatDateTime(latest.runDatetime)})` : ''}
+                          </p>
+                        </div>
+                        <span className="inline-flex items-center justify-end gap-1 text-xs font-bold text-[#0b7f76]"><Eye className="size-4" /> View chart</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </Card>
+            )
+          }) : (
+            <Card className="p-8 text-center text-sm text-[#8198a0]">No IQC charts match this filter.</Card>
+          )}
+        </div>
+
+        <div className="space-y-2 xl:sticky xl:top-4 xl:self-start">
+          {selectedChart ? (
+            <>
+              <LjChart chart={selectedChart} />
+              {isAdmin && selectedChart.activeLimit !== 'lab' ? (
+                <div className="flex items-center justify-end gap-2">
+                  {!selectedChart.lockEligible ? <span className="text-[11px] text-[#a9700f]">n {selectedChart.n} &lt; 20 — lock ได้แบบ override (Admin)</span> : null}
+                  <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={selectedChart.n < 2 || busy === selectedChart.key} onClick={() => lock(selectedChart.controlLotId, selectedChart.analyteId, selectedChart.lockEligible)}>
+                    <Lock className="size-3.5" /> {selectedChart.lockEligible ? 'Lock Lab Mean/SD' : `Lock (override, n ${selectedChart.n})`}
+                  </Button>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <Card className="flex min-h-[320px] flex-col items-center justify-center p-8 text-center">
+              <div className="flex size-12 items-center justify-center rounded-lg bg-[#edf8f6] text-[#0b7f76]"><Layers3 className="size-6" /></div>
+              <h3 className="mt-4 font-bold text-[#173d50]">เลือก analyte เพื่อดูกราฟ</h3>
+              <p className="mt-2 max-w-sm text-sm leading-6 text-[#789097]">ภาพรวมจะแสดงสถานะและ lot แบบย่อก่อน เพื่อให้ control เยอะ ๆ ยังอ่านง่าย</p>
+            </Card>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Kept temporarily as a fallback while the overview tab is being rolled out.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function ChartsTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace; isAdmin: boolean; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void }) {
   const [busy, setBusy] = useState<string | null>(null)
   async function lock(controlLotId: string, analyteId: string, eligible: boolean) {
@@ -710,11 +924,12 @@ function ManageTab({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: string
   const remove = (url: string, okText: string) => request(url, null, okText, 'DELETE')
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <AnalyteForm onSubmit={(b) => post('/api/iqc/analytes', b, 'เพิ่ม analyte แล้ว')} onToggle={(id, a) => post(`/api/iqc/analytes/${id}`, { isActive: a }, a ? 'เปิดใช้ analyte แล้ว' : 'ปิด analyte แล้ว', 'PATCH')} onDelete={(id) => remove(`/api/iqc/analytes/${id}`, 'ลบ analyte แล้ว')} analytes={data.analytes} />
-      <InstrumentForm onSubmit={(b) => post('/api/iqc/instruments', b, 'เพิ่ม instrument แล้ว')} onToggle={(id, a) => post(`/api/iqc/instruments/${id}`, { isActive: a }, a ? 'เปิดใช้ instrument แล้ว' : 'ปิด instrument แล้ว', 'PATCH')} onDelete={(id) => remove(`/api/iqc/instruments/${id}`, 'ลบ instrument แล้ว')} instruments={data.instruments} />
-      <MaterialForm onSubmit={(b) => post('/api/iqc/materials', b, 'เพิ่ม control material แล้ว')} onToggle={(id, a) => post(`/api/iqc/materials/${id}`, { isActive: a }, a ? 'เปิดใช้ material แล้ว' : 'ปิด material แล้ว', 'PATCH')} onDelete={(id) => remove(`/api/iqc/materials/${id}`, 'ลบ control material แล้ว')} materials={data.controlMaterials} />
+      <AnalyteForm onSubmit={(b) => post('/api/iqc/analytes', b, 'เพิ่ม analyte แล้ว')} onUpdate={(id, b) => post(`/api/iqc/analytes/${id}`, b, 'แก้ไข analyte แล้ว', 'PATCH')} onToggle={(id, a) => post(`/api/iqc/analytes/${id}`, { isActive: a }, a ? 'เปิดใช้ analyte แล้ว' : 'ปิด analyte แล้ว', 'PATCH')} onDelete={(id) => remove(`/api/iqc/analytes/${id}`, 'ลบ analyte แล้ว')} analytes={data.analytes} />
+      <InstrumentForm onSubmit={(b) => post('/api/iqc/instruments', b, 'เพิ่ม instrument แล้ว')} onUpdate={(id, b) => post(`/api/iqc/instruments/${id}`, b, 'แก้ไข instrument แล้ว', 'PATCH')} onToggle={(id, a) => post(`/api/iqc/instruments/${id}`, { isActive: a }, a ? 'เปิดใช้ instrument แล้ว' : 'ปิด instrument แล้ว', 'PATCH')} onDelete={(id) => remove(`/api/iqc/instruments/${id}`, 'ลบ instrument แล้ว')} instruments={data.instruments} />
+      <MaterialForm onSubmit={(b) => post('/api/iqc/materials', b, 'เพิ่ม control material แล้ว')} onUpdate={(id, b) => post(`/api/iqc/materials/${id}`, b, 'แก้ไข control material แล้ว', 'PATCH')} onToggle={(id, a) => post(`/api/iqc/materials/${id}`, { isActive: a }, a ? 'เปิดใช้ material แล้ว' : 'ปิด material แล้ว', 'PATCH')} onDelete={(id) => remove(`/api/iqc/materials/${id}`, 'ลบ control material แล้ว')} materials={data.controlMaterials} />
       <LotForm
         onSubmit={(b) => post('/api/iqc/lots', b, 'เพิ่ม control lot แล้ว')}
+        onUpdate={(id, b) => post(`/api/iqc/lots/${id}`, b, 'แก้ไข control lot แล้ว', 'PATCH')}
         onToggle={(id, isActive) => post(`/api/iqc/lots/${id}`, { isActive }, isActive ? 'เปิดใช้ lot แล้ว' : 'ปิด lot แล้ว', 'PATCH')}
         onDelete={(id) => remove(`/api/iqc/lots/${id}`, 'ลบ control lot แล้ว')}
         data={data}
@@ -751,13 +966,18 @@ function TeaForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean
   )
 }
 
-function AnalyteForm({ onSubmit, onToggle, onDelete, analytes }: { onSubmit: (b: unknown) => Promise<boolean>; onToggle: (id: string, isActive: boolean) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; analytes: IqcWorkspace['analytes'] }) {
+function AnalyteForm({ onSubmit, onUpdate, onToggle, onDelete, analytes }: { onSubmit: (b: unknown) => Promise<boolean>; onUpdate: (id: string, b: unknown) => Promise<boolean>; onToggle: (id: string, isActive: boolean) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; analytes: IqcWorkspace['analytes'] }) {
   const [form, setForm] = useState({ code: '', name: '', dataType: 'quantitative', scale: 'linear', isAbsolute: false, unit: '', groupLabel: '' })
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  function reset() {
+    setEditingId(null)
+    setForm({ code: '', name: '', dataType: 'quantitative', scale: 'linear', isAbsolute: false, unit: '', groupLabel: '' })
+  }
   return (
     <Card className="space-y-3 p-4">
-      <h2 className="font-bold text-[#173d50]">Analyte</h2>
-      <form className="space-y-2" onSubmit={async (e) => { e.preventDefault(); setBusy(true); if (await onSubmit(form)) setForm({ code: '', name: '', dataType: 'quantitative', scale: 'linear', isAbsolute: false, unit: '', groupLabel: '' }); setBusy(false) }}>
+      <h2 className="font-bold text-[#173d50]">{editingId ? 'Edit analyte' : 'Analyte'}</h2>
+      <form className="space-y-2" onSubmit={async (e) => { e.preventDefault(); setBusy(true); if (editingId ? await onUpdate(editingId, form) : await onSubmit(form)) reset(); setBusy(false) }}>
         <div className="grid grid-cols-2 gap-2">
           <Field label="Code"><Input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} required /></Field>
           <Field label="ชื่อ / Name"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></Field>
@@ -767,62 +987,95 @@ function AnalyteForm({ onSubmit, onToggle, onDelete, analytes }: { onSubmit: (b:
           <Field label="Group"><Input value={form.groupLabel} onChange={(e) => setForm({ ...form, groupLabel: e.target.value })} placeholder="CD4 Panel" /></Field>
         </div>
         <label className="flex items-center gap-2 text-sm text-[#3f5c64]"><input type="checkbox" checked={form.isAbsolute} onChange={(e) => setForm({ ...form, isAbsolute: e.target.checked })} /> เป็นค่า absolute count (เช่น AbsCD4 — Trucount มีผล)</label>
-        <Button disabled={busy}>เพิ่ม analyte</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button disabled={busy}>{editingId ? 'บันทึกการแก้ไข' : 'เพิ่ม analyte'}</Button>
+          {editingId ? <Button type="button" variant="ghost" disabled={busy} onClick={reset}>ยกเลิก</Button> : null}
+        </div>
       </form>
-      <ManagedList noun="Analyte" onToggle={onToggle} onDelete={(id) => onDelete(id)} items={analytes.map((a) => ({ id: a.id, label: a.code, sublabel: `${a.name}${a.groupLabel ? ` · ${a.groupLabel}` : ''}`, isActive: a.isActive }))} />
+      <ManagedList noun="Analyte" onToggle={onToggle} onEdit={(id) => { const item = analytes.find((a) => a.id === id); if (!item) return; setEditingId(id); setForm({ code: item.code, name: item.name, dataType: item.dataType, scale: item.scale, isAbsolute: item.isAbsolute, unit: item.unit ?? '', groupLabel: item.groupLabel ?? '' }) }} onDelete={(id) => onDelete(id)} items={analytes.map((a) => ({ id: a.id, label: a.code, sublabel: `${a.name}${a.groupLabel ? ` · ${a.groupLabel}` : ''}`, isActive: a.isActive }))} />
     </Card>
   )
 }
 
-function InstrumentForm({ onSubmit, onToggle, onDelete, instruments }: { onSubmit: (b: unknown) => Promise<boolean>; onToggle: (id: string, isActive: boolean) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; instruments: IqcWorkspace['instruments'] }) {
+function InstrumentForm({ onSubmit, onUpdate, onToggle, onDelete, instruments }: { onSubmit: (b: unknown) => Promise<boolean>; onUpdate: (id: string, b: unknown) => Promise<boolean>; onToggle: (id: string, isActive: boolean) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; instruments: IqcWorkspace['instruments'] }) {
   const [form, setForm] = useState({ code: '', name: '', model: '' })
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  function reset() {
+    setEditingId(null)
+    setForm({ code: '', name: '', model: '' })
+  }
   return (
     <Card className="space-y-3 p-4">
-      <h2 className="font-bold text-[#173d50]">Instrument</h2>
-      <form className="grid grid-cols-3 gap-2" onSubmit={async (e) => { e.preventDefault(); setBusy(true); if (await onSubmit(form)) setForm({ code: '', name: '', model: '' }); setBusy(false) }}>
+      <h2 className="font-bold text-[#173d50]">{editingId ? 'Edit instrument' : 'Instrument'}</h2>
+      <form className="grid grid-cols-3 gap-2" onSubmit={async (e) => { e.preventDefault(); setBusy(true); if (editingId ? await onUpdate(editingId, form) : await onSubmit(form)) reset(); setBusy(false) }}>
         <Field label="Code"><Input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} required /></Field>
         <Field label="Name"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></Field>
         <Field label="Model"><Input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} placeholder="cobas 6800" /></Field>
-        <div className="col-span-3"><Button disabled={busy}>เพิ่ม instrument</Button></div>
+        <div className="col-span-3 flex flex-wrap gap-2">
+          <Button disabled={busy}>{editingId ? 'บันทึกการแก้ไข' : 'เพิ่ม instrument'}</Button>
+          {editingId ? <Button type="button" variant="ghost" disabled={busy} onClick={reset}>ยกเลิก</Button> : null}
+        </div>
       </form>
-      <ManagedList noun="Instrument" onToggle={onToggle} onDelete={(id) => onDelete(id)} items={instruments.map((i) => ({ id: i.id, label: i.code, sublabel: `${i.name}${i.model ? ` · ${i.model}` : ''}`, isActive: i.isActive }))} />
+      <ManagedList noun="Instrument" onToggle={onToggle} onEdit={(id) => { const item = instruments.find((i) => i.id === id); if (!item) return; setEditingId(id); setForm({ code: item.code, name: item.name, model: item.model ?? '' }) }} onDelete={(id) => onDelete(id)} items={instruments.map((i) => ({ id: i.id, label: i.code, sublabel: `${i.name}${i.model ? ` · ${i.model}` : ''}`, isActive: i.isActive }))} />
     </Card>
   )
 }
 
-function MaterialForm({ onSubmit, onToggle, onDelete, materials }: { onSubmit: (b: unknown) => Promise<boolean>; onToggle: (id: string, isActive: boolean) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; materials: IqcWorkspace['controlMaterials'] }) {
+function MaterialForm({ onSubmit, onUpdate, onToggle, onDelete, materials }: { onSubmit: (b: unknown) => Promise<boolean>; onUpdate: (id: string, b: unknown) => Promise<boolean>; onToggle: (id: string, isActive: boolean) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; materials: IqcWorkspace['controlMaterials'] }) {
   const [form, setForm] = useState({ name: '', level: '', manufacturer: '' })
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  function reset() {
+    setEditingId(null)
+    setForm({ name: '', level: '', manufacturer: '' })
+  }
   return (
     <Card className="space-y-3 p-4">
-      <h2 className="font-bold text-[#173d50]">Control material</h2>
-      <form className="grid grid-cols-3 gap-2" onSubmit={async (e) => { e.preventDefault(); setBusy(true); if (await onSubmit(form)) setForm({ name: '', level: '', manufacturer: '' }); setBusy(false) }}>
+      <h2 className="font-bold text-[#173d50]">{editingId ? 'Edit control material' : 'Control material'}</h2>
+      <form className="grid grid-cols-3 gap-2" onSubmit={async (e) => { e.preventDefault(); setBusy(true); if (editingId ? await onUpdate(editingId, form) : await onSubmit(form)) reset(); setBusy(false) }}>
         <Field label="Name"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></Field>
         <Field label="Level"><Input value={form.level} onChange={(e) => setForm({ ...form, level: e.target.value })} placeholder="HPC/LPC/Normal" /></Field>
         <Field label="Manufacturer"><Input value={form.manufacturer} onChange={(e) => setForm({ ...form, manufacturer: e.target.value })} /></Field>
-        <div className="col-span-3"><Button disabled={busy}>เพิ่ม material</Button></div>
+        <div className="col-span-3 flex flex-wrap gap-2">
+          <Button disabled={busy}>{editingId ? 'บันทึกการแก้ไข' : 'เพิ่ม material'}</Button>
+          {editingId ? <Button type="button" variant="ghost" disabled={busy} onClick={reset}>ยกเลิก</Button> : null}
+        </div>
       </form>
-      <ManagedList noun="Control material" onToggle={onToggle} onDelete={(id) => onDelete(id)} items={materials.map((m) => ({ id: m.id, label: m.name, sublabel: [m.level, m.manufacturer].filter(Boolean).join(' · ') || undefined, isActive: m.isActive }))} />
+      <ManagedList noun="Control material" onToggle={onToggle} onEdit={(id) => { const item = materials.find((m) => m.id === id); if (!item) return; setEditingId(id); setForm({ name: item.name, level: item.level ?? '', manufacturer: item.manufacturer ?? '' }) }} onDelete={(id) => onDelete(id)} items={materials.map((m) => ({ id: m.id, label: m.name, sublabel: [m.level, m.manufacturer].filter(Boolean).join(' · ') || undefined, isActive: m.isActive }))} />
     </Card>
   )
 }
 
-function LotForm({ onSubmit, onToggle, onDelete, data }: { onSubmit: (b: unknown) => Promise<boolean>; onToggle: (id: string, isActive: boolean) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; data: IqcWorkspace }) {
+function LotForm({ onSubmit, onUpdate, onToggle, onDelete, data }: { onSubmit: (b: unknown) => Promise<boolean>; onUpdate: (id: string, b: unknown) => Promise<boolean>; onToggle: (id: string, isActive: boolean) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; data: IqcWorkspace }) {
   const [form, setForm] = useState({ controlMaterialId: '', lotNumber: '', expiryDate: '' })
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  function reset() {
+    setEditingId(null)
+    setForm({ controlMaterialId: '', lotNumber: '', expiryDate: '' })
+  }
   return (
     <Card className="space-y-3 p-4">
-      <h2 className="font-bold text-[#173d50]">Control lot</h2>
-      <form className="grid grid-cols-3 gap-2" onSubmit={async (e) => { e.preventDefault(); if (!form.controlMaterialId) return; setBusy(true); if (await onSubmit({ ...form, expiryDate: form.expiryDate || null })) setForm({ controlMaterialId: '', lotNumber: '', expiryDate: '' }); setBusy(false) }}>
+      <h2 className="font-bold text-[#173d50]">{editingId ? 'Edit control lot' : 'Control lot'}</h2>
+      <form className="grid grid-cols-3 gap-2" onSubmit={async (e) => { e.preventDefault(); if (!form.controlMaterialId) return; setBusy(true); if (editingId ? await onUpdate(editingId, { ...form, expiryDate: form.expiryDate || null }) : await onSubmit({ ...form, expiryDate: form.expiryDate || null })) reset(); setBusy(false) }}>
         <Field label="Material"><Select value={form.controlMaterialId} onChange={(e) => setForm({ ...form, controlMaterialId: e.target.value })} required><option value="">—</option>{data.controlMaterials.filter((m) => m.isActive).map((m) => <option key={m.id} value={m.id}>{m.name}{m.level ? ` (${m.level})` : ''}</option>)}</Select></Field>
         <Field label="Lot no."><Input value={form.lotNumber} onChange={(e) => setForm({ ...form, lotNumber: e.target.value })} required /></Field>
         <Field label="Expiry"><Input type="date" value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })} /></Field>
-        <div className="col-span-3"><Button disabled={busy}>เพิ่ม lot</Button></div>
+        <div className="col-span-3 flex flex-wrap gap-2">
+          <Button disabled={busy}>{editingId ? 'บันทึกการแก้ไข' : 'เพิ่ม lot'}</Button>
+          {editingId ? <Button type="button" variant="ghost" disabled={busy} onClick={reset}>ยกเลิก</Button> : null}
+        </div>
       </form>
       <ManagedList
         noun="Control lot"
         onToggle={onToggle}
+        onEdit={(id) => {
+          const item = data.controlLots.find((lot) => lot.id === id)
+          if (!item) return
+          setEditingId(id)
+          setForm({ controlMaterialId: item.controlMaterialId, lotNumber: item.lotNumber, expiryDate: item.expiryDate ?? '' })
+        }}
         onDelete={(id) => onDelete(id)}
         items={data.controlLots.map((l) => ({ id: l.id, label: l.lotNumber, sublabel: `${l.controlMaterialName}${l.level ? ` ${l.level}` : ''}${l.expiryDate ? ` · exp ${formatDate(l.expiryDate)}` : ''}`, isActive: l.isActive }))}
       />
