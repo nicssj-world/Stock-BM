@@ -12,6 +12,7 @@ const schema = z.object({
   periodIndex: z.number().int().min(1).max(3).nullable().optional(),
   note: z.string().trim().max(500).nullable().optional(),
   readingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  readingTime: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
 })
 
 export async function POST(request: Request) {

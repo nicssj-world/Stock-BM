@@ -224,6 +224,11 @@ export async function updateRound(id: string, input: { status?: EqaRoundStatus; 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (input.status !== undefined) updates.status = input.status
   if (input.submissionDate !== undefined) updates.submission_date = input.submissionDate || null
+  if (input.submissionDate === undefined && (input.status === 'submitted' || input.status === 'evaluated')) {
+    const { data, error } = await getAdminClient().from('eqa_rounds').select('submission_date').eq('id', id).maybeSingle()
+    fail(error)
+    if (!nullableString((data as RecordRow | null)?.submission_date)) updates.submission_date = todayBangkok()
+  }
   if (input.sampleReceivedDate !== undefined) updates.sample_received_date = input.sampleReceivedDate || null
   if (input.resultDueDate !== undefined) updates.result_due_date = input.resultDueDate || null
   if (input.note !== undefined) updates.note = clean(input.note)
@@ -244,6 +249,32 @@ export async function createResult(input: { roundId: string; analyte: string; su
   }).select('id').single()
   fail(error)
   await writeAudit(actor, 'eqa.result.create', 'eqa-result', asString((data as RecordRow).id), input)
+  return getEqaWorkspace(actor)
+}
+
+export async function updateResult(id: string, input: { analyte: string; submittedValue?: string | null; evaluationScore?: number | null; outcome: EqaOutcome }, actor: BmActor) {
+  const { data, error } = await getAdminClient().from('eqa_results').update({
+    analyte: input.analyte.trim(),
+    submitted_value: clean(input.submittedValue),
+    evaluation_score: input.evaluationScore ?? null,
+    outcome: input.outcome,
+  }).eq('id', id).select('id').single()
+  fail(error)
+  await writeAudit(actor, 'eqa.result.update', 'eqa-result', asString((data as RecordRow).id), input)
+  return getEqaWorkspace(actor)
+}
+
+export async function deleteResult(id: string, actor: BmActor) {
+  const admin = getAdminClient()
+  const { data: row, error: rowError } = await admin.from('eqa_results').select('id,round_id,analyte').eq('id', id).maybeSingle()
+  fail(rowError)
+  if (!row) throw new HttpError(404, 'EQA result not found')
+  const { error } = await admin.from('eqa_results').delete().eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'eqa.result.delete', 'eqa-result', id, {
+    roundId: asString((row as RecordRow).round_id),
+    analyte: asString((row as RecordRow).analyte),
+  })
   return getEqaWorkspace(actor)
 }
 

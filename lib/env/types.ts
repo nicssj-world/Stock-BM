@@ -61,6 +61,7 @@ export interface EnvReading {
   id: string
   unitId: string
   readingDate: string
+  readingTime: string | null
   periodIndex: EnvPeriodIndex
   periodLabel: string
   readingValue: number
@@ -78,6 +79,8 @@ export interface EnvReading {
 export interface EnvReadingPoint {
   id: string
   readingDate: string
+  readingTime?: string | null
+  createdAt?: string | null
   periodIndex: EnvPeriodIndex
   value: number
   humidityValue?: number | null

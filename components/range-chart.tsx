@@ -31,6 +31,15 @@ function formatChartMonth(value: string) {
   return new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { month: 'short', year: 'numeric' }).format(readingDate(value))
 }
 
+function formatSavedAt(value?: string | null) {
+  if (!value) return null
+  return new Intl.DateTimeFormat('th-TH-u-ca-buddhist', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    timeZone: 'Asia/Bangkok',
+  }).format(new Date(value))
+}
+
 function xTickIndexes(length: number) {
   if (length <= 0) return []
   if (length <= 1) return [0]
@@ -155,7 +164,9 @@ export function RangeChart({
         const x = xAt(i)
         const y = yAt(p.value)
         const color = STATUS_COLOR[p.status] ?? '#16a34a'
-        const tip = `${formatDate(p.readingDate)} · ${fmt(p.value)} ${unit} · ${p.status}`
+        const measuredAt = `${formatDate(p.readingDate)}${p.readingTime ? ` ${p.readingTime}` : ''}`
+        const savedAt = formatSavedAt(p.createdAt)
+        const tip = `${measuredAt} · ${fmt(p.value)} ${unit} · ${p.status}${savedAt ? ` · บันทึกจริง ${savedAt}` : ''}`
         const node =
           p.status === 'out-of-range' ? (
             <g stroke={color} strokeWidth={2}>

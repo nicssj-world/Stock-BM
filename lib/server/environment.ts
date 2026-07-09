@@ -131,6 +131,7 @@ function mapReading(row: RecordRow, names: Map<string, string>): EnvReading {
     id: asString(row.id),
     unitId: asString(row.unit_id),
     readingDate: asString(row.reading_date),
+    readingTime: nullableString(row.reading_time),
     periodIndex: envPeriodIndex(row.period_index),
     periodLabel: envPeriodLabel(Number(row.period_index ?? 1)),
     readingValue: Number(row.reading_value),
@@ -374,7 +375,7 @@ export async function getEnvironmentWorkspace(actor: BmActor): Promise<EnvWorksp
         .filter((reading) => !reading.isVoided)
         .slice(0, ENV_TREND_POINTS)
         .reverse()
-        .map((reading) => ({ id: reading.id, readingDate: reading.readingDate, periodIndex: reading.periodIndex, value: reading.readingValue, humidityValue: reading.humidityPercent, status: reading.status, isVoided: reading.isVoided }))
+        .map((reading) => ({ id: reading.id, readingDate: reading.readingDate, readingTime: reading.readingTime, createdAt: reading.createdAt, periodIndex: reading.periodIndex, value: reading.readingValue, humidityValue: reading.humidityPercent, status: reading.status, isVoided: reading.isVoided }))
       return {
         unit,
         todayReading,
@@ -471,6 +472,7 @@ interface LogReadingInput {
   periodIndex?: number | null
   note?: string | null
   readingDate?: string | null
+  readingTime?: string | null
 }
 
 export async function logReading(input: LogReadingInput, actor: BmActor): Promise<{ reading: EnvReading; outOfRange: boolean }> {
@@ -484,6 +486,10 @@ export async function logReading(input: LogReadingInput, actor: BmActor): Promis
   const readingDate = clean(input.readingDate) ?? today
   if (actor.role !== 'Admin' && readingDate !== today) throw new HttpError(403, 'Only Admin can backdate temperature readings')
   if (readingDate > today) throw new HttpError(400, 'Reading date cannot be in the future')
+  const readingTime = clean(input.readingTime)
+  if (readingTime && actor.role !== 'Admin') throw new HttpError(403, 'Only Admin can set a backdated reading time')
+  if (readingTime && !/^\d{2}:\d{2}$/.test(readingTime)) throw new HttpError(400, 'Invalid reading time')
+  if (actor.role === 'Admin' && readingDate !== today && !readingTime) throw new HttpError(400, 'Reading time is required for backdated readings')
   if (unitUnavailableOn(unit, readingDate)) throw new HttpError(409, 'ตู้นี้อยู่ในสถานะซ่อม/พักใช้งานในวันที่เลือก จึงไม่ต้องบันทึกอุณหภูมิ')
   await assertMonthUnlocked(unit.id, yearMonth(readingDate))
   const periodIndex = Math.min(Math.max(Number(input.periodIndex ?? 1), 1), unit.readingsPerDay)
@@ -499,6 +505,7 @@ export async function logReading(input: LogReadingInput, actor: BmActor): Promis
     .insert({
       unit_id: unit.id,
       reading_date: readingDate,
+      reading_time: readingTime,
       period_index: periodIndex,
       reading_value: input.readingValue,
       humidity_percent: humidityPercent,
@@ -522,6 +529,7 @@ export async function logReading(input: LogReadingInput, actor: BmActor): Promis
     humidityPercent,
     status,
     readingDate,
+    readingTime,
     periodIndex,
   })
   return { reading, outOfRange: status === 'out-of-range' }

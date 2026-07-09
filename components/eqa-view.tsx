@@ -1,9 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { CalendarClock, ClipboardList, FolderOpen, Settings, Trash2 } from 'lucide-react'
+import { CalendarClock, ClipboardList, FolderOpen, Pencil, Send, Settings, Trash2, X } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
-import type { EqaRound, EqaWorkspace } from '@/lib/eqa/types'
+import type { EqaResult, EqaRound, EqaWorkspace } from '@/lib/eqa/types'
 import { formatDate } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea, type StatusTone } from '@/components/ui'
 import { AttachmentList } from '@/components/attachments'
@@ -85,27 +85,66 @@ function RoundCard({ round, actor, onOk, onErr }: { round: EqaRound; actor: BmAc
   const [score, setScore] = useState('')
   const [outcome, setOutcome] = useState('not-evaluated')
   const [busy, setBusy] = useState(false)
+  const [statusBusy, setStatusBusy] = useState(false)
+  const [editingResultId, setEditingResultId] = useState<string | null>(null)
+  const [resultBusyId, setResultBusyId] = useState<string | null>(null)
+  const isSubmitted = round.status === 'submitted' || round.status === 'evaluated' || round.status === 'closed'
 
-  async function setStatus(status: string) {
+  function resetResultForm() {
+    setAnalyte('')
+    setValue('')
+    setScore('')
+    setOutcome('not-evaluated')
+    setEditingResultId(null)
+  }
+
+  function editResult(result: EqaResult) {
+    setEditingResultId(result.id)
+    setAnalyte(result.analyte)
+    setValue(result.submittedValue ?? '')
+    setScore(result.evaluationScore == null ? '' : String(result.evaluationScore))
+    setOutcome(result.outcome)
+  }
+
+  async function setStatus(status: string, okText = 'อัปเดตสถานะแล้ว') {
+    setStatusBusy(true)
     try {
-      const result = await api<{ eqa: EqaWorkspace }>(`/api/eqa/rounds/${round.id}`, { method: 'PATCH', body: JSON.stringify({ status, submissionDate: status === 'submitted' ? new Date().toISOString().slice(0, 10) : undefined }) })
-      onOk('อัปเดตสถานะแล้ว', result.eqa)
+      const result = await api<{ eqa: EqaWorkspace }>(`/api/eqa/rounds/${round.id}`, { method: 'PATCH', body: JSON.stringify({ status }) })
+      onOk(okText, result.eqa)
     } catch (e) {
       onErr(e instanceof Error ? e.message : 'อัปเดตไม่สำเร็จ')
+    } finally {
+      setStatusBusy(false)
     }
   }
-  async function addResult(event: React.FormEvent) {
+  async function saveResult(event: React.FormEvent) {
     event.preventDefault()
     if (!analyte.trim()) return
     setBusy(true)
     try {
-      const result = await api<{ eqa: EqaWorkspace }>('/api/eqa/results', { method: 'POST', body: JSON.stringify({ roundId: round.id, analyte, submittedValue: value || null, evaluationScore: score === '' ? null : Number(score), outcome }) })
-      onOk('บันทึกผลแล้ว', result.eqa)
-      setAnalyte(''); setValue(''); setScore(''); setOutcome('not-evaluated')
+      const body = { analyte, submittedValue: value || null, evaluationScore: score === '' ? null : Number(score), outcome }
+      const result = editingResultId
+        ? await api<{ eqa: EqaWorkspace }>(`/api/eqa/results/${editingResultId}`, { method: 'PATCH', body: JSON.stringify(body) })
+        : await api<{ eqa: EqaWorkspace }>('/api/eqa/results', { method: 'POST', body: JSON.stringify({ roundId: round.id, ...body }) })
+      onOk(editingResultId ? 'แก้ไขผลแล้ว' : 'บันทึกผลแล้ว', result.eqa)
+      resetResultForm()
     } catch (e) {
       onErr(e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ')
     } finally {
       setBusy(false)
+    }
+  }
+  async function removeResult(result: EqaResult) {
+    if (!window.confirm(`ลบผล "${result.analyte}" ใช่ไหม?`)) return
+    setResultBusyId(result.id)
+    try {
+      const response = await api<{ eqa: EqaWorkspace }>(`/api/eqa/results/${result.id}`, { method: 'DELETE' })
+      if (editingResultId === result.id) resetResultForm()
+      onOk('ลบผลแล้ว', response.eqa)
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : 'ลบผลไม่สำเร็จ')
+    } finally {
+      setResultBusyId(null)
     }
   }
 
@@ -120,19 +159,26 @@ function RoundCard({ round, actor, onOk, onErr }: { round: EqaRound; actor: BmAc
           </div>
           <p className="mt-0.5 text-xs text-[#789097]">{round.providerName} · รับตัวอย่าง {formatDate(round.sampleReceivedDate)} · ครบกำหนด {formatDate(round.resultDueDate)} · ส่ง {formatDate(round.submissionDate)}</p>
         </div>
-        <Select className="h-9 w-40" value={round.status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="scheduled">scheduled</option>
-          <option value="received">received</option>
-          <option value="submitted">submitted</option>
-          <option value="evaluated">evaluated</option>
-          <option value="closed">closed</option>
-        </Select>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {!isSubmitted ? (
+            <Button type="button" variant="secondary" className="h-9 px-3 text-xs" disabled={statusBusy} onClick={() => setStatus('submitted', 'บันทึกว่าส่งผลแล้ว')}>
+              <Send className="size-3.5" /> ส่งผลแล้ว
+            </Button>
+          ) : null}
+          <Select className="h-9 w-40" value={round.status} disabled={statusBusy} onChange={(e) => setStatus(e.target.value)}>
+            <option value="scheduled">scheduled</option>
+            <option value="received">received</option>
+            <option value="submitted">submitted</option>
+            <option value="evaluated">evaluated</option>
+            <option value="closed">closed</option>
+          </Select>
+        </div>
       </div>
 
       {round.results.length ? (
         <div className="mt-3 overflow-x-auto rounded-md border border-[#e9eff0]">
           <table className="w-full text-left text-xs">
-            <thead className="bg-[#f6fafa] text-[#55727c]"><tr><th className="px-2 py-1.5 font-semibold">Analyte</th><th className="px-2 py-1.5 font-semibold">Submitted</th><th className="px-2 py-1.5 text-right font-semibold">Score (z/SDI)</th><th className="px-2 py-1.5 font-semibold">Outcome</th></tr></thead>
+            <thead className="bg-[#f6fafa] text-[#55727c]"><tr><th className="px-2 py-1.5 font-semibold">Analyte</th><th className="px-2 py-1.5 font-semibold">Submitted</th><th className="px-2 py-1.5 text-right font-semibold">Score (z/SDI)</th><th className="px-2 py-1.5 font-semibold">Outcome</th><th className="px-2 py-1.5 text-right font-semibold">Action</th></tr></thead>
             <tbody className="divide-y divide-[#eef3f3]">
               {round.results.map((r) => (
                 <tr key={r.id}>
@@ -140,6 +186,16 @@ function RoundCard({ round, actor, onOk, onErr }: { round: EqaRound; actor: BmAc
                   <td className="mono px-2 py-1.5 tabular-nums">{r.submittedValue ?? '—'}</td>
                   <td className="mono px-2 py-1.5 text-right tabular-nums">{r.evaluationScore ?? '—'}</td>
                   <td className="px-2 py-1.5"><StatusBadge tone={OUTCOME_TONE[r.outcome]} label={r.outcome} /></td>
+                  <td className="px-2 py-1.5">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button type="button" variant="ghost" className="min-h-7 px-2 py-1" disabled={busy || resultBusyId === r.id} onClick={() => editResult(r)} title="แก้ไขผล">
+                        <Pencil className="size-3.5" />
+                      </Button>
+                      <Button type="button" variant="danger" className="min-h-7 px-2 py-1" disabled={busy || resultBusyId === r.id} onClick={() => removeResult(r)} title="ลบผล">
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -147,17 +203,24 @@ function RoundCard({ round, actor, onOk, onErr }: { round: EqaRound; actor: BmAc
         </div>
       ) : null}
 
-      <form onSubmit={addResult} className="mt-3 grid grid-cols-[1fr_1fr_0.7fr_1fr_auto] items-end gap-1.5">
+      <form onSubmit={saveResult} className="mt-3 grid grid-cols-[1fr_1fr_0.7fr_1fr_auto] items-end gap-1.5">
         <Field label="Analyte"><Input className="h-9" value={analyte} onChange={(e) => setAnalyte(e.target.value)} /></Field>
         <Field label="Submitted"><Input className="mono h-9" value={value} onChange={(e) => setValue(e.target.value)} /></Field>
         <Field label="Score"><Input className="mono h-9" type="number" step="any" value={score} onChange={(e) => setScore(e.target.value)} /></Field>
         <Field label="Outcome"><Select className="h-9" value={outcome} onChange={(e) => setOutcome(e.target.value)}><option value="not-evaluated">not-evaluated</option><option value="acceptable">acceptable</option><option value="warning">warning</option><option value="unacceptable">unacceptable</option></Select></Field>
-        <Button className="h-9" disabled={busy}>+ ผล</Button>
+        <div className="flex items-center gap-1">
+          <Button className="h-9 whitespace-nowrap" disabled={busy}>{editingResultId ? 'บันทึกแก้ไข' : '+ ผล'}</Button>
+          {editingResultId ? (
+            <Button type="button" variant="ghost" className="h-9 px-2" disabled={busy} onClick={resetResultForm} title="ยกเลิกแก้ไข">
+              <X className="size-4" />
+            </Button>
+          ) : null}
+        </div>
       </form>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        <AttachmentList module="eqa" entityType="eqa-round" entityId={round.id} kind="eqa-certificate" canDelete={actor.role === 'Admin'} label="Certificate / รายงานผล" />
         <AttachmentList module="eqa" entityType="eqa-round-receipt" entityId={round.id} kind="eqa-receipt" canDelete={actor.role === 'Admin'} label="แบบรับตัวอย่าง" />
+        <AttachmentList module="eqa" entityType="eqa-round" entityId={round.id} kind="eqa-certificate" canDelete={actor.role === 'Admin'} label="Certificate / รายงานผล" />
       </div>
     </Card>
   )

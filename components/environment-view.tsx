@@ -523,7 +523,7 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
               .filter((r) => !r.isVoided)
               .slice()
               .reverse()
-              .map((r) => ({ id: r.id, readingDate: r.readingDate, periodIndex: r.periodIndex, value: r.readingValue, status: r.status, isVoided: r.isVoided }))}
+              .map((r) => ({ id: r.id, readingDate: r.readingDate, readingTime: r.readingTime, createdAt: r.createdAt, periodIndex: r.periodIndex, value: r.readingValue, status: r.status, isVoided: r.isVoided }))}
             minLimit={unit.minLimit}
             maxLimit={unit.maxLimit}
             unit={unit.unit}
@@ -541,6 +541,8 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
                   .map((r) => ({
                     id: r.id,
                     readingDate: r.readingDate,
+                    readingTime: r.readingTime,
+                    createdAt: r.createdAt,
                     periodIndex: r.periodIndex,
                     value: r.humidityPercent as number,
                     humidityValue: r.humidityPercent,
@@ -567,7 +569,7 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
             <table className="w-full text-sm">
               <thead className="border-b border-[#e3ebec] bg-[#f6f9fa] text-xs text-[#58747d]">
                 <tr>
-                  <th className="px-4 py-2.5 text-left">วันที่</th>
+                  <th className="px-4 py-2.5 text-left">วันที่/เวลาอ่านค่า</th>
                   <th className="px-4 py-2.5 text-left">รอบ</th>
                   <th className="px-4 py-2.5 text-right">ค่า ({unit?.unit})</th>
                   <th className="px-4 py-2.5 text-right">Humidity (%)</th>
@@ -576,13 +578,17 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
                   <th className="px-4 py-2.5 text-left">สถานะ</th>
                   <th className="px-4 py-2.5 text-left">หมายเหตุ</th>
                   <th className="px-4 py-2.5 text-left">บันทึกโดย</th>
+                  <th className="px-4 py-2.5 text-left">บันทึกจริง</th>
                   {isAdmin ? <th className="px-4 py-2.5" /> : null}
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#f0f4f5]">
                 {readings.map((r) => (
                   <tr key={r.id} className={r.isVoided ? 'opacity-40 line-through' : 'hover:bg-[#f8fbfb]'}>
-                    <td className="mono px-4 py-2.5 text-xs text-[#244854]">{formatDate(r.readingDate)}</td>
+                    <td className="mono px-4 py-2.5 text-xs text-[#244854]">
+                      {formatDate(r.readingDate)}
+                      {r.readingTime ? <span className="mt-0.5 block text-[11px] text-[#789097]">{r.readingTime}</span> : null}
+                    </td>
                     <td className="px-4 py-2.5 text-xs text-[#58747d]">{r.periodLabel}</td>
                     <td className="mono px-4 py-2.5 text-right font-semibold text-[#173d50]">{r.readingValue}</td>
                     <td className="mono px-4 py-2.5 text-right text-xs text-[#58747d]">{r.humidityPercent != null ? `${r.humidityPercent}%` : '—'}</td>
@@ -595,6 +601,7 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
                     </td>
                     <td className="px-4 py-2.5 text-xs text-[#58747d]">{r.note ?? ''}</td>
                     <td className="px-4 py-2.5 text-xs text-[#789097]">{r.recordedByName ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-xs text-[#789097]">{r.createdAt ? formatDateTime(r.createdAt) : '—'}</td>
                     {isAdmin ? (
                       <td className="px-4 py-2.5 text-right">
                         {isLocked ? (

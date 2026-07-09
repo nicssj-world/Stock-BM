@@ -32,6 +32,7 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex, all
   const [humidityPercent, setHumidityPercent] = useState('')
   const [note, setNote] = useState('')
   const [readingDate, setReadingDate] = useState(localToday)
+  const [readingTime, setReadingTime] = useState('')
   const [periodIndex, setPeriodIndex] = useState<EnvPeriodIndex>(defaultPeriodIndex ?? currentPeriodIndex(unit.readingsPerDay))
   const [recordedMin, setRecordedMin] = useState('')
   const [recordedMax, setRecordedMax] = useState('')
@@ -49,6 +50,7 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex, all
 
   const limitText = `${unit.minLimit ?? '—'} ถึง ${unit.maxLimit ?? '—'} ${unit.unit}`
   const unavailableToday = unitUnavailableToday(unit)
+  const isBackdateEntry = readingDate !== localToday()
 
   function toggleSign(current: string, setNext: (value: string) => void) {
     const trimmed = current.trim()
@@ -97,6 +99,7 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex, all
           readingValue: numeric,
           humidityPercent: humidityValue,
           readingDate,
+          readingTime: allowBackdate && isBackdateEntry && readingTime ? readingTime : null,
           periodIndex,
           recordedMin: recordedMin !== '' ? Number(recordedMin) : null,
           recordedMax: recordedMax !== '' ? Number(recordedMax) : null,
@@ -142,13 +145,15 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex, all
   if (logged) {
     const outOfRange = logged.status === 'out-of-range'
     const isBackdate = logged.readingDate !== localToday()
+    const savedAt = logged.createdAt ? new Date(logged.createdAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : null
     return (
       <div className="space-y-3" role="status" aria-live="polite">
         <Notice tone={outOfRange ? 'danger' : 'success'}>
           บันทึกแล้ว: <span className="mono font-bold">{logged.readingValue} {unit.unit}</span>
           {logged.humidityPercent != null ? <span className="ml-1 text-[11px] opacity-75">Humidity {logged.humidityPercent}%</span> : null}
           <span className="ml-1 text-[11px] opacity-75">({logged.periodLabel})</span>
-          {isBackdate ? <span className="ml-1 text-[11px] opacity-75">({logged.readingDate})</span> : ''}
+          {isBackdate ? <span className="ml-1 text-[11px] opacity-75">({logged.readingDate}{logged.readingTime ? ` ${logged.readingTime}` : ''})</span> : ''}
+          {savedAt ? <span className="ml-1 text-[11px] opacity-75">บันทึกจริง {savedAt}</span> : null}
           {' '}— {outOfRange ? 'นอกช่วง / Out of range' : 'อยู่ในช่วง / In range'}
         </Notice>
         {outOfRange && !caSaved ? (
@@ -224,9 +229,16 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex, all
       </Field> : null}
       <Field label="หมายเหตุ / Note"><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="ถ้ามี" /></Field>
       {allowBackdate ? (
-        <Field label="วันที่บันทึก">
-          <Input type="date" value={readingDate} onChange={(e) => setReadingDate(e.target.value)} required />
-        </Field>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="วันที่ของค่า">
+            <Input type="date" value={readingDate} onChange={(e) => setReadingDate(e.target.value)} required />
+          </Field>
+          {isBackdateEntry ? (
+            <Field label="เวลาของค่า">
+              <Input type="time" value={readingTime} onChange={(e) => setReadingTime(e.target.value)} required={isBackdateEntry} />
+            </Field>
+          ) : null}
+        </div>
       ) : null}
 
       <button
