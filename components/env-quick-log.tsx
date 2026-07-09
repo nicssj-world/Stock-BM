@@ -153,7 +153,7 @@ export function EnvQuickLog({ unit, onLogged, autoFocus, defaultPeriodIndex, all
           {logged.humidityPercent != null ? <span className="ml-1 text-[11px] opacity-75">Humidity {logged.humidityPercent}%</span> : null}
           <span className="ml-1 text-[11px] opacity-75">({logged.periodLabel})</span>
           {isBackdate ? <span className="ml-1 text-[11px] opacity-75">({logged.readingDate}{logged.readingTime ? ` ${logged.readingTime}` : ''})</span> : ''}
-          {savedAt ? <span className="ml-1 text-[11px] opacity-75">บันทึกจริง {savedAt}</span> : null}
+          {savedAt ? <span className="ml-1 text-[11px] opacity-75">บันทึก {savedAt}</span> : null}
           {' '}— {outOfRange ? 'นอกช่วง / Out of range' : 'อยู่ในช่วง / In range'}
         </Notice>
         {outOfRange && !caSaved ? (

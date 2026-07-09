@@ -578,7 +578,7 @@ function HistoryTab({ data, actor, onChanged }: { data: EnvWorkspace; actor: BmA
                   <th className="px-4 py-2.5 text-left">สถานะ</th>
                   <th className="px-4 py-2.5 text-left">หมายเหตุ</th>
                   <th className="px-4 py-2.5 text-left">บันทึกโดย</th>
-                  <th className="px-4 py-2.5 text-left">บันทึกจริง</th>
+                  <th className="px-4 py-2.5 text-left">บันทึก</th>
                   {isAdmin ? <th className="px-4 py-2.5" /> : null}
                 </tr>
               </thead>

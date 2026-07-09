@@ -166,7 +166,7 @@ export function RangeChart({
         const color = STATUS_COLOR[p.status] ?? '#16a34a'
         const measuredAt = `${formatDate(p.readingDate)}${p.readingTime ? ` ${p.readingTime}` : ''}`
         const savedAt = formatSavedAt(p.createdAt)
-        const tip = `${measuredAt} · ${fmt(p.value)} ${unit} · ${p.status}${savedAt ? ` · บันทึกจริง ${savedAt}` : ''}`
+        const tip = `${measuredAt} · ${fmt(p.value)} ${unit} · ${p.status}${savedAt ? ` · บันทึก ${savedAt}` : ''}`
         const node =
           p.status === 'out-of-range' ? (
             <g stroke={color} strokeWidth={2}>
