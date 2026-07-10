@@ -17,7 +17,7 @@ export function IqcView({ actor, initialData }: { actor: BmActor; initialData: I
   const [data, setData] = useState(initialData)
   const [tab, setTab] = useState<Tab>('charts')
   const [notice, setNotice] = useState<NoticeState>(null)
-  const isAdmin = actor.role === 'Admin'
+  const canManageIqc = true
 
   const tabs = [
     { key: 'charts' as const, label: 'ภาพรวม / Charts', icon: LineChart },
@@ -25,7 +25,7 @@ export function IqcView({ actor, initialData }: { actor: BmActor; initialData: I
     { key: 'sixsigma' as const, label: 'Six Sigma', icon: Gauge },
     { key: 'uncertainty' as const, label: 'Uncertainty', icon: Sigma },
     { key: 'corrective' as const, label: 'Corrective action', icon: Wrench },
-    ...(isAdmin ? [{ key: 'manage' as const, label: 'จัดการ / Manage', icon: Settings }] : []),
+    ...(canManageIqc ? [{ key: 'manage' as const, label: 'จัดการ / Manage', icon: Settings }] : []),
   ]
 
   function ok(text: string, next: IqcWorkspace) {
@@ -89,12 +89,12 @@ export function IqcView({ actor, initialData }: { actor: BmActor; initialData: I
 
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
 
-      {tab === 'charts' ? <ChartsOverviewTab data={scoped} isAdmin={isAdmin} onOk={ok} onErr={err} /> : null}
+      {tab === 'charts' ? <ChartsOverviewTab data={scoped} isAdmin={canManageIqc} onOk={ok} onErr={err} /> : null}
       {tab === 'enter' ? <EnterTab data={scoped} onOk={ok} onErr={err} onDone={() => setTab('charts')} /> : null}
       {tab === 'sixsigma' ? <SixSigmaTab data={scoped} /> : null}
-      {tab === 'uncertainty' ? <UncertaintyTab data={scoped} isAdmin={isAdmin} onOk={ok} onErr={err} /> : null}
-      {tab === 'corrective' ? <CorrectiveTab data={data} actor={actor} onOk={ok} onErr={err} /> : null}
-      {tab === 'manage' && isAdmin ? <ManageTab data={data} onOk={ok} onErr={err} /> : null}
+      {tab === 'uncertainty' ? <UncertaintyTab data={scoped} isAdmin={canManageIqc} onOk={ok} onErr={err} /> : null}
+      {tab === 'corrective' ? <CorrectiveTab data={data} onOk={ok} onErr={err} /> : null}
+      {tab === 'manage' && canManageIqc ? <ManageTab data={data} onOk={ok} onErr={err} /> : null}
     </div>
   )
 }
@@ -124,20 +124,63 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
   const [statusFilter, setStatusFilter] = useState<ChartStatusFilter>('all')
   const [query, setQuery] = useState('')
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [selectedPointId, setSelectedPointId] = useState<string | null>(null)
 
-  async function lock(controlLotId: string, analyteId: string, eligible: boolean) {
+  async function lockLot(controlLotId: string, charts: IqcWorkspace['charts']) {
     let overrideReason: string | undefined
-    if (!eligible) {
-      const reason = window.prompt('จุดยังไม่ครบ 20 — ระบุเหตุผลในการ override lock:')
+    const unlocked = charts.filter((chart) => !chart.labLockedAt)
+    if (!unlocked.length) return
+    const tooFew = unlocked.filter((chart) => chart.n < 2)
+    const needsOverride = unlocked.some((chart) => chart.n >= 2 && !chart.lockEligible)
+    if (tooFew.length) {
+      window.alert(`บาง analyte มีข้อมูลน้อยกว่า 2 จุด จะถูกข้าม: ${tooFew.map((chart) => chart.analyteCode).join(', ')}`)
+    }
+    if (needsOverride) {
+      const reason = window.prompt('บาง analyte ยังไม่ครบ 20 จุด — ระบุเหตุผลในการ override lock ทั้ง lot:')
       if (reason == null || !reason.trim()) return
       overrideReason = reason.trim()
     }
-    setBusy(`${controlLotId}:${analyteId}`)
+    setBusy(`lot:${controlLotId}`)
     try {
-      const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/lock', { method: 'POST', body: JSON.stringify({ controlLotId, analyteId, overrideReason }) })
-      onOk(eligible ? 'Lock lab mean/SD แล้ว' : 'Lock (override) แล้ว', result.iqc)
+      const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/lock/lot', { method: 'POST', body: JSON.stringify({ controlLotId, overrideReason }) })
+      onOk(needsOverride ? 'Lock ทั้ง lot แบบ override แล้ว' : 'Lock ทั้ง lot แล้ว', result.iqc)
     } catch (e) {
-      onErr(e instanceof Error ? e.message : 'Lock ไม่สำเร็จ')
+      onErr(e instanceof Error ? e.message : 'Lock ทั้ง lot ไม่สำเร็จ')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function unlockLot(controlLotId: string) {
+    const reason = window.prompt('ระบุเหตุผลในการปลดล็อคตาราง QC ทั้ง lot:')
+    if (reason == null || !reason.trim()) return
+    setBusy(`lot:${controlLotId}`)
+    try {
+      const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/lock/lot', {
+        method: 'DELETE',
+        body: JSON.stringify({ controlLotId, reason: reason.trim() }),
+      })
+      onOk('ปลดล็อคทั้ง lot แล้ว', result.iqc)
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : 'Unlock ทั้ง lot ไม่สำเร็จ')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function voidPoint(resultId: string) {
+    const reason = window.prompt('ระบุเหตุผลในการ void ผล IQC จุดนี้:')
+    if (reason == null || !reason.trim()) return
+    setBusy(`point:${resultId}`)
+    try {
+      const result = await api<{ iqc: IqcWorkspace }>(`/api/iqc/results/${resultId}/void`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: reason.trim() }),
+      })
+      setSelectedPointId(null)
+      onOk('Void ผล IQC แล้ว และ refresh chart แล้ว', result.iqc)
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : 'Void result ไม่สำเร็จ')
     } finally {
       setBusy(null)
     }
@@ -152,10 +195,10 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
     const days = daysUntil(lot.expiryDate)
     return days != null && days >= 0 && days <= 30
   }).map((lot) => lot.id))
-  const attentionKeys = new Set(data.charts.filter((chart) => chart.status !== 'accepted' || chart.activeLimit !== 'lab' || expiringLotIds.has(chart.controlLotId)).map((chart) => chart.key))
+  const attentionKeys = new Set(data.charts.filter((chart) => chart.status !== 'accepted' || !chart.labLockedAt || expiringLotIds.has(chart.controlLotId)).map((chart) => chart.key))
   const rejectedCount = data.charts.filter((chart) => chart.status === 'rejected').length
   const warningCount = data.charts.filter((chart) => chart.status === 'warning').length
-  const unlockedCount = data.charts.filter((chart) => chart.activeLimit !== 'lab').length
+  const unlockedCount = data.charts.filter((chart) => !chart.labLockedAt).length
   const expiringCount = new Set(data.charts.filter((chart) => expiringLotIds.has(chart.controlLotId)).map((chart) => chart.controlLotId)).size
   const q = query.trim().toLowerCase()
   const filteredCharts = data.charts
@@ -164,7 +207,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
       if (statusFilter === 'accepted' && chart.status !== 'accepted') return false
       if (statusFilter === 'warning' && chart.status !== 'warning') return false
       if (statusFilter === 'rejected' && chart.status !== 'rejected') return false
-      if (statusFilter === 'unlocked' && chart.activeLimit === 'lab') return false
+      if (statusFilter === 'unlocked' && chart.labLockedAt) return false
       if (statusFilter === 'expiring' && !expiringLotIds.has(chart.controlLotId)) return false
       if (!q) return true
       return [chart.controlMaterialName, chart.level, chart.lotNumber, chart.analyteCode, chart.analyteName, chart.groupLabel]
@@ -175,6 +218,9 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
     })
     .sort((a, b) => chartStatusRank(a.status) - chartStatusRank(b.status) || a.controlMaterialName.localeCompare(b.controlMaterialName) || a.lotNumber.localeCompare(b.lotNumber) || a.analyteCode.localeCompare(b.analyteCode))
   const selectedChart = filteredCharts.find((chart) => chart.key === selectedKey) ?? null
+  const selectedPoint = selectedChart?.points.find((point) => point.resultId === selectedPointId) ?? null
+  const selectedRun = selectedPoint ? data.runs.find((run) => run.id === selectedPoint.runId) ?? null : null
+  const selectedRunResult = selectedRun?.results.find((result) => result.analyteId === selectedChart?.analyteId && result.controlLotId === selectedChart.controlLotId) ?? null
   const grouped = filteredCharts.reduce((map, chart) => {
     const current = map.get(chart.controlLotId) ?? []
     current.push(chart)
@@ -220,7 +266,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-[#789097]" />
             <Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder="Search control, lot, analyte" />
           </label>
-          <Select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as ChartStatusFilter); setSelectedKey(null) }}>
+          <Select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as ChartStatusFilter); setSelectedKey(null); setSelectedPointId(null) }}>
             <option value="attention">Needs attention</option>
             <option value="all">All charts</option>
             <option value="rejected">Rejected</option>
@@ -238,6 +284,10 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
             const lot = lotsById.get(lotId)
             const worst = charts.some((chart) => chart.status === 'rejected') ? 'rejected' : charts.some((chart) => chart.status === 'warning') ? 'warning' : 'accepted'
             const days = daysUntil(lot?.expiryDate ?? null)
+            const lockedCount = charts.filter((chart) => chart.labLockedAt).length
+            const unlockable = lockedCount > 0
+            const lockable = charts.some((chart) => !chart.labLockedAt && chart.n >= 2)
+            const lotBusy = busy === `lot:${lotId}`
             return (
               <Card key={lotId} className="overflow-hidden">
                 <div className="border-b border-[#e3ebec] bg-[#fbfefe] p-4">
@@ -252,29 +302,49 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
                     </div>
                     <div className="text-right text-xs text-[#789097]">
                       <div>{charts.length} analyte{charts.length > 1 ? 's' : ''}</div>
+                      <div className={lockedCount === charts.length ? 'font-bold text-[#18763a]' : 'font-bold text-[#a9700f]'}>{lockedCount}/{charts.length} locked</div>
                       {lot?.expiryDate ? <div className={days != null && days <= 30 ? 'font-bold text-[#a9700f]' : ''}>EXP {formatDate(lot.expiryDate)}</div> : null}
                     </div>
                   </div>
+                  {isAdmin ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {lockable ? (
+                        <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={lotBusy} onClick={() => lockLot(lotId, charts)}>
+                          <Lock className="size-3.5" /> Lock ทั้ง Lot
+                        </Button>
+                      ) : null}
+                      {unlockable ? (
+                        <Button variant="danger" className="min-h-8 px-3 py-1.5 text-xs" disabled={lotBusy} onClick={() => unlockLot(lotId)}>
+                          <Lock className="size-3.5" /> Unlock ทั้ง Lot
+                        </Button>
+                      ) : null}
+                      {!lockable && !unlockable ? <span className="text-xs text-[#789097]">ยังไม่มี analyte ที่ lock ได้</span> : null}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="divide-y divide-[#eef3f3]">
                   {charts.map((chart) => {
                     const latest = [...chart.points].reverse().find((point) => !point.isVoided)
                     const selected = selectedChart?.key === chart.key
                     return (
-                      <button key={chart.key} type="button" onClick={() => setSelectedKey(chart.key)} className={`grid w-full gap-2 px-4 py-3 text-left transition hover:bg-[#f7fbfb] sm:grid-cols-[1fr_auto] ${selected ? 'bg-[#edf8f6] ring-2 ring-inset ring-[#0b7f76]/45' : 'bg-white'}`}>
+                      <div key={chart.key} className={`grid w-full gap-3 px-4 py-3 text-left transition hover:bg-[#f7fbfb] sm:grid-cols-[1fr_auto] ${selected ? 'bg-[#edf8f6] ring-2 ring-inset ring-[#0b7f76]/45' : 'bg-white'}`}>
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-bold text-[#173d50]">{chart.analyteCode}</span>
                             <StatusBadge tone={chart.status} label={chart.status} />
-                            {chart.activeLimit !== 'lab' ? <span className="rounded-full border border-[#eed4a6] bg-[#fff9ed] px-2 py-0.5 text-[11px] font-bold text-[#a9700f]">not locked</span> : null}
+                            {!chart.labLockedAt ? <span className="rounded-full border border-[#eed4a6] bg-[#fff9ed] px-2 py-0.5 text-[11px] font-bold text-[#a9700f]">not locked</span> : <span className="rounded-full border border-[#bfe3cf] bg-[#f1fbf4] px-2 py-0.5 text-[11px] font-bold text-[#18763a]">locked</span>}
                           </div>
                           <p className="mt-1 text-xs text-[#789097]">
                             n {chart.n} · mean {fmtCompact(chart.mean)} · SD {fmtCompact(chart.sd)}
                             {latest ? ` · latest ${fmtCompact(latest.value)} (${formatDateTime(latest.runDatetime)})` : ''}
                           </p>
                         </div>
-                        <span className="inline-flex items-center justify-end gap-1 text-xs font-bold text-[#0b7f76]"><Eye className="size-4" /> View chart</span>
-                      </button>
+                        <div className="flex flex-wrap items-center justify-start gap-2 sm:justify-end">
+                          <button type="button" onClick={() => { setSelectedKey(chart.key); setSelectedPointId(null) }} className="inline-flex min-h-8 items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-bold text-[#0b7f76] transition hover:bg-[#e1f3f0] focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none">
+                            <Eye className="size-4" /> View chart
+                          </button>
+                        </div>
+                      </div>
                     )
                   })}
                 </div>
@@ -288,15 +358,22 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
         <div className="space-y-2 xl:sticky xl:top-4 xl:self-start">
           {selectedChart ? (
             <>
-              <LjChart chart={selectedChart} />
-              {isAdmin && selectedChart.activeLimit !== 'lab' ? (
-                <div className="flex items-center justify-end gap-2">
-                  {!selectedChart.lockEligible ? <span className="text-[11px] text-[#a9700f]">n {selectedChart.n} &lt; 20 — lock ได้แบบ override (Admin)</span> : null}
-                  <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={selectedChart.n < 2 || busy === selectedChart.key} onClick={() => lock(selectedChart.controlLotId, selectedChart.analyteId, selectedChart.lockEligible)}>
-                    <Lock className="size-3.5" /> {selectedChart.lockEligible ? 'Lock Lab Mean/SD' : `Lock (override, n ${selectedChart.n})`}
-                  </Button>
-                </div>
+              <LjChart chart={selectedChart} selectedResultId={selectedPointId} onPointSelect={(point) => setSelectedPointId(point.resultId)} />
+              {selectedPoint ? (
+                <PointDetailCard
+                  chart={selectedChart}
+                  point={selectedPoint}
+                  run={selectedRun}
+                  result={selectedRunResult}
+                  busy={busy === `point:${selectedPoint.resultId}`}
+                  onVoid={() => voidPoint(selectedPoint.resultId)}
+                />
               ) : null}
+              <div className="flex justify-end">
+                <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-bold ${selectedChart.labLockedAt ? 'border-[#bfe3cf] bg-[#f1fbf4] text-[#18763a]' : 'border-[#eed4a6] bg-[#fff9ed] text-[#a9700f]'}`}>
+                  <Lock className="size-3.5" /> {selectedChart.labLockedAt ? 'Lab mean/SD locked' : 'Not locked - use lot action'}
+                </span>
+              </div>
             </>
           ) : (
             <Card className="flex min-h-[320px] flex-col items-center justify-center p-8 text-center">
@@ -308,6 +385,56 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
         </div>
       </div>
     </div>
+  )
+}
+
+function PointDetailCard({
+  chart,
+  point,
+  run,
+  result,
+  busy,
+  onVoid,
+}: {
+  chart: IqcWorkspace['charts'][number]
+  point: IqcWorkspace['charts'][number]['points'][number]
+  run: IqcWorkspace['runs'][number] | null
+  result: IqcWorkspace['runs'][number]['results'][number] | null
+  busy: boolean
+  onVoid: () => void
+}) {
+  return (
+    <Card className="space-y-3 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-bold tracking-[0.14em] text-[#789097] uppercase">Selected point</p>
+          <h3 className="mt-1 font-bold text-[#173d50]">{chart.analyteCode} · {chart.controlMaterialName} · Lot {chart.lotNumber}</h3>
+          <p className="mt-1 text-xs text-[#789097]">{formatDateTime(point.runDatetime)}{run?.instrumentName ? ` · ${run.instrumentName}` : ''}{run?.enteredByName ? ` · by ${run.enteredByName}` : ''}</p>
+        </div>
+        <StatusBadge tone={point.isVoided ? 'neutral' : point.status} label={point.isVoided ? 'voided' : point.status} />
+      </div>
+      <div className="grid gap-2 text-sm sm:grid-cols-3">
+        <div className="rounded-md border border-[#e2ecee] bg-[#fbfefe] p-3">
+          <p className="text-[11px] font-bold text-[#789097] uppercase">Value</p>
+          <p className="mono mt-1 text-lg font-bold tabular-nums text-[#173d50]">{fmtCompact(point.value)}{chart.unit ? ` ${chart.unit}` : ''}</p>
+        </div>
+        <div className="rounded-md border border-[#e2ecee] bg-[#fbfefe] p-3">
+          <p className="text-[11px] font-bold text-[#789097] uppercase">Z-score</p>
+          <p className="mono mt-1 text-lg font-bold tabular-nums text-[#173d50]">{point.z.toFixed(2)}</p>
+        </div>
+        <div className="rounded-md border border-[#e2ecee] bg-[#fbfefe] p-3">
+          <p className="text-[11px] font-bold text-[#789097] uppercase">Rules</p>
+          <p className="mt-1 text-sm font-semibold text-[#173d50]">{point.violatedRules.join(', ') || '-'}</p>
+        </div>
+      </div>
+      {run?.note ? <p className="rounded-md bg-[#f6fafa] px-3 py-2 text-xs text-[#58747d]">Note: {run.note}</p> : null}
+      {result?.qualitativeValue ? <p className="text-xs text-[#789097]">Qualitative: {result.qualitativeValue}</p> : null}
+      <div className="flex justify-end">
+        <Button type="button" variant="danger" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy || point.isVoided} onClick={onVoid}>
+          <Trash2 className="size-3.5" /> Void result
+        </Button>
+      </div>
+    </Card>
   )
 }
 
@@ -825,7 +952,7 @@ function BudgetForm({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: strin
   )
 }
 
-function CorrectiveTab({ data, actor, onOk, onErr }: { data: IqcWorkspace; actor: BmActor; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void }) {
+function CorrectiveTab({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void }) {
   const [runId, setRunId] = useState('')
   const [problem, setProblem] = useState('')
   const [rootCause, setRootCause] = useState('')
@@ -833,8 +960,31 @@ function CorrectiveTab({ data, actor, onOk, onErr }: { data: IqcWorkspace; actor
   const [busy, setBusy] = useState(false)
   const [showAll, setShowAll] = useState(false)
 
+  const controlLotLabels = useMemo(() => new Map(data.controlLots.map((lot) => [
+    lot.id,
+    `${lot.controlMaterialName}${lot.level ? ` ${lot.level}` : ''} · ${lot.lotNumber}`,
+  ])), [data.controlLots])
+  const runById = useMemo(() => new Map(data.runs.map((run) => [run.id, run])), [data.runs])
   const flaggedOf = (r: IqcWorkspace['runs'][number]) => r.results.filter((res) => !res.isVoided && res.status !== 'accepted')
   const runOptions = data.runs.filter((r) => showAll || flaggedOf(r).length > 0)
+  function lotLabel(controlLotId: string) {
+    return controlLotLabels.get(controlLotId) ?? 'Control'
+  }
+  function summarizeResults(results: IqcWorkspace['runs'][number]['results'], includeRules: boolean) {
+    const grouped = new Map<string, string[]>()
+    for (const result of results.filter((res) => !res.isVoided)) {
+      const ruleText = includeRules && result.violatedRules.length ? ` ${result.violatedRules.join('/')}` : ''
+      grouped.set(result.controlLotId, [...(grouped.get(result.controlLotId) ?? []), `${result.analyteCode}${ruleText}`])
+    }
+    return [...grouped.entries()]
+      .map(([controlLotId, analytes]) => `${lotLabel(controlLotId)} · ${analytes.join(', ')}`)
+      .join(' | ')
+  }
+  function runOptionLabel(run: IqcWorkspace['runs'][number]) {
+    const flags = flaggedOf(run)
+    const summary = flags.length ? summarizeResults(flags, true) : summarizeResults(run.results, false)
+    return `${formatDateTime(run.runDatetime)}${summary ? ` · ${summary}` : ''}`
+  }
 
   async function create(event: React.FormEvent) {
     event.preventDefault()
@@ -870,11 +1020,7 @@ function CorrectiveTab({ data, actor, onOk, onErr }: { data: IqcWorkspace; actor
           <Field label="Run (เฉพาะที่มีค่า out)">
             <Select value={runId} onChange={(e) => setRunId(e.target.value)} required>
               <option value="">— เลือก run —</option>
-              {runOptions.map((r) => {
-                const flags = flaggedOf(r)
-                const flagText = flags.map((f) => `${f.analyteCode}${f.violatedRules.length ? ` ${f.violatedRules.join('/')}` : ''}`).join(', ')
-                return <option key={r.id} value={r.id}>{formatDateTime(r.runDatetime)}{flagText ? ` · ${flagText}` : ''}</option>
-              })}
+              {runOptions.map((r) => <option key={r.id} value={r.id}>{runOptionLabel(r)}</option>)}
             </Select>
           </Field>
           <label className="flex items-center gap-2 text-xs text-[#58747d]">
@@ -893,6 +1039,7 @@ function CorrectiveTab({ data, actor, onOk, onErr }: { data: IqcWorkspace; actor
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <div className="flex items-center gap-2"><span className="font-bold text-[#315763]">{formatDateTime(ca.runDatetime)}</span><StatusBadge tone={ca.status === 'open' ? 'warning' : 'accepted'} label={ca.status} /></div>
+                {runById.get(ca.runId) ? <p className="mt-1 text-xs font-semibold text-[#58747d]">{summarizeResults(flaggedOf(runById.get(ca.runId)!), true) || summarizeResults(runById.get(ca.runId)!.results, false)}</p> : null}
                 <p className="mt-1 text-sm text-[#3f5c64]">{ca.problem}</p>
                 {ca.rootCause ? <p className="mt-1 text-xs text-[#789097]">Root cause: {ca.rootCause}</p> : null}
                 {ca.actionTaken ? <p className="text-xs text-[#789097]">Action: {ca.actionTaken}</p> : null}
@@ -900,7 +1047,7 @@ function CorrectiveTab({ data, actor, onOk, onErr }: { data: IqcWorkspace; actor
               </div>
               {ca.status === 'open' ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => close(ca.id)}>ปิด</Button> : null}
             </div>
-            <div className="mt-3"><AttachmentList module="iqc" entityType="corrective-action" entityId={ca.id} kind="corrective-action" canDelete={actor.role === 'Admin'} /></div>
+            <div className="mt-3"><AttachmentList module="iqc" entityType="corrective-action" entityId={ca.id} kind="corrective-action" canDelete /></div>
           </Card>
         ))}
         {!data.correctiveActions.length ? <Card className="p-8 text-center text-sm text-[#8198a0]"><ClipboardList className="mx-auto mb-2 size-6 text-[#b8c9cd]" />ยังไม่มี corrective action</Card> : null}

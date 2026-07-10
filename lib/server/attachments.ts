@@ -127,13 +127,14 @@ export async function signedUrl(id: string): Promise<string> {
 }
 
 export async function deleteAttachment(id: string, actor: BmActor): Promise<void> {
-  if (actor.role !== 'Admin') throw new HttpError(403, 'Admin permission required to delete attachment')
   const admin = getAdminClient()
   const row = await getAttachmentRow(id)
+  const module = asString(row.module)
+  if (actor.role !== 'Admin' && module !== 'iqc') throw new HttpError(403, 'Admin permission required to delete attachment')
   await admin.storage.from(BUCKET).remove([asString(row.storage_path)])
   const { error } = await admin.from('bm_attachments').delete().eq('id', id)
   fail(error)
-  await writeAudit(actor, 'attachment.delete', `${asString(row.module)}-attachment`, id, {
+  await writeAudit(actor, 'attachment.delete', `${module}-attachment`, id, {
     fileName: asString(row.file_name),
   })
 }

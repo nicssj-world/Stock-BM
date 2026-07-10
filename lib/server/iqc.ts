@@ -52,7 +52,9 @@ function clean(value: string | null | undefined) {
   return value?.trim() || null
 }
 function assertAdmin(actor: BmActor) {
-  if (actor.role !== 'Admin') throw new HttpError(403, 'Admin permission required')
+  // Staff and Admin intentionally share full IQC access. Assistant remains HPV-only,
+  // and must be blocked here too so direct API calls cannot bypass the page/nav guard.
+  if (actor.role === 'Assistant') throw new HttpError(403, 'IQC permission required')
 }
 
 async function countIqcReferences(table: string, column: string, id: string) {
@@ -127,7 +129,7 @@ function activeStats(spec: IqcSpec | undefined): { meanValue: number | null; sdV
 }
 
 export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
-  void actor
+  if (actor.role === 'Assistant') throw new HttpError(403, 'IQC permission required')
   const admin = getAdminClient()
   const [
     { data: analyteData, error: analyteError },
@@ -895,66 +897,77 @@ export async function createRun(input: {
     fail(consError)
   }
 
-  const valueRows = input.values.map((value) => {
-    const analyte = analyteById.get(value.analyteId)
-    const key = `${value.controlLotId}:${value.analyteId}`
-    const spec = specByKey.get(key)
-    if (analyte?.dataType === 'qualitative') {
-      const expected = spec?.expectedQualitative
-      const status: QcStatus = expected && value.qualitativeValue && expected.trim().toLowerCase() !== value.qualitativeValue.trim().toLowerCase() ? 'rejected' : 'accepted'
+  let valueRows: RecordRow[]
+  try {
+    valueRows = input.values.map((value) => {
+      const analyte = analyteById.get(value.analyteId)
+      const key = `${value.controlLotId}:${value.analyteId}`
+      const spec = specByKey.get(key)
+      if (analyte?.dataType === 'qualitative') {
+        const expected = spec?.expectedQualitative
+        const status: QcStatus = expected && value.qualitativeValue && expected.trim().toLowerCase() !== value.qualitativeValue.trim().toLowerCase() ? 'rejected' : 'accepted'
+        return {
+          run_id: runId,
+          control_lot_id: value.controlLotId,
+          analyte_id: value.analyteId,
+          numeric_value: null,
+          stat_value: null,
+          qualitative_value: clean(value.qualitativeValue),
+          z_score: null,
+          violated_rules: [],
+          status,
+        }
+      }
+      const numeric = value.numericValue ?? null
+      const scale = analyte?.scale ?? 'linear'
+      if (numeric == null) throw new HttpError(400, `Numeric value required for ${analyte?.code ?? 'analyte'}`)
+      if (scale === 'log10' && numeric <= 0) throw new HttpError(400, `${analyte?.code} value must be > 0 for log scale`)
+      const statValue = toStat(numeric, scale)
+      const { meanValue, sdValue } = activeStats(spec)
+      let z: number | null = null
+      let violated: string[] = []
+      let status: QcStatus = 'accepted'
+      if (meanValue != null && sdValue != null && sdValue > 0) {
+        const series = [...(priorByKey.get(key) ?? [])]
+          .sort((a, b) => a.when.localeCompare(b.when))
+          .map((p) => p.stat)
+        series.push(statValue)
+        const point = evaluateLatest(series, meanValue, sdValue)
+        z = point.z
+        violated = point.violatedRules
+        status = point.status
+      }
       return {
         run_id: runId,
         control_lot_id: value.controlLotId,
         analyte_id: value.analyteId,
-        numeric_value: null,
-        stat_value: null,
-        qualitative_value: clean(value.qualitativeValue),
-        z_score: null,
-        violated_rules: [],
+        numeric_value: numeric,
+        stat_value: statValue,
+        qualitative_value: null,
+        z_score: z,
+        violated_rules: violated,
         status,
       }
-    }
-    const numeric = value.numericValue ?? null
-    const scale = analyte?.scale ?? 'linear'
-    if (numeric == null) throw new HttpError(400, `Numeric value required for ${analyte?.code ?? 'analyte'}`)
-    if (scale === 'log10' && numeric <= 0) throw new HttpError(400, `${analyte?.code} value must be > 0 for log scale`)
-    const statValue = toStat(numeric, scale)
-    const { meanValue, sdValue } = activeStats(spec)
-    let z: number | null = null
-    let violated: string[] = []
-    let status: QcStatus = 'accepted'
-    if (meanValue != null && sdValue != null && sdValue > 0) {
-      const series = [...(priorByKey.get(key) ?? [])]
-        .sort((a, b) => a.when.localeCompare(b.when))
-        .map((p) => p.stat)
-      series.push(statValue)
-      const point = evaluateLatest(series, meanValue, sdValue)
-      z = point.z
-      violated = point.violatedRules
-      status = point.status
-    }
-    return {
-      run_id: runId,
-      control_lot_id: value.controlLotId,
-      analyte_id: value.analyteId,
-      numeric_value: numeric,
-      stat_value: statValue,
-      qualitative_value: null,
-      z_score: z,
-      violated_rules: violated,
-      status,
-    }
-  })
+    })
+  } catch (error) {
+    await admin.from('iqc_runs').delete().eq('id', runId)
+    throw error
+  }
 
   const { error: valueError } = await admin.from('iqc_result_values').insert(valueRows)
   if (valueError) {
     await admin.from('iqc_runs').delete().eq('id', runId)
     throw new HttpError(400, valueError.message || 'Could not save run results')
   }
+  const changedKeys = [...new Set(valueRows.map((v) => `${asString(v.control_lot_id)}:${asString(v.analyte_id)}`))]
+  for (const key of changedKeys) {
+    const [controlLotId, analyteId] = key.split(':')
+    await recalculateChartStatuses(controlLotId, analyteId)
+  }
 
   await writeAudit(actor, 'iqc.run.create', 'iqc-run', runId, {
     runDatetime: runWhen,
-    values: valueRows.map((v) => ({ analyteId: v.analyte_id, status: v.status, rules: v.violated_rules })),
+    values: valueRows.map((v) => ({ analyteId: asString(v.analyte_id), status: v.status, rules: v.violated_rules })),
   })
   return getIqcWorkspace(actor)
 }
@@ -1005,7 +1018,11 @@ export async function importIqcRuns(input: {
     const runId = asString((runData as RecordRow).id)
 
     if (input.trucountLot?.trim()) {
-      await admin.from('iqc_run_consumables').insert({ run_id: runId, kind: 'trucount-tube', lot_number: input.trucountLot.trim(), applies_scope: 'absolute-only' })
+      const { error: consumableError } = await admin.from('iqc_run_consumables').insert({ run_id: runId, kind: 'trucount-tube', lot_number: input.trucountLot.trim(), applies_scope: 'absolute-only' })
+      if (consumableError) {
+        await admin.from('iqc_runs').delete().eq('id', runId)
+        throw new HttpError(400, consumableError.message || 'Could not save IQC run consumable')
+      }
     }
 
     const valueRows: RecordRow[] = []
@@ -1055,22 +1072,34 @@ export async function importIqcRuns(input: {
   }
 
   await writeAudit(actor, 'iqc.import', 'iqc-control-lot', input.controlLotId, { imported, analyteIds: input.analyteIds })
+  for (const analyteId of input.analyteIds) {
+    await recalculateChartStatuses(input.controlLotId, analyteId)
+  }
   return getIqcWorkspace(actor)
 }
 
 export async function voidResult(resultId: string, reason: string, actor: BmActor) {
   if (!reason.trim()) throw new HttpError(400, 'Void reason is required')
-  const { error } = await getAdminClient()
+  const admin = getAdminClient()
+  const { data: existing, error: existingError } = await admin
+    .from('iqc_result_values')
+    .select('control_lot_id,analyte_id,is_voided')
+    .eq('id', resultId)
+    .maybeSingle()
+  fail(existingError)
+  if (!existing) throw new HttpError(404, 'IQC result not found')
+  if (Boolean((existing as RecordRow).is_voided)) throw new HttpError(400, 'IQC result is already voided')
+  const { error } = await admin
     .from('iqc_result_values')
     .update({ is_voided: true, void_reason: reason.trim() })
     .eq('id', resultId)
   fail(error)
+  await recalculateChartStatuses(asString((existing as RecordRow).control_lot_id), asString((existing as RecordRow).analyte_id))
   await writeAudit(actor, 'iqc.result.void', 'iqc-result', resultId, { reason: reason.trim() })
   return getIqcWorkspace(actor)
 }
 
-export async function lockLabStatistics(controlLotId: string, analyteId: string, actor: BmActor, overrideReason?: string | null) {
-  assertAdmin(actor)
+async function getUsableLabValues(controlLotId: string, analyteId: string) {
   const admin = getAdminClient()
   const { data: valueRows, error } = await admin
     .from('iqc_result_values')
@@ -1081,6 +1110,12 @@ export async function lockLabStatistics(controlLotId: string, analyteId: string,
   const usable = ((valueRows ?? []) as RecordRow[])
     .filter((row) => !Boolean(row.is_voided) && asString(row.status) !== 'rejected' && row.stat_value != null)
     .map((row) => Number(row.stat_value))
+  return usable
+}
+
+async function saveLabLock(controlLotId: string, analyteId: string, actor: BmActor, overrideReason?: string | null) {
+  const admin = getAdminClient()
+  const usable = await getUsableLabValues(controlLotId, analyteId)
   if (usable.length < 2) {
     throw new HttpError(400, `ต้องมีอย่างน้อย 2 จุดจึงคำนวณ SD ได้ (ตอนนี้ ${usable.length})`)
   }
@@ -1120,6 +1155,136 @@ export async function lockLabStatistics(controlLotId: string, analyteId: string,
     overridden,
     overrideReason: overridden ? overrideReason?.trim() : null,
   })
+  return { analyteId, labMean, labSd, labN: usable.length, overridden }
+}
+
+async function recalculateChartStatuses(controlLotId: string, analyteId: string) {
+  const admin = getAdminClient()
+  const [{ data: analyteRow, error: analyteError }, { data: specRows, error: specError }, { data: valueRows, error: valueError }] = await Promise.all([
+    admin.from('iqc_analytes').select('*').eq('id', analyteId).maybeSingle(),
+    admin.from('iqc_control_specs').select('*').eq('control_lot_id', controlLotId).eq('analyte_id', analyteId),
+    admin
+      .from('iqc_result_values')
+      .select('id,stat_value,numeric_value,qualitative_value,is_voided,iqc_runs(run_datetime)')
+      .eq('control_lot_id', controlLotId)
+      .eq('analyte_id', analyteId),
+  ])
+  fail(analyteError)
+  fail(specError)
+  fail(valueError)
+  if (!analyteRow) return
+
+  const analyte = mapAnalyte(analyteRow as RecordRow)
+  const spec = ((specRows ?? []) as RecordRow[]).map(mapSpec)[0]
+  const { meanValue, sdValue } = activeStats(spec)
+  const ordered = ((valueRows ?? []) as RecordRow[])
+    .map((row) => ({
+      row,
+      id: asString(row.id),
+      when: asString((row.iqc_runs as RecordRow | null)?.run_datetime),
+    }))
+    .sort((a, b) => a.when.localeCompare(b.when) || a.id.localeCompare(b.id))
+
+  const acceptedSeries: number[] = []
+  for (const item of ordered) {
+    const row = item.row
+    if (Boolean(row.is_voided)) continue
+    let z: number | null = null
+    let violated: string[] = []
+    let status: QcStatus = 'accepted'
+
+    if (analyte.dataType === 'qualitative') {
+      const expected = spec?.expectedQualitative
+      const actual = clean(nullableString(row.qualitative_value))
+      status = expected && actual && expected.trim().toLowerCase() !== actual.trim().toLowerCase() ? 'rejected' : 'accepted'
+    } else if (row.stat_value != null && meanValue != null && sdValue != null && sdValue > 0) {
+      const stat = Number(row.stat_value)
+      const point = evaluateLatest([...acceptedSeries, stat], meanValue, sdValue)
+      z = point.z
+      violated = point.violatedRules
+      status = point.status
+      if (status !== 'rejected') acceptedSeries.push(stat)
+    } else if (row.stat_value != null) {
+      acceptedSeries.push(Number(row.stat_value))
+    }
+
+    const { error } = await admin
+      .from('iqc_result_values')
+      .update({ z_score: z, violated_rules: violated, status })
+      .eq('id', item.id)
+    fail(error)
+  }
+}
+
+export async function lockLabStatistics(controlLotId: string, analyteId: string, actor: BmActor, overrideReason?: string | null) {
+  assertAdmin(actor)
+  await saveLabLock(controlLotId, analyteId, actor, overrideReason)
+  return getIqcWorkspace(actor)
+}
+
+export async function unlockLabStatistics(controlLotId: string, analyteId: string, reason: string, actor: BmActor) {
+  assertAdmin(actor)
+  const trimmedReason = reason.trim()
+  if (!trimmedReason) throw new HttpError(400, 'Unlock reason is required')
+  const { error } = await getAdminClient()
+    .from('iqc_control_specs')
+    .update({ lab_locked_at: null, updated_at: new Date().toISOString() })
+    .eq('control_lot_id', controlLotId)
+    .eq('analyte_id', analyteId)
+  fail(error)
+  await writeAudit(actor, 'iqc.spec.unlockLab', 'iqc-control-spec', `${controlLotId}:${analyteId}`, { reason: trimmedReason })
+  return getIqcWorkspace(actor)
+}
+
+export async function lockControlLotStatistics(controlLotId: string, actor: BmActor, overrideReason?: string | null) {
+  assertAdmin(actor)
+  const admin = getAdminClient()
+  const { data, error } = await admin.from('iqc_result_values').select('analyte_id').eq('control_lot_id', controlLotId)
+  fail(error)
+  const analyteIds = [...new Set(((data ?? []) as RecordRow[]).map((row) => asString(row.analyte_id)).filter(Boolean))]
+  if (!analyteIds.length) throw new HttpError(400, 'ยังไม่มีผล IQC สำหรับ lot นี้')
+
+  const counts = await Promise.all(analyteIds.map(async (analyteId) => ({ analyteId, n: (await getUsableLabValues(controlLotId, analyteId)).length })))
+  const lockable = counts.filter((row) => row.n >= 2)
+  const skipped = counts.filter((row) => row.n < 2)
+  if (!lockable.length) throw new HttpError(400, 'ไม่มี analyte ที่มีข้อมูลอย่างน้อย 2 จุดสำหรับ lock')
+  const needsOverride = lockable.some((row) => row.n < LAB_LOCK_MIN_POINTS)
+  if (needsOverride && !overrideReason?.trim()) {
+    throw new HttpError(400, `มีบาง analyte ยังไม่ครบ ${LAB_LOCK_MIN_POINTS} จุด — ระบุเหตุผล override เพื่อ lock ทั้ง lot`)
+  }
+
+  const locked = []
+  for (const row of lockable) {
+    locked.push(await saveLabLock(controlLotId, row.analyteId, actor, row.n < LAB_LOCK_MIN_POINTS ? overrideReason : null))
+  }
+  await writeAudit(actor, 'iqc.spec.lockLot', 'iqc-control-lot', controlLotId, {
+    locked: locked.map((row) => row.analyteId),
+    skipped: skipped.map((row) => ({ analyteId: row.analyteId, n: row.n })),
+    overrideReason: needsOverride ? overrideReason?.trim() : null,
+  })
+  return getIqcWorkspace(actor)
+}
+
+export async function unlockControlLotStatistics(controlLotId: string, reason: string, actor: BmActor) {
+  assertAdmin(actor)
+  const trimmedReason = reason.trim()
+  if (!trimmedReason) throw new HttpError(400, 'Unlock reason is required')
+  const admin = getAdminClient()
+  const { data, error: selectError } = await admin
+    .from('iqc_control_specs')
+    .select('analyte_id')
+    .eq('control_lot_id', controlLotId)
+    .not('lab_locked_at', 'is', null)
+  fail(selectError)
+  const analyteIds = ((data ?? []) as RecordRow[]).map((row) => asString(row.analyte_id)).filter(Boolean)
+  if (!analyteIds.length) throw new HttpError(400, 'ไม่มี analyte ที่ถูก lock ใน lot นี้')
+  const { error } = await admin
+    .from('iqc_control_specs')
+    .update({ lab_locked_at: null, updated_at: new Date().toISOString() })
+    .eq('control_lot_id', controlLotId)
+    .not('lab_locked_at', 'is', null)
+  fail(error)
+  await writeAudit(actor, 'iqc.spec.unlockLot', 'iqc-control-lot', controlLotId, { reason: trimmedReason, analyteIds })
   return getIqcWorkspace(actor)
 }
 
@@ -1147,9 +1312,23 @@ export async function createCorrectiveAction(input: {
 }
 
 export async function closeCorrectiveAction(id: string, input: { rootCause?: string | null; actionTaken?: string | null }, actor: BmActor) {
-  const { error } = await getAdminClient().from('iqc_corrective_actions').update({
-    root_cause: clean(input.rootCause),
-    action_taken: clean(input.actionTaken),
+  const admin = getAdminClient()
+  const { data: existing, error: existingError } = await admin
+    .from('iqc_corrective_actions')
+    .select('root_cause,action_taken,status')
+    .eq('id', id)
+    .maybeSingle()
+  fail(existingError)
+  if (!existing) throw new HttpError(404, 'Corrective action not found')
+  if (asString((existing as RecordRow).status) === 'closed') throw new HttpError(400, 'Corrective action is already closed')
+
+  const rootCause = clean(input.rootCause) ?? clean(nullableString((existing as RecordRow).root_cause))
+  const actionTaken = clean(input.actionTaken) ?? clean(nullableString((existing as RecordRow).action_taken))
+  if (!rootCause || !actionTaken) throw new HttpError(400, 'Root cause and action taken are required before closing')
+
+  const { error } = await admin.from('iqc_corrective_actions').update({
+    root_cause: rootCause,
+    action_taken: actionTaken,
     status: 'closed',
     closed_by: actor.id,
     closed_at: new Date().toISOString(),

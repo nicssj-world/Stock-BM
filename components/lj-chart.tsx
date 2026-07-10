@@ -20,15 +20,22 @@ function fmt(value: number) {
 }
 
 function runDate(value: string) {
-  return new Date(value)
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
 }
 
 function formatRunDay(value: string) {
-  return new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { day: 'numeric', month: 'short' }).format(runDate(value))
+  const date = runDate(value)
+  return date ? new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { day: 'numeric', month: 'short' }).format(date) : '-'
 }
 
 function formatRunMonth(value: string) {
-  return new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { month: 'short', year: 'numeric' }).format(runDate(value))
+  const date = runDate(value)
+  return date ? new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { month: 'short', year: 'numeric' }).format(date) : null
+}
+
+function safeFormatDateTime(value: string) {
+  return runDate(value) ? formatDateTime(value) : '-'
 }
 
 function xTickIndexes(length: number) {
@@ -43,7 +50,15 @@ function chartShell(status: IqcChart['status']) {
   return 'border-l-4 border-l-[#0d9488] shadow-[0_18px_44px_rgba(13,148,136,0.06)]'
 }
 
-export function LjChart({ chart }: { chart: IqcChart }) {
+export function LjChart({
+  chart,
+  selectedResultId,
+  onPointSelect,
+}: {
+  chart: IqcChart
+  selectedResultId?: string | null
+  onPointSelect?: (point: IqcChart['points'][number]) => void
+}) {
   const [showTable, setShowTable] = useState(false)
   const { mean, sd, points } = chart
   const hasStats = mean != null && sd != null && sd > 0
@@ -213,7 +228,7 @@ export function LjChart({ chart }: { chart: IqcChart }) {
             const x = xAt(i)
             const y = yAt(p.statValue)
             const color = p.isVoided ? '#9aafb4' : STATUS_COLOR[p.status] ?? '#16a34a'
-            const tip = `${formatDateTime(p.runDatetime)} · ${fmt(p.value)} · z ${p.z.toFixed(2)}${p.violatedRules.length ? ` · ${p.violatedRules.join(', ')}` : ''}${p.isVoided ? ' · voided' : ''}`
+            const tip = `${safeFormatDateTime(p.runDatetime)} · ${fmt(p.value)} · z ${p.z.toFixed(2)}${p.violatedRules.length ? ` · ${p.violatedRules.join(', ')}` : ''}${p.isVoided ? ' · voided' : ''}`
             const node =
               p.status === 'rejected' && !p.isVoided ? (
                 <g stroke={color} strokeWidth={2}>
@@ -225,8 +240,22 @@ export function LjChart({ chart }: { chart: IqcChart }) {
               ) : (
                 <circle cx={x} cy={y} r={4} fill={color} stroke="white" strokeWidth={1.4} opacity={p.isVoided ? 0.4 : 1} />
               )
+            const selected = selectedResultId === p.resultId
             return (
-              <g key={p.resultId}>
+              <g
+                key={p.resultId}
+                role={onPointSelect ? 'button' : undefined}
+                tabIndex={onPointSelect ? 0 : undefined}
+                className={onPointSelect ? 'cursor-pointer' : undefined}
+                onClick={onPointSelect ? () => onPointSelect(p) : undefined}
+                onKeyDown={onPointSelect ? (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    onPointSelect(p)
+                  }
+                } : undefined}
+              >
+                {selected ? <circle cx={x} cy={y} r={10} fill="none" stroke="#0b7f76" strokeWidth={2} /> : null}
                 {node}
                 <circle cx={x} cy={y} r={8} fill="transparent">
                   <title>{tip}</title>
@@ -250,7 +279,7 @@ export function LjChart({ chart }: { chart: IqcChart }) {
             <tbody className="divide-y divide-[#eef3f3]">
               {[...visible].reverse().map((p) => (
                 <tr key={p.resultId} className={p.isVoided ? 'text-[#9aafb4] line-through' : ''}>
-                  <td className="px-2 py-1.5">{formatDateTime(p.runDatetime)}</td>
+                  <td className="px-2 py-1.5">{safeFormatDateTime(p.runDatetime)}</td>
                   <td className="mono px-2 py-1.5 text-right tabular-nums">{fmt(p.value)}</td>
                   <td className="mono px-2 py-1.5 text-right tabular-nums">{p.z.toFixed(2)}</td>
                   <td className="px-2 py-1.5"><StatusBadge tone={p.isVoided ? 'neutral' : p.status} label={p.isVoided ? 'voided' : p.status} /></td>
