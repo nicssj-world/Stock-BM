@@ -7,8 +7,10 @@ const source = readFileSync(join(process.cwd(), 'components/hpv-view.tsx'), 'utf
 describe('HPV sample storage interface', () => {
   it('keeps a selected specimen type while scanning samples', () => {
     expect(source).toContain('specimenType, position: selectedPosition')
-    expect(source).toContain('<option value="self_collected">Self-collected</option>')
-    expect(source).toContain('<option value="clinician_collected">Clinician-collected</option>')
+    expect(source).toContain('role="group" aria-label="Specimen type"')
+    expect(source).toContain("onClick={() => setSpecimenType('self_collected')}")
+    expect(source).toContain("onClick={() => setSpecimenType('clinician_collected')}")
+    expect(source).not.toContain('<Select value={specimenType}')
   })
 
   it('shows specimen types on samples without retaining box types', () => {

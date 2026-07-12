@@ -1093,10 +1093,24 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
               )}
             </Field>
             <Field label="Specimen type">
-              <Select value={specimenType} onChange={(event) => setSpecimenType(event.target.value as HpvSpecimenType)}>
-                <option value="self_collected">Self-collected</option>
-                <option value="clinician_collected">Clinician-collected</option>
-              </Select>
+              <div role="group" aria-label="Specimen type" className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  aria-pressed={specimenType === 'self_collected'}
+                  onClick={() => setSpecimenType('self_collected')}
+                  className={`rounded-md border px-3 py-2 text-sm font-bold transition ${specimenType === 'self_collected' ? 'border-[#0b7f76] bg-[#e7f7f4] text-[#08766e] ring-2 ring-[#0b7f76]/20' : 'border-[#c9dadd] bg-white text-[#58747d] hover:border-[#69b8b0]'}`}
+                >
+                  Self-collected
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={specimenType === 'clinician_collected'}
+                  onClick={() => setSpecimenType('clinician_collected')}
+                  className={`rounded-md border px-3 py-2 text-sm font-bold transition ${specimenType === 'clinician_collected' ? 'border-[#d8a936] bg-[#fff7df] text-[#9a6700] ring-2 ring-[#d8a936]/20' : 'border-[#c9dadd] bg-white text-[#58747d] hover:border-[#d8a936]'}`}
+                >
+                  Clinician-collected
+                </button>
+              </div>
             </Field>
             {selectedPosition ? (
               <div className="flex items-center justify-between rounded-md border border-[#97d5cf] bg-[#eef9f7] px-3 py-2 text-sm">
