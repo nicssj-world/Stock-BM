@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CalendarClock, Calculator, ClipboardList, Eye, Gauge, Layers3, Lock, LineChart, ListFilter, PlusCircle, Printer, Search, Settings, Sigma, Trash2, Wrench } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { IqcUncertaintyBudget, IqcWorkspace } from '@/lib/iqc/types'
-import { findCorrectiveActionForPoint } from '@/lib/iqc/corrective-actions'
+import { findCorrectiveActionForPoint, runsWithoutCorrectiveActions } from '@/lib/iqc/corrective-actions'
 import { formatDate, formatDateTime } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
 import { LjChart } from '@/components/lj-chart'
@@ -1027,7 +1027,8 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
   ])), [data.controlLots])
   const runById = useMemo(() => new Map(data.runs.map((run) => [run.id, run])), [data.runs])
   const flaggedOf = (r: IqcWorkspace['runs'][number]) => r.results.filter((res) => !res.isVoided && res.status !== 'accepted')
-  const runOptions = data.runs.filter((r) => showAll || flaggedOf(r).length > 0)
+  const runOptions = runsWithoutCorrectiveActions(data.runs, data.correctiveActions)
+    .filter((r) => showAll || flaggedOf(r).length > 0)
   useEffect(() => {
     if (!focusId) return
     document.getElementById(`corrective-action-${focusId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -1091,7 +1092,7 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
           <label className="flex items-center gap-2 text-xs text-[#58747d]">
             <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} /> แสดงทุก run (รวมที่ปกติ)
           </label>
-          {!runOptions.length ? <p className="text-xs text-[#9aafb4]">ไม่มี run ที่มีค่า out — ติ๊ก &ldquo;แสดงทุก run&rdquo; เพื่อเปิดเอง</p> : null}
+          {!runOptions.length ? <p className="text-xs text-[#9aafb4]">ไม่มี run ที่ยังไม่มี corrective action — ติ๊ก &ldquo;แสดงทุก run&rdquo; เพื่อดู run ปกติที่ยังไม่ได้บันทึก</p> : null}
           <Field label="ปัญหา / Problem"><Textarea rows={2} value={problem} onChange={(e) => setProblem(e.target.value)} required /></Field>
           <Field label="Root cause"><Textarea rows={2} value={rootCause} onChange={(e) => setRootCause(e.target.value)} /></Field>
           <Field label="Action taken"><Textarea rows={2} value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} /></Field>
