@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { GitCompareArrows, Plus } from 'lucide-react'
+import { GitCompareArrows, Pencil, Plus, Trash2, X } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { LotVerification, LotVerifStatus, LotVerifWorkspace } from '@/lib/lotverif/types'
 import { formatDate } from '@/lib/bm/rules'
@@ -140,12 +140,51 @@ function VerificationCard({ verification: v, data, actor, onChanged }: { verific
   const editable = v.status === 'draft' || v.status === 'in-progress' || v.status === 'passed' || v.status === 'failed'
   const [conclusion, setConclusion] = useState(v.conclusion ?? '')
   const [busy, setBusy] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [editForm, setEditForm] = useState({ title: v.title ?? '', method: v.method, acceptanceCriteria: v.acceptanceCriteria ?? '' })
+  const [actionError, setActionError] = useState('')
 
   async function setStatus(status: LotVerifStatus) {
     setBusy(status)
     try {
       await api(`/api/lot-verification/verifications/${v.id}`, { method: 'PATCH', body: JSON.stringify({ status, conclusion: conclusion.trim() || null }) })
       onChanged()
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function saveEdit(event: React.FormEvent) {
+    event.preventDefault()
+    setBusy('edit')
+    setActionError('')
+    try {
+      await api(`/api/lot-verification/verifications/${v.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: editForm.title.trim() || null,
+          method: editForm.method,
+          acceptanceCriteria: editForm.acceptanceCriteria.trim() || null,
+        }),
+      })
+      setEditing(false)
+      onChanged()
+    } catch (requestError) {
+      setActionError(requestError instanceof Error ? requestError.message : 'แก้ไขไม่สำเร็จ')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function remove() {
+    if (!window.confirm(`ลบ verification "${v.title || v.newLotLabel || 'รายการนี้'}" ใช่ไหม?\n\nลบได้เฉพาะรายการที่ยังไม่ final และไม่มีไฟล์แนบ`)) return
+    setBusy('delete')
+    setActionError('')
+    try {
+      await api(`/api/lot-verification/verifications/${v.id}`, { method: 'DELETE' })
+      onChanged()
+    } catch (requestError) {
+      setActionError(requestError instanceof Error ? requestError.message : 'ลบไม่สำเร็จ')
     } finally {
       setBusy('')
     }
@@ -166,8 +205,22 @@ function VerificationCard({ verification: v, data, actor, onChanged }: { verific
           </p>
           {v.acceptanceCriteria ? <p className="text-[11px] text-[#8ba0a5]">เกณฑ์: {v.acceptanceCriteria}</p> : null}
         </div>
-        <p className="text-[11px] text-[#8ba0a5]">{formatDate(v.createdAt.slice(0, 10))} · {v.performedByName ?? '—'}</p>
+        <div className="flex items-center gap-1">
+          <p className="mr-1 text-[11px] text-[#8ba0a5]">{formatDate(v.createdAt.slice(0, 10))} · {v.performedByName ?? '—'}</p>
+          {editable ? <Button type="button" variant="ghost" className="min-h-8 px-2 py-1" disabled={busy !== ''} onClick={() => setEditing((value) => !value)} title="แก้ไข verification"><Pencil className="size-3.5" /></Button> : null}
+          {isAdmin && editable ? <Button type="button" variant="danger" className="min-h-8 px-2 py-1" disabled={busy !== ''} onClick={remove} title="ลบ verification"><Trash2 className="size-3.5" /></Button> : null}
+        </div>
       </div>
+
+      {editing ? (
+        <form onSubmit={saveEdit} className="mt-3 grid gap-2 rounded-md border border-[#d7e6e7] bg-[#f8fbfb] p-3 sm:grid-cols-3">
+          <Field label="หัวข้อ / Title"><Input value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} /></Field>
+          <Field label="วิธี / Method"><Select value={editForm.method} onChange={(e) => setEditForm({ ...editForm, method: e.target.value as LotVerification['method'] })}><option value="parallel-comparison">Parallel comparison</option><option value="qc-acceptance">QC acceptance</option><option value="patient-comparison">Patient comparison</option></Select></Field>
+          <Field label="เกณฑ์ยอมรับ / Acceptance criteria"><Input value={editForm.acceptanceCriteria} onChange={(e) => setEditForm({ ...editForm, acceptanceCriteria: e.target.value })} /></Field>
+          <div className="flex items-center gap-2 sm:col-span-3"><Button disabled={busy !== ''}>{busy === 'edit' ? 'กำลังบันทึก…' : 'บันทึกการแก้ไข'}</Button><Button type="button" variant="ghost" disabled={busy !== ''} onClick={() => setEditing(false)}><X className="size-3.5" /> ยกเลิก</Button></div>
+        </form>
+      ) : null}
+      {actionError ? <div className="mt-3"><Notice tone="danger">{actionError}</Notice></div> : null}
 
       <MeasurementTable verification={v} />
 
