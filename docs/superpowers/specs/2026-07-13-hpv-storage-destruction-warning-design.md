@@ -14,7 +14,7 @@ Keep the existing one-month destruction date for completed HPV storage boxes and
 
 ## Data flow
 
-- Add pure date helpers that compare date-only values in the Bangkok calendar and return the due state.
+- Normalize `destroy_due_at` timestamps to a Bangkok date before comparing them, then use pure date helpers to return the due state.
 - Extend the HPV dashboard payload with a `boxesDueSoon` count calculated server-side with `destroy_due_at` from tomorrow through five days ahead.
 - Existing `boxesDueDestruction` continues to count due-now boxes only.
 
