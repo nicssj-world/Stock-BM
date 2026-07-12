@@ -2,6 +2,7 @@ import type { StockWorkspace } from '@/lib/bm/types'
 import type { HpvSiteSummary } from '@/lib/hpv/rules'
 
 export type HpvBoxType = 'self_collected' | 'clinician_collected'
+export type HpvSpecimenType = 'self_collected' | 'clinician_collected'
 export type HpvBoxStatus = 'open' | 'full' | 'destroyed'
 export type HpvSampleStatus = 'stored' | 'checked_out' | 'destroyed'
 
@@ -93,6 +94,7 @@ export interface HpvSiteReceipt {
 export interface HpvSample {
   id: string
   barcode: string
+  specimenType: HpvSpecimenType
   boxId: string
   position: number
   status: HpvSampleStatus
@@ -107,7 +109,6 @@ export interface HpvSample {
 export interface HpvStorageBox {
   id: string
   boxCode: string
-  boxType: HpvBoxType
   capacity: number
   status: HpvBoxStatus
   filledAt: string | null

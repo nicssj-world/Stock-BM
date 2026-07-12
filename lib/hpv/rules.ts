@@ -1,3 +1,5 @@
+import type { HpvSpecimenType } from '@/lib/hpv/types'
+
 export const HPV_BOX_CAPACITY = 25
 
 export interface HpvDistributionLike {
@@ -34,6 +36,14 @@ export function nextHpvBoxPosition(occupiedPositions: number[], capacity = HPV_B
 
 export function isHpvBoxFull(occupiedPositions: number[], capacity = HPV_BOX_CAPACITY) {
   return nextHpvBoxPosition(occupiedPositions, capacity) === null
+}
+
+export function isHpvSpecimenType(value: unknown): value is HpvSpecimenType {
+  return value === 'self_collected' || value === 'clinician_collected'
+}
+
+export function specimenTypeLabel(type: HpvSpecimenType) {
+  return type === 'self_collected' ? 'Self-collected' : 'Clinician-collected'
 }
 
 export function addOneMonth(date: Date) {

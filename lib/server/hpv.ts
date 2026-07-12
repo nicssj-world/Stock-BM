@@ -3,13 +3,13 @@ import 'server-only'
 import { addOneMonth, nextHpvBoxPosition, summarizeHpvSites } from '@/lib/hpv/rules'
 import type { BmActor } from '@/lib/bm/types'
 import type {
-  HpvBoxType,
   HpvDashboard,
   HpvKitDistribution,
   HpvKitDistributionLine,
   HpvKitReturn,
   HpvKitReturnLine,
   HpvSample,
+  HpvSpecimenType,
   HpvSite,
   HpvSiteReceipt,
   HpvStorageBox,
@@ -169,6 +169,7 @@ function sampleFromRow(row: RecordRow, names: Map<string, string>): HpvSample {
   return {
     id: asString(row.id),
     barcode: asString(row.barcode),
+    specimenType: asString(row.specimen_type) as HpvSpecimenType,
     boxId: asString(row.box_id),
     position: asNumber(row.position),
     status: asString(row.status) as HpvSample['status'],
@@ -185,7 +186,6 @@ function boxFromRow(row: RecordRow, samples: HpvSample[]): HpvStorageBox {
   return {
     id: asString(row.id),
     boxCode: asString(row.box_code),
-    boxType: asString(row.box_type) as HpvBoxType,
     capacity: asNumber(row.capacity),
     status: asString(row.status) as HpvStorageBox['status'],
     filledAt: nullableString(row.filled_at),
@@ -640,10 +640,10 @@ export async function createHpvKitReturn(input: {
   return { workspace: await getHpvWorkspace(actor), returnId: id }
 }
 
-export async function createHpvStorageBox(input: { boxCode: string; boxType: HpvBoxType }, actor: BmActor) {
+export async function createHpvStorageBox(input: { boxCode: string }, actor: BmActor) {
   const { data, error } = await getAdminClient()
     .from('bm_hpv_storage_boxes')
-    .insert({ box_code: input.boxCode.trim(), box_type: input.boxType, created_by: actor.id })
+    .insert({ box_code: input.boxCode.trim(), created_by: actor.id })
     .select('id')
     .single()
   fail(error)
@@ -692,7 +692,7 @@ export async function moveHpvSamplePosition(sampleId: string, targetPosition: nu
   return getHpvWorkspace(actor)
 }
 
-export async function scanHpvSample(input: { barcode: string; boxId: string; position?: number | null }, actor: BmActor) {
+export async function scanHpvSample(input: { barcode: string; boxId: string; specimenType: HpvSpecimenType; position?: number | null }, actor: BmActor) {
   const admin = getAdminClient()
   const barcode = input.barcode.trim()
   const { data: existing, error: existingError } = await admin.from('bm_hpv_samples').select('id,status').eq('barcode', barcode).maybeSingle()
@@ -720,7 +720,7 @@ export async function scanHpvSample(input: { barcode: string; boxId: string; pos
 
   const { data, error } = await admin
     .from('bm_hpv_samples')
-    .insert({ barcode, box_id: input.boxId, position, stored_by: actor.id })
+    .insert({ barcode, box_id: input.boxId, position, specimen_type: input.specimenType, stored_by: actor.id })
     .select('id')
     .single()
   fail(error)
@@ -739,7 +739,7 @@ export async function scanHpvSample(input: { barcode: string; boxId: string; pos
     fail(updateError)
   }
 
-  await writeAudit(actor, 'hpv.sample.store', 'hpv-sample', asString((data as RecordRow).id), { barcode, boxId: input.boxId, position })
+  await writeAudit(actor, 'hpv.sample.store', 'hpv-sample', asString((data as RecordRow).id), { barcode, boxId: input.boxId, position, specimenType: input.specimenType })
   return getHpvWorkspace(actor)
 }
 

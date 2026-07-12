@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addOneMonth, formatHpvBoxPosition, isHpvBoxFull, nextHpvBoxPosition, summarizeHpvSites } from '@/lib/hpv/rules'
+import { addOneMonth, formatHpvBoxPosition, isHpvBoxFull, isHpvSpecimenType, nextHpvBoxPosition, specimenTypeLabel, summarizeHpvSites } from '@/lib/hpv/rules'
 
 describe('HPV storage rules', () => {
   it('finds the first open position in a 5x5 box', () => {
@@ -17,6 +17,17 @@ describe('HPV storage rules', () => {
   it('sets destruction due date one month after the box is filled', () => {
     const filled = new Date('2026-06-22T03:30:00.000Z')
     expect(addOneMonth(filled).toISOString()).toBe('2026-07-22T03:30:00.000Z')
+  })
+
+  it('accepts the two allowed specimen types only', () => {
+    expect(isHpvSpecimenType('self_collected')).toBe(true)
+    expect(isHpvSpecimenType('clinician_collected')).toBe(true)
+    expect(isHpvSpecimenType('mixed')).toBe(false)
+  })
+
+  it('provides staff-facing labels for specimen types', () => {
+    expect(specimenTypeLabel('self_collected')).toBe('Self-collected')
+    expect(specimenTypeLabel('clinician_collected')).toBe('Clinician-collected')
   })
 })
 
