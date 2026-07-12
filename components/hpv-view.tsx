@@ -25,8 +25,8 @@ import {
   X,
 } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
-import type { HpvBoxType, HpvKitDistribution, HpvSample, HpvSiteReceipt, HpvStorageBox, HpvWorkspace } from '@/lib/hpv/types'
-import { formatHpvBoxPosition, HPV_BOX_CAPACITY } from '@/lib/hpv/rules'
+import type { HpvBoxType, HpvKitDistribution, HpvSample, HpvSiteReceipt, HpvSpecimenType, HpvStorageBox, HpvWorkspace } from '@/lib/hpv/types'
+import { formatHpvBoxPosition, HPV_BOX_CAPACITY, specimenTypeLabel } from '@/lib/hpv/rules'
 import { formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
 
@@ -39,6 +39,15 @@ function todayKey() {
 
 function boxTypeLabel(type: HpvBoxType) {
   return type === 'self_collected' ? 'Self-collected' : 'Clinician-collected'
+}
+
+function SpecimenTypeBadge({ type, compact = false }: { type: HpvSpecimenType; compact?: boolean }) {
+  const selfCollected = type === 'self_collected'
+  return (
+    <span className={`inline-flex rounded-full border font-bold ${compact ? 'px-1.5 py-0.5 text-[8px]' : 'px-2 py-0.5 text-[10px]'} ${selfCollected ? 'border-[#97d5cf] bg-[#e7f7f4] text-[#08766e]' : 'border-[#efd294] bg-[#fff7df] text-[#9a6700]'}`}>
+      {compact ? (selfCollected ? 'SELF' : 'CLIN') : specimenTypeLabel(type)}
+    </span>
+  )
 }
 
 function normalizeScan(value: string) {
@@ -935,7 +944,8 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
   const [selectedPosition, setSelectedPosition] = useState<number | null>(null)
   const [barcode, setBarcode] = useState('')
   const [busy, setBusy] = useState(false)
-  const [boxForm, setBoxForm] = useState({ boxCode: `HPV-${todayKey().replaceAll('-', '')}-01`, boxType: 'self_collected' as HpvBoxType })
+  const [boxForm, setBoxForm] = useState({ boxCode: `HPV-${todayKey().replaceAll('-', '')}-01` })
+  const [specimenType, setSpecimenType] = useState<HpvSpecimenType>('self_collected')
   const effectiveBoxId = data.boxes.some((box) => box.id === selectedBoxId) ? selectedBoxId : openBoxes[0]?.id ?? data.boxes[0]?.id ?? ''
   const selectedBox = data.boxes.find((box) => box.id === effectiveBoxId) ?? data.boxes[0] ?? null
   const scanBox = openBoxes.find((box) => box.id === effectiveBoxId) ?? openBoxes[0] ?? null
@@ -959,7 +969,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
     try {
       const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/storage/scan', {
         method: 'POST',
-        body: JSON.stringify({ barcode: code, boxId: scanBox.id, position: selectedPosition ?? undefined }),
+        body: JSON.stringify({ barcode: code, boxId: scanBox.id, specimenType, position: selectedPosition ?? undefined }),
       })
       onWorkspace(result.workspace, `จัดเก็บ sample ${code}${selectedPosition ? ` ที่ ${formatHpvBoxPosition(selectedPosition)}` : ''} แล้ว`)
       setBarcode('')
@@ -1069,7 +1079,6 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
           <form onSubmit={createBox} className="space-y-3">
             <h2 className="font-bold text-[#173d50]">เปิด Storage box</h2>
             <Field label="Box code"><Input required value={boxForm.boxCode} onChange={(e) => setBoxForm({ ...boxForm, boxCode: e.target.value })} /></Field>
-            <Field label="Box type"><Select value={boxForm.boxType} onChange={(e) => setBoxForm({ ...boxForm, boxType: e.target.value as HpvBoxType })}><option value="self_collected">Self-collected Box</option><option value="clinician_collected">Clinician-collected Box</option></Select></Field>
             <Button disabled={busy}><Plus className="size-4" /> Open box</Button>
           </form>
         </Card>
@@ -1078,10 +1087,16 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
             <h2 className="font-bold text-[#173d50]">ยิงบาร์โค้ดเข้า box</h2>
             <Field label="Active box">
               {openBoxes.length ? (
-                <Select value={scanBox?.id ?? ''} onChange={(e) => { setSelectedBoxId(e.target.value) }}>{openBoxes.map((box) => <option key={box.id} value={box.id}>{box.boxCode} · {boxTypeLabel(box.boxType)}</option>)}</Select>
+                <Select value={scanBox?.id ?? ''} onChange={(e) => { setSelectedBoxId(e.target.value) }}>{openBoxes.map((box) => <option key={box.id} value={box.id}>{box.boxCode}</option>)}</Select>
               ) : (
                 <p className="rounded-md border border-dashed border-[#d7e3e5] px-3 py-2 text-sm text-[#8ba0a5]">ยังไม่มีกล่องที่เปิดอยู่ — เปิดกล่องใหม่ก่อน</p>
               )}
+            </Field>
+            <Field label="Specimen type">
+              <Select value={specimenType} onChange={(event) => setSpecimenType(event.target.value as HpvSpecimenType)}>
+                <option value="self_collected">Self-collected</option>
+                <option value="clinician_collected">Clinician-collected</option>
+              </Select>
             </Field>
             {selectedPosition ? (
               <div className="flex items-center justify-between rounded-md border border-[#97d5cf] bg-[#eef9f7] px-3 py-2 text-sm">
@@ -1104,7 +1119,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
           ) : searchBarcode.trim() && searchResult && searchResult !== 'not_found' ? (
             <div className="rounded-md bg-[#eef9f7] p-3">
               <p className="text-sm font-bold text-[#0b7f76]">{searchResult.box.boxCode}</p>
-              <p className="text-xs text-[#789097]">{formatHpvBoxPosition(searchResult.sample.position)} · {searchResult.sample.status}</p>
+              <div className="mt-1 flex items-center gap-2"><p className="text-xs text-[#789097]">{formatHpvBoxPosition(searchResult.sample.position)} · {searchResult.sample.status}</p><SpecimenTypeBadge type={searchResult.sample.specimenType} /></div>
               <button type="button" onClick={() => { setSelectedBoxId(searchResult.box.id); setSelectedPosition(null) }} className="mt-1.5 text-xs font-bold text-[#0b7f76] underline hover:no-underline">ไปที่กล่องนี้</button>
             </div>
           ) : null}
@@ -1119,7 +1134,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
             <div className="max-h-[210px] overflow-y-auto">
               <table className="w-full text-left text-sm">
                 <thead className="sticky top-0 bg-[#f7fafa] text-[10px] tracking-[0.08em] text-[#779097] uppercase">
-                  <tr><th className="px-4 py-2">Code</th><th className="px-2 py-2">Type</th><th className="px-2 py-2 text-center">Stored</th><th className="px-2 py-2">Status</th><th className="px-2 py-2">Destroy due</th></tr>
+                  <tr><th className="px-4 py-2">Code</th><th className="px-2 py-2 text-center">Stored</th><th className="px-2 py-2">Status</th><th className="px-2 py-2">Destroy due</th></tr>
                 </thead>
                 <tbody className="divide-y divide-[#edf2f2]">
                   {data.boxes.map((box) => {
@@ -1129,7 +1144,6 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
                     return (
                       <tr key={box.id} onClick={() => setSelectedBoxId(box.id)} className={`cursor-pointer transition-colors ${isSelected ? 'bg-[#eef9f7]' : 'hover:bg-[#f7fbfc]'}`}>
                         <td className="mono px-4 py-2 font-bold text-[#315763]">{box.boxCode}</td>
-                        <td className="px-2 py-2 text-xs text-[#789097]">{box.boxType === 'self_collected' ? 'Self' : 'Clinician'}</td>
                         <td className="mono px-2 py-2 text-center font-bold text-[#315763]">{storedCount}/{box.capacity}</td>
                         <td className="px-2 py-2"><StatusBadge tone={box.status === 'open' ? 'accepted' : box.status === 'full' ? 'warning' : 'neutral'} label={box.status.toUpperCase()} /></td>
                         <td className={`px-2 py-2 text-xs ${isDue ? 'font-bold text-red-600' : 'text-[#8ba0a5]'}`}>{box.destroyDueAt ? formatDate(box.destroyDueAt) : '-'}</td>
@@ -1172,7 +1186,6 @@ function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onCl
     <Card className="overflow-hidden">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#e1eaeb] bg-[linear-gradient(115deg,#fafdfe,#eef9f7)] px-4 py-4">
         <div>
-          <p className="text-[11px] font-bold tracking-[0.16em] text-[#0b7f76] uppercase">{boxTypeLabel(box.boxType)}</p>
           <h2 className="mt-1 text-xl font-bold text-[#173d50]">{box.boxCode}</h2>
           <p className="mt-1 text-xs text-[#789097]">{occupied}/{HPV_BOX_CAPACITY} positions · created {formatDateTime(box.createdAt)}</p>
         </div>
@@ -1239,7 +1252,7 @@ function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onCl
               >
                 <p className="mono text-[10px] font-bold text-[#789097]">{formatHpvBoxPosition(position)}</p>
                 {sample
-                  ? <p className={`mono mt-1 truncate text-[10px] font-bold leading-tight ${checkedOut ? 'text-[#6f868b]' : 'text-[#0b7f76]'}`}>{sample.barcode}</p>
+                  ? <><p className={`mono mt-1 truncate text-[10px] font-bold leading-tight ${checkedOut ? 'text-[#6f868b]' : 'text-[#0b7f76]'}`}>{sample.barcode}</p><div className="mt-1"><SpecimenTypeBadge type={sample.specimenType} compact /></div></>
                   : isSelected
                     ? <p className="mt-1 text-[10px] font-bold text-[#0b7f76]">selected</p>
                     : <p className="mt-1 text-[10px] text-[#b4c3c6]">empty</p>
@@ -1252,6 +1265,7 @@ function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onCl
           {box.samples.map((sample) => <div key={sample.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf2f2] px-3 py-2 last:border-0">
             <div><p className="mono font-bold text-[#315763]">{sample.barcode}</p><p className="text-xs text-[#8ba0a5]">{formatHpvBoxPosition(sample.position)} · stored {formatDateTime(sample.storedAt)} · {sample.storedByName ?? '-'}</p></div>
             <div className="flex items-center gap-2">
+              <SpecimenTypeBadge type={sample.specimenType} />
               <StatusBadge tone={sample.status === 'stored' ? 'accepted' : 'neutral'} label={sample.status} />
               {onDeleteSample && sample.status === 'stored' ? <button onClick={() => onDeleteSample(sample)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-bold text-red-500 hover:bg-red-100"><Trash2 className="size-3" /></button> : null}
             </div>
@@ -1334,7 +1348,7 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
           <div className="border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3 font-bold text-[#173d50]">Stored samples ready for checkout</div>
           <div className="max-h-[360px] overflow-y-auto divide-y divide-[#edf2f2]">
             {storedSamples.map((sample) => <button key={sample.id} onClick={() => setBarcode(sample.barcode)} className="flex w-full flex-wrap items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-[#f6fbfa]">
-              <div><p className="mono font-bold text-[#315763]">{sample.barcode}</p><p className="text-xs text-[#8ba0a5]">{sample.box.boxCode} · {formatHpvBoxPosition(sample.position)} · {boxTypeLabel(sample.box.boxType)}</p></div>
+              <div><p className="mono font-bold text-[#315763]">{sample.barcode}</p><div className="mt-1 flex items-center gap-2"><p className="text-xs text-[#8ba0a5]">{sample.box.boxCode} · {formatHpvBoxPosition(sample.position)}</p><SpecimenTypeBadge type={sample.specimenType} /></div></div>
               <Send className="size-4 text-[#0b7f76]" />
             </button>)}
             {!storedSamples.length ? <p className="px-4 py-12 text-center text-sm text-[#91a4a9]">ไม่มีตัวอย่างที่รอ checkout</p> : null}
@@ -1350,7 +1364,7 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
               <div key={sample.id} className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
                 <div>
                   <p className="mono font-bold text-[#315763]">{sample.barcode}</p>
-                  <p className="text-xs text-[#8ba0a5]">{sample.box.boxCode} · {formatHpvBoxPosition(sample.position)}</p>
+                  <div className="mt-1 flex items-center gap-2"><p className="text-xs text-[#8ba0a5]">{sample.box.boxCode} · {formatHpvBoxPosition(sample.position)}</p><SpecimenTypeBadge type={sample.specimenType} /></div>
                   <p className="text-xs font-semibold text-[#0b7f76]">→ {sample.checkoutDestination ?? 'Co-testing'}</p>
                   {sample.checkoutNote ? <p className="mt-0.5 text-xs text-[#789097]">{sample.checkoutNote}</p> : null}
                 </div>
