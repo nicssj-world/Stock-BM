@@ -9,6 +9,7 @@ const schema = z.object({
   assignedMean: z.number().nullable().optional(),
   assignedSd: z.number().min(0).nullable().optional(),
   expectedQualitative: z.string().trim().max(80).nullable().optional(),
+  changeReason: z.string().trim().max(300).nullable().optional(),
 })
 
 export async function POST(request: Request) {

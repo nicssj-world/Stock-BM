@@ -30,6 +30,7 @@ import { cv, evaluateLatest, mean, sd, toStat, type QcStatus } from '@/lib/iqc/w
 import { sigmaRating, sixSigma, teaPercent } from '@/lib/iqc/sixsigma'
 import { combinedRelative, divisorFor, expandedRelative, pooledRsd, relativeStandardUncertainty, standardUncertainty } from '@/lib/iqc/uncertainty'
 import type { BmActor } from '@/lib/bm/types'
+import { todayBangkok } from '@/lib/bm/rules'
 import { writeAudit } from '@/lib/server/audit'
 import { HttpError } from '@/lib/server/errors'
 import { getAdminClient } from '@/lib/supabase/admin'
@@ -55,6 +56,25 @@ function assertAdmin(actor: BmActor) {
   // Staff and Admin intentionally share full IQC access. Assistant remains HPV-only,
   // and must be blocked here too so direct API calls cannot bypass the page/nav guard.
   if (actor.role === 'Assistant') throw new HttpError(403, 'IQC permission required')
+}
+
+async function assertUsableControlLots(lotIds: string[]) {
+  const ids = [...new Set(lotIds.filter(Boolean))]
+  const { data, error } = await getAdminClient()
+    .from('iqc_control_lots')
+    .select('id,lot_number,is_active,expiry_date')
+    .in('id', ids)
+  fail(error)
+  const lots = new Map(((data ?? []) as RecordRow[]).map((lot) => [asString(lot.id), lot]))
+  const today = todayBangkok()
+  for (const id of ids) {
+    const lot = lots.get(id)
+    if (!lot) throw new HttpError(404, 'ไม่พบ Control lot')
+    const lotNumber = asString(lot.lot_number)
+    if (!Boolean(lot.is_active)) throw new HttpError(400, `Control lot ${lotNumber} ถูกปิดแล้ว`)
+    const expiryDate = nullableString(lot.expiry_date)
+    if (expiryDate && expiryDate < today) throw new HttpError(400, `Control lot ${lotNumber} หมดอายุแล้ว`)
+  }
 }
 
 async function countIqcReferences(table: string, column: string, id: string) {
@@ -667,20 +687,33 @@ export async function upsertSpec(input: {
   assignedMean?: number | null
   assignedSd?: number | null
   expectedQualitative?: string | null
+  changeReason?: string | null
 }, actor: BmActor) {
   assertAdmin(actor)
   const admin = getAdminClient()
   const { data: existing, error: existingError } = await admin
     .from('iqc_control_specs')
-    .select('id')
+    .select('id,assigned_mean,assigned_sd,expected_qualitative')
     .eq('control_lot_id', input.controlLotId)
     .eq('analyte_id', input.analyteId)
     .maybeSingle()
   fail(existingError)
+  const assignedMean = input.assignedMean ?? null
+  const assignedSd = input.assignedSd ?? null
+  const expectedQualitative = clean(input.expectedQualitative)
+  const specChanged = Boolean(existing) && (
+    nullableNumber((existing as RecordRow).assigned_mean) !== assignedMean
+    || nullableNumber((existing as RecordRow).assigned_sd) !== assignedSd
+    || clean(nullableString((existing as RecordRow).expected_qualitative)) !== expectedQualitative
+  )
+  const changeReason = clean(input.changeReason)
+  if (specChanged && !changeReason) throw new HttpError(400, 'ระบุเหตุผลในการแก้ไข assigned spec')
   const payload = {
-    assigned_mean: input.assignedMean ?? null,
-    assigned_sd: input.assignedSd ?? null,
-    expected_qualitative: clean(input.expectedQualitative),
+    assigned_mean: assignedMean,
+    assigned_sd: assignedSd,
+    expected_qualitative: expectedQualitative,
+    updated_by: actor.id,
+    change_reason: changeReason,
     updated_at: new Date().toISOString(),
   }
   if (existing) {
@@ -695,7 +728,8 @@ export async function upsertSpec(input: {
     })
     fail(error)
   }
-  await writeAudit(actor, 'iqc.spec.upsert', 'iqc-control-spec', `${input.controlLotId}:${input.analyteId}`, input)
+  if (specChanged) await recalculateChartStatuses(input.controlLotId, input.analyteId)
+  await writeAudit(actor, 'iqc.spec.upsert', 'iqc-control-spec', `${input.controlLotId}:${input.analyteId}`, { ...input, recalculated: specChanged })
   return getIqcWorkspace(actor)
 }
 
@@ -847,6 +881,7 @@ export async function createRun(input: {
 
   const analyteIds = [...new Set(input.values.map((v) => v.analyteId))]
   const lotIds = [...new Set(input.values.map((v) => v.controlLotId))]
+  await assertUsableControlLots(lotIds)
   const [{ data: analyteRows, error: aErr }, { data: specRows, error: sErr }, { data: priorRows, error: pErr }] = await Promise.all([
     admin.from('iqc_analytes').select('*').in('id', analyteIds),
     admin.from('iqc_control_specs').select('*').in('control_lot_id', lotIds).in('analyte_id', analyteIds),
@@ -982,6 +1017,7 @@ export async function importIqcRuns(input: {
 }, actor: BmActor) {
   if (!input.analyteIds.length) throw new HttpError(400, 'Select at least one analyte column')
   if (!input.rows.length) throw new HttpError(400, 'No rows to import')
+  await assertUsableControlLots([input.controlLotId])
   const admin = getAdminClient()
 
   const [{ data: analyteRows, error: aErr }, { data: specRows, error: sErr }, { data: priorRows, error: pErr }] = await Promise.all([
@@ -1113,6 +1149,25 @@ async function getUsableLabValues(controlLotId: string, analyteId: string) {
   return usable
 }
 
+async function assertAllLotAnalytesLockable(controlLotId: string) {
+  const admin = getAdminClient()
+  const [{ data: resultRows, error: resultError }, { data: specRows, error: specError }] = await Promise.all([
+    admin.from('iqc_result_values').select('analyte_id').eq('control_lot_id', controlLotId),
+    admin.from('iqc_control_specs').select('analyte_id').eq('control_lot_id', controlLotId),
+  ])
+  fail(resultError)
+  fail(specError)
+  const analyteIds = [...new Set([
+    ...((resultRows ?? []) as RecordRow[]).map((row) => asString(row.analyte_id)),
+    ...((specRows ?? []) as RecordRow[]).map((row) => asString(row.analyte_id)),
+  ].filter(Boolean))]
+  if (!analyteIds.length) throw new HttpError(400, 'ยังไม่มี analyte สำหรับ Control lot นี้')
+  const counts = await Promise.all(analyteIds.map(async (analyteId) => ({ analyteId, n: (await getUsableLabValues(controlLotId, analyteId)).length })))
+  const incomplete = counts.filter((row) => row.n < 2)
+  if (incomplete.length) throw new HttpError(400, `ไม่สามารถ Lock & ปิด Lot ได้: ${incomplete.map((row) => `${row.analyteId} มี ${row.n} จุด`).join(', ')}`)
+  return counts
+}
+
 async function saveLabLock(controlLotId: string, analyteId: string, actor: BmActor, overrideReason?: string | null) {
   const admin = getAdminClient()
   const usable = await getUsableLabValues(controlLotId, analyteId)
@@ -1239,29 +1294,20 @@ export async function unlockLabStatistics(controlLotId: string, analyteId: strin
 export async function lockControlLotStatistics(controlLotId: string, actor: BmActor, overrideReason?: string | null) {
   assertAdmin(actor)
   const admin = getAdminClient()
-  const { data, error } = await admin.from('iqc_result_values').select('analyte_id').eq('control_lot_id', controlLotId)
-  fail(error)
-  const analyteIds = [...new Set(((data ?? []) as RecordRow[]).map((row) => asString(row.analyte_id)).filter(Boolean))]
-  if (!analyteIds.length) throw new HttpError(400, 'ยังไม่มีผล IQC สำหรับ lot นี้')
-
-  const counts = await Promise.all(analyteIds.map(async (analyteId) => ({ analyteId, n: (await getUsableLabValues(controlLotId, analyteId)).length })))
-  const lockable = counts.filter((row) => row.n >= 2)
-  const skipped = counts.filter((row) => row.n < 2)
-  if (!lockable.length) throw new HttpError(400, 'ไม่มี analyte ที่มีข้อมูลอย่างน้อย 2 จุดสำหรับ lock')
-  const needsOverride = lockable.some((row) => row.n < LAB_LOCK_MIN_POINTS)
+  const counts = await assertAllLotAnalytesLockable(controlLotId)
+  const needsOverride = counts.some((row) => row.n < LAB_LOCK_MIN_POINTS)
   if (needsOverride && !overrideReason?.trim()) {
     throw new HttpError(400, `มีบาง analyte ยังไม่ครบ ${LAB_LOCK_MIN_POINTS} จุด — ระบุเหตุผล override เพื่อ lock ทั้ง lot`)
   }
 
   const locked = []
-  for (const row of lockable) {
+  for (const row of counts) {
     locked.push(await saveLabLock(controlLotId, row.analyteId, actor, row.n < LAB_LOCK_MIN_POINTS ? overrideReason : null))
   }
   const { error: closeError } = await admin.from('iqc_control_lots').update({ is_active: false }).eq('id', controlLotId)
   fail(closeError)
   await writeAudit(actor, 'iqc.lot.lockAndClose', 'iqc-control-lot', controlLotId, {
     locked: locked.map((row) => row.analyteId),
-    skipped: skipped.map((row) => ({ analyteId: row.analyteId, n: row.n })),
     overrideReason: needsOverride ? overrideReason?.trim() : null,
     isActive: false,
   })

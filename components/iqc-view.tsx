@@ -1300,7 +1300,7 @@ function LotForm({ onSubmit, onUpdate, onToggle, onDelete, data }: { onSubmit: (
 }
 
 function SpecForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean>; data: IqcWorkspace }) {
-  const [form, setForm] = useState({ controlLotId: '', analyteId: '', assignedMean: '', assignedSd: '', expectedQualitative: '' })
+  const [form, setForm] = useState({ controlLotId: '', analyteId: '', assignedMean: '', assignedSd: '', expectedQualitative: '', changeReason: '' })
   const [busy, setBusy] = useState(false)
   return (
     <Card className="space-y-3 p-4 lg:col-span-2">
@@ -1309,8 +1309,8 @@ function SpecForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolea
         e.preventDefault()
         if (!form.controlLotId || !form.analyteId) return
         setBusy(true)
-        const body = { controlLotId: form.controlLotId, analyteId: form.analyteId, assignedMean: form.assignedMean === '' ? null : Number(form.assignedMean), assignedSd: form.assignedSd === '' ? null : Number(form.assignedSd), expectedQualitative: form.expectedQualitative || null }
-        if (await onSubmit(body)) setForm({ controlLotId: '', analyteId: '', assignedMean: '', assignedSd: '', expectedQualitative: '' })
+        const body = { controlLotId: form.controlLotId, analyteId: form.analyteId, assignedMean: form.assignedMean === '' ? null : Number(form.assignedMean), assignedSd: form.assignedSd === '' ? null : Number(form.assignedSd), expectedQualitative: form.expectedQualitative || null, changeReason: form.changeReason || null }
+        if (await onSubmit(body)) setForm({ controlLotId: '', analyteId: '', assignedMean: '', assignedSd: '', expectedQualitative: '', changeReason: '' })
         setBusy(false)
       }}>
         <Field label="Control lot"><Select value={form.controlLotId} onChange={(e) => setForm({ ...form, controlLotId: e.target.value })} required><option value="">—</option>{data.controlLots.map((l) => <option key={l.id} value={l.id}>{l.controlMaterialName}{l.level ? ` ${l.level}` : ''} · {l.lotNumber}</option>)}</Select></Field>
@@ -1318,6 +1318,7 @@ function SpecForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolea
         <Field label="Assigned mean"><Input className="mono" type="number" step="any" value={form.assignedMean} onChange={(e) => setForm({ ...form, assignedMean: e.target.value })} /></Field>
         <Field label="Assigned SD"><Input className="mono" type="number" step="any" value={form.assignedSd} onChange={(e) => setForm({ ...form, assignedSd: e.target.value })} /></Field>
         <Field label="Expected (qual)"><Input value={form.expectedQualitative} onChange={(e) => setForm({ ...form, expectedQualitative: e.target.value })} placeholder="valid/pos" /></Field>
+        <Field label="เหตุผลแก้ไข Spec" hint="ต้องระบุเมื่อแก้ไข spec ที่มีอยู่แล้ว"><Input value={form.changeReason} onChange={(e) => setForm({ ...form, changeReason: e.target.value })} placeholder="เช่น แก้ตาม certificate ผู้ผลิต" /></Field>
         <div className="md:col-span-5"><Button disabled={busy}>บันทึก spec</Button></div>
       </form>
     </Card>
