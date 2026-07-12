@@ -1257,10 +1257,13 @@ export async function lockControlLotStatistics(controlLotId: string, actor: BmAc
   for (const row of lockable) {
     locked.push(await saveLabLock(controlLotId, row.analyteId, actor, row.n < LAB_LOCK_MIN_POINTS ? overrideReason : null))
   }
-  await writeAudit(actor, 'iqc.spec.lockLot', 'iqc-control-lot', controlLotId, {
+  const { error: closeError } = await admin.from('iqc_control_lots').update({ is_active: false }).eq('id', controlLotId)
+  fail(closeError)
+  await writeAudit(actor, 'iqc.lot.lockAndClose', 'iqc-control-lot', controlLotId, {
     locked: locked.map((row) => row.analyteId),
     skipped: skipped.map((row) => ({ analyteId: row.analyteId, n: row.n })),
     overrideReason: needsOverride ? overrideReason?.trim() : null,
+    isActive: false,
   })
   return getIqcWorkspace(actor)
 }

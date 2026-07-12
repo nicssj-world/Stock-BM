@@ -142,16 +142,16 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
       window.alert(`บาง analyte มีข้อมูลน้อยกว่า 2 จุด จะถูกข้าม: ${tooFew.map((chart) => chart.analyteCode).join(', ')}`)
     }
     if (needsOverride) {
-      const reason = window.prompt('บาง analyte ยังไม่ครบ 20 จุด — ระบุเหตุผลในการ override lock ทั้ง lot:')
+      const reason = window.prompt('บาง analyte ยังไม่ครบ 20 จุด — ระบุเหตุผลในการ override ก่อน Lock & ปิด Lot:')
       if (reason == null || !reason.trim()) return
       overrideReason = reason.trim()
     }
     setBusy(`lot:${controlLotId}`)
     try {
       const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/lock/lot', { method: 'POST', body: JSON.stringify({ controlLotId, overrideReason }) })
-      onOk(needsOverride ? 'Lock ทั้ง lot แบบ override แล้ว' : 'Lock ทั้ง lot แล้ว', result.iqc)
+      onOk(needsOverride ? 'Lock และปิด Lot แบบ override แล้ว' : 'Lock และปิด Lot แล้ว', result.iqc)
     } catch (e) {
-      onErr(e instanceof Error ? e.message : 'Lock ทั้ง lot ไม่สำเร็จ')
+      onErr(e instanceof Error ? e.message : 'Lock และปิด Lot ไม่สำเร็จ')
     } finally {
       setBusy(null)
     }
@@ -320,6 +320,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
                       <h3 className="font-bold text-[#173d50]">{charts[0]?.controlMaterialName}</h3>
                       {charts[0]?.level ? <span className="rounded-full border border-[#d2dee0] px-2 py-0.5 text-[11px] font-bold text-[#55727c]">{charts[0].level}</span> : null}
                       <StatusBadge tone={worst} label={worst} />
+                      {!lot?.isActive ? <span className="rounded-full border border-[#d2dee0] bg-[#f1f5f5] px-2 py-0.5 text-[11px] font-bold text-[#58747d]">closed</span> : null}
                     </div>
                     <p className="mono mt-1 text-xs text-[#5f7880]">Lot {charts[0]?.lotNumber}</p>
                   </div>
@@ -328,7 +329,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
                       <div className="flex flex-wrap items-center gap-2">
                       {lockable ? (
                         <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={lotBusy} onClick={() => lockLot(lotId, charts)}>
-                          <Lock className="size-3.5" /> Lock ทั้ง Lot
+                          <Lock className="size-3.5" /> Lock & ปิด Lot
                         </Button>
                       ) : null}
                       {unlockable ? (
