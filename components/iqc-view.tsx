@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CalendarClock, Calculator, ClipboardList, Eye, Gauge, Layers3, Lock, LineChart, ListFilter, PlusCircle, Printer, Search, Settings, Sigma, Trash2, Wrench } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { IqcUncertaintyBudget, IqcWorkspace } from '@/lib/iqc/types'
+import { findCorrectiveActionForPoint } from '@/lib/iqc/corrective-actions'
 import { formatDate, formatDateTime } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
 import { LjChart } from '@/components/lj-chart'
@@ -242,7 +243,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
   const selectedRun = selectedPoint ? data.runs.find((run) => run.id === selectedPoint.runId) ?? null : null
   const selectedRunResult = selectedRun?.results.find((result) => result.analyteId === selectedChart?.analyteId && result.controlLotId === selectedChart.controlLotId) ?? null
   const linkedCorrectiveAction = selectedPoint && selectedChart
-    ? data.correctiveActions.find((action) => action.runId === selectedPoint.runId && action.analyteId === selectedChart.analyteId) ?? null
+    ? findCorrectiveActionForPoint(data.correctiveActions, selectedPoint.runId, selectedChart.analyteId)
     : null
   const grouped = filteredCharts.reduce((map, chart) => {
     const current = map.get(chart.controlLotId) ?? []
