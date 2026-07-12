@@ -1138,7 +1138,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
             )}
             <div className="relative"><ScanLine className="absolute top-3 left-3 size-5 text-[#88a1a7]" /><Input autoFocus value={barcode} onChange={(e) => setBarcode(e.target.value)} className="h-12 pl-11 mono text-base" placeholder="Sample barcode" /></div>
             <div className="flex gap-2"><Button disabled={busy || !scanBox}><QrCode className="size-4" /> Store sample</Button><Button type="button" variant="secondary" onClick={() => setCameraOn((value) => !value)}>{cameraOn ? <X className="size-4" /> : <Camera className="size-4" />} Camera</Button></div>
-            {cameraOn ? <div className="overflow-hidden rounded-md border border-[#d6e2e3] bg-black"><video ref={videoRef} className="aspect-video w-full object-cover" /></div> : null}
+            {cameraOn ? <div className="relative overflow-hidden rounded-md border border-[#d6e2e3] bg-black"><video ref={videoRef} className="aspect-video w-full object-cover" /><div className="pointer-events-none absolute inset-0 grid place-items-center"><div className="barcode-guide-frame relative h-[34%] w-[78%] rounded-lg border-2 border-[#5de1d0] shadow-[0_0_0_999px_rgba(0,0,0,.22),0_0_18px_rgba(93,225,208,.8)]"><span className="absolute -bottom-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-[#073f3a]/90 px-3 py-1 text-[11px] font-bold text-white">จัดบาร์โค้ดให้อยู่ในกรอบ</span></div></div></div> : null}
           </form>
         </Card>
         <Card className="p-4 space-y-3">
