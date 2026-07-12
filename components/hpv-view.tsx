@@ -1148,7 +1148,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
             <div className="max-h-[210px] overflow-y-auto">
               <table className="w-full text-left text-sm">
                 <thead className="sticky top-0 bg-[#f7fafa] text-[10px] tracking-[0.08em] text-[#779097] uppercase">
-                  <tr><th className="px-4 py-2">Code</th><th className="px-2 py-2 text-center">Stored</th><th className="px-2 py-2">Status</th><th className="px-2 py-2">Destroy due</th></tr>
+                  <tr><th className="px-4 py-2">Code</th><th className="px-2 py-2 text-center">Stored</th><th className="px-2 py-2">Status</th><th className="px-2 py-2">Destroy due</th><th className="px-2 py-2 text-right">Action</th></tr>
                 </thead>
                 <tbody className="divide-y divide-[#edf2f2]">
                   {data.boxes.map((box) => {
@@ -1162,6 +1162,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
                         <td className="mono px-2 py-2 text-center font-bold text-[#315763]">{storedCount}/{box.capacity}</td>
                         <td className="px-2 py-2"><StatusBadge tone={box.status === 'open' ? 'accepted' : box.status === 'full' ? 'warning' : 'neutral'} label={box.status.toUpperCase()} /></td>
                         <td className="px-2 py-2 text-xs">{destructionState === 'due_soon' ? <StatusBadge tone="warning" label={`เหลือ ${remainingDays} วัน`} /> : destructionState === 'due_now' ? <StatusBadge tone="rejected" label="ครบกำหนดทำลาย" /> : <span className="text-[#8ba0a5]">{box.destroyDueAt ? formatDate(box.destroyDueAt) : '-'}</span>}</td>
+                        <td className="px-2 py-2 text-right">{box.status === 'open' ? <button type="button" onClick={(event) => { event.stopPropagation(); void closeBox(box) }} className="rounded border border-[#c7a850] bg-[#fdf8ed] px-2 py-1 text-[10px] font-bold text-[#8a6d1e] hover:bg-[#f9efc8]">ปิดกล่อง</button> : null}</td>
                       </tr>
                     )
                   })}
