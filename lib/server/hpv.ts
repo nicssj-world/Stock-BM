@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { addOneMonth, nextHpvBoxPosition, summarizeHpvSites } from '@/lib/hpv/rules'
+import { addOneMonth, getHpvDestructionState, nextHpvBoxPosition, summarizeHpvSites } from '@/lib/hpv/rules'
 import type { BmActor } from '@/lib/bm/types'
 import type {
   HpvDashboard,
@@ -8,6 +8,7 @@ import type {
   HpvKitDistributionLine,
   HpvKitReturn,
   HpvKitReturnLine,
+  HpvBoxStatus,
   HpvSample,
   HpvSpecimenType,
   HpvSite,
@@ -791,11 +792,13 @@ export async function destroyHpvStorageBox(id: string, actor: BmActor) {
 export async function getHpvDashboardData(): Promise<HpvDashboard> {
   const admin = getAdminClient()
   const today = todayBangkok()
-  const [{ count: storedCount }, { count: boxCount }] = await Promise.all([
+  const [{ count: storedCount }, { data: boxData, error: boxError }] = await Promise.all([
     admin.from('bm_hpv_samples').select('*', { count: 'exact', head: true }).eq('status', 'stored'),
-    admin.from('bm_hpv_storage_boxes').select('*', { count: 'exact', head: true }).lte('destroy_due_at', today).neq('status', 'destroyed'),
+    admin.from('bm_hpv_storage_boxes').select('destroy_due_at,status').not('destroy_due_at', 'is', null).neq('status', 'destroyed'),
   ])
-  return { storedSamples: storedCount ?? 0, boxesDueDestruction: boxCount ?? 0 }
+  fail(boxError)
+  const states = (boxData ?? []).map((box) => getHpvDestructionState(nullableString((box as RecordRow).destroy_due_at), asString((box as RecordRow).status) as HpvBoxStatus, today))
+  return { storedSamples: storedCount ?? 0, boxesDueSoon: states.filter((state) => state === 'due_soon').length, boxesDueDestruction: states.filter((state) => state === 'due_now').length }
 }
 
 export async function checkoutHpvSample(input: { barcode: string; destination?: string | null; note?: string | null }, actor: BmActor) {

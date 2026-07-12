@@ -26,8 +26,8 @@ import {
 } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { HpvBoxType, HpvKitDistribution, HpvSample, HpvSiteReceipt, HpvSpecimenType, HpvStorageBox, HpvWorkspace } from '@/lib/hpv/types'
-import { formatHpvBoxPosition, HPV_BOX_CAPACITY, specimenTypeLabel } from '@/lib/hpv/rules'
-import { formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
+import { formatHpvBoxPosition, getHpvDestructionState, HPV_BOX_CAPACITY, specimenTypeLabel } from '@/lib/hpv/rules'
+import { bangkokDateKey, daysUntil, formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
 
 type Tab = 'distribution' | 'returns' | 'receipts' | 'storage' | 'checkout'
@@ -1153,14 +1153,15 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
                 <tbody className="divide-y divide-[#edf2f2]">
                   {data.boxes.map((box) => {
                     const isSelected = effectiveBoxId === box.id
-                    const isDue = box.destroyDueAt && box.destroyDueAt.slice(0, 10) <= today
+                    const destructionState = getHpvDestructionState(box.destroyDueAt, box.status, today)
+                    const remainingDays = box.destroyDueAt ? daysUntil(bangkokDateKey(box.destroyDueAt), today) : 0
                     const storedCount = box.samples.filter((s) => s.status === 'stored').length
                     return (
                       <tr key={box.id} onClick={() => setSelectedBoxId(box.id)} className={`cursor-pointer transition-colors ${isSelected ? 'bg-[#eef9f7]' : 'hover:bg-[#f7fbfc]'}`}>
                         <td className="mono px-4 py-2 font-bold text-[#315763]">{box.boxCode}</td>
                         <td className="mono px-2 py-2 text-center font-bold text-[#315763]">{storedCount}/{box.capacity}</td>
                         <td className="px-2 py-2"><StatusBadge tone={box.status === 'open' ? 'accepted' : box.status === 'full' ? 'warning' : 'neutral'} label={box.status.toUpperCase()} /></td>
-                        <td className={`px-2 py-2 text-xs ${isDue ? 'font-bold text-red-600' : 'text-[#8ba0a5]'}`}>{box.destroyDueAt ? formatDate(box.destroyDueAt) : '-'}</td>
+                        <td className="px-2 py-2 text-xs">{destructionState === 'due_soon' ? <StatusBadge tone="warning" label={`เหลือ ${remainingDays} วัน`} /> : destructionState === 'due_now' ? <StatusBadge tone="rejected" label="ครบกำหนดทำลาย" /> : <span className="text-[#8ba0a5]">{box.destroyDueAt ? formatDate(box.destroyDueAt) : '-'}</span>}</td>
                       </tr>
                     )
                   })}
@@ -1193,7 +1194,8 @@ function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onCl
   if (!box) return <Card className="flex min-h-[520px] items-center justify-center p-8 text-center text-sm text-[#789097]">ยังไม่มี Storage box</Card>
   const sampleMap = new Map(box.samples.map((sample) => [sample.position, sample]))
   const occupied = box.samples.length
-  const dueTone = box.destroyDueAt && box.destroyDueAt.slice(0, 10) <= today ? 'rejected' : 'warning'
+  const destructionState = getHpvDestructionState(box.destroyDueAt, box.status, today)
+  const remainingDays = box.destroyDueAt ? daysUntil(bangkokDateKey(box.destroyDueAt), today) : 0
   const canInteract = box.status === 'open'
 
   return (
@@ -1205,7 +1207,9 @@ function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onCl
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge tone={box.status === 'open' ? 'accepted' : box.status === 'full' ? 'warning' : 'neutral'} label={box.status.toUpperCase()} />
-          {box.destroyDueAt ? <StatusBadge tone={dueTone} label={`Destroy due ${formatDate(box.destroyDueAt)}`} /> : null}
+          {destructionState === 'due_soon' ? <StatusBadge tone="warning" label={`เหลือ ${remainingDays} วัน`} /> : null}
+          {destructionState === 'due_now' ? <StatusBadge tone="rejected" label="ครบกำหนดทำลาย" /> : null}
+          {destructionState === 'none' && box.destroyDueAt ? <StatusBadge tone="neutral" label={`Destroy due ${formatDate(box.destroyDueAt)}`} /> : null}
           {onClose && box.status === 'open' ? <button onClick={() => onClose(box)} className="flex items-center gap-1 rounded border border-[#c7a850] bg-[#fdf8ed] px-2 py-1 text-[10px] font-bold text-[#8a6d1e] hover:bg-[#f9efc8]"><CheckCircle2 className="size-3" /> ปิดกล่อง</button> : null}
           {onDestroy && box.status === 'full' ? <button onClick={() => onDestroy(box)} className="flex items-center gap-1 rounded border border-red-300 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-700 hover:bg-red-100"><Flame className="size-3" /> ทำลาย</button> : null}
           {onDelete ? <button onClick={() => onDelete(box)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-500 hover:bg-red-100"><Trash2 className="size-3" /> ลบกล่อง</button> : null}

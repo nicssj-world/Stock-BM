@@ -3,12 +3,16 @@ import type { ExpiryState, StockLot } from '@/lib/bm/types'
 const DAY_MS = 24 * 60 * 60 * 1000
 
 export function todayBangkok() {
+  return bangkokDateKey(new Date())
+}
+
+export function bangkokDateKey(value: string | Date) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Bangkok',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).formatToParts(new Date())
+  }).formatToParts(new Date(value))
   const map = new Map(parts.map((part) => [part.type, part.value]))
   return `${map.get('year')}-${map.get('month')}-${map.get('day')}`
 }

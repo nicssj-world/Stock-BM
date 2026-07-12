@@ -1,4 +1,5 @@
-import type { HpvSpecimenType } from '@/lib/hpv/types'
+import type { HpvBoxStatus, HpvDestructionState, HpvSpecimenType } from '@/lib/hpv/types'
+import { bangkokDateKey, daysUntil, todayBangkok } from '@/lib/bm/rules'
 
 export const HPV_BOX_CAPACITY = 25
 
@@ -44,6 +45,13 @@ export function isHpvSpecimenType(value: unknown): value is HpvSpecimenType {
 
 export function specimenTypeLabel(type: HpvSpecimenType) {
   return type === 'self_collected' ? 'Self-collected' : 'Clinician-collected'
+}
+
+export function getHpvDestructionState(destroyDueAt: string | null, status: HpvBoxStatus, today = todayBangkok()): HpvDestructionState {
+  if (!destroyDueAt || status === 'destroyed') return 'none'
+  const remaining = daysUntil(bangkokDateKey(destroyDueAt), today)
+  if (remaining <= 0) return 'due_now'
+  return remaining <= 5 ? 'due_soon' : 'none'
 }
 
 export function addOneMonth(date: Date) {

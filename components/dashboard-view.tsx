@@ -122,6 +122,16 @@ export function DashboardView({ actor, stock, env, hpv }: { actor: BmActor; stoc
           <SectionTitle title="HPV Samples" href="/hpv" />
           <div className="divide-y divide-[#edf2f2]">
             <div className="flex items-center gap-3 px-4 py-3">
+              <div className={`flex size-8 items-center justify-center rounded-md ${hpv.boxesDueSoon > 0 ? 'bg-[#fff8e8]' : 'bg-[#f3f6f7]'}`}>
+                <CalendarClock className={`size-4 ${hpv.boxesDueSoon > 0 ? 'text-[#a76511]' : 'text-[#7b9298]'}`} />
+              </div>
+              <div>
+                <p className={`font-semibold ${hpv.boxesDueSoon > 0 ? 'text-[#a76511]' : 'text-[#315763]'}`}>กล่องใกล้ครบกำหนดทำลาย</p>
+                <p className="text-xs text-[#7b9298]">เหลือไม่เกิน 5 วัน</p>
+              </div>
+              <span className={`mono ml-auto text-lg font-bold ${hpv.boxesDueSoon > 0 ? 'text-[#a76511]' : 'text-[#173d50]'}`}>{hpv.boxesDueSoon}</span>
+            </div>
+            <div className="flex items-center gap-3 px-4 py-3">
               <div className="flex size-8 items-center justify-center rounded-md bg-[#e8f7f5]"><FlaskConical className="size-4 text-[#0b7f76]" /></div>
               <div>
                 <p className="font-semibold text-[#315763]">ตัวอย่างในคลัง</p>
@@ -140,7 +150,7 @@ export function DashboardView({ actor, stock, env, hpv }: { actor: BmActor; stoc
               <span className={`mono ml-auto text-lg font-bold ${hpv.boxesDueDestruction > 0 ? 'text-[#be3d49]' : 'text-[#173d50]'}`}>{hpv.boxesDueDestruction}</span>
             </div>
           </div>
-          {hpv.boxesDueDestruction > 0 ? (
+          {hpv.boxesDueSoon > 0 || hpv.boxesDueDestruction > 0 ? (
             <div className="border-t border-[#edf2f2] px-4 py-2 text-[11px] text-[#a76511]">
               <Link href="/hpv" className="hover:underline">ดูกล่องที่ต้องทำลาย →</Link>
             </div>
