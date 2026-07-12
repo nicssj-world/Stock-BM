@@ -57,18 +57,21 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
     { data: roundData, error: roundError },
     { data: resultData, error: resultError },
     { data: caData, error: caError },
+    { data: iqcAnalyteData, error: iqcAnalyteError },
   ] = await Promise.all([
     admin.from('eqa_providers').select('*').order('name'),
     admin.from('eqa_schemes').select('*').order('name'),
     admin.from('eqa_rounds').select('*').order('result_due_date', { ascending: true, nullsFirst: false }),
     admin.from('eqa_results').select('*'),
     admin.from('eqa_corrective_actions').select('*').order('created_at', { ascending: false }).limit(200),
+    admin.from('iqc_analytes').select('id,code,name').eq('is_active', true).order('code'),
   ])
   fail(providerError)
   fail(schemeError)
   fail(roundError)
   fail(resultError)
   fail(caError)
+  fail(iqcAnalyteError)
 
   const providers: EqaProvider[] = ((providerData ?? []) as RecordRow[]).map((row) => ({ id: asString(row.id), name: asString(row.name), isActive: Boolean(row.is_active) }))
   const providerMap = new Map(providers.map((p) => [p.id, p]))
@@ -95,6 +98,8 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
       submittedValue: nullableString(row.submitted_value),
       evaluationScore: nullableNumber(row.evaluation_score),
       outcome: asString(row.outcome) as EqaOutcome,
+      iqcAnalyteId: nullableString(row.iqc_analyte_id),
+      assignedValue: nullableNumber(row.assigned_value),
     }
     resultsByRound.set(roundId, [...(resultsByRound.get(roundId) ?? []), result])
   }
@@ -150,6 +155,7 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
     schemes,
     rounds,
     correctiveActions,
+    iqcAnalytes: ((iqcAnalyteData ?? []) as RecordRow[]).map((row) => ({ id: asString(row.id), code: asString(row.code), name: asString(row.name) })),
     summary: {
       schemeCount: schemes.filter((s) => s.isActive).length,
       overdue: rounds.filter((r) => r.reminder === 'overdue').length,
@@ -238,13 +244,15 @@ export async function updateRound(id: string, input: { status?: EqaRoundStatus; 
   return getEqaWorkspace(actor)
 }
 
-export async function createResult(input: { roundId: string; analyte: string; submittedValue?: string | null; evaluationScore?: number | null; outcome: EqaOutcome }, actor: BmActor) {
+export async function createResult(input: { roundId: string; analyte: string; submittedValue?: string | null; evaluationScore?: number | null; outcome: EqaOutcome; iqcAnalyteId?: string | null; assignedValue?: number | null }, actor: BmActor) {
   const { data, error } = await getAdminClient().from('eqa_results').insert({
     round_id: input.roundId,
     analyte: input.analyte.trim(),
     submitted_value: clean(input.submittedValue),
     evaluation_score: input.evaluationScore ?? null,
     outcome: input.outcome,
+    iqc_analyte_id: input.iqcAnalyteId || null,
+    assigned_value: input.assignedValue ?? null,
     created_by: actor.id,
   }).select('id').single()
   fail(error)
@@ -252,12 +260,14 @@ export async function createResult(input: { roundId: string; analyte: string; su
   return getEqaWorkspace(actor)
 }
 
-export async function updateResult(id: string, input: { analyte: string; submittedValue?: string | null; evaluationScore?: number | null; outcome: EqaOutcome }, actor: BmActor) {
+export async function updateResult(id: string, input: { analyte: string; submittedValue?: string | null; evaluationScore?: number | null; outcome: EqaOutcome; iqcAnalyteId?: string | null; assignedValue?: number | null }, actor: BmActor) {
   const { data, error } = await getAdminClient().from('eqa_results').update({
     analyte: input.analyte.trim(),
     submitted_value: clean(input.submittedValue),
     evaluation_score: input.evaluationScore ?? null,
     outcome: input.outcome,
+    iqc_analyte_id: input.iqcAnalyteId || null,
+    assigned_value: input.assignedValue ?? null,
   }).eq('id', id).select('id').single()
   fail(error)
   await writeAudit(actor, 'eqa.result.update', 'eqa-result', asString((data as RecordRow).id), input)

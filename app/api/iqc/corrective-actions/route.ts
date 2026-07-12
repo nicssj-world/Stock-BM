@@ -10,6 +10,8 @@ const schema = z.object({
   problem: z.string().trim().min(1).max(1000),
   rootCause: z.string().trim().max(1000).nullable().optional(),
   actionTaken: z.string().trim().max(1000).nullable().optional(),
+  ownerId: z.string().uuid().nullable().optional(),
+  dueDate: z.string().date().nullable().optional(),
 })
 
 export async function POST(request: Request) {

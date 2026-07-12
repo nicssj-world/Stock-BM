@@ -11,7 +11,9 @@ export interface WestgardPoint {
 }
 
 // Rules that reject a run. 1-2s is a warning only (prompts inspection).
-const REJECT_RULES = new Set(['1-3s', '2-2s', 'R-4s', '4-1s', '10x'])
+export const WESTGARD_RULES = ['1-2s', '1-3s', '2-2s', 'R-4s', '4-1s', '10x'] as const
+export type WestgardRule = (typeof WESTGARD_RULES)[number]
+const REJECT_RULES = new Set<WestgardRule>(['1-3s', '2-2s', 'R-4s', '4-1s', '10x'])
 
 export function mean(values: number[]): number {
   if (!values.length) return 0
@@ -44,28 +46,29 @@ export function toStat(value: number, scale: AnalyteScale): number {
 
 // Evaluate Westgard multi-rules across a chronological series (oldest first).
 // Each point is judged using itself and the preceding points.
-export function evaluateWestgard(series: number[], m: number, s: number): WestgardPoint[] {
+export function evaluateWestgard(series: number[], m: number, s: number, enabledRules: readonly WestgardRule[] = WESTGARD_RULES): WestgardPoint[] {
+  const enabled = new Set(enabledRules)
   const usable = s > 0
   const zs = series.map((v) => (usable ? (v - m) / s : 0))
   return series.map((_, i) => {
     const z = zs[i]
-    const rules: string[] = []
+    const rules: WestgardRule[] = []
     if (usable) {
-      if (Math.abs(z) > 3) rules.push('1-3s')
+      if (Math.abs(z) > 3 && enabled.has('1-3s')) rules.push('1-3s')
       if (i >= 1) {
         const zp = zs[i - 1]
-        if ((z > 2 && zp > 2) || (z < -2 && zp < -2)) rules.push('2-2s')
-        if (Math.abs(z - zp) > 4) rules.push('R-4s')
+        if (enabled.has('2-2s') && ((z > 2 && zp > 2) || (z < -2 && zp < -2))) rules.push('2-2s')
+        if (enabled.has('R-4s') && Math.abs(z - zp) > 4) rules.push('R-4s')
       }
       if (i >= 3) {
         const w = zs.slice(i - 3, i + 1)
-        if (w.every((x) => x > 1) || w.every((x) => x < -1)) rules.push('4-1s')
+        if (enabled.has('4-1s') && (w.every((x) => x > 1) || w.every((x) => x < -1))) rules.push('4-1s')
       }
       if (i >= 9) {
         const w = zs.slice(i - 9, i + 1)
-        if (w.every((x) => x > 0) || w.every((x) => x < 0)) rules.push('10x')
+        if (enabled.has('10x') && (w.every((x) => x > 0) || w.every((x) => x < 0))) rules.push('10x')
       }
-      if (Math.abs(z) > 2 && !rules.includes('1-3s')) rules.push('1-2s')
+      if (enabled.has('1-2s') && Math.abs(z) > 2 && !rules.includes('1-3s')) rules.push('1-2s')
     }
     const hasReject = rules.some((rule) => REJECT_RULES.has(rule))
     const status: QcStatus = hasReject ? 'rejected' : rules.includes('1-2s') ? 'warning' : 'accepted'
@@ -74,7 +77,7 @@ export function evaluateWestgard(series: number[], m: number, s: number): Westga
 }
 
 // Convenience: evaluate only the latest point given the prior accepted series.
-export function evaluateLatest(series: number[], m: number, s: number): WestgardPoint {
-  const points = evaluateWestgard(series, m, s)
+export function evaluateLatest(series: number[], m: number, s: number, enabledRules: readonly WestgardRule[] = WESTGARD_RULES): WestgardPoint {
+  const points = evaluateWestgard(series, m, s, enabledRules)
   return points[points.length - 1] ?? { z: 0, violatedRules: [], status: 'accepted' }
 }

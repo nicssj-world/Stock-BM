@@ -93,6 +93,8 @@ export function IqcView({ actor, initialData }: { actor: BmActor; initialData: I
         <StatCard label="Rejected" value={scoped.summary.rejected} tone="rejected" hint={`${data.summary.openCorrectiveActions} corrective action ค้าง`} />
       </div>
 
+      {data.alerts.length ? <Card className="p-3"><div className="flex flex-wrap gap-2">{data.alerts.map((alert) => <span key={alert.id} className={`inline-flex max-w-full items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold ${alert.tone === 'rejected' ? 'border-[#efc7cc] bg-[#fff5f6] text-[#c02a37]' : 'border-[#eed4a6] bg-[#fff9ed] text-[#a9700f]'}`}><AlertTriangle className="size-3.5 shrink-0" /> {alert.title} <span className="font-normal opacity-80">· {alert.detail}</span></span>)}</div></Card> : null}
+
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
 
       {tab === 'charts' ? <ChartsOverviewTab data={scoped} isAdmin={canManageIqc} onOk={ok} onErr={err} onOpenCorrectiveAction={openCorrectiveAction} /> : null}
@@ -470,6 +472,7 @@ function PointDetailCard({
           <p className="mt-1 text-sm font-semibold text-[#173d50]">{point.violatedRules.join(', ') || '-'}</p>
         </div>
       </div>
+
       {run?.note ? <p className="rounded-md bg-[#f6fafa] px-3 py-2 text-xs text-[#58747d]">Note: {run.note}</p> : null}
       {result?.qualitativeValue ? <p className="text-xs text-[#789097]">Qualitative: {result.qualitativeValue}</p> : null}
       {correctiveAction ? (
@@ -821,7 +824,7 @@ function SigmaBar({ sigma }: { sigma: number | null }) {
 
 function SixSigmaTab({ data }: { data: IqcWorkspace }) {
   if (!data.sixSigma.length) {
-    return <Notice tone="info">ยังไม่มี Six Sigma — ตั้งค่า TEa ต่อ analyte (แท็บ จัดการ) และต้องมี mean/SD แล้ว <span className="text-xs">(bias มาจากโมดูล EQA — ตอนนี้ถือเป็น 0)</span></Notice>
+    return <Notice tone="info">ยังไม่มี Six Sigma — ตั้งค่า TEa ต่อ analyte (แท็บ จัดการ) และต้องมี mean/SD แล้ว</Notice>
   }
   return (
     <Card className="overflow-hidden">
@@ -833,7 +836,7 @@ function SixSigmaTab({ data }: { data: IqcWorkspace }) {
               <th className="px-3 py-2 font-semibold">Lot / Level</th>
               <th className="px-3 py-2 text-right font-semibold">Mean</th>
               <th className="px-3 py-2 text-right font-semibold">CV%</th>
-              <th className="px-3 py-2 text-right font-semibold">Bias%</th>
+              <th className="px-3 py-2 text-right font-semibold">Bias% / EQA</th>
               <th className="px-3 py-2 text-right font-semibold">TEa</th>
               <th className="px-3 py-2 text-right font-semibold">TEa%</th>
               <th className="px-3 py-2 font-semibold">Sigma</th>
@@ -846,7 +849,7 @@ function SixSigmaTab({ data }: { data: IqcWorkspace }) {
                 <td className="px-3 py-2 text-xs text-[#789097]">{row.lotNumber}{row.level ? ` · ${row.level}` : ''}</td>
                 <td className="mono px-3 py-2 text-right tabular-nums">{row.meanValue?.toFixed(2) ?? '—'}</td>
                 <td className="mono px-3 py-2 text-right tabular-nums">{row.cv?.toFixed(1) ?? '—'}</td>
-                <td className="mono px-3 py-2 text-right tabular-nums">{row.biasPct.toFixed(1)}</td>
+                <td className="mono px-3 py-2 text-right tabular-nums">{row.biasSampleCount ? `${row.biasPct.toFixed(1)} (${row.biasSampleCount})` : '—'}</td>
                 <td className="mono px-3 py-2 text-right tabular-nums">{row.teaValue}{row.teaMode === 'percent' ? '%' : ''}</td>
                 <td className="mono px-3 py-2 text-right tabular-nums">{row.teaPct?.toFixed(1) ?? '—'}</td>
                 <td className="px-3 py-2"><div className="flex items-center gap-2"><SigmaBar sigma={row.sigma} /><StatusBadge tone={SIGMA_TONE[row.rating]} label={row.rating} /></div></td>
@@ -1019,6 +1022,8 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
   const [problem, setProblem] = useState('')
   const [rootCause, setRootCause] = useState('')
   const [actionTaken, setActionTaken] = useState('')
+  const [ownerId, setOwnerId] = useState('')
+  const [dueDate, setDueDate] = useState('')
   const [busy, setBusy] = useState(false)
   const [showAll, setShowAll] = useState(false)
 
@@ -1058,9 +1063,9 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
     if (!runId || !problem.trim()) return onErr('เลือก run และระบุปัญหา')
     setBusy(true)
     try {
-      const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/corrective-actions', { method: 'POST', body: JSON.stringify({ runId, problem, rootCause: rootCause || null, actionTaken: actionTaken || null }) })
+      const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/corrective-actions', { method: 'POST', body: JSON.stringify({ runId, problem, rootCause: rootCause || null, actionTaken: actionTaken || null, ownerId: ownerId || null, dueDate: dueDate || null }) })
       onOk('เปิด corrective action แล้ว', result.iqc)
-      setProblem(''); setRootCause(''); setActionTaken('')
+      setProblem(''); setRootCause(''); setActionTaken(''); setOwnerId(''); setDueDate('')
     } catch (e) {
       onErr(e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ')
     } finally {
@@ -1071,12 +1076,22 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
     setBusy(true)
     try {
       const result = await api<{ iqc: IqcWorkspace }>(`/api/iqc/corrective-actions/${id}/close`, { method: 'POST', body: JSON.stringify({}) })
-      onOk('ปิด corrective action แล้ว', result.iqc)
+      onOk('ส่ง CAPA เพื่อรอตรวจ effectiveness แล้ว', result.iqc)
     } catch (e) {
       onErr(e instanceof Error ? e.message : 'ปิดไม่สำเร็จ')
     } finally {
       setBusy(false)
     }
+  }
+  async function verify(id: string) {
+    const effective = window.confirm('Corrective action นี้มีประสิทธิผลหรือไม่?\nกด OK = effective, Cancel = ineffective')
+    const note = window.prompt('บันทึกผลการตรวจ effectiveness:')
+    if (!note?.trim()) return
+    setBusy(true)
+    try {
+      const result = await api<{ iqc: IqcWorkspace }>(`/api/iqc/corrective-actions/${id}/close`, { method: 'POST', body: JSON.stringify({ effectivenessOutcome: effective ? 'effective' : 'ineffective', effectivenessNote: note.trim() }) })
+      onOk(effective ? 'ตรวจ effectiveness แล้ว และปิด CAPA' : 'บันทึกว่า ineffective และเปิด CAPA ต่อ', result.iqc)
+    } catch (e) { onErr(e instanceof Error ? e.message : 'ตรวจ effectiveness ไม่สำเร็จ') } finally { setBusy(false) }
   }
 
   return (
@@ -1097,6 +1112,7 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
           <Field label="ปัญหา / Problem"><Textarea rows={2} value={problem} onChange={(e) => setProblem(e.target.value)} required /></Field>
           <Field label="Root cause"><Textarea rows={2} value={rootCause} onChange={(e) => setRootCause(e.target.value)} /></Field>
           <Field label="Action taken"><Textarea rows={2} value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} /></Field>
+          <div className="grid grid-cols-2 gap-2"><Field label="ผู้รับผิดชอบ"><Select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}><option value="">— ยังไม่กำหนด —</option>{data.assignableUsers.map((user) => <option key={user.id} value={user.id}>{user.displayName}</option>)}</Select></Field><Field label="Due date"><Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field></div>
           <Button disabled={busy}>บันทึก</Button>
         </form>
       </Card>
@@ -1106,14 +1122,17 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
             <Card className="p-4">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <div className="flex items-center gap-2"><span className="font-bold text-[#315763]">{formatDateTime(ca.runDatetime)}</span><StatusBadge tone={ca.status === 'open' ? 'warning' : 'accepted'} label={ca.status} /></div>
+                  <div className="flex items-center gap-2"><span className="font-bold text-[#315763]">{formatDateTime(ca.runDatetime)}</span><StatusBadge tone={ca.status === 'closed' ? 'accepted' : 'warning'} label={ca.status} /></div>
                   {runById.get(ca.runId) ? <p className="mt-1 text-xs font-semibold text-[#58747d]">{summarizeResults(flaggedOf(runById.get(ca.runId)!), true) || summarizeResults(runById.get(ca.runId)!.results, false)}</p> : null}
                   <p className="mt-1 text-sm text-[#3f5c64]">{ca.problem}</p>
                   {ca.rootCause ? <p className="mt-1 text-xs text-[#789097]">Root cause: {ca.rootCause}</p> : null}
                   {ca.actionTaken ? <p className="text-xs text-[#789097]">Action: {ca.actionTaken}</p> : null}
+                  {ca.ownerName || ca.dueDate ? <p className="text-xs text-[#789097]">Owner: {ca.ownerName ?? '-'} · Due: {formatDate(ca.dueDate)}</p> : null}
+                  {ca.effectivenessNote ? <p className="text-xs text-[#789097]">Effectiveness: {ca.effectivenessOutcome} · {ca.effectivenessNote}</p> : null}
                   <p className="mt-1 text-[11px] text-[#9aafb4]">โดย {ca.createdByName ?? '-'}</p>
                 </div>
-                {ca.status === 'open' ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => close(ca.id)}>ปิด</Button> : null}
+                {ca.status === 'open' ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => close(ca.id)}>ส่งตรวจผล</Button> : null}
+                {ca.status === 'awaiting-effectiveness' ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => verify(ca.id)}>ตรวจ effectiveness</Button> : null}
               </div>
               <div className="mt-3"><AttachmentList module="iqc" entityType="corrective-action" entityId={ca.id} kind="corrective-action" canDelete /></div>
             </Card>
@@ -1152,8 +1171,33 @@ function ManageTab({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: string
       />
       <SpecForm onSubmit={(b) => post('/api/iqc/specs', b, 'บันทึก spec แล้ว')} data={data} />
       <TeaForm onSubmit={(b) => post('/api/iqc/tea', b, 'บันทึก TEa แล้ว')} data={data} />
+      <ControlPlanForm onSubmit={(b) => post('/api/iqc/control-plans', b, 'บันทึก Control plan แล้ว')} data={data} />
     </div>
   )
+}
+
+const CONTROL_PLAN_RULES = ['1-2s', '1-3s', '2-2s', 'R-4s', '4-1s', '10x']
+
+function ControlPlanForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean>; data: IqcWorkspace }) {
+  const [analyteId, setAnalyteId] = useState('')
+  const [instrumentId, setInstrumentId] = useState('')
+  const [levels, setLevels] = useState('')
+  const [frequency, setFrequency] = useState('daily')
+  const [rules, setRules] = useState<string[]>(CONTROL_PLAN_RULES)
+  const [busy, setBusy] = useState(false)
+  const toggleRule = (rule: string) => setRules((current) => current.includes(rule) ? current.filter((item) => item !== rule) : [...current, rule])
+  return <Card className="space-y-3 p-4 lg:col-span-2">
+    <div><h2 className="font-bold text-[#173d50]">Control plan ต่อ assay / instrument</h2><p className="text-xs text-[#789097]">กำหนดระดับ control ที่ต้องรัน และ Westgard rules ที่ใช้กับ instrument นั้น</p></div>
+    <form className="grid gap-2 md:grid-cols-4" onSubmit={async (event) => { event.preventDefault(); const requiredLevels = levels.split(',').map((item) => item.trim()).filter(Boolean); if (!analyteId || !instrumentId || !requiredLevels.length || !rules.length) return; setBusy(true); if (await onSubmit({ analyteId, instrumentId, requiredLevels, frequency, westgardRules: rules })) { setAnalyteId(''); setInstrumentId(''); setLevels('') }; setBusy(false) }}>
+      <Field label="Analyte"><Select value={analyteId} onChange={(event) => setAnalyteId(event.target.value)} required><option value="">—</option>{data.analytes.filter((item) => item.isActive).map((item) => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}</Select></Field>
+      <Field label="Instrument"><Select value={instrumentId} onChange={(event) => setInstrumentId(event.target.value)} required><option value="">—</option>{data.instruments.filter((item) => item.isActive).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></Field>
+      <Field label="Required levels"><Input value={levels} onChange={(event) => setLevels(event.target.value)} placeholder="Low, Normal, High" required /></Field>
+      <Field label="Frequency"><Select value={frequency} onChange={(event) => setFrequency(event.target.value)}><option value="daily">อย่างน้อยวันละครั้ง</option><option value="per-run">ทุก IQC run</option></Select></Field>
+      <div className="md:col-span-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#58747d]">{CONTROL_PLAN_RULES.map((rule) => <label key={rule} className="flex items-center gap-1"><input type="checkbox" checked={rules.includes(rule)} onChange={() => toggleRule(rule)} /> {rule}</label>)}</div>
+      <div className="md:col-span-4"><Button disabled={busy}>{busy ? 'กำลังบันทึก…' : 'บันทึก Control plan'}</Button></div>
+    </form>
+    {data.controlPlans.length ? <div className="divide-y divide-[#eef3f3] rounded-md border border-[#e9eff0] text-xs">{data.controlPlans.map((plan) => <div key={plan.id} className="flex flex-wrap justify-between gap-2 p-2"><span className="font-semibold text-[#315763]">{plan.analyteCode} · {plan.instrumentName}</span><span>{plan.frequency} · {plan.requiredLevels.join(', ')} · {plan.westgardRules.join(', ')}</span></div>)}</div> : null}
+  </Card>
 }
 
 function TeaForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean>; data: IqcWorkspace }) {

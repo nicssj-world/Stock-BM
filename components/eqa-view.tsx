@@ -72,18 +72,20 @@ function RoundsTab({ data, actor, onOk, onErr }: { data: EqaWorkspace; actor: Bm
   if (!data.rounds.length) return <Card className="p-8 text-center text-sm text-[#8198a0]">ยังไม่มี round — สร้างที่แท็บ จัดการ / Manage</Card>
   return (
     <div className="space-y-4">
-      {data.rounds.map((round) => <RoundCard key={round.id} round={round} actor={actor} onOk={onOk} onErr={onErr} />)}
+      {data.rounds.map((round) => <RoundCard key={round.id} round={round} iqcAnalytes={data.iqcAnalytes} actor={actor} onOk={onOk} onErr={onErr} />)}
     </div>
   )
 }
 
 const STATUS_TONE: Record<string, StatusTone> = { scheduled: 'neutral', received: 'warning', submitted: 'accepted', evaluated: 'accepted', closed: 'neutral' }
 
-function RoundCard({ round, actor, onOk, onErr }: { round: EqaRound; actor: BmActor; onOk: (t: string, d: EqaWorkspace) => void; onErr: (t: string) => void }) {
+function RoundCard({ round, iqcAnalytes, actor, onOk, onErr }: { round: EqaRound; iqcAnalytes: EqaWorkspace['iqcAnalytes']; actor: BmActor; onOk: (t: string, d: EqaWorkspace) => void; onErr: (t: string) => void }) {
   const [analyte, setAnalyte] = useState('')
   const [value, setValue] = useState('')
   const [score, setScore] = useState('')
   const [outcome, setOutcome] = useState('not-evaluated')
+  const [iqcAnalyteId, setIqcAnalyteId] = useState('')
+  const [assignedValue, setAssignedValue] = useState('')
   const [busy, setBusy] = useState(false)
   const [statusBusy, setStatusBusy] = useState(false)
   const [editingResultId, setEditingResultId] = useState<string | null>(null)
@@ -95,6 +97,8 @@ function RoundCard({ round, actor, onOk, onErr }: { round: EqaRound; actor: BmAc
     setValue('')
     setScore('')
     setOutcome('not-evaluated')
+    setIqcAnalyteId('')
+    setAssignedValue('')
     setEditingResultId(null)
   }
 
@@ -104,6 +108,8 @@ function RoundCard({ round, actor, onOk, onErr }: { round: EqaRound; actor: BmAc
     setValue(result.submittedValue ?? '')
     setScore(result.evaluationScore == null ? '' : String(result.evaluationScore))
     setOutcome(result.outcome)
+    setIqcAnalyteId(result.iqcAnalyteId ?? '')
+    setAssignedValue(result.assignedValue == null ? '' : String(result.assignedValue))
   }
 
   async function setStatus(status: string, okText = 'อัปเดตสถานะแล้ว') {
@@ -122,7 +128,7 @@ function RoundCard({ round, actor, onOk, onErr }: { round: EqaRound; actor: BmAc
     if (!analyte.trim()) return
     setBusy(true)
     try {
-      const body = { analyte, submittedValue: value || null, evaluationScore: score === '' ? null : Number(score), outcome }
+      const body = { analyte, submittedValue: value || null, evaluationScore: score === '' ? null : Number(score), outcome, iqcAnalyteId: iqcAnalyteId || null, assignedValue: assignedValue === '' ? null : Number(assignedValue) }
       const result = editingResultId
         ? await api<{ eqa: EqaWorkspace }>(`/api/eqa/results/${editingResultId}`, { method: 'PATCH', body: JSON.stringify(body) })
         : await api<{ eqa: EqaWorkspace }>('/api/eqa/results', { method: 'POST', body: JSON.stringify({ roundId: round.id, ...body }) })
@@ -203,9 +209,11 @@ function RoundCard({ round, actor, onOk, onErr }: { round: EqaRound; actor: BmAc
         </div>
       ) : null}
 
-      <form onSubmit={saveResult} className="mt-3 grid grid-cols-[1fr_1fr_0.7fr_1fr_auto] items-end gap-1.5">
+      <form onSubmit={saveResult} className="mt-3 grid gap-1.5 md:grid-cols-3 xl:grid-cols-[1fr_1fr_0.7fr_1fr_1fr_0.8fr_auto] items-end">
         <Field label="Analyte"><Input className="h-9" value={analyte} onChange={(e) => setAnalyte(e.target.value)} /></Field>
+        <Field label="IQC analyte"><Select className="h-9" value={iqcAnalyteId} onChange={(e) => setIqcAnalyteId(e.target.value)}><option value="">— ไม่ใช้ Sigma —</option>{iqcAnalytes.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}</Select></Field>
         <Field label="Submitted"><Input className="mono h-9" value={value} onChange={(e) => setValue(e.target.value)} /></Field>
+        <Field label="Assigned"><Input className="mono h-9" type="number" step="any" value={assignedValue} onChange={(e) => setAssignedValue(e.target.value)} /></Field>
         <Field label="Score"><Input className="mono h-9" type="number" step="any" value={score} onChange={(e) => setScore(e.target.value)} /></Field>
         <Field label="Outcome"><Select className="h-9" value={outcome} onChange={(e) => setOutcome(e.target.value)}><option value="not-evaluated">not-evaluated</option><option value="acceptable">acceptable</option><option value="warning">warning</option><option value="unacceptable">unacceptable</option></Select></Field>
         <div className="flex items-center gap-1">
