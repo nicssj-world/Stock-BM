@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CalendarClock, Calculator, ClipboardList, Eye, Gauge, Layers3, Lock, LineChart, ListFilter, PlusCircle, Printer, Search, Settings, Sigma, Trash2, Wrench } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { IqcUncertaintyBudget, IqcWorkspace } from '@/lib/iqc/types'
@@ -17,6 +17,7 @@ export function IqcView({ actor, initialData }: { actor: BmActor; initialData: I
   const [data, setData] = useState(initialData)
   const [tab, setTab] = useState<Tab>('charts')
   const [notice, setNotice] = useState<NoticeState>(null)
+  const [focusedCorrectiveActionId, setFocusedCorrectiveActionId] = useState<string | null>(null)
   const canManageIqc = true
 
   const tabs = [
@@ -34,6 +35,10 @@ export function IqcView({ actor, initialData }: { actor: BmActor; initialData: I
   }
   function err(text: string) {
     setNotice({ tone: 'danger', text })
+  }
+  function openCorrectiveAction(id: string) {
+    setFocusedCorrectiveActionId(id)
+    setTab('corrective')
   }
 
   const [panel, setPanel] = useState<string>('all')
@@ -89,11 +94,11 @@ export function IqcView({ actor, initialData }: { actor: BmActor; initialData: I
 
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
 
-      {tab === 'charts' ? <ChartsOverviewTab data={scoped} isAdmin={canManageIqc} onOk={ok} onErr={err} /> : null}
+      {tab === 'charts' ? <ChartsOverviewTab data={scoped} isAdmin={canManageIqc} onOk={ok} onErr={err} onOpenCorrectiveAction={openCorrectiveAction} /> : null}
       {tab === 'enter' ? <EnterTab data={scoped} onOk={ok} onErr={err} onDone={() => setTab('charts')} /> : null}
       {tab === 'sixsigma' ? <SixSigmaTab data={scoped} /> : null}
       {tab === 'uncertainty' ? <UncertaintyTab data={scoped} isAdmin={canManageIqc} onOk={ok} onErr={err} /> : null}
-      {tab === 'corrective' ? <CorrectiveTab data={data} onOk={ok} onErr={err} /> : null}
+      {tab === 'corrective' ? <CorrectiveTab data={data} onOk={ok} onErr={err} focusId={focusedCorrectiveActionId} /> : null}
       {tab === 'manage' && canManageIqc ? <ManageTab data={data} onOk={ok} onErr={err} /> : null}
     </div>
   )
@@ -119,7 +124,7 @@ function fmtCompact(value: number | null) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value)
 }
 
-function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace; isAdmin: boolean; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void }) {
+function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction }: { data: IqcWorkspace; isAdmin: boolean; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void; onOpenCorrectiveAction: (id: string) => void }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<ChartStatusFilter>('all')
   const [query, setQuery] = useState('')
@@ -186,6 +191,21 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
     }
   }
 
+  async function createPointCorrectiveAction(point: IqcWorkspace['charts'][number]['points'][number], chart: IqcWorkspace['charts'][number], problem: string) {
+    setBusy(`point:${point.resultId}`)
+    try {
+      const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/corrective-actions', {
+        method: 'POST',
+        body: JSON.stringify({ runId: point.runId, analyteId: chart.analyteId, problem }),
+      })
+      onOk('บันทึก corrective action สำหรับจุดนี้แล้ว', result.iqc)
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : 'บันทึก corrective action ไม่สำเร็จ')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   if (!data.charts.length) {
     return <Card className="p-8 text-center text-sm text-[#8198a0]">ยังไม่มีข้อมูล IQC — เพิ่ม analyte/control แล้วบันทึกผลที่แท็บบันทึกผล</Card>
   }
@@ -221,6 +241,9 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
   const selectedPoint = selectedChart?.points.find((point) => point.resultId === selectedPointId) ?? null
   const selectedRun = selectedPoint ? data.runs.find((run) => run.id === selectedPoint.runId) ?? null : null
   const selectedRunResult = selectedRun?.results.find((result) => result.analyteId === selectedChart?.analyteId && result.controlLotId === selectedChart.controlLotId) ?? null
+  const linkedCorrectiveAction = selectedPoint && selectedChart
+    ? data.correctiveActions.find((action) => action.runId === selectedPoint.runId && action.analyteId === selectedChart.analyteId) ?? null
+    : null
   const grouped = filteredCharts.reduce((map, chart) => {
     const current = map.get(chart.controlLotId) ?? []
     current.push(chart)
@@ -361,12 +384,16 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
               <LjChart chart={selectedChart} selectedResultId={selectedPointId} onPointSelect={(point) => setSelectedPointId(point.resultId)} />
               {selectedPoint ? (
                 <PointDetailCard
+                  key={`${selectedChart.key}:${selectedPoint.resultId}`}
                   chart={selectedChart}
                   point={selectedPoint}
                   run={selectedRun}
                   result={selectedRunResult}
+                  correctiveAction={linkedCorrectiveAction}
                   busy={busy === `point:${selectedPoint.resultId}`}
                   onVoid={() => voidPoint(selectedPoint.resultId)}
+                  onCreateCorrective={(problem) => createPointCorrectiveAction(selectedPoint, selectedChart, problem)}
+                  onOpenCorrectiveAction={onOpenCorrectiveAction}
                 />
               ) : null}
               <div className="flex justify-end">
@@ -393,16 +420,30 @@ function PointDetailCard({
   point,
   run,
   result,
+  correctiveAction,
   busy,
   onVoid,
+  onCreateCorrective,
+  onOpenCorrectiveAction,
 }: {
   chart: IqcWorkspace['charts'][number]
   point: IqcWorkspace['charts'][number]['points'][number]
   run: IqcWorkspace['runs'][number] | null
   result: IqcWorkspace['runs'][number]['results'][number] | null
+  correctiveAction: IqcWorkspace['correctiveActions'][number] | null
   busy: boolean
   onVoid: () => void
+  onCreateCorrective: (problem: string) => Promise<void>
+  onOpenCorrectiveAction: (id: string) => void
 }) {
+  const [problem, setProblem] = useState('')
+
+  async function createCorrectiveAction(event: React.FormEvent) {
+    event.preventDefault()
+    if (!problem.trim()) return
+    await onCreateCorrective(problem.trim())
+  }
+
   return (
     <Card className="space-y-3 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -429,6 +470,25 @@ function PointDetailCard({
       </div>
       {run?.note ? <p className="rounded-md bg-[#f6fafa] px-3 py-2 text-xs text-[#58747d]">Note: {run.note}</p> : null}
       {result?.qualitativeValue ? <p className="text-xs text-[#789097]">Qualitative: {result.qualitativeValue}</p> : null}
+      {correctiveAction ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#eed4a6] bg-[#fff9ed] p-3">
+          <div>
+            <p className="text-xs font-bold text-[#8b5a08]">มี Corrective action สำหรับจุดนี้แล้ว</p>
+            <p className="mt-0.5 text-xs text-[#795d2d]">{correctiveAction.problem}</p>
+          </div>
+          <Button type="button" variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" onClick={() => onOpenCorrectiveAction(correctiveAction.id)}>
+            <Wrench className="size-3.5" /> ไปยัง Corrective action
+          </Button>
+        </div>
+      ) : !point.isVoided ? (
+        <form onSubmit={createCorrectiveAction} className="space-y-2 rounded-md border border-[#e2ecee] bg-[#fbfefe] p-3">
+          <p className="text-xs font-bold text-[#315763]">บันทึก Corrective action สำหรับจุดนี้</p>
+          <Textarea rows={2} value={problem} onChange={(event) => setProblem(event.target.value)} placeholder="ระบุปัญหาที่พบ" required />
+          <div className="flex justify-end">
+            <Button className="min-h-8 px-3 py-1.5 text-xs" disabled={busy}>บันทึก Corrective action</Button>
+          </div>
+        </form>
+      ) : null}
       <div className="flex justify-end">
         <Button type="button" variant="danger" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy || point.isVoided} onClick={onVoid}>
           <Trash2 className="size-3.5" /> Void result
@@ -952,7 +1012,7 @@ function BudgetForm({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: strin
   )
 }
 
-function CorrectiveTab({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void }) {
+function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void; focusId: string | null }) {
   const [runId, setRunId] = useState('')
   const [problem, setProblem] = useState('')
   const [rootCause, setRootCause] = useState('')
@@ -967,6 +1027,10 @@ function CorrectiveTab({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: st
   const runById = useMemo(() => new Map(data.runs.map((run) => [run.id, run])), [data.runs])
   const flaggedOf = (r: IqcWorkspace['runs'][number]) => r.results.filter((res) => !res.isVoided && res.status !== 'accepted')
   const runOptions = data.runs.filter((r) => showAll || flaggedOf(r).length > 0)
+  useEffect(() => {
+    if (!focusId) return
+    document.getElementById(`corrective-action-${focusId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [focusId, data.correctiveActions])
   function lotLabel(controlLotId: string) {
     return controlLotLabels.get(controlLotId) ?? 'Control'
   }
@@ -1035,20 +1099,22 @@ function CorrectiveTab({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: st
       </Card>
       <div className="space-y-3">
         {data.correctiveActions.map((ca) => (
-          <Card key={ca.id} className="p-4">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <div className="flex items-center gap-2"><span className="font-bold text-[#315763]">{formatDateTime(ca.runDatetime)}</span><StatusBadge tone={ca.status === 'open' ? 'warning' : 'accepted'} label={ca.status} /></div>
-                {runById.get(ca.runId) ? <p className="mt-1 text-xs font-semibold text-[#58747d]">{summarizeResults(flaggedOf(runById.get(ca.runId)!), true) || summarizeResults(runById.get(ca.runId)!.results, false)}</p> : null}
-                <p className="mt-1 text-sm text-[#3f5c64]">{ca.problem}</p>
-                {ca.rootCause ? <p className="mt-1 text-xs text-[#789097]">Root cause: {ca.rootCause}</p> : null}
-                {ca.actionTaken ? <p className="text-xs text-[#789097]">Action: {ca.actionTaken}</p> : null}
-                <p className="mt-1 text-[11px] text-[#9aafb4]">โดย {ca.createdByName ?? '-'}</p>
+          <div key={ca.id} id={ca.id === focusId ? `corrective-action-${focusId}` : undefined}>
+            <Card className="p-4">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2"><span className="font-bold text-[#315763]">{formatDateTime(ca.runDatetime)}</span><StatusBadge tone={ca.status === 'open' ? 'warning' : 'accepted'} label={ca.status} /></div>
+                  {runById.get(ca.runId) ? <p className="mt-1 text-xs font-semibold text-[#58747d]">{summarizeResults(flaggedOf(runById.get(ca.runId)!), true) || summarizeResults(runById.get(ca.runId)!.results, false)}</p> : null}
+                  <p className="mt-1 text-sm text-[#3f5c64]">{ca.problem}</p>
+                  {ca.rootCause ? <p className="mt-1 text-xs text-[#789097]">Root cause: {ca.rootCause}</p> : null}
+                  {ca.actionTaken ? <p className="text-xs text-[#789097]">Action: {ca.actionTaken}</p> : null}
+                  <p className="mt-1 text-[11px] text-[#9aafb4]">โดย {ca.createdByName ?? '-'}</p>
+                </div>
+                {ca.status === 'open' ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => close(ca.id)}>ปิด</Button> : null}
               </div>
-              {ca.status === 'open' ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => close(ca.id)}>ปิด</Button> : null}
-            </div>
-            <div className="mt-3"><AttachmentList module="iqc" entityType="corrective-action" entityId={ca.id} kind="corrective-action" canDelete /></div>
-          </Card>
+              <div className="mt-3"><AttachmentList module="iqc" entityType="corrective-action" entityId={ca.id} kind="corrective-action" canDelete /></div>
+            </Card>
+          </div>
         ))}
         {!data.correctiveActions.length ? <Card className="p-8 text-center text-sm text-[#8198a0]"><ClipboardList className="mx-auto mb-2 size-6 text-[#b8c9cd]" />ยังไม่มี corrective action</Card> : null}
       </div>
