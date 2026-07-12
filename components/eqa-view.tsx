@@ -297,9 +297,9 @@ function CorrectiveTab({ data, onOk, onErr }: { data: EqaWorkspace; onOk: (t: st
 }
 
 function ManageTab({ data, onOk, onErr }: { data: EqaWorkspace; onOk: (t: string, d: EqaWorkspace) => void; onErr: (t: string) => void }) {
-  async function post(url: string, body: unknown, okText: string) {
+  async function request(url: string, body: unknown, okText: string, method: 'POST' | 'PATCH' | 'DELETE' = 'POST') {
     try {
-      const result = await api<{ eqa: EqaWorkspace }>(url, { method: 'POST', body: JSON.stringify(body) })
+      const result = await api<{ eqa: EqaWorkspace }>(url, { method, body: method === 'DELETE' ? undefined : JSON.stringify(body) })
       onOk(okText, result.eqa)
       return true
     } catch (e) {
@@ -307,27 +307,20 @@ function ManageTab({ data, onOk, onErr }: { data: EqaWorkspace; onOk: (t: string
       return false
     }
   }
-  async function remove(url: string, okText: string) {
-    try {
-      const result = await api<{ eqa: EqaWorkspace }>(url, { method: 'DELETE' })
-      onOk(okText, result.eqa)
-      return true
-    } catch (e) {
-      onErr(e instanceof Error ? e.message : 'ลบไม่สำเร็จ')
-      return false
-    }
-  }
+  const post = (url: string, body: unknown, text: string) => request(url, body, text)
+  const patch = (url: string, body: unknown, text: string) => request(url, body, text, 'PATCH')
+  const remove = (url: string, text: string) => request(url, null, text, 'DELETE')
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <ProviderForm onSubmit={(b) => post('/api/eqa/providers', b, 'เพิ่ม provider แล้ว')} onDelete={(id) => remove(`/api/eqa/providers/${id}`, 'ลบ provider แล้ว')} data={data} />
-      <SchemeForm onSubmit={(b) => post('/api/eqa/schemes', b, 'เพิ่ม scheme แล้ว')} data={data} />
-      <RoundForm onSubmit={(b) => post('/api/eqa/rounds', b, 'เพิ่ม round แล้ว')} data={data} />
+      <ProviderForm onSubmit={(b) => post('/api/eqa/providers', b, 'เพิ่ม provider แล้ว')} onUpdate={(id, b) => patch(`/api/eqa/providers/${id}`, b, 'แก้ไข provider แล้ว')} onDelete={(id) => remove(`/api/eqa/providers/${id}`, 'ลบ provider แล้ว')} data={data} />
+      <SchemeForm onSubmit={(b) => post('/api/eqa/schemes', b, 'เพิ่ม scheme แล้ว')} onUpdate={(id, b) => patch(`/api/eqa/schemes/${id}`, b, 'แก้ไข scheme แล้ว')} onDelete={(id) => remove(`/api/eqa/schemes/${id}`, 'ลบ scheme แล้ว')} data={data} />
+      <RoundForm onSubmit={(b) => post('/api/eqa/rounds', b, 'เพิ่ม round แล้ว')} onUpdate={(id, b) => patch(`/api/eqa/rounds/${id}`, b, 'แก้ไข round แล้ว')} onDelete={(id) => remove(`/api/eqa/rounds/${id}`, 'ลบ round แล้ว')} data={data} />
       <AnnualSummary data={data} />
     </div>
   )
 }
 
-function ProviderForm({ onSubmit, onDelete, data }: { onSubmit: (b: unknown) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; data: EqaWorkspace }) {
+function ProviderForm({ onSubmit, onUpdate, onDelete, data }: { onSubmit: (b: unknown) => Promise<boolean>; onUpdate: (id: string, b: unknown) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; data: EqaWorkspace }) {
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [deletingId, setDeletingId] = useState('')
@@ -357,7 +350,7 @@ function ProviderForm({ onSubmit, onDelete, data }: { onSubmit: (b: unknown) => 
                 <p className="truncate text-sm font-semibold text-[#173d50]">{provider.name}</p>
                 <p className="text-[11px] text-[#789097]">{schemeCount ? `${schemeCount} scheme` : 'ยังไม่มี scheme'}</p>
               </div>
-              <Button
+              <div className="flex gap-1"><Button type="button" variant="ghost" className="min-h-8 px-2.5 py-1.5" title="แก้ไข provider" onClick={async () => { const name = window.prompt('ชื่อ provider:', provider.name); if (name?.trim()) await onUpdate(provider.id, { name }) }}><Pencil className="size-3.5" /></Button><Button
                 type="button"
                 variant="danger"
                 className="min-h-8 px-2.5 py-1.5 text-xs"
@@ -366,7 +359,7 @@ function ProviderForm({ onSubmit, onDelete, data }: { onSubmit: (b: unknown) => 
                 onClick={() => removeProvider(provider.id, provider.name)}
               >
                 <Trash2 className="size-3.5" />
-              </Button>
+              </Button></div>
             </div>
           )
         })}
@@ -375,7 +368,7 @@ function ProviderForm({ onSubmit, onDelete, data }: { onSubmit: (b: unknown) => 
   )
 }
 
-function SchemeForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean>; data: EqaWorkspace }) {
+function SchemeForm({ onSubmit, onUpdate, onDelete, data }: { onSubmit: (b: unknown) => Promise<boolean>; onUpdate: (id: string, b: unknown) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; data: EqaWorkspace }) {
   const [form, setForm] = useState({ providerId: '', name: '', code: '', analyteScope: '', roundsPerYear: '' })
   const [busy, setBusy] = useState(false)
   return (
@@ -389,11 +382,12 @@ function SchemeForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<bool
         <div className="col-span-2"><Field label="Analyte scope"><Input value={form.analyteScope} onChange={(e) => setForm({ ...form, analyteScope: e.target.value })} placeholder="HIV VL, HBV VL…" /></Field></div>
         <div className="col-span-2"><Button disabled={busy}>เพิ่ม scheme</Button></div>
       </form>
+      <div className="space-y-1">{data.schemes.map((scheme) => <div key={scheme.id} className="flex items-center justify-between gap-2 rounded-md border border-[#e3ebec] px-2 py-1.5 text-xs"><span>{scheme.providerName} · {scheme.name}</span><span className="flex gap-1"><Button type="button" variant="ghost" className="min-h-7 px-2" title="แก้ไข scheme" onClick={async () => { const name = window.prompt('ชื่อ scheme:', scheme.name); if (!name?.trim()) return; await onUpdate(scheme.id, { providerId: scheme.providerId, name, code: scheme.code, analyteScope: scheme.analyteScope, roundsPerYear: scheme.roundsPerYear }) }}><Pencil className="size-3.5" /></Button><Button type="button" variant="danger" className="min-h-7 px-2" title="ลบ scheme" onClick={() => window.confirm(`ลบ scheme \"${scheme.name}\" ใช่ไหม?`) && onDelete(scheme.id)}><Trash2 className="size-3.5" /></Button></span></div>)}</div>
     </Card>
   )
 }
 
-function RoundForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean>; data: EqaWorkspace }) {
+function RoundForm({ onSubmit, onUpdate, onDelete, data }: { onSubmit: (b: unknown) => Promise<boolean>; onUpdate: (id: string, b: unknown) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; data: EqaWorkspace }) {
   const [form, setForm] = useState({ schemeId: '', roundLabel: '', sampleReceivedDate: '', resultDueDate: '' })
   const [busy, setBusy] = useState(false)
   return (
@@ -406,6 +400,7 @@ function RoundForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boole
         <Field label="ครบกำหนดส่ง"><Input type="date" value={form.resultDueDate} onChange={(e) => setForm({ ...form, resultDueDate: e.target.value })} /></Field>
         <div className="col-span-2"><Button disabled={busy}>เพิ่ม round</Button></div>
       </form>
+      <div className="space-y-1">{data.rounds.map((round) => <div key={round.id} className="flex items-center justify-between gap-2 rounded-md border border-[#e3ebec] px-2 py-1.5 text-xs"><span>{round.schemeName} · {round.roundLabel}</span><span className="flex gap-1"><Button type="button" variant="ghost" className="min-h-7 px-2" title="แก้ไข round" onClick={async () => { const roundLabel = window.prompt('ชื่อ round:', round.roundLabel); if (!roundLabel?.trim()) return; await onUpdate(round.id, { roundLabel }) }}><Pencil className="size-3.5" /></Button><Button type="button" variant="danger" className="min-h-7 px-2" title="ลบ round" onClick={() => window.confirm(`ลบ round \"${round.roundLabel}\" ใช่ไหม?`) && onDelete(round.id)}><Trash2 className="size-3.5" /></Button></span></div>)}</div>
     </Card>
   )
 }

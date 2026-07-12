@@ -211,6 +211,34 @@ export async function createScheme(input: { providerId: string; name: string; co
   return getEqaWorkspace(actor)
 }
 
+export async function updateProvider(id: string, input: { name: string }, actor: BmActor) {
+  assertAdmin(actor)
+  const { error } = await getAdminClient().from('eqa_providers').update({ name: input.name.trim() }).eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'eqa.provider.update', 'eqa-provider', id, input)
+  return getEqaWorkspace(actor)
+}
+
+export async function updateScheme(id: string, input: { providerId: string; name: string; code?: string | null; analyteScope?: string | null; roundsPerYear?: number | null }, actor: BmActor) {
+  assertAdmin(actor)
+  const { error } = await getAdminClient().from('eqa_schemes').update({ provider_id: input.providerId, name: input.name.trim(), code: clean(input.code), analyte_scope: clean(input.analyteScope), rounds_per_year: input.roundsPerYear ?? null }).eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'eqa.scheme.update', 'eqa-scheme', id, input)
+  return getEqaWorkspace(actor)
+}
+
+export async function deleteScheme(id: string, actor: BmActor) {
+  assertAdmin(actor)
+  const admin = getAdminClient()
+  const { count, error: countError } = await admin.from('eqa_rounds').select('id', { count: 'exact', head: true }).eq('scheme_id', id)
+  fail(countError)
+  if (count) throw new HttpError(409, 'ลบ scheme ไม่ได้ เพราะมี round ผูกอยู่')
+  const { error } = await admin.from('eqa_schemes').delete().eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'eqa.scheme.delete', 'eqa-scheme', id, {})
+  return getEqaWorkspace(actor)
+}
+
 export async function createRound(input: { schemeId: string; roundLabel: string; sampleReceivedDate?: string | null; resultDueDate?: string | null; note?: string | null }, actor: BmActor) {
   assertAdmin(actor)
   const { data, error } = await getAdminClient().from('eqa_rounds').insert({
@@ -226,9 +254,10 @@ export async function createRound(input: { schemeId: string; roundLabel: string;
   return getEqaWorkspace(actor)
 }
 
-export async function updateRound(id: string, input: { status?: EqaRoundStatus; submissionDate?: string | null; sampleReceivedDate?: string | null; resultDueDate?: string | null; note?: string | null }, actor: BmActor) {
+export async function updateRound(id: string, input: { roundLabel?: string; status?: EqaRoundStatus; submissionDate?: string | null; sampleReceivedDate?: string | null; resultDueDate?: string | null; note?: string | null }, actor: BmActor) {
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (input.status !== undefined) updates.status = input.status
+  if (input.roundLabel !== undefined) updates.round_label = input.roundLabel.trim()
   if (input.submissionDate !== undefined) updates.submission_date = input.submissionDate || null
   if (input.submissionDate === undefined && (input.status === 'submitted' || input.status === 'evaluated')) {
     const { data, error } = await getAdminClient().from('eqa_rounds').select('submission_date').eq('id', id).maybeSingle()
@@ -241,6 +270,18 @@ export async function updateRound(id: string, input: { status?: EqaRoundStatus; 
   const { error } = await getAdminClient().from('eqa_rounds').update(updates).eq('id', id)
   fail(error)
   await writeAudit(actor, 'eqa.round.update', 'eqa-round', id, input)
+  return getEqaWorkspace(actor)
+}
+
+export async function deleteRound(id: string, actor: BmActor) {
+  assertAdmin(actor)
+  const admin = getAdminClient()
+  const { count, error: countError } = await admin.from('eqa_corrective_actions').select('id', { count: 'exact', head: true }).eq('round_id', id)
+  fail(countError)
+  if (count) throw new HttpError(409, 'ลบ round ไม่ได้ เพราะมี corrective action ผูกอยู่')
+  const { error } = await admin.from('eqa_rounds').delete().eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'eqa.round.delete', 'eqa-round', id, {})
   return getEqaWorkspace(actor)
 }
 
