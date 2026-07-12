@@ -315,23 +315,17 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
             return (
               <Card key={lotId} className="overflow-hidden">
                 <div className="border-b border-[#e3ebec] bg-[#fbfefe] p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-bold text-[#173d50]">{charts[0]?.controlMaterialName}</h3>
-                        {charts[0]?.level ? <span className="rounded-full border border-[#d2dee0] px-2 py-0.5 text-[11px] font-bold text-[#55727c]">{charts[0].level}</span> : null}
-                        <StatusBadge tone={worst} label={worst} />
-                      </div>
-                      <p className="mono mt-1 text-xs text-[#5f7880]">Lot {charts[0]?.lotNumber}</p>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-bold text-[#173d50]">{charts[0]?.controlMaterialName}</h3>
+                      {charts[0]?.level ? <span className="rounded-full border border-[#d2dee0] px-2 py-0.5 text-[11px] font-bold text-[#55727c]">{charts[0].level}</span> : null}
+                      <StatusBadge tone={worst} label={worst} />
                     </div>
-                    <div className="text-right text-xs text-[#789097]">
-                      <div>{charts.length} analyte{charts.length > 1 ? 's' : ''}</div>
-                      <div className={lockedCount === charts.length ? 'font-bold text-[#18763a]' : 'font-bold text-[#a9700f]'}>{lockedCount}/{charts.length} locked</div>
-                      {lot?.expiryDate ? <div className={days != null && days <= 30 ? 'font-bold text-[#a9700f]' : ''}>EXP {formatDate(lot.expiryDate)}</div> : null}
-                    </div>
+                    <p className="mono mt-1 text-xs text-[#5f7880]">Lot {charts[0]?.lotNumber}</p>
                   </div>
-                  {isAdmin ? (
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                    {isAdmin ? (
+                      <div className="flex flex-wrap items-center gap-2">
                       {lockable ? (
                         <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={lotBusy} onClick={() => lockLot(lotId, charts)}>
                           <Lock className="size-3.5" /> Lock ทั้ง Lot
@@ -343,8 +337,14 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
                         </Button>
                       ) : null}
                       {!lockable && !unlockable ? <span className="text-xs text-[#789097]">ยังไม่มี analyte ที่ lock ได้</span> : null}
+                      </div>
+                    ) : null}
+                    <div className="ml-auto shrink-0 text-right text-xs text-[#789097]">
+                      <div>{charts.length} analyte{charts.length > 1 ? 's' : ''}</div>
+                      <div className={lockedCount === charts.length ? 'font-bold text-[#18763a]' : 'font-bold text-[#a9700f]'}>{lockedCount}/{charts.length} locked</div>
+                      {lot?.expiryDate ? <div className={days != null && days <= 30 ? 'font-bold text-[#a9700f]' : ''}>EXP {formatDate(lot.expiryDate)}</div> : null}
                     </div>
-                  ) : null}
+                  </div>
                 </div>
                 <div className="divide-y divide-[#eef3f3]">
                   {charts.map((chart) => {
