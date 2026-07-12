@@ -1042,6 +1042,22 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
     }
   }
 
+  async function reopenBox(box: HpvStorageBox) {
+    if (!window.confirm(`เปิดกล่อง "${box.boxCode}" กลับใช้งานใช่ไหม?\n\nกำหนดวันทำลายจะถูกล้าง แต่ sample เดิมจะยังอยู่`)) return
+    setBusy(true)
+    try {
+      const result = await api<{ workspace: HpvWorkspace }>(`/api/hpv/storage/boxes/${box.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ action: 'reopen' }),
+      })
+      onWorkspace(result.workspace, `เปิดกล่อง ${box.boxCode} กลับใช้งานแล้ว`)
+    } catch (error) {
+      onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'เปิดกล่องกลับไม่สำเร็จ' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function destroyBox(box: HpvStorageBox) {
     if (!window.confirm(`บันทึกทำลายกล่อง "${box.boxCode}" ใช่ไหม?\n\nไม่สามารถย้อนกลับได้`)) return
     setBusy(true)
@@ -1162,7 +1178,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
                         <td className="mono px-2 py-2 text-center font-bold text-[#315763]">{storedCount}/{box.capacity}</td>
                         <td className="px-2 py-2"><StatusBadge tone={box.status === 'open' ? 'accepted' : box.status === 'full' ? 'warning' : 'neutral'} label={box.status.toUpperCase()} /></td>
                         <td className="px-2 py-2 text-xs">{destructionState === 'due_soon' ? <StatusBadge tone="warning" label={`เหลือ ${remainingDays} วัน`} /> : destructionState === 'due_now' ? <StatusBadge tone="rejected" label="ครบกำหนดทำลาย" /> : <span className="text-[#8ba0a5]">{box.destroyDueAt ? formatDate(box.destroyDueAt) : '-'}</span>}</td>
-                        <td className="px-2 py-2 text-right">{box.status === 'open' ? <button type="button" onClick={(event) => { event.stopPropagation(); void closeBox(box) }} className="rounded border border-[#c7a850] bg-[#fdf8ed] px-2 py-1 text-[10px] font-bold text-[#8a6d1e] hover:bg-[#f9efc8]">ปิดกล่อง</button> : null}</td>
+                        <td className="px-2 py-2 text-right">{box.status === 'open' ? <button type="button" onClick={(event) => { event.stopPropagation(); void closeBox(box) }} className="rounded border border-[#c7a850] bg-[#fdf8ed] px-2 py-1 text-[10px] font-bold text-[#8a6d1e] hover:bg-[#f9efc8]">ปิดกล่อง</button> : box.status === 'full' ? <button type="button" onClick={(event) => { event.stopPropagation(); void reopenBox(box) }} className="rounded border border-[#83bcb6] bg-[#eef9f7] px-2 py-1 text-[10px] font-bold text-[#08766e] hover:bg-[#dff3ef]">เปิดกล่องกลับ</button> : null}</td>
                       </tr>
                     )
                   })}
@@ -1173,19 +1189,20 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
             <p className="px-4 py-8 text-center text-sm text-[#91a4a9]">ยังไม่มี Storage box</p>
           )}
         </Card>
-        <BoxPanel box={selectedBox} today={today} selectedPosition={selectedPosition} onSelectPosition={setSelectedPosition} onMove={moveOrSwap} onClose={closeBox} onDestroy={destroyBox} onDelete={deleteBox} onDeleteSample={deleteSample} />
+        <BoxPanel box={selectedBox} today={today} selectedPosition={selectedPosition} onSelectPosition={setSelectedPosition} onMove={moveOrSwap} onClose={closeBox} onReopen={reopenBox} onDestroy={destroyBox} onDelete={deleteBox} onDeleteSample={deleteSample} />
       </div>
     </div>
   )
 }
 
-function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onClose, onDestroy, onDelete, onDeleteSample }: {
+function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onClose, onReopen, onDestroy, onDelete, onDeleteSample }: {
   box: HpvStorageBox | null
   today: string
   selectedPosition?: number | null
   onSelectPosition?: (pos: number | null) => void
   onMove?: (sampleId: string, toPosition: number) => void
   onClose?: (box: HpvStorageBox) => void
+  onReopen?: (box: HpvStorageBox) => void
   onDestroy?: (box: HpvStorageBox) => void
   onDelete?: (box: HpvStorageBox) => void
   onDeleteSample?: (sample: HpvSample) => void
@@ -1212,6 +1229,7 @@ function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onCl
           {destructionState === 'due_now' ? <StatusBadge tone="rejected" label="ครบกำหนดทำลาย" /> : null}
           {destructionState === 'none' && box.destroyDueAt ? <StatusBadge tone="neutral" label={`Destroy due ${formatDate(box.destroyDueAt)}`} /> : null}
           {onClose && box.status === 'open' ? <button onClick={() => onClose(box)} className="flex items-center gap-1 rounded border border-[#c7a850] bg-[#fdf8ed] px-2 py-1 text-[10px] font-bold text-[#8a6d1e] hover:bg-[#f9efc8]"><CheckCircle2 className="size-3" /> ปิดกล่อง</button> : null}
+          {onReopen && box.status === 'full' ? <button onClick={() => onReopen(box)} className="flex items-center gap-1 rounded border border-[#83bcb6] bg-[#eef9f7] px-2 py-1 text-[10px] font-bold text-[#08766e] hover:bg-[#dff3ef]"><RotateCcw className="size-3" /> เปิดกล่องกลับ</button> : null}
           {onDestroy && box.status === 'full' ? <button onClick={() => onDestroy(box)} className="flex items-center gap-1 rounded border border-red-300 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-700 hover:bg-red-100"><Flame className="size-3" /> ทำลาย</button> : null}
           {onDelete ? <button onClick={() => onDelete(box)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-500 hover:bg-red-100"><Trash2 className="size-3" /> ลบกล่อง</button> : null}
         </div>

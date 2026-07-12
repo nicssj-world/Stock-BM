@@ -24,4 +24,10 @@ describe('HPV sample storage interface', () => {
     expect(source).toContain('onClick={(event) => { event.stopPropagation(); void closeBox(box) }}')
     expect(source).toContain('ปิดกล่อง')
   })
+
+  it('lets staff reopen a closed box without deleting its samples', () => {
+    expect(source).toContain("body: JSON.stringify({ action: 'reopen' })")
+    expect(source).toContain("box.status === 'full' ? <button")
+    expect(source).toContain('เปิดกล่องกลับ')
+  })
 })

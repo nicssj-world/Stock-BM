@@ -801,6 +801,20 @@ export async function getHpvDashboardData(): Promise<HpvDashboard> {
   return { storedSamples: storedCount ?? 0, boxesDueSoon: states.filter((state) => state === 'due_soon').length, boxesDueDestruction: states.filter((state) => state === 'due_now').length }
 }
 
+export async function reopenHpvStorageBox(id: string, actor: BmActor) {
+  assertAdmin(actor)
+  const { data: box, error: boxError } = await getAdminClient().from('bm_hpv_storage_boxes').select('status').eq('id', id).maybeSingle()
+  fail(boxError)
+  if ((box as RecordRow | null)?.status !== 'full') throw new HttpError(400, 'เปิดกลับได้เฉพาะกล่องที่ปิดแล้ว')
+  const { error } = await getAdminClient()
+    .from('bm_hpv_storage_boxes')
+    .update({ status: 'open', filled_at: null, destroy_due_at: null, updated_at: new Date().toISOString() })
+    .eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'hpv.box.reopen', 'hpv-box', id, {})
+  return getHpvWorkspace(actor)
+}
+
 export async function checkoutHpvSample(input: { barcode: string; destination?: string | null; note?: string | null }, actor: BmActor) {
   const admin = getAdminClient()
   const { data: sample, error: sampleError } = await admin.from('bm_hpv_samples').select('id,status').eq('barcode', input.barcode.trim()).maybeSingle()
