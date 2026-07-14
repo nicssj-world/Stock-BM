@@ -169,8 +169,9 @@ function sampleFromRow(row: RecordRow, names: Map<string, string>): HpvSample {
   return {
     id: asString(row.id),
     barcode: asString(row.barcode),
-    boxId: asString(row.box_id),
-    position: asNumber(row.position),
+    boxId: nullableString(row.box_id),
+    position: row.position === null || row.position === undefined ? null : asNumber(row.position),
+    fromStorageBox: row.from_storage_box !== false,
     status: asString(row.status) as HpvSample['status'],
     storedAt: asString(row.stored_at),
     storedByName: names.get(asString(row.stored_by)) ?? null,
@@ -193,7 +194,7 @@ function boxFromRow(row: RecordRow, samples: HpvSample[]): HpvStorageBox {
     destroyedAt: nullableString(row.destroyed_at),
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
-    samples: samples.sort((a, b) => a.position - b.position),
+    samples: samples.sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
   }
 }
 
@@ -251,7 +252,11 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
 
   const samples = sampleRows.map((row) => sampleFromRow(row, names))
   const samplesByBox = new Map<string, HpvSample[]>()
-  for (const sample of samples) samplesByBox.set(sample.boxId, [...(samplesByBox.get(sample.boxId) ?? []), sample])
+  const externalSamples: HpvSample[] = []
+  for (const sample of samples) {
+    if (sample.boxId) samplesByBox.set(sample.boxId, [...(samplesByBox.get(sample.boxId) ?? []), sample])
+    else externalSamples.push(sample)
+  }
   const locationsById = new Map(stock.locations.map((location) => [location.id, location]))
   const lotsById = new Map(stock.items.flatMap((item) => item.lots.map((lot) => [lot.id, { item, lot }] as const)))
   const linesByDistribution = new Map<string, HpvKitDistributionLine[]>()
@@ -320,6 +325,7 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
     kitReturns,
     receipts,
     boxes: boxRows.map((row) => boxFromRow(row, samplesByBox.get(asString(row.id)) ?? [])),
+    externalSamples,
     stock,
   }
 }
@@ -800,24 +806,52 @@ export async function getHpvDashboardData(): Promise<HpvDashboard> {
 
 export async function checkoutHpvSample(input: { barcode: string; destination?: string | null; note?: string | null }, actor: BmActor) {
   const admin = getAdminClient()
-  const { data: sample, error: sampleError } = await admin.from('bm_hpv_samples').select('id,status').eq('barcode', input.barcode.trim()).maybeSingle()
+  const barcode = input.barcode.trim()
+  const destination = clean(input.destination) ?? 'Co-testing'
+  const note = clean(input.note)
+  const checkedOutAt = new Date().toISOString()
+
+  const { data: sample, error: sampleError } = await admin.from('bm_hpv_samples').select('id,status').eq('barcode', barcode).maybeSingle()
   fail(sampleError)
   const sampleRow = sample as RecordRow | null
-  if (!sampleRow) throw new HttpError(404, 'HPV sample barcode not found')
+
+  if (!sampleRow) {
+    // Barcode was never stored in a storage box (e.g. sample sent straight to co-testing) — record the checkout directly.
+    const { data, error } = await admin
+      .from('bm_hpv_samples')
+      .insert({
+        barcode,
+        box_id: null,
+        position: null,
+        from_storage_box: false,
+        status: 'checked_out',
+        stored_at: checkedOutAt,
+        stored_by: actor.id,
+        checked_out_at: checkedOutAt,
+        checked_out_by: actor.id,
+        checkout_destination: destination,
+        checkout_note: note,
+      })
+      .select('id')
+      .single()
+    fail(error)
+    await writeAudit(actor, 'hpv.sample.checkout', 'hpv-sample', asString((data as RecordRow).id), { barcode, destination, fromStorageBox: false })
+    return getHpvWorkspace(actor)
+  }
+
   if (asString(sampleRow.status) !== 'stored') throw new HttpError(409, 'Only stored HPV samples can be checked out')
 
-  const checkedOutAt = new Date().toISOString()
   const { error } = await admin
     .from('bm_hpv_samples')
     .update({
       status: 'checked_out',
       checked_out_at: checkedOutAt,
       checked_out_by: actor.id,
-      checkout_destination: clean(input.destination) ?? 'Co-testing',
-      checkout_note: clean(input.note),
+      checkout_destination: destination,
+      checkout_note: note,
     })
     .eq('id', asString(sampleRow.id))
   fail(error)
-  await writeAudit(actor, 'hpv.sample.checkout', 'hpv-sample', asString(sampleRow.id), { barcode: input.barcode.trim(), destination: clean(input.destination) ?? 'Co-testing' })
+  await writeAudit(actor, 'hpv.sample.checkout', 'hpv-sample', asString(sampleRow.id), { barcode, destination })
   return getHpvWorkspace(actor)
 }

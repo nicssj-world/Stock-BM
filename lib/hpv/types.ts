@@ -93,8 +93,9 @@ export interface HpvSiteReceipt {
 export interface HpvSample {
   id: string
   barcode: string
-  boxId: string
-  position: number
+  boxId: string | null
+  position: number | null
+  fromStorageBox: boolean
   status: HpvSampleStatus
   storedAt: string
   storedByName: string | null
@@ -125,6 +126,7 @@ export interface HpvWorkspace {
   kitReturns: HpvKitReturn[]
   receipts: HpvSiteReceipt[]
   boxes: HpvStorageBox[]
+  externalSamples: HpvSample[]
   stock: StockWorkspace
 }
 

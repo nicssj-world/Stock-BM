@@ -1275,20 +1275,20 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
   const [busy, setBusy] = useState(false)
   const effectiveDestination = destination === 'อื่นๆ' ? customDestination.trim() || 'อื่นๆ' : destination
   const storedSamples = data.boxes.flatMap((box) => box.samples.map((sample) => ({ ...sample, box }))).filter((sample) => sample.status === 'stored')
-  const checkedOutSamples = useMemo(() =>
-    data.boxes
-      .flatMap((box) => box.samples.filter((s) => s.status === 'checked_out').map((sample) => ({ ...sample, box })))
-      .sort((a, b) => (b.checkedOutAt ?? '').localeCompare(a.checkedOutAt ?? '')),
-    [data.boxes],
-  )
+  const checkedOutSamples = useMemo(() => {
+    const fromBoxes = data.boxes.flatMap((box) => box.samples.filter((s) => s.status === 'checked_out').map((sample) => ({ ...sample, box: box as HpvStorageBox | null })))
+    const external = data.externalSamples.filter((s) => s.status === 'checked_out').map((sample) => ({ ...sample, box: null as HpvStorageBox | null }))
+    return [...fromBoxes, ...external].sort((a, b) => (b.checkedOutAt ?? '').localeCompare(a.checkedOutAt ?? ''))
+  }, [data.boxes, data.externalSamples])
 
   function exportCheckout() {
     const rows = [
-      ['Barcode', 'Box', 'Position', 'Destination', 'Note', 'Checkout At', 'By'],
+      ['Barcode', 'Box', 'Position', 'From storage box', 'Destination', 'Note', 'Checkout At', 'By'],
       ...checkedOutSamples.map((s) => [
         s.barcode,
-        s.box.boxCode,
-        formatHpvBoxPosition(s.position),
+        s.box?.boxCode ?? '-',
+        s.box ? formatHpvBoxPosition(s.position) : '-',
+        s.fromStorageBox ? 'Yes' : 'No',
         s.checkoutDestination ?? 'Co-testing',
         s.checkoutNote ?? '',
         s.checkedOutAt ? formatDateTime(s.checkedOutAt) : '',
@@ -1301,10 +1301,11 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
   async function checkout(codeInput = barcode) {
     const code = normalizeScan(codeInput)
     if (!code) return
+    const isExternal = !storedSamples.some((sample) => sample.barcode === code)
     setBusy(true)
     try {
       const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/storage/checkout', { method: 'POST', body: JSON.stringify({ barcode: code, destination: effectiveDestination, note: note.trim() || null }) })
-      onWorkspace(result.workspace, `Checkout ${code} ไป ${effectiveDestination} แล้ว`)
+      onWorkspace(result.workspace, isExternal ? `Checkout ${code} ไป ${effectiveDestination} แล้ว (ไม่ได้มาจาก storage box)` : `Checkout ${code} ไป ${effectiveDestination} แล้ว`)
       setBarcode('')
       setNote('')
     } catch (error) {
@@ -1322,6 +1323,7 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
         <form onSubmit={(e) => { e.preventDefault(); void checkout() }} className="space-y-3">
           <h2 className="font-bold text-[#173d50]">Checkout</h2>
           <div className="relative"><ScanLine className="absolute top-3 left-3 size-5 text-[#88a1a7]" /><Input autoFocus value={barcode} onChange={(e) => setBarcode(e.target.value)} className="h-12 pl-11 mono text-base" placeholder="Sample barcode" /></div>
+          <p className="text-xs text-[#8ba0a5]">ถ้า barcode นี้ไม่มีอยู่ใน storage box ระบบจะบันทึก checkout ให้และทำสัญลักษณ์ว่าไม่ได้มาจาก storage box</p>
           <Field label="Destination"><Select value={destination} onChange={(e) => setDestination(e.target.value)}><option>Co-testing</option><option>GeneXpert</option><option>PCR</option><option>อื่นๆ</option></Select></Field>
           {destination === 'อื่นๆ' ? <Field label="ระบุ"><Input value={customDestination} onChange={(e) => setCustomDestination(e.target.value)} placeholder="ระบุปลายทาง" /></Field> : null}
           <Field label="Note"><Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
@@ -1349,8 +1351,11 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
             {checkedOutSamples.map((sample) => (
               <div key={sample.id} className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
                 <div>
-                  <p className="mono font-bold text-[#315763]">{sample.barcode}</p>
-                  <p className="text-xs text-[#8ba0a5]">{sample.box.boxCode} · {formatHpvBoxPosition(sample.position)}</p>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <p className="mono font-bold text-[#315763]">{sample.barcode}</p>
+                    {!sample.fromStorageBox ? <StatusBadge tone="warning" label="ไม่ได้มาจาก Storage box" /> : null}
+                  </div>
+                  <p className="text-xs text-[#8ba0a5]">{sample.box ? `${sample.box.boxCode} · ${formatHpvBoxPosition(sample.position)}` : 'ไม่มีข้อมูลกล่อง'}</p>
                   <p className="text-xs font-semibold text-[#0b7f76]">→ {sample.checkoutDestination ?? 'Co-testing'}</p>
                   {sample.checkoutNote ? <p className="mt-0.5 text-xs text-[#789097]">{sample.checkoutNote}</p> : null}
                 </div>

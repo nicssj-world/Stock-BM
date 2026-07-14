@@ -65,7 +65,8 @@ export function summarizeHpvSites(distributions: HpvDistributionLike[], receipts
   return summaries
 }
 
-export function formatHpvBoxPosition(position: number) {
+export function formatHpvBoxPosition(position: number | null) {
+  if (position === null) return '-'
   const row = Math.ceil(position / 5)
   const column = ((position - 1) % 5) + 1
   return `${String.fromCharCode(64 + row)}${column}`
