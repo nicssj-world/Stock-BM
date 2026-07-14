@@ -6,6 +6,8 @@ import {
   Boxes,
   Camera,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   ClipboardCheck,
   Download,
   Eye,
@@ -1324,6 +1326,8 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
   const [destination, setDestination] = useState('Co-testing')
   const [customDestination, setCustomDestination] = useState('')
   const [busy, setBusy] = useState(false)
+  const [historyPage, setHistoryPage] = useState(1)
+  const historyPageSize = 10
   const effectiveDestination = destination === 'อื่นๆ' ? customDestination.trim() || 'อื่นๆ' : destination
   const storedSamples = data.boxes.flatMap((box) => box.samples.map((sample) => ({ ...sample, box }))).filter((sample) => sample.status === 'stored')
   const checkedOutSamples = useMemo(() => {
@@ -1331,6 +1335,9 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
     const external = data.externalSamples.filter((s) => s.status === 'checked_out').map((sample) => ({ ...sample, box: null as HpvStorageBox | null }))
     return [...fromBoxes, ...external].sort((a, b) => (b.checkedOutAt ?? '').localeCompare(a.checkedOutAt ?? ''))
   }, [data.boxes, data.externalSamples])
+  const historyPageCount = Math.max(1, Math.ceil(checkedOutSamples.length / historyPageSize))
+  const currentHistoryPage = Math.min(historyPage, historyPageCount)
+  const pagedCheckedOutSamples = checkedOutSamples.slice((currentHistoryPage - 1) * historyPageSize, currentHistoryPage * historyPageSize)
 
   function exportCheckout() {
     const rows = [
@@ -1406,8 +1413,8 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
           <span className="font-bold text-[#173d50]">Checkout history ({checkedOutSamples.length})</span>
           {checkedOutSamples.length > 0 ? <Button variant="ghost" className="gap-1 px-2 py-1 text-xs" onClick={exportCheckout}><Download className="size-3" /> Export CSV</Button> : null}
         </div>
-        <div className="max-h-[640px] overflow-y-auto divide-y divide-[#edf2f2]">
-          {checkedOutSamples.map((sample) => (
+        <div className="divide-y divide-[#edf2f2]">
+          {pagedCheckedOutSamples.map((sample) => (
             <div key={sample.id} className="flex flex-wrap items-start justify-between gap-4 px-4 py-3.5">
               <div className="min-w-0 flex-1 space-y-1.5">
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -1436,6 +1443,32 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
           ))}
           {!checkedOutSamples.length ? <p className="px-4 py-10 text-center text-sm text-[#91a4a9]">ยังไม่มี Checkout</p> : null}
         </div>
+        {checkedOutSamples.length > historyPageSize ? (
+          <div className="flex items-center justify-between border-t border-[#e1eaeb] bg-[#fbfdfd] px-4 py-2.5">
+            <p className="text-xs text-[#8ba0a5]">
+              {(currentHistoryPage - 1) * historyPageSize + 1}–{Math.min(currentHistoryPage * historyPageSize, checkedOutSamples.length)} จาก {checkedOutSamples.length}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={currentHistoryPage <= 1}
+                onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                className="flex items-center gap-1 rounded border border-[#c9dadd] bg-white px-2 py-1 text-xs font-bold text-[#55727c] hover:bg-[#f5f9fa] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
+              >
+                <ChevronLeft className="size-3.5" aria-hidden="true" /> ก่อนหน้า
+              </button>
+              <span className="mono text-xs font-bold text-[#315763]">{currentHistoryPage} / {historyPageCount}</span>
+              <button
+                type="button"
+                disabled={currentHistoryPage >= historyPageCount}
+                onClick={() => setHistoryPage((p) => Math.min(historyPageCount, p + 1))}
+                className="flex items-center gap-1 rounded border border-[#c9dadd] bg-white px-2 py-1 text-xs font-bold text-[#55727c] hover:bg-[#f5f9fa] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
+              >
+                ถัดไป <ChevronRight className="size-3.5" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+        ) : null}
       </Card>
     </div>
   )
