@@ -72,18 +72,20 @@ function RoundsTab({ data, actor, onOk, onErr }: { data: EqaWorkspace; actor: Bm
   if (!data.rounds.length) return <Card className="p-8 text-center text-sm text-[#8198a0]">ยังไม่มี round — สร้างที่แท็บ จัดการ / Manage</Card>
   return (
     <div className="space-y-4">
-      {data.rounds.map((round) => <RoundCard key={round.id} round={round} actor={actor} onOk={onOk} onErr={onErr} />)}
+      {data.rounds.map((round) => <RoundCard key={round.id} round={round} iqcAnalytes={data.iqcAnalytes} actor={actor} onOk={onOk} onErr={onErr} />)}
     </div>
   )
 }
 
 const STATUS_TONE: Record<string, StatusTone> = { scheduled: 'neutral', received: 'warning', submitted: 'accepted', evaluated: 'accepted', closed: 'neutral' }
 
-function RoundCard({ round, actor, onOk, onErr }: { round: EqaRound; actor: BmActor; onOk: (t: string, d: EqaWorkspace) => void; onErr: (t: string) => void }) {
+function RoundCard({ round, iqcAnalytes, actor, onOk, onErr }: { round: EqaRound; iqcAnalytes: EqaWorkspace['iqcAnalytes']; actor: BmActor; onOk: (t: string, d: EqaWorkspace) => void; onErr: (t: string) => void }) {
   const [analyte, setAnalyte] = useState('')
   const [value, setValue] = useState('')
   const [score, setScore] = useState('')
   const [outcome, setOutcome] = useState('not-evaluated')
+  const [iqcAnalyteId, setIqcAnalyteId] = useState('')
+  const [assignedValue, setAssignedValue] = useState('')
   const [busy, setBusy] = useState(false)
   const [statusBusy, setStatusBusy] = useState(false)
   const [editingResultId, setEditingResultId] = useState<string | null>(null)
@@ -95,6 +97,8 @@ function RoundCard({ round, actor, onOk, onErr }: { round: EqaRound; actor: BmAc
     setValue('')
     setScore('')
     setOutcome('not-evaluated')
+    setIqcAnalyteId('')
+    setAssignedValue('')
     setEditingResultId(null)
   }
 
@@ -104,6 +108,8 @@ function RoundCard({ round, actor, onOk, onErr }: { round: EqaRound; actor: BmAc
     setValue(result.submittedValue ?? '')
     setScore(result.evaluationScore == null ? '' : String(result.evaluationScore))
     setOutcome(result.outcome)
+    setIqcAnalyteId(result.iqcAnalyteId ?? '')
+    setAssignedValue(result.assignedValue == null ? '' : String(result.assignedValue))
   }
 
   async function setStatus(status: string, okText = 'อัปเดตสถานะแล้ว') {
@@ -122,7 +128,7 @@ function RoundCard({ round, actor, onOk, onErr }: { round: EqaRound; actor: BmAc
     if (!analyte.trim()) return
     setBusy(true)
     try {
-      const body = { analyte, submittedValue: value || null, evaluationScore: score === '' ? null : Number(score), outcome }
+      const body = { analyte, submittedValue: value || null, evaluationScore: score === '' ? null : Number(score), outcome, iqcAnalyteId: iqcAnalyteId || null, assignedValue: assignedValue === '' ? null : Number(assignedValue) }
       const result = editingResultId
         ? await api<{ eqa: EqaWorkspace }>(`/api/eqa/results/${editingResultId}`, { method: 'PATCH', body: JSON.stringify(body) })
         : await api<{ eqa: EqaWorkspace }>('/api/eqa/results', { method: 'POST', body: JSON.stringify({ roundId: round.id, ...body }) })
@@ -203,9 +209,11 @@ function RoundCard({ round, actor, onOk, onErr }: { round: EqaRound; actor: BmAc
         </div>
       ) : null}
 
-      <form onSubmit={saveResult} className="mt-3 grid grid-cols-[1fr_1fr_0.7fr_1fr_auto] items-end gap-1.5">
+      <form onSubmit={saveResult} className="mt-3 grid gap-1.5 md:grid-cols-3 xl:grid-cols-[1fr_1fr_0.7fr_1fr_1fr_0.8fr_auto] items-end">
         <Field label="Analyte"><Input className="h-9" value={analyte} onChange={(e) => setAnalyte(e.target.value)} /></Field>
+        <Field label="IQC analyte"><Select className="h-9" value={iqcAnalyteId} onChange={(e) => setIqcAnalyteId(e.target.value)}><option value="">— ไม่ใช้ Sigma —</option>{iqcAnalytes.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}</Select></Field>
         <Field label="Submitted"><Input className="mono h-9" value={value} onChange={(e) => setValue(e.target.value)} /></Field>
+        <Field label="Assigned"><Input className="mono h-9" type="number" step="any" value={assignedValue} onChange={(e) => setAssignedValue(e.target.value)} /></Field>
         <Field label="Score"><Input className="mono h-9" type="number" step="any" value={score} onChange={(e) => setScore(e.target.value)} /></Field>
         <Field label="Outcome"><Select className="h-9" value={outcome} onChange={(e) => setOutcome(e.target.value)}><option value="not-evaluated">not-evaluated</option><option value="acceptable">acceptable</option><option value="warning">warning</option><option value="unacceptable">unacceptable</option></Select></Field>
         <div className="flex items-center gap-1">
@@ -289,9 +297,9 @@ function CorrectiveTab({ data, onOk, onErr }: { data: EqaWorkspace; onOk: (t: st
 }
 
 function ManageTab({ data, onOk, onErr }: { data: EqaWorkspace; onOk: (t: string, d: EqaWorkspace) => void; onErr: (t: string) => void }) {
-  async function post(url: string, body: unknown, okText: string) {
+  async function request(url: string, body: unknown, okText: string, method: 'POST' | 'PATCH' | 'DELETE' = 'POST') {
     try {
-      const result = await api<{ eqa: EqaWorkspace }>(url, { method: 'POST', body: JSON.stringify(body) })
+      const result = await api<{ eqa: EqaWorkspace }>(url, { method, body: method === 'DELETE' ? undefined : JSON.stringify(body) })
       onOk(okText, result.eqa)
       return true
     } catch (e) {
@@ -299,27 +307,20 @@ function ManageTab({ data, onOk, onErr }: { data: EqaWorkspace; onOk: (t: string
       return false
     }
   }
-  async function remove(url: string, okText: string) {
-    try {
-      const result = await api<{ eqa: EqaWorkspace }>(url, { method: 'DELETE' })
-      onOk(okText, result.eqa)
-      return true
-    } catch (e) {
-      onErr(e instanceof Error ? e.message : 'ลบไม่สำเร็จ')
-      return false
-    }
-  }
+  const post = (url: string, body: unknown, text: string) => request(url, body, text)
+  const patch = (url: string, body: unknown, text: string) => request(url, body, text, 'PATCH')
+  const remove = (url: string, text: string) => request(url, null, text, 'DELETE')
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <ProviderForm onSubmit={(b) => post('/api/eqa/providers', b, 'เพิ่ม provider แล้ว')} onDelete={(id) => remove(`/api/eqa/providers/${id}`, 'ลบ provider แล้ว')} data={data} />
-      <SchemeForm onSubmit={(b) => post('/api/eqa/schemes', b, 'เพิ่ม scheme แล้ว')} data={data} />
-      <RoundForm onSubmit={(b) => post('/api/eqa/rounds', b, 'เพิ่ม round แล้ว')} data={data} />
+      <ProviderForm onSubmit={(b) => post('/api/eqa/providers', b, 'เพิ่ม provider แล้ว')} onUpdate={(id, b) => patch(`/api/eqa/providers/${id}`, b, 'แก้ไข provider แล้ว')} onDelete={(id) => remove(`/api/eqa/providers/${id}`, 'ลบ provider แล้ว')} data={data} />
+      <SchemeForm onSubmit={(b) => post('/api/eqa/schemes', b, 'เพิ่ม scheme แล้ว')} onUpdate={(id, b) => patch(`/api/eqa/schemes/${id}`, b, 'แก้ไข scheme แล้ว')} onDelete={(id) => remove(`/api/eqa/schemes/${id}`, 'ลบ scheme แล้ว')} data={data} />
+      <RoundForm onSubmit={(b) => post('/api/eqa/rounds', b, 'เพิ่ม round แล้ว')} onUpdate={(id, b) => patch(`/api/eqa/rounds/${id}`, b, 'แก้ไข round แล้ว')} onDelete={(id) => remove(`/api/eqa/rounds/${id}`, 'ลบ round แล้ว')} data={data} />
       <AnnualSummary data={data} />
     </div>
   )
 }
 
-function ProviderForm({ onSubmit, onDelete, data }: { onSubmit: (b: unknown) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; data: EqaWorkspace }) {
+function ProviderForm({ onSubmit, onUpdate, onDelete, data }: { onSubmit: (b: unknown) => Promise<boolean>; onUpdate: (id: string, b: unknown) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; data: EqaWorkspace }) {
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [deletingId, setDeletingId] = useState('')
@@ -349,7 +350,7 @@ function ProviderForm({ onSubmit, onDelete, data }: { onSubmit: (b: unknown) => 
                 <p className="truncate text-sm font-semibold text-[#173d50]">{provider.name}</p>
                 <p className="text-[11px] text-[#789097]">{schemeCount ? `${schemeCount} scheme` : 'ยังไม่มี scheme'}</p>
               </div>
-              <Button
+              <div className="flex gap-1"><Button type="button" variant="ghost" className="min-h-8 px-2.5 py-1.5" title="แก้ไข provider" onClick={async () => { const name = window.prompt('ชื่อ provider:', provider.name); if (name?.trim()) await onUpdate(provider.id, { name }) }}><Pencil className="size-3.5" /></Button><Button
                 type="button"
                 variant="danger"
                 className="min-h-8 px-2.5 py-1.5 text-xs"
@@ -358,7 +359,7 @@ function ProviderForm({ onSubmit, onDelete, data }: { onSubmit: (b: unknown) => 
                 onClick={() => removeProvider(provider.id, provider.name)}
               >
                 <Trash2 className="size-3.5" />
-              </Button>
+              </Button></div>
             </div>
           )
         })}
@@ -367,7 +368,7 @@ function ProviderForm({ onSubmit, onDelete, data }: { onSubmit: (b: unknown) => 
   )
 }
 
-function SchemeForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean>; data: EqaWorkspace }) {
+function SchemeForm({ onSubmit, onUpdate, onDelete, data }: { onSubmit: (b: unknown) => Promise<boolean>; onUpdate: (id: string, b: unknown) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; data: EqaWorkspace }) {
   const [form, setForm] = useState({ providerId: '', name: '', code: '', analyteScope: '', roundsPerYear: '' })
   const [busy, setBusy] = useState(false)
   return (
@@ -381,11 +382,12 @@ function SchemeForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<bool
         <div className="col-span-2"><Field label="Analyte scope"><Input value={form.analyteScope} onChange={(e) => setForm({ ...form, analyteScope: e.target.value })} placeholder="HIV VL, HBV VL…" /></Field></div>
         <div className="col-span-2"><Button disabled={busy}>เพิ่ม scheme</Button></div>
       </form>
+      <div className="space-y-1">{data.schemes.map((scheme) => <div key={scheme.id} className="flex items-center justify-between gap-2 rounded-md border border-[#e3ebec] px-2 py-1.5 text-xs"><span>{scheme.providerName} · {scheme.name}</span><span className="flex gap-1"><Button type="button" variant="ghost" className="min-h-7 px-2" title="แก้ไข scheme" onClick={async () => { const name = window.prompt('ชื่อ scheme:', scheme.name); if (!name?.trim()) return; await onUpdate(scheme.id, { providerId: scheme.providerId, name, code: scheme.code, analyteScope: scheme.analyteScope, roundsPerYear: scheme.roundsPerYear }) }}><Pencil className="size-3.5" /></Button><Button type="button" variant="danger" className="min-h-7 px-2" title="ลบ scheme" onClick={() => window.confirm(`ลบ scheme \"${scheme.name}\" ใช่ไหม?`) && onDelete(scheme.id)}><Trash2 className="size-3.5" /></Button></span></div>)}</div>
     </Card>
   )
 }
 
-function RoundForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean>; data: EqaWorkspace }) {
+function RoundForm({ onSubmit, onUpdate, onDelete, data }: { onSubmit: (b: unknown) => Promise<boolean>; onUpdate: (id: string, b: unknown) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; data: EqaWorkspace }) {
   const [form, setForm] = useState({ schemeId: '', roundLabel: '', sampleReceivedDate: '', resultDueDate: '' })
   const [busy, setBusy] = useState(false)
   return (
@@ -398,6 +400,7 @@ function RoundForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boole
         <Field label="ครบกำหนดส่ง"><Input type="date" value={form.resultDueDate} onChange={(e) => setForm({ ...form, resultDueDate: e.target.value })} /></Field>
         <div className="col-span-2"><Button disabled={busy}>เพิ่ม round</Button></div>
       </form>
+      <div className="space-y-1">{data.rounds.map((round) => <div key={round.id} className="flex items-center justify-between gap-2 rounded-md border border-[#e3ebec] px-2 py-1.5 text-xs"><span>{round.schemeName} · {round.roundLabel}</span><span className="flex gap-1"><Button type="button" variant="ghost" className="min-h-7 px-2" title="แก้ไข round" onClick={async () => { const roundLabel = window.prompt('ชื่อ round:', round.roundLabel); if (!roundLabel?.trim()) return; await onUpdate(round.id, { roundLabel }) }}><Pencil className="size-3.5" /></Button><Button type="button" variant="danger" className="min-h-7 px-2" title="ลบ round" onClick={() => window.confirm(`ลบ round \"${round.roundLabel}\" ใช่ไหม?`) && onDelete(round.id)}><Trash2 className="size-3.5" /></Button></span></div>)}</div>
     </Card>
   )
 }

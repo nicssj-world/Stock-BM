@@ -5,7 +5,6 @@ import { readJson, respond } from '@/lib/server/route'
 
 const schema = z.object({
   boxCode: z.string().trim().min(1).max(80),
-  boxType: z.enum(['self_collected', 'clinician_collected']),
 })
 
 export async function POST(request: Request) {

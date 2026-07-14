@@ -1,40 +1,13 @@
 'use client'
 
-import { useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { FlaskConical, KeyRound, ScanLine, ShieldCheck, UserRound } from 'lucide-react'
-import { api, Button, Input, Notice } from '@/components/ui'
-
-function safeNextPath(nextPath: string | null) {
-  if (!nextPath || !nextPath.startsWith('/') || nextPath.startsWith('//')) return '/dashboard'
-  return nextPath
-}
-
-function landingPath(role: string, nextPath: string | null) {
-  if (role === 'Assistant') return '/hpv'
-  return safeNextPath(nextPath)
-}
+import { Button, Input, Notice } from '@/components/ui'
 
 export function LoginForm() {
   const searchParams = useSearchParams()
-  const [ephisId, setEphisId] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  async function submit(event: React.FormEvent) {
-    event.preventDefault()
-    setError('')
-    setBusy(true)
-    try {
-      const result = await api<{ actor: { role: string } }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ ephisId, password }) })
-      window.location.replace(landingPath(result.actor.role, searchParams.get('next')))
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'เข้าสู่ระบบไม่สำเร็จ / Login failed')
-    } finally {
-      setBusy(false)
-    }
-  }
+  const error = searchParams.get('error')
+  const nextPath = searchParams.get('next') ?? ''
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#eaf2f1] px-4 py-8">
@@ -58,17 +31,18 @@ export function LoginForm() {
           <p className="text-xs font-bold tracking-[0.18em] text-[#0b7f76] uppercase">Secure workspace</p>
           <h2 className="mt-2 text-3xl font-bold text-[#173d50]">เข้าสู่ระบบ / Login</h2>
           <p className="mt-2 text-sm text-[#6e858d]">ใช้รหัส E-Phis และรหัสผ่านชุดเดียวกับ Genomic-CBH</p>
-          <form onSubmit={submit} className="mt-8 space-y-4">
+          <form action="/api/auth/login" method="post" className="mt-8 space-y-4">
+            <input type="hidden" name="next" value={nextPath} />
             <label className="block">
               <span className="mb-1 block text-xs font-bold text-[#57737c]">E-Phis</span>
-              <div className="relative"><UserRound className="absolute top-2.5 left-3 size-4 text-[#88a1a7]" /><Input autoFocus inputMode="numeric" value={ephisId} onChange={(event) => setEphisId(event.target.value)} className="pl-9" /></div>
+              <div className="relative"><UserRound className="absolute top-2.5 left-3 size-4 text-[#88a1a7]" /><Input autoFocus required name="ephisId" inputMode="numeric" className="pl-9" /></div>
             </label>
             <label className="block">
               <span className="mb-1 block text-xs font-bold text-[#57737c]">Password</span>
-              <div className="relative"><KeyRound className="absolute top-2.5 left-3 size-4 text-[#88a1a7]" /><Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="pl-9" /></div>
+              <div className="relative"><KeyRound className="absolute top-2.5 left-3 size-4 text-[#88a1a7]" /><Input required name="password" type="password" className="pl-9" /></div>
             </label>
             {error ? <Notice tone="danger">{error}</Notice> : null}
-            <Button disabled={busy} className="mt-2 w-full py-2.5">{busy ? 'กำลังตรวจสอบ...' : 'เข้าสู่ระบบ / Sign in'}</Button>
+            <Button type="submit" className="mt-2 w-full py-2.5">เข้าสู่ระบบ / Sign in</Button>
           </form>
           <div className="mt-9 grid grid-cols-2 gap-3 border-t border-[#e2ebec] pt-5 text-[11px] text-[#799096]">
             <span className="flex items-center gap-1.5"><ShieldCheck className="size-3.5 text-[#0b7f76]" /> Supabase Auth</span>

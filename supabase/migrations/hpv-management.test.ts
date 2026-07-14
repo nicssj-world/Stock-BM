@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const sql = readFileSync(join(process.cwd(), 'supabase/migrations/202606220001_hpv_management.sql'), 'utf8')
+const specimenTypeSql = readFileSync(join(process.cwd(), 'supabase/migrations/202607130001_hpv_sample_specimen_types.sql'), 'utf8')
 
 describe('HPV management migration', () => {
   it('creates HPV site, distribution, receipt, box, and sample tables', () => {
@@ -29,5 +30,12 @@ describe('HPV management migration', () => {
   it('does not expose HPV mutating SQL functions to browser roles', () => {
     expect(sql).not.toContain('grant execute on function public.hpv')
     expect(sql).not.toContain('to authenticated')
+  })
+
+  it('moves collection type from storage boxes to individual samples', () => {
+    expect(specimenTypeSql).toContain('drop column if exists box_type')
+    expect(specimenTypeSql).toContain("add column specimen_type text not null check (specimen_type in ('self_collected', 'clinician_collected'))")
+    expect(specimenTypeSql).toContain('drop index if exists public.bm_hpv_storage_boxes_status_type')
+    expect(specimenTypeSql).toContain("notify pgrst, 'reload schema'")
   })
 })

@@ -25,6 +25,8 @@ export interface EqaResult {
   submittedValue: string | null
   evaluationScore: number | null
   outcome: EqaOutcome
+  iqcAnalyteId: string | null
+  assignedValue: number | null
 }
 
 export interface EqaRound {
@@ -62,6 +64,7 @@ export interface EqaWorkspace {
   schemes: EqaScheme[]
   rounds: EqaRound[]
   correctiveActions: EqaCorrectiveAction[]
+  iqcAnalytes: { id: string; code: string; name: string }[]
   summary: {
     schemeCount: number
     overdue: number

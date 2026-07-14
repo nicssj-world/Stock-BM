@@ -1,9 +1,10 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CalendarClock, Calculator, ClipboardList, Eye, Gauge, Layers3, Lock, LineChart, ListFilter, PlusCircle, Printer, Search, Settings, Sigma, Trash2, Wrench } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { IqcUncertaintyBudget, IqcWorkspace } from '@/lib/iqc/types'
+import { findCorrectiveActionForPoint, runsWithoutCorrectiveActions } from '@/lib/iqc/corrective-actions'
 import { formatDate, formatDateTime } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
 import { LjChart } from '@/components/lj-chart'
@@ -17,6 +18,7 @@ export function IqcView({ actor, initialData }: { actor: BmActor; initialData: I
   const [data, setData] = useState(initialData)
   const [tab, setTab] = useState<Tab>('charts')
   const [notice, setNotice] = useState<NoticeState>(null)
+  const [focusedCorrectiveActionId, setFocusedCorrectiveActionId] = useState<string | null>(null)
   const canManageIqc = true
 
   const tabs = [
@@ -34,6 +36,10 @@ export function IqcView({ actor, initialData }: { actor: BmActor; initialData: I
   }
   function err(text: string) {
     setNotice({ tone: 'danger', text })
+  }
+  function openCorrectiveAction(id: string) {
+    setFocusedCorrectiveActionId(id)
+    setTab('corrective')
   }
 
   const [panel, setPanel] = useState<string>('all')
@@ -87,13 +93,15 @@ export function IqcView({ actor, initialData }: { actor: BmActor; initialData: I
         <StatCard label="Rejected" value={scoped.summary.rejected} tone="rejected" hint={`${data.summary.openCorrectiveActions} corrective action ค้าง`} />
       </div>
 
+      {data.alerts.length ? <Card className="p-3"><div className="flex flex-wrap gap-2">{data.alerts.map((alert) => <span key={alert.id} className={`inline-flex max-w-full items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold ${alert.tone === 'rejected' ? 'border-[#efc7cc] bg-[#fff5f6] text-[#c02a37]' : 'border-[#eed4a6] bg-[#fff9ed] text-[#a9700f]'}`}><AlertTriangle className="size-3.5 shrink-0" /> {alert.title} <span className="font-normal opacity-80">· {alert.detail}</span></span>)}</div></Card> : null}
+
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
 
-      {tab === 'charts' ? <ChartsOverviewTab data={scoped} isAdmin={canManageIqc} onOk={ok} onErr={err} /> : null}
+      {tab === 'charts' ? <ChartsOverviewTab data={scoped} isAdmin={canManageIqc} onOk={ok} onErr={err} onOpenCorrectiveAction={openCorrectiveAction} /> : null}
       {tab === 'enter' ? <EnterTab data={scoped} onOk={ok} onErr={err} onDone={() => setTab('charts')} /> : null}
       {tab === 'sixsigma' ? <SixSigmaTab data={scoped} /> : null}
       {tab === 'uncertainty' ? <UncertaintyTab data={scoped} isAdmin={canManageIqc} onOk={ok} onErr={err} /> : null}
-      {tab === 'corrective' ? <CorrectiveTab data={data} onOk={ok} onErr={err} /> : null}
+      {tab === 'corrective' ? <CorrectiveTab data={data} onOk={ok} onErr={err} focusId={focusedCorrectiveActionId} /> : null}
       {tab === 'manage' && canManageIqc ? <ManageTab data={data} onOk={ok} onErr={err} /> : null}
     </div>
   )
@@ -119,7 +127,7 @@ function fmtCompact(value: number | null) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value)
 }
 
-function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace; isAdmin: boolean; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void }) {
+function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction }: { data: IqcWorkspace; isAdmin: boolean; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void; onOpenCorrectiveAction: (id: string) => void }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<ChartStatusFilter>('all')
   const [query, setQuery] = useState('')
@@ -136,16 +144,16 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
       window.alert(`บาง analyte มีข้อมูลน้อยกว่า 2 จุด จะถูกข้าม: ${tooFew.map((chart) => chart.analyteCode).join(', ')}`)
     }
     if (needsOverride) {
-      const reason = window.prompt('บาง analyte ยังไม่ครบ 20 จุด — ระบุเหตุผลในการ override lock ทั้ง lot:')
+      const reason = window.prompt('บาง analyte ยังไม่ครบ 20 จุด — ระบุเหตุผลในการ override ก่อน Lock & ปิด Lot:')
       if (reason == null || !reason.trim()) return
       overrideReason = reason.trim()
     }
     setBusy(`lot:${controlLotId}`)
     try {
       const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/lock/lot', { method: 'POST', body: JSON.stringify({ controlLotId, overrideReason }) })
-      onOk(needsOverride ? 'Lock ทั้ง lot แบบ override แล้ว' : 'Lock ทั้ง lot แล้ว', result.iqc)
+      onOk(needsOverride ? 'Lock และปิด Lot แบบ override แล้ว' : 'Lock และปิด Lot แล้ว', result.iqc)
     } catch (e) {
-      onErr(e instanceof Error ? e.message : 'Lock ทั้ง lot ไม่สำเร็จ')
+      onErr(e instanceof Error ? e.message : 'Lock และปิด Lot ไม่สำเร็จ')
     } finally {
       setBusy(null)
     }
@@ -186,6 +194,21 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
     }
   }
 
+  async function createPointCorrectiveAction(point: IqcWorkspace['charts'][number]['points'][number], chart: IqcWorkspace['charts'][number], problem: string) {
+    setBusy(`point:${point.resultId}`)
+    try {
+      const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/corrective-actions', {
+        method: 'POST',
+        body: JSON.stringify({ runId: point.runId, analyteId: chart.analyteId, problem }),
+      })
+      onOk('บันทึก corrective action สำหรับจุดนี้แล้ว', result.iqc)
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : 'บันทึก corrective action ไม่สำเร็จ')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   if (!data.charts.length) {
     return <Card className="p-8 text-center text-sm text-[#8198a0]">ยังไม่มีข้อมูล IQC — เพิ่ม analyte/control แล้วบันทึกผลที่แท็บบันทึกผล</Card>
   }
@@ -221,6 +244,9 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
   const selectedPoint = selectedChart?.points.find((point) => point.resultId === selectedPointId) ?? null
   const selectedRun = selectedPoint ? data.runs.find((run) => run.id === selectedPoint.runId) ?? null : null
   const selectedRunResult = selectedRun?.results.find((result) => result.analyteId === selectedChart?.analyteId && result.controlLotId === selectedChart.controlLotId) ?? null
+  const linkedCorrectiveAction = selectedPoint && selectedChart
+    ? findCorrectiveActionForPoint(data.correctiveActions, selectedPoint.runId, selectedChart.analyteId)
+    : null
   const grouped = filteredCharts.reduce((map, chart) => {
     const current = map.get(chart.controlLotId) ?? []
     current.push(chart)
@@ -291,26 +317,21 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
             return (
               <Card key={lotId} className="overflow-hidden">
                 <div className="border-b border-[#e3ebec] bg-[#fbfefe] p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-bold text-[#173d50]">{charts[0]?.controlMaterialName}</h3>
-                        {charts[0]?.level ? <span className="rounded-full border border-[#d2dee0] px-2 py-0.5 text-[11px] font-bold text-[#55727c]">{charts[0].level}</span> : null}
-                        <StatusBadge tone={worst} label={worst} />
-                      </div>
-                      <p className="mono mt-1 text-xs text-[#5f7880]">Lot {charts[0]?.lotNumber}</p>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-bold text-[#173d50]">{charts[0]?.controlMaterialName}</h3>
+                      {charts[0]?.level ? <span className="rounded-full border border-[#d2dee0] px-2 py-0.5 text-[11px] font-bold text-[#55727c]">{charts[0].level}</span> : null}
+                      <StatusBadge tone={worst} label={worst} />
+                      {!lot?.isActive ? <span className="rounded-full border border-[#d2dee0] bg-[#f1f5f5] px-2 py-0.5 text-[11px] font-bold text-[#58747d]">closed</span> : null}
                     </div>
-                    <div className="text-right text-xs text-[#789097]">
-                      <div>{charts.length} analyte{charts.length > 1 ? 's' : ''}</div>
-                      <div className={lockedCount === charts.length ? 'font-bold text-[#18763a]' : 'font-bold text-[#a9700f]'}>{lockedCount}/{charts.length} locked</div>
-                      {lot?.expiryDate ? <div className={days != null && days <= 30 ? 'font-bold text-[#a9700f]' : ''}>EXP {formatDate(lot.expiryDate)}</div> : null}
-                    </div>
+                    <p className="mono mt-1 text-xs text-[#5f7880]">Lot {charts[0]?.lotNumber}</p>
                   </div>
-                  {isAdmin ? (
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                    {isAdmin ? (
+                      <div className="flex flex-wrap items-center gap-2">
                       {lockable ? (
                         <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={lotBusy} onClick={() => lockLot(lotId, charts)}>
-                          <Lock className="size-3.5" /> Lock ทั้ง Lot
+                          <Lock className="size-3.5" /> Lock & ปิด Lot
                         </Button>
                       ) : null}
                       {unlockable ? (
@@ -319,8 +340,14 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
                         </Button>
                       ) : null}
                       {!lockable && !unlockable ? <span className="text-xs text-[#789097]">ยังไม่มี analyte ที่ lock ได้</span> : null}
+                      </div>
+                    ) : null}
+                    <div className="ml-auto shrink-0 text-right text-xs text-[#789097]">
+                      <div>{charts.length} analyte{charts.length > 1 ? 's' : ''}</div>
+                      <div className={lockedCount === charts.length ? 'font-bold text-[#18763a]' : 'font-bold text-[#a9700f]'}>{lockedCount}/{charts.length} locked</div>
+                      {lot?.expiryDate ? <div className={days != null && days <= 30 ? 'font-bold text-[#a9700f]' : ''}>EXP {formatDate(lot.expiryDate)}</div> : null}
                     </div>
-                  ) : null}
+                  </div>
                 </div>
                 <div className="divide-y divide-[#eef3f3]">
                   {charts.map((chart) => {
@@ -361,12 +388,16 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace;
               <LjChart chart={selectedChart} selectedResultId={selectedPointId} onPointSelect={(point) => setSelectedPointId(point.resultId)} />
               {selectedPoint ? (
                 <PointDetailCard
+                  key={`${selectedChart.key}:${selectedPoint.resultId}`}
                   chart={selectedChart}
                   point={selectedPoint}
                   run={selectedRun}
                   result={selectedRunResult}
+                  correctiveAction={linkedCorrectiveAction}
                   busy={busy === `point:${selectedPoint.resultId}`}
                   onVoid={() => voidPoint(selectedPoint.resultId)}
+                  onCreateCorrective={(problem) => createPointCorrectiveAction(selectedPoint, selectedChart, problem)}
+                  onOpenCorrectiveAction={onOpenCorrectiveAction}
                 />
               ) : null}
               <div className="flex justify-end">
@@ -393,16 +424,30 @@ function PointDetailCard({
   point,
   run,
   result,
+  correctiveAction,
   busy,
   onVoid,
+  onCreateCorrective,
+  onOpenCorrectiveAction,
 }: {
   chart: IqcWorkspace['charts'][number]
   point: IqcWorkspace['charts'][number]['points'][number]
   run: IqcWorkspace['runs'][number] | null
   result: IqcWorkspace['runs'][number]['results'][number] | null
+  correctiveAction: IqcWorkspace['correctiveActions'][number] | null
   busy: boolean
   onVoid: () => void
+  onCreateCorrective: (problem: string) => Promise<void>
+  onOpenCorrectiveAction: (id: string) => void
 }) {
+  const [problem, setProblem] = useState('')
+
+  async function createCorrectiveAction(event: React.FormEvent) {
+    event.preventDefault()
+    if (!problem.trim()) return
+    await onCreateCorrective(problem.trim())
+  }
+
   return (
     <Card className="space-y-3 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -427,8 +472,28 @@ function PointDetailCard({
           <p className="mt-1 text-sm font-semibold text-[#173d50]">{point.violatedRules.join(', ') || '-'}</p>
         </div>
       </div>
+
       {run?.note ? <p className="rounded-md bg-[#f6fafa] px-3 py-2 text-xs text-[#58747d]">Note: {run.note}</p> : null}
       {result?.qualitativeValue ? <p className="text-xs text-[#789097]">Qualitative: {result.qualitativeValue}</p> : null}
+      {correctiveAction ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#eed4a6] bg-[#fff9ed] p-3">
+          <div>
+            <p className="text-xs font-bold text-[#8b5a08]">มี Corrective action สำหรับจุดนี้แล้ว</p>
+            <p className="mt-0.5 text-xs text-[#795d2d]">{correctiveAction.problem}</p>
+          </div>
+          <Button type="button" variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" onClick={() => onOpenCorrectiveAction(correctiveAction.id)}>
+            <Wrench className="size-3.5" /> ไปยัง Corrective action
+          </Button>
+        </div>
+      ) : !point.isVoided ? (
+        <form onSubmit={createCorrectiveAction} className="space-y-2 rounded-md border border-[#e2ecee] bg-[#fbfefe] p-3">
+          <p className="text-xs font-bold text-[#315763]">บันทึก Corrective action สำหรับจุดนี้</p>
+          <Textarea rows={2} value={problem} onChange={(event) => setProblem(event.target.value)} placeholder="ระบุปัญหาที่พบ" required />
+          <div className="flex justify-end">
+            <Button className="min-h-8 px-3 py-1.5 text-xs" disabled={busy}>บันทึก Corrective action</Button>
+          </div>
+        </form>
+      ) : null}
       <div className="flex justify-end">
         <Button type="button" variant="danger" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy || point.isVoided} onClick={onVoid}>
           <Trash2 className="size-3.5" /> Void result
@@ -759,7 +824,7 @@ function SigmaBar({ sigma }: { sigma: number | null }) {
 
 function SixSigmaTab({ data }: { data: IqcWorkspace }) {
   if (!data.sixSigma.length) {
-    return <Notice tone="info">ยังไม่มี Six Sigma — ตั้งค่า TEa ต่อ analyte (แท็บ จัดการ) และต้องมี mean/SD แล้ว <span className="text-xs">(bias มาจากโมดูล EQA — ตอนนี้ถือเป็น 0)</span></Notice>
+    return <Notice tone="info">ยังไม่มี Six Sigma — ตั้งค่า TEa ต่อ analyte (แท็บ จัดการ) และต้องมี mean/SD แล้ว</Notice>
   }
   return (
     <Card className="overflow-hidden">
@@ -771,7 +836,7 @@ function SixSigmaTab({ data }: { data: IqcWorkspace }) {
               <th className="px-3 py-2 font-semibold">Lot / Level</th>
               <th className="px-3 py-2 text-right font-semibold">Mean</th>
               <th className="px-3 py-2 text-right font-semibold">CV%</th>
-              <th className="px-3 py-2 text-right font-semibold">Bias%</th>
+              <th className="px-3 py-2 text-right font-semibold">Bias% / EQA</th>
               <th className="px-3 py-2 text-right font-semibold">TEa</th>
               <th className="px-3 py-2 text-right font-semibold">TEa%</th>
               <th className="px-3 py-2 font-semibold">Sigma</th>
@@ -784,7 +849,7 @@ function SixSigmaTab({ data }: { data: IqcWorkspace }) {
                 <td className="px-3 py-2 text-xs text-[#789097]">{row.lotNumber}{row.level ? ` · ${row.level}` : ''}</td>
                 <td className="mono px-3 py-2 text-right tabular-nums">{row.meanValue?.toFixed(2) ?? '—'}</td>
                 <td className="mono px-3 py-2 text-right tabular-nums">{row.cv?.toFixed(1) ?? '—'}</td>
-                <td className="mono px-3 py-2 text-right tabular-nums">{row.biasPct.toFixed(1)}</td>
+                <td className="mono px-3 py-2 text-right tabular-nums">{row.biasSampleCount ? `${row.biasPct.toFixed(1)} (${row.biasSampleCount})` : '—'}</td>
                 <td className="mono px-3 py-2 text-right tabular-nums">{row.teaValue}{row.teaMode === 'percent' ? '%' : ''}</td>
                 <td className="mono px-3 py-2 text-right tabular-nums">{row.teaPct?.toFixed(1) ?? '—'}</td>
                 <td className="px-3 py-2"><div className="flex items-center gap-2"><SigmaBar sigma={row.sigma} /><StatusBadge tone={SIGMA_TONE[row.rating]} label={row.rating} /></div></td>
@@ -952,11 +1017,13 @@ function BudgetForm({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: strin
   )
 }
 
-function CorrectiveTab({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void }) {
+function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void; focusId: string | null }) {
   const [runId, setRunId] = useState('')
   const [problem, setProblem] = useState('')
   const [rootCause, setRootCause] = useState('')
   const [actionTaken, setActionTaken] = useState('')
+  const [ownerId, setOwnerId] = useState('')
+  const [dueDate, setDueDate] = useState('')
   const [busy, setBusy] = useState(false)
   const [showAll, setShowAll] = useState(false)
 
@@ -966,7 +1033,12 @@ function CorrectiveTab({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: st
   ])), [data.controlLots])
   const runById = useMemo(() => new Map(data.runs.map((run) => [run.id, run])), [data.runs])
   const flaggedOf = (r: IqcWorkspace['runs'][number]) => r.results.filter((res) => !res.isVoided && res.status !== 'accepted')
-  const runOptions = data.runs.filter((r) => showAll || flaggedOf(r).length > 0)
+  const runOptions = runsWithoutCorrectiveActions(data.runs, data.correctiveActions)
+    .filter((r) => showAll || flaggedOf(r).length > 0)
+  useEffect(() => {
+    if (!focusId) return
+    document.getElementById(`corrective-action-${focusId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [focusId, data.correctiveActions])
   function lotLabel(controlLotId: string) {
     return controlLotLabels.get(controlLotId) ?? 'Control'
   }
@@ -991,9 +1063,9 @@ function CorrectiveTab({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: st
     if (!runId || !problem.trim()) return onErr('เลือก run และระบุปัญหา')
     setBusy(true)
     try {
-      const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/corrective-actions', { method: 'POST', body: JSON.stringify({ runId, problem, rootCause: rootCause || null, actionTaken: actionTaken || null }) })
+      const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/corrective-actions', { method: 'POST', body: JSON.stringify({ runId, problem, rootCause: rootCause || null, actionTaken: actionTaken || null, ownerId: ownerId || null, dueDate: dueDate || null }) })
       onOk('เปิด corrective action แล้ว', result.iqc)
-      setProblem(''); setRootCause(''); setActionTaken('')
+      setProblem(''); setRootCause(''); setActionTaken(''); setOwnerId(''); setDueDate('')
     } catch (e) {
       onErr(e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ')
     } finally {
@@ -1004,12 +1076,22 @@ function CorrectiveTab({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: st
     setBusy(true)
     try {
       const result = await api<{ iqc: IqcWorkspace }>(`/api/iqc/corrective-actions/${id}/close`, { method: 'POST', body: JSON.stringify({}) })
-      onOk('ปิด corrective action แล้ว', result.iqc)
+      onOk('ส่ง CAPA เพื่อรอตรวจ effectiveness แล้ว', result.iqc)
     } catch (e) {
       onErr(e instanceof Error ? e.message : 'ปิดไม่สำเร็จ')
     } finally {
       setBusy(false)
     }
+  }
+  async function verify(id: string) {
+    const effective = window.confirm('Corrective action นี้มีประสิทธิผลหรือไม่?\nกด OK = effective, Cancel = ineffective')
+    const note = window.prompt('บันทึกผลการตรวจ effectiveness:')
+    if (!note?.trim()) return
+    setBusy(true)
+    try {
+      const result = await api<{ iqc: IqcWorkspace }>(`/api/iqc/corrective-actions/${id}/close`, { method: 'POST', body: JSON.stringify({ effectivenessOutcome: effective ? 'effective' : 'ineffective', effectivenessNote: note.trim() }) })
+      onOk(effective ? 'ตรวจ effectiveness แล้ว และปิด CAPA' : 'บันทึกว่า ineffective และเปิด CAPA ต่อ', result.iqc)
+    } catch (e) { onErr(e instanceof Error ? e.message : 'ตรวจ effectiveness ไม่สำเร็จ') } finally { setBusy(false) }
   }
 
   return (
@@ -1026,29 +1108,35 @@ function CorrectiveTab({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: st
           <label className="flex items-center gap-2 text-xs text-[#58747d]">
             <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} /> แสดงทุก run (รวมที่ปกติ)
           </label>
-          {!runOptions.length ? <p className="text-xs text-[#9aafb4]">ไม่มี run ที่มีค่า out — ติ๊ก &ldquo;แสดงทุก run&rdquo; เพื่อเปิดเอง</p> : null}
+          {!runOptions.length ? <p className="text-xs text-[#9aafb4]">ไม่มี run ที่ยังไม่มี corrective action — ติ๊ก &ldquo;แสดงทุก run&rdquo; เพื่อดู run ปกติที่ยังไม่ได้บันทึก</p> : null}
           <Field label="ปัญหา / Problem"><Textarea rows={2} value={problem} onChange={(e) => setProblem(e.target.value)} required /></Field>
           <Field label="Root cause"><Textarea rows={2} value={rootCause} onChange={(e) => setRootCause(e.target.value)} /></Field>
           <Field label="Action taken"><Textarea rows={2} value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} /></Field>
+          <div className="grid grid-cols-2 gap-2"><Field label="ผู้รับผิดชอบ"><Select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}><option value="">— ยังไม่กำหนด —</option>{data.assignableUsers.map((user) => <option key={user.id} value={user.id}>{user.displayName}</option>)}</Select></Field><Field label="Due date"><Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field></div>
           <Button disabled={busy}>บันทึก</Button>
         </form>
       </Card>
       <div className="space-y-3">
         {data.correctiveActions.map((ca) => (
-          <Card key={ca.id} className="p-4">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <div className="flex items-center gap-2"><span className="font-bold text-[#315763]">{formatDateTime(ca.runDatetime)}</span><StatusBadge tone={ca.status === 'open' ? 'warning' : 'accepted'} label={ca.status} /></div>
-                {runById.get(ca.runId) ? <p className="mt-1 text-xs font-semibold text-[#58747d]">{summarizeResults(flaggedOf(runById.get(ca.runId)!), true) || summarizeResults(runById.get(ca.runId)!.results, false)}</p> : null}
-                <p className="mt-1 text-sm text-[#3f5c64]">{ca.problem}</p>
-                {ca.rootCause ? <p className="mt-1 text-xs text-[#789097]">Root cause: {ca.rootCause}</p> : null}
-                {ca.actionTaken ? <p className="text-xs text-[#789097]">Action: {ca.actionTaken}</p> : null}
-                <p className="mt-1 text-[11px] text-[#9aafb4]">โดย {ca.createdByName ?? '-'}</p>
+          <div key={ca.id} id={ca.id === focusId ? `corrective-action-${focusId}` : undefined}>
+            <Card className="p-4">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2"><span className="font-bold text-[#315763]">{formatDateTime(ca.runDatetime)}</span><StatusBadge tone={ca.status === 'closed' ? 'accepted' : 'warning'} label={ca.status} /></div>
+                  {runById.get(ca.runId) ? <p className="mt-1 text-xs font-semibold text-[#58747d]">{summarizeResults(flaggedOf(runById.get(ca.runId)!), true) || summarizeResults(runById.get(ca.runId)!.results, false)}</p> : null}
+                  <p className="mt-1 text-sm text-[#3f5c64]">{ca.problem}</p>
+                  {ca.rootCause ? <p className="mt-1 text-xs text-[#789097]">Root cause: {ca.rootCause}</p> : null}
+                  {ca.actionTaken ? <p className="text-xs text-[#789097]">Action: {ca.actionTaken}</p> : null}
+                  {ca.ownerName || ca.dueDate ? <p className="text-xs text-[#789097]">Owner: {ca.ownerName ?? '-'} · Due: {formatDate(ca.dueDate)}</p> : null}
+                  {ca.effectivenessNote ? <p className="text-xs text-[#789097]">Effectiveness: {ca.effectivenessOutcome} · {ca.effectivenessNote}</p> : null}
+                  <p className="mt-1 text-[11px] text-[#9aafb4]">โดย {ca.createdByName ?? '-'}</p>
+                </div>
+                {ca.status === 'open' ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => close(ca.id)}>ส่งตรวจผล</Button> : null}
+                {ca.status === 'awaiting-effectiveness' ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => verify(ca.id)}>ตรวจ effectiveness</Button> : null}
               </div>
-              {ca.status === 'open' ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => close(ca.id)}>ปิด</Button> : null}
-            </div>
-            <div className="mt-3"><AttachmentList module="iqc" entityType="corrective-action" entityId={ca.id} kind="corrective-action" canDelete /></div>
-          </Card>
+              <div className="mt-3"><AttachmentList module="iqc" entityType="corrective-action" entityId={ca.id} kind="corrective-action" canDelete /></div>
+            </Card>
+          </div>
         ))}
         {!data.correctiveActions.length ? <Card className="p-8 text-center text-sm text-[#8198a0]"><ClipboardList className="mx-auto mb-2 size-6 text-[#b8c9cd]" />ยังไม่มี corrective action</Card> : null}
       </div>
@@ -1083,8 +1171,33 @@ function ManageTab({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: string
       />
       <SpecForm onSubmit={(b) => post('/api/iqc/specs', b, 'บันทึก spec แล้ว')} data={data} />
       <TeaForm onSubmit={(b) => post('/api/iqc/tea', b, 'บันทึก TEa แล้ว')} data={data} />
+      <ControlPlanForm onSubmit={(b) => post('/api/iqc/control-plans', b, 'บันทึก Control plan แล้ว')} data={data} />
     </div>
   )
+}
+
+const CONTROL_PLAN_RULES = ['1-2s', '1-3s', '2-2s', 'R-4s', '4-1s', '10x']
+
+function ControlPlanForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean>; data: IqcWorkspace }) {
+  const [analyteId, setAnalyteId] = useState('')
+  const [instrumentId, setInstrumentId] = useState('')
+  const [levels, setLevels] = useState('')
+  const [frequency, setFrequency] = useState('daily')
+  const [rules, setRules] = useState<string[]>(CONTROL_PLAN_RULES)
+  const [busy, setBusy] = useState(false)
+  const toggleRule = (rule: string) => setRules((current) => current.includes(rule) ? current.filter((item) => item !== rule) : [...current, rule])
+  return <Card className="space-y-3 p-4 lg:col-span-2">
+    <div><h2 className="font-bold text-[#173d50]">Control plan ต่อ assay / instrument</h2><p className="text-xs text-[#789097]">กำหนดระดับ control ที่ต้องรัน และ Westgard rules ที่ใช้กับ instrument นั้น</p></div>
+    <form className="grid gap-2 md:grid-cols-4" onSubmit={async (event) => { event.preventDefault(); const requiredLevels = levels.split(',').map((item) => item.trim()).filter(Boolean); if (!analyteId || !instrumentId || !requiredLevels.length || !rules.length) return; setBusy(true); if (await onSubmit({ analyteId, instrumentId, requiredLevels, frequency, westgardRules: rules })) { setAnalyteId(''); setInstrumentId(''); setLevels('') }; setBusy(false) }}>
+      <Field label="Analyte"><Select value={analyteId} onChange={(event) => setAnalyteId(event.target.value)} required><option value="">—</option>{data.analytes.filter((item) => item.isActive).map((item) => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}</Select></Field>
+      <Field label="Instrument"><Select value={instrumentId} onChange={(event) => setInstrumentId(event.target.value)} required><option value="">—</option>{data.instruments.filter((item) => item.isActive).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></Field>
+      <Field label="Required levels"><Input value={levels} onChange={(event) => setLevels(event.target.value)} placeholder="Low, Normal, High" required /></Field>
+      <Field label="Frequency"><Select value={frequency} onChange={(event) => setFrequency(event.target.value)}><option value="daily">อย่างน้อยวันละครั้ง</option><option value="per-run">ทุก IQC run</option></Select></Field>
+      <div className="md:col-span-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#58747d]">{CONTROL_PLAN_RULES.map((rule) => <label key={rule} className="flex items-center gap-1"><input type="checkbox" checked={rules.includes(rule)} onChange={() => toggleRule(rule)} /> {rule}</label>)}</div>
+      <div className="md:col-span-4"><Button disabled={busy}>{busy ? 'กำลังบันทึก…' : 'บันทึก Control plan'}</Button></div>
+    </form>
+    {data.controlPlans.length ? <div className="divide-y divide-[#eef3f3] rounded-md border border-[#e9eff0] text-xs">{data.controlPlans.map((plan) => <div key={plan.id} className="flex flex-wrap justify-between gap-2 p-2"><span className="font-semibold text-[#315763]">{plan.analyteCode} · {plan.instrumentName}</span><span>{plan.frequency} · {plan.requiredLevels.join(', ')} · {plan.westgardRules.join(', ')}</span></div>)}</div> : null}
+  </Card>
 }
 
 function TeaForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean>; data: IqcWorkspace }) {
@@ -1231,7 +1344,7 @@ function LotForm({ onSubmit, onUpdate, onToggle, onDelete, data }: { onSubmit: (
 }
 
 function SpecForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean>; data: IqcWorkspace }) {
-  const [form, setForm] = useState({ controlLotId: '', analyteId: '', assignedMean: '', assignedSd: '', expectedQualitative: '' })
+  const [form, setForm] = useState({ controlLotId: '', analyteId: '', assignedMean: '', assignedSd: '', expectedQualitative: '', changeReason: '' })
   const [busy, setBusy] = useState(false)
   return (
     <Card className="space-y-3 p-4 lg:col-span-2">
@@ -1240,8 +1353,8 @@ function SpecForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolea
         e.preventDefault()
         if (!form.controlLotId || !form.analyteId) return
         setBusy(true)
-        const body = { controlLotId: form.controlLotId, analyteId: form.analyteId, assignedMean: form.assignedMean === '' ? null : Number(form.assignedMean), assignedSd: form.assignedSd === '' ? null : Number(form.assignedSd), expectedQualitative: form.expectedQualitative || null }
-        if (await onSubmit(body)) setForm({ controlLotId: '', analyteId: '', assignedMean: '', assignedSd: '', expectedQualitative: '' })
+        const body = { controlLotId: form.controlLotId, analyteId: form.analyteId, assignedMean: form.assignedMean === '' ? null : Number(form.assignedMean), assignedSd: form.assignedSd === '' ? null : Number(form.assignedSd), expectedQualitative: form.expectedQualitative || null, changeReason: form.changeReason || null }
+        if (await onSubmit(body)) setForm({ controlLotId: '', analyteId: '', assignedMean: '', assignedSd: '', expectedQualitative: '', changeReason: '' })
         setBusy(false)
       }}>
         <Field label="Control lot"><Select value={form.controlLotId} onChange={(e) => setForm({ ...form, controlLotId: e.target.value })} required><option value="">—</option>{data.controlLots.map((l) => <option key={l.id} value={l.id}>{l.controlMaterialName}{l.level ? ` ${l.level}` : ''} · {l.lotNumber}</option>)}</Select></Field>
@@ -1249,6 +1362,7 @@ function SpecForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolea
         <Field label="Assigned mean"><Input className="mono" type="number" step="any" value={form.assignedMean} onChange={(e) => setForm({ ...form, assignedMean: e.target.value })} /></Field>
         <Field label="Assigned SD"><Input className="mono" type="number" step="any" value={form.assignedSd} onChange={(e) => setForm({ ...form, assignedSd: e.target.value })} /></Field>
         <Field label="Expected (qual)"><Input value={form.expectedQualitative} onChange={(e) => setForm({ ...form, expectedQualitative: e.target.value })} placeholder="valid/pos" /></Field>
+        <Field label="เหตุผลแก้ไข Spec" hint="ต้องระบุเมื่อแก้ไข spec ที่มีอยู่แล้ว"><Input value={form.changeReason} onChange={(e) => setForm({ ...form, changeReason: e.target.value })} placeholder="เช่น แก้ตาม certificate ผู้ผลิต" /></Field>
         <div className="md:col-span-5"><Button disabled={busy}>บันทึก spec</Button></div>
       </form>
     </Card>

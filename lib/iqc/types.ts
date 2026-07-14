@@ -1,4 +1,4 @@
-import type { AnalyteScale, QcStatus } from '@/lib/iqc/westgard'
+import type { AnalyteScale, QcStatus, WestgardRule } from '@/lib/iqc/westgard'
 
 export type { AnalyteScale, QcStatus } from '@/lib/iqc/westgard'
 export type AnalyteDataType = 'quantitative' | 'qualitative'
@@ -153,11 +153,44 @@ export interface IqcCorrectiveAction {
   problem: string
   rootCause: string | null
   actionTaken: string | null
-  status: 'open' | 'closed'
+  status: 'open' | 'awaiting-effectiveness' | 'closed'
+  ownerId: string | null
+  ownerName: string | null
+  dueDate: string | null
+  effectivenessOutcome: 'pending' | 'effective' | 'ineffective'
+  effectivenessNote: string | null
+  effectivenessVerifiedByName: string | null
+  effectivenessVerifiedAt: string | null
   createdByName: string | null
   createdAt: string
   closedByName: string | null
   closedAt: string | null
+}
+
+export interface IqcControlPlan {
+  id: string
+  analyteId: string
+  analyteCode: string
+  analyteName: string
+  instrumentId: string
+  instrumentName: string
+  requiredLevels: string[]
+  frequency: 'daily' | 'per-run'
+  westgardRules: WestgardRule[]
+  isActive: boolean
+}
+
+export interface IqcAlert {
+  id: string
+  tone: 'warning' | 'rejected'
+  kind: 'lot-expiring' | 'rejected-trend' | 'control-due' | 'capa-overdue'
+  title: string
+  detail: string
+}
+
+export interface IqcAssignableUser {
+  id: string
+  displayName: string
 }
 
 export type TeaMode = 'absolute' | 'percent'
@@ -185,6 +218,8 @@ export interface IqcSixSigmaRow {
   meanValue: number | null
   cv: number | null
   biasPct: number
+  biasSampleCount: number
+  biasPeriod: string | null
   teaValue: number
   teaMode: TeaMode
   teaPct: number | null
@@ -238,6 +273,9 @@ export interface IqcWorkspace {
   controlLots: IqcControlLot[]
   specs: IqcSpec[]
   teaSpecs: IqcTeaSpec[]
+  controlPlans: IqcControlPlan[]
+  alerts: IqcAlert[]
+  assignableUsers: IqcAssignableUser[]
   charts: IqcChart[]
   sixSigma: IqcSixSigmaRow[]
   uncertaintyBudgets: IqcUncertaintyBudget[]

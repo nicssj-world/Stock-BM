@@ -1,15 +1,16 @@
 import 'server-only'
 
-import { addOneMonth, nextHpvBoxPosition, summarizeHpvSites } from '@/lib/hpv/rules'
+import { addOneMonth, getHpvDestructionState, nextHpvBoxPosition, summarizeHpvSites } from '@/lib/hpv/rules'
 import type { BmActor } from '@/lib/bm/types'
 import type {
-  HpvBoxType,
   HpvDashboard,
   HpvKitDistribution,
   HpvKitDistributionLine,
   HpvKitReturn,
   HpvKitReturnLine,
+  HpvBoxStatus,
   HpvSample,
+  HpvSpecimenType,
   HpvSite,
   HpvSiteReceipt,
   HpvStorageBox,
@@ -169,6 +170,7 @@ function sampleFromRow(row: RecordRow, names: Map<string, string>): HpvSample {
   return {
     id: asString(row.id),
     barcode: asString(row.barcode),
+    specimenType: asString(row.specimen_type) as HpvSpecimenType,
     boxId: nullableString(row.box_id),
     position: row.position === null || row.position === undefined ? null : asNumber(row.position),
     fromStorageBox: row.from_storage_box !== false,
@@ -186,7 +188,6 @@ function boxFromRow(row: RecordRow, samples: HpvSample[]): HpvStorageBox {
   return {
     id: asString(row.id),
     boxCode: asString(row.box_code),
-    boxType: asString(row.box_type) as HpvBoxType,
     capacity: asNumber(row.capacity),
     status: asString(row.status) as HpvStorageBox['status'],
     filledAt: nullableString(row.filled_at),
@@ -646,10 +647,10 @@ export async function createHpvKitReturn(input: {
   return { workspace: await getHpvWorkspace(actor), returnId: id }
 }
 
-export async function createHpvStorageBox(input: { boxCode: string; boxType: HpvBoxType }, actor: BmActor) {
+export async function createHpvStorageBox(input: { boxCode: string }, actor: BmActor) {
   const { data, error } = await getAdminClient()
     .from('bm_hpv_storage_boxes')
-    .insert({ box_code: input.boxCode.trim(), box_type: input.boxType, created_by: actor.id })
+    .insert({ box_code: input.boxCode.trim(), created_by: actor.id })
     .select('id')
     .single()
   fail(error)
@@ -698,7 +699,7 @@ export async function moveHpvSamplePosition(sampleId: string, targetPosition: nu
   return getHpvWorkspace(actor)
 }
 
-export async function scanHpvSample(input: { barcode: string; boxId: string; position?: number | null }, actor: BmActor) {
+export async function scanHpvSample(input: { barcode: string; boxId: string; specimenType: HpvSpecimenType; position?: number | null }, actor: BmActor) {
   const admin = getAdminClient()
   const barcode = input.barcode.trim()
   const { data: existing, error: existingError } = await admin.from('bm_hpv_samples').select('id,status').eq('barcode', barcode).maybeSingle()
@@ -726,7 +727,7 @@ export async function scanHpvSample(input: { barcode: string; boxId: string; pos
 
   const { data, error } = await admin
     .from('bm_hpv_samples')
-    .insert({ barcode, box_id: input.boxId, position, stored_by: actor.id })
+    .insert({ barcode, box_id: input.boxId, position, specimen_type: input.specimenType, stored_by: actor.id })
     .select('id')
     .single()
   fail(error)
@@ -745,7 +746,7 @@ export async function scanHpvSample(input: { barcode: string; boxId: string; pos
     fail(updateError)
   }
 
-  await writeAudit(actor, 'hpv.sample.store', 'hpv-sample', asString((data as RecordRow).id), { barcode, boxId: input.boxId, position })
+  await writeAudit(actor, 'hpv.sample.store', 'hpv-sample', asString((data as RecordRow).id), { barcode, boxId: input.boxId, position, specimenType: input.specimenType })
   return getHpvWorkspace(actor)
 }
 
@@ -797,14 +798,30 @@ export async function destroyHpvStorageBox(id: string, actor: BmActor) {
 export async function getHpvDashboardData(): Promise<HpvDashboard> {
   const admin = getAdminClient()
   const today = todayBangkok()
-  const [{ count: storedCount }, { count: boxCount }] = await Promise.all([
+  const [{ count: storedCount }, { data: boxData, error: boxError }] = await Promise.all([
     admin.from('bm_hpv_samples').select('*', { count: 'exact', head: true }).eq('status', 'stored'),
-    admin.from('bm_hpv_storage_boxes').select('*', { count: 'exact', head: true }).lte('destroy_due_at', today).neq('status', 'destroyed'),
+    admin.from('bm_hpv_storage_boxes').select('destroy_due_at,status').not('destroy_due_at', 'is', null).neq('status', 'destroyed'),
   ])
-  return { storedSamples: storedCount ?? 0, boxesDueDestruction: boxCount ?? 0 }
+  fail(boxError)
+  const states = (boxData ?? []).map((box) => getHpvDestructionState(nullableString((box as RecordRow).destroy_due_at), asString((box as RecordRow).status) as HpvBoxStatus, today))
+  return { storedSamples: storedCount ?? 0, boxesDueSoon: states.filter((state) => state === 'due_soon').length, boxesDueDestruction: states.filter((state) => state === 'due_now').length }
 }
 
-export async function checkoutHpvSample(input: { barcode: string; destination?: string | null; note?: string | null }, actor: BmActor) {
+export async function reopenHpvStorageBox(id: string, actor: BmActor) {
+  assertAdmin(actor)
+  const { data: box, error: boxError } = await getAdminClient().from('bm_hpv_storage_boxes').select('status').eq('id', id).maybeSingle()
+  fail(boxError)
+  if ((box as RecordRow | null)?.status !== 'full') throw new HttpError(400, 'เปิดกลับได้เฉพาะกล่องที่ปิดแล้ว')
+  const { error } = await getAdminClient()
+    .from('bm_hpv_storage_boxes')
+    .update({ status: 'open', filled_at: null, destroy_due_at: null, updated_at: new Date().toISOString() })
+    .eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'hpv.box.reopen', 'hpv-box', id, {})
+  return getHpvWorkspace(actor)
+}
+
+export async function checkoutHpvSample(input: { barcode: string; destination?: string | null; note?: string | null; specimenType?: HpvSpecimenType }, actor: BmActor) {
   const admin = getAdminClient()
   const barcode = input.barcode.trim()
   const destination = clean(input.destination) ?? 'Co-testing'
@@ -817,6 +834,7 @@ export async function checkoutHpvSample(input: { barcode: string; destination?: 
 
   if (!sampleRow) {
     // Barcode was never stored in a storage box (e.g. sample sent straight to co-testing) — record the checkout directly.
+    if (!input.specimenType) throw new HttpError(400, 'กรุณาระบุประเภทตัวอย่างสำหรับ sample ที่ไม่ได้มาจาก storage box')
     const { data, error } = await admin
       .from('bm_hpv_samples')
       .insert({
@@ -824,6 +842,7 @@ export async function checkoutHpvSample(input: { barcode: string; destination?: 
         box_id: null,
         position: null,
         from_storage_box: false,
+        specimen_type: input.specimenType,
         status: 'checked_out',
         stored_at: checkedOutAt,
         stored_by: actor.id,
@@ -835,7 +854,7 @@ export async function checkoutHpvSample(input: { barcode: string; destination?: 
       .select('id')
       .single()
     fail(error)
-    await writeAudit(actor, 'hpv.sample.checkout', 'hpv-sample', asString((data as RecordRow).id), { barcode, destination, fromStorageBox: false })
+    await writeAudit(actor, 'hpv.sample.checkout', 'hpv-sample', asString((data as RecordRow).id), { barcode, destination, fromStorageBox: false, specimenType: input.specimenType })
     return getHpvWorkspace(actor)
   }
 

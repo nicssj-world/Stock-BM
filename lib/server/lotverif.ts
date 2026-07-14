@@ -337,6 +337,7 @@ interface UpdateInput {
   conclusion?: string | null
   acceptanceCriteria?: string | null
   title?: string | null
+  method?: LotVerifMethod
 }
 
 export async function updateVerification(id: string, patch: UpdateInput, actor: BmActor): Promise<void> {
@@ -345,6 +346,7 @@ export async function updateVerification(id: string, patch: UpdateInput, actor: 
   if (patch.conclusion !== undefined) update.conclusion = clean(patch.conclusion)
   if (patch.acceptanceCriteria !== undefined) update.acceptance_criteria = clean(patch.acceptanceCriteria)
   if (patch.title !== undefined) update.title = clean(patch.title)
+  if (patch.method !== undefined) update.method = patch.method
 
   if (patch.status !== undefined) {
     update.status = patch.status
@@ -362,4 +364,34 @@ export async function updateVerification(id: string, patch: UpdateInput, actor: 
   const { error } = await admin.from('lotverif_verifications').update(update).eq('id', id)
   fail(error)
   await writeAudit(actor, 'lotverif.update', 'lotverif', id, { patch })
+}
+
+export async function deleteVerification(id: string, actor: BmActor): Promise<void> {
+  assertAdmin(actor)
+  const admin = getAdminClient()
+  const { data: verification, error: verificationError } = await admin
+    .from('lotverif_verifications')
+    .select('id,status,title')
+    .eq('id', id)
+    .maybeSingle()
+  fail(verificationError)
+  if (!verification) throw new HttpError(404, 'Verification not found')
+  const status = asString((verification as RecordRow).status) as LotVerifStatus
+  if (status === 'released' || status === 'rejected') throw new HttpError(409, 'ไม่สามารถลบ verification ที่ final แล้ว')
+
+  const { count, error: attachmentError } = await admin
+    .from('bm_attachments')
+    .select('id', { count: 'exact', head: true })
+    .eq('module', 'lotverif')
+    .eq('entity_type', 'verification')
+    .eq('entity_id', id)
+  fail(attachmentError)
+  if ((count ?? 0) > 0) throw new HttpError(409, 'ลบไฟล์แนบออกก่อนจึงจะลบ verification ได้')
+
+  const { error } = await admin.from('lotverif_verifications').delete().eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'lotverif.delete', 'lotverif', id, {
+    status,
+    title: nullableString((verification as RecordRow).title),
+  })
 }
