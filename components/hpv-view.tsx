@@ -1332,6 +1332,7 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
   const [destination, setDestination] = useState('Co-testing')
   const [customDestination, setCustomDestination] = useState('')
   const [busy, setBusy] = useState(false)
+  const [historySearch, setHistorySearch] = useState('')
   const effectiveDestination = destination === 'อื่นๆ' ? customDestination.trim() || 'อื่นๆ' : destination
   const storedSamples = data.boxes.flatMap((box) => box.samples.map((sample) => ({ ...sample, box }))).filter((sample) => sample.status === 'stored')
   const checkedOutSamples = useMemo(() => {
@@ -1339,8 +1340,17 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
     const external = data.externalSamples.filter((s) => s.status === 'checked_out').map((sample) => ({ ...sample, box: null as HpvStorageBox | null }))
     return [...fromBoxes, ...external].sort((a, b) => (b.checkedOutAt ?? '').localeCompare(a.checkedOutAt ?? ''))
   }, [data.boxes, data.externalSamples])
-  const historyPagination = usePagination(checkedOutSamples.length, 10)
-  const pagedCheckedOutSamples = checkedOutSamples.slice(historyPagination.start, historyPagination.end)
+  const filteredCheckedOutSamples = useMemo(() => {
+    const term = historySearch.trim().toLowerCase()
+    if (!term) return checkedOutSamples
+    return checkedOutSamples.filter((sample) =>
+      [sample.barcode, sample.box?.boxCode, sample.checkoutDestination, sample.checkoutNote, sample.checkedOutByName]
+        .filter(Boolean)
+        .some((field) => field!.toLowerCase().includes(term)),
+    )
+  }, [checkedOutSamples, historySearch])
+  const historyPagination = usePagination(filteredCheckedOutSamples.length, 10)
+  const pagedCheckedOutSamples = filteredCheckedOutSamples.slice(historyPagination.start, historyPagination.end)
 
   function exportCheckout() {
     const rows = [
@@ -1412,9 +1422,15 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
         </form>
       </Card>
       <Card className="overflow-hidden">
-        <div className="flex items-center justify-between border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3">
-          <span className="font-bold text-[#173d50]">Checkout history ({checkedOutSamples.length})</span>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3">
+          <span className="font-bold text-[#173d50]">Checkout history ({filteredCheckedOutSamples.length}{historySearch.trim() ? ` / ${checkedOutSamples.length}` : ''})</span>
           {checkedOutSamples.length > 0 ? <Button variant="ghost" className="gap-1 px-2 py-1 text-xs" onClick={exportCheckout}><Download className="size-3" /> Export CSV</Button> : null}
+        </div>
+        <div className="border-b border-[#edf2f2] px-4 py-2.5">
+          <div className="relative">
+            <Search className="absolute top-2.5 left-3 size-4 text-[#8ca1a5]" />
+            <Input value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} className="pl-9" placeholder="ค้นหา barcode, box, destination, note, ผู้บันทึก" />
+          </div>
         </div>
         <div className="divide-y divide-[#edf2f2]">
           {pagedCheckedOutSamples.map((sample) => (
@@ -1445,8 +1461,9 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
             </div>
           ))}
           {!checkedOutSamples.length ? <p className="px-4 py-10 text-center text-sm text-[#91a4a9]">ยังไม่มี Checkout</p> : null}
+          {checkedOutSamples.length > 0 && !filteredCheckedOutSamples.length ? <p className="px-4 py-10 text-center text-sm text-[#91a4a9]">ไม่พบรายการที่ตรงกับคำค้นหา</p> : null}
         </div>
-        {checkedOutSamples.length > 10 ? <Pagination {...historyPagination} total={checkedOutSamples.length} onChange={historyPagination.setPage} /> : null}
+        {filteredCheckedOutSamples.length > 10 ? <Pagination {...historyPagination} total={filteredCheckedOutSamples.length} onChange={historyPagination.setPage} /> : null}
       </Card>
     </div>
   )
