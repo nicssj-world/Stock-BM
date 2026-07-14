@@ -1333,6 +1333,7 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
   const [customDestination, setCustomDestination] = useState('')
   const [busy, setBusy] = useState(false)
   const [historySearch, setHistorySearch] = useState('')
+  const [historyHintOpen, setHistoryHintOpen] = useState(false)
   const effectiveDestination = destination === 'อื่นๆ' ? customDestination.trim() || 'อื่นๆ' : destination
   const storedSamples = data.boxes.flatMap((box) => box.samples.map((sample) => ({ ...sample, box }))).filter((sample) => sample.status === 'stored')
   const checkedOutSamples = useMemo(() => {
@@ -1349,6 +1350,7 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
         .some((field) => field!.toLowerCase().includes(term)),
     )
   }, [checkedOutSamples, historySearch])
+  const historyHints = historySearch.trim() ? filteredCheckedOutSamples.slice(0, 6) : []
   const historyPagination = usePagination(filteredCheckedOutSamples.length, 10)
   const pagedCheckedOutSamples = filteredCheckedOutSamples.slice(historyPagination.start, historyPagination.end)
 
@@ -1426,11 +1428,33 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
           <span className="font-bold text-[#173d50]">Checkout history ({filteredCheckedOutSamples.length}{historySearch.trim() ? ` / ${checkedOutSamples.length}` : ''})</span>
           {checkedOutSamples.length > 0 ? <Button variant="ghost" className="gap-1 px-2 py-1 text-xs" onClick={exportCheckout}><Download className="size-3" /> Export CSV</Button> : null}
         </div>
-        <div className="border-b border-[#edf2f2] px-4 py-2.5">
+        <div className="relative border-b border-[#edf2f2] px-4 py-2.5">
           <div className="relative">
             <Search className="absolute top-2.5 left-3 size-4 text-[#8ca1a5]" />
-            <Input value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} className="pl-9" placeholder="ค้นหา barcode, box, destination, note, ผู้บันทึก" />
+            <Input
+              value={historySearch}
+              onChange={(e) => { setHistorySearch(e.target.value); setHistoryHintOpen(true) }}
+              onFocus={() => setHistoryHintOpen(true)}
+              onBlur={() => setTimeout(() => setHistoryHintOpen(false), 150)}
+              className="pl-9"
+              placeholder="ค้นหา barcode, box, destination, note, ผู้บันทึก"
+            />
           </div>
+          {historyHintOpen && historyHints.length > 0 ? (
+            <div className="absolute inset-x-4 top-full z-10 mt-1 overflow-hidden rounded-md border border-[#d6e2e3] bg-white shadow-lg">
+              {historyHints.map((sample) => (
+                <button
+                  key={sample.id}
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); setHistorySearch(sample.barcode); setHistoryHintOpen(false) }}
+                  className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition hover:bg-[#f6fbfa]"
+                >
+                  <span className="mono text-sm font-bold text-[#315763]">{sample.barcode}</span>
+                  <span className="truncate text-xs text-[#8ba0a5]">{sample.box ? sample.box.boxCode : 'ไม่ได้มาจาก Storage box'} · {sample.checkoutDestination ?? 'Co-testing'}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
         <div className="divide-y divide-[#edf2f2]">
           {pagedCheckedOutSamples.map((sample) => (
