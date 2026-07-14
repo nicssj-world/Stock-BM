@@ -1403,22 +1403,26 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
           </div>
           <div className="max-h-[360px] overflow-y-auto divide-y divide-[#edf2f2]">
             {checkedOutSamples.map((sample) => (
-              <div key={sample.id} className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
-                <div>
+              <div key={sample.id} className="flex flex-wrap items-start justify-between gap-4 px-4 py-3.5">
+                <div className="min-w-0 flex-1 space-y-1.5">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <p className="mono font-bold text-[#315763]">{sample.barcode}</p>
+                    <p className="mono text-sm font-bold text-[#315763]">{sample.barcode}</p>
+                    <SpecimenTypeBadge type={sample.specimenType} />
                     {!sample.fromStorageBox ? <StatusBadge tone="warning" label="ไม่ได้มาจาก Storage box" /> : null}
                   </div>
-                  <div className="mt-1 flex items-center gap-2">
-                    <p className="text-xs text-[#8ba0a5]">{sample.box ? `${sample.box.boxCode} · ${formatHpvBoxPosition(sample.position)}` : 'ไม่มีข้อมูลกล่อง'}</p>
-                    <SpecimenTypeBadge type={sample.specimenType} />
-                  </div>
-                  <p className="text-xs font-semibold text-[#0b7f76]">→ {sample.checkoutDestination ?? 'Co-testing'}</p>
-                  {sample.checkoutNote ? <p className="mt-0.5 text-xs text-[#789097]">{sample.checkoutNote}</p> : null}
+                  <p className="flex items-center gap-1.5 text-xs text-[#8ba0a5]">
+                    <Boxes className="size-3.5 shrink-0" aria-hidden="true" />
+                    {sample.box ? `${sample.box.boxCode} · ${formatHpvBoxPosition(sample.position)}` : 'ไม่มีข้อมูลกล่อง'}
+                  </p>
+                  <p className="flex items-center gap-1.5 text-xs font-semibold text-[#0b7f76]">
+                    <Send className="size-3.5 shrink-0" aria-hidden="true" />
+                    {sample.checkoutDestination ?? 'Co-testing'}
+                  </p>
+                  {sample.checkoutNote ? <p className="border-l-2 border-[#e1eaeb] pl-2 text-xs text-[#789097] italic">{sample.checkoutNote}</p> : null}
                 </div>
-                <div className="text-right text-xs text-[#8ba0a5]">
-                  <p>{sample.checkedOutAt ? formatDateTime(sample.checkedOutAt) : '-'}</p>
-                  <p>{sample.checkedOutByName ?? '-'}</p>
+                <div className="shrink-0 text-right text-xs text-[#8ba0a5]">
+                  <p className="mono">{sample.checkedOutAt ? formatDateTime(sample.checkedOutAt) : '-'}</p>
+                  <p className="mt-0.5 font-medium text-[#55727c]">{sample.checkedOutByName ?? '-'}</p>
                 </div>
               </div>
             ))}
