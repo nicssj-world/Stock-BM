@@ -777,6 +777,33 @@ export async function deleteHpvSample(id: string, actor: BmActor) {
   return getHpvWorkspace(actor)
 }
 
+export async function undoHpvSampleCheckout(id: string, actor: BmActor) {
+  assertAdmin(actor)
+  const admin = getAdminClient()
+  const { data: sample, error: sampleError } = await admin.from('bm_hpv_samples').select('id,barcode,status,box_id').eq('id', id).maybeSingle()
+  fail(sampleError)
+  const row = sample as RecordRow | null
+  if (!row) throw new HttpError(404, 'HPV sample not found')
+  if (asString(row.status) !== 'checked_out') throw new HttpError(409, 'ยกเลิก checkout ได้เฉพาะ sample ที่ checkout แล้ว')
+
+  const boxId = nullableString(row.box_id)
+  if (boxId) {
+    // Sample came from a storage box — undoing checkout puts it back to stored in its original position.
+    const { error } = await admin
+      .from('bm_hpv_samples')
+      .update({ status: 'stored', checked_out_at: null, checked_out_by: null, checkout_destination: null, checkout_note: null })
+      .eq('id', id)
+    fail(error)
+  } else {
+    // Sample was never stored in a box — the row only ever existed to record this checkout, so remove it entirely.
+    const { error } = await admin.from('bm_hpv_samples').delete().eq('id', id)
+    fail(error)
+  }
+
+  await writeAudit(actor, 'hpv.sample.checkout_undo', 'hpv-sample', id, { barcode: asString(row.barcode), restoredToBox: Boolean(boxId) })
+  return getHpvWorkspace(actor)
+}
+
 export async function destroyHpvStorageBox(id: string, actor: BmActor) {
   assertAdmin(actor)
   const { data: box, error: boxError } = await getAdminClient().from('bm_hpv_storage_boxes').select('status').eq('id', id).maybeSingle()
