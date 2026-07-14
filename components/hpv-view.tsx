@@ -1323,12 +1323,9 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
   const [note, setNote] = useState('')
   const [destination, setDestination] = useState('Co-testing')
   const [customDestination, setCustomDestination] = useState('')
-  const [specimenType, setSpecimenType] = useState<HpvSpecimenType>('self_collected')
   const [busy, setBusy] = useState(false)
   const effectiveDestination = destination === 'อื่นๆ' ? customDestination.trim() || 'อื่นๆ' : destination
   const storedSamples = data.boxes.flatMap((box) => box.samples.map((sample) => ({ ...sample, box }))).filter((sample) => sample.status === 'stored')
-  const trimmedBarcode = normalizeScan(barcode)
-  const isUnregisteredBarcode = trimmedBarcode.length > 0 && !storedSamples.some((sample) => sample.barcode === trimmedBarcode)
   const checkedOutSamples = useMemo(() => {
     const fromBoxes = data.boxes.flatMap((box) => box.samples.filter((s) => s.status === 'checked_out').map((sample) => ({ ...sample, box: box as HpvStorageBox | null })))
     const external = data.externalSamples.filter((s) => s.status === 'checked_out').map((sample) => ({ ...sample, box: null as HpvStorageBox | null }))
@@ -1360,7 +1357,7 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
     try {
       const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/storage/checkout', {
         method: 'POST',
-        body: JSON.stringify({ barcode: code, destination: effectiveDestination, note: note.trim() || null, specimenType: isExternal ? specimenType : undefined }),
+        body: JSON.stringify({ barcode: code, destination: effectiveDestination, note: note.trim() || null, specimenType: isExternal ? 'clinician_collected' : undefined }),
       })
       onWorkspace(result.workspace, isExternal ? `Checkout ${code} ไป ${effectiveDestination} แล้ว (ไม่ได้มาจาก storage box)` : `Checkout ${code} ไป ${effectiveDestination} แล้ว`)
       setBarcode('')
@@ -1380,29 +1377,7 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
         <form onSubmit={(e) => { e.preventDefault(); void checkout() }} className="space-y-3">
           <h2 className="font-bold text-[#173d50]">Checkout</h2>
           <div className="relative"><ScanLine className="absolute top-3 left-3 size-5 text-[#88a1a7]" /><Input autoFocus value={barcode} onChange={(e) => setBarcode(e.target.value)} className="h-12 pl-11 mono text-base" placeholder="Sample barcode" /></div>
-          <p className="text-xs text-[#8ba0a5]">ถ้า barcode นี้ไม่มีอยู่ใน storage box ระบบจะบันทึก checkout ให้และทำสัญลักษณ์ว่าไม่ได้มาจาก storage box</p>
-          {isUnregisteredBarcode ? (
-            <Field label="Specimen type (สำหรับ sample ที่ไม่ได้มาจาก storage box)">
-              <div role="group" aria-label="Specimen type" className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  aria-pressed={specimenType === 'self_collected'}
-                  onClick={() => setSpecimenType('self_collected')}
-                  className={`rounded-md border px-3 py-2 text-sm font-bold transition ${specimenType === 'self_collected' ? 'border-[#0b7f76] bg-[#e7f7f4] text-[#08766e] ring-2 ring-[#0b7f76]/20' : 'border-[#c9dadd] bg-white text-[#58747d] hover:border-[#69b8b0]'}`}
-                >
-                  Self-collected
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={specimenType === 'clinician_collected'}
-                  onClick={() => setSpecimenType('clinician_collected')}
-                  className={`rounded-md border px-3 py-2 text-sm font-bold transition ${specimenType === 'clinician_collected' ? 'border-[#d8a936] bg-[#fff7df] text-[#9a6700] ring-2 ring-[#d8a936]/20' : 'border-[#c9dadd] bg-white text-[#58747d] hover:border-[#d8a936]'}`}
-                >
-                  Clinician-collected
-                </button>
-              </div>
-            </Field>
-          ) : null}
+          <p className="text-xs text-[#8ba0a5]">ถ้า barcode นี้ไม่มีอยู่ใน storage box ระบบจะบันทึก checkout ให้และทำสัญลักษณ์ว่าไม่ได้มาจาก storage box (ระบุเป็น Clinician-collected โดยอัตโนมัติ)</p>
           <Field label="Destination"><Select value={destination} onChange={(e) => setDestination(e.target.value)}><option>Co-testing</option><option>GeneXpert</option><option>PCR</option><option>อื่นๆ</option></Select></Field>
           {destination === 'อื่นๆ' ? <Field label="ระบุ"><Input value={customDestination} onChange={(e) => setCustomDestination(e.target.value)} placeholder="ระบุปลายทาง" /></Field> : null}
           <Field label="Note"><Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
