@@ -14,6 +14,11 @@ import { ManagedList } from '@/components/managed-list'
 type Tab = 'charts' | 'enter' | 'sixsigma' | 'uncertainty' | 'corrective' | 'manage'
 type NoticeState = { tone: 'success' | 'danger'; text: string } | null
 
+function nowForDatetimeLocalInput() {
+  const now = new Date()
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+}
+
 export function IqcView({ actor, initialData }: { actor: BmActor; initialData: IqcWorkspace }) {
   const [data, setData] = useState(initialData)
   const [tab, setTab] = useState<Tab>('charts')
@@ -664,7 +669,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
   const activeAnalytes = useMemo(() => data.analytes.filter((a) => a.isActive), [data.analytes])
   const activeLots = useMemo(() => data.controlLots.filter((l) => l.isActive), [data.controlLots])
   const [instrumentId, setInstrumentId] = useState('')
-  const [runDatetime, setRunDatetime] = useState(() => new Date().toISOString().slice(0, 16))
+  const [runDatetime, setRunDatetime] = useState(nowForDatetimeLocalInput)
   const [note, setNote] = useState('')
   const [consumables, setConsumables] = useState<ConsumableRow[]>([])
   const [rows, setRows] = useState<ValueRow[]>([])
@@ -706,6 +711,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
         }),
       })
       onOk('บันทึก run แล้ว', result.iqc)
+      setRunDatetime(nowForDatetimeLocalInput())
       onDone()
     } catch (e) {
       onErr(e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ')
