@@ -6,8 +6,6 @@ import {
   Boxes,
   Camera,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   ClipboardCheck,
   Download,
   Eye,
@@ -30,7 +28,7 @@ import type { BmActor } from '@/lib/bm/types'
 import type { HpvBoxType, HpvKitDistribution, HpvSample, HpvSiteReceipt, HpvSpecimenType, HpvStorageBox, HpvWorkspace } from '@/lib/hpv/types'
 import { formatHpvBoxPosition, getHpvDestructionState, HPV_BOX_CAPACITY, specimenTypeLabel } from '@/lib/hpv/rules'
 import { bangkokDateKey, daysUntil, formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
-import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
+import { api, Button, Card, Field, Input, Notice, PageHeader, Pagination, Select, StatCard, StatusBadge, Tabs, Textarea, usePagination } from '@/components/ui'
 
 type Tab = 'distribution' | 'returns' | 'receipts' | 'storage' | 'checkout'
 
@@ -203,6 +201,8 @@ function DistributionTab({
     return { item, itemLines, selectedKey, selectedLine: itemLines.find((line) => line.key === selectedKey) ?? null }
   })
   const canSubmitBundle = Boolean(selectedSiteId && kitType && stockItems.length && selectedBundleLines.every((line) => line.selectedLine))
+  const distributionsPagination = usePagination(data.distributions.length, 10)
+  const pagedDistributions = data.distributions.slice(distributionsPagination.start, distributionsPagination.end)
 
   async function uploadDistributionFile(distributionId: string, file: File) {
     const formData = new FormData()
@@ -513,13 +513,13 @@ function DistributionTab({
         <h2 className="font-bold text-[#173d50]">ประวัติการเบิก</h2>
         <button onClick={exportDistributions} className="flex items-center gap-1.5 rounded border border-[#c7dde0] bg-[#f5f9fa] px-2.5 py-1.5 text-xs font-bold text-[#55727c] hover:bg-[#ebf5f6]"><Download className="size-3.5" /> Export CSV</button>
       </div>
-      <div className="max-h-[360px] overflow-y-auto">
+      <div className="overflow-x-auto">
         <table className="w-full min-w-[800px] text-left text-sm">
           <thead className="sticky top-0 bg-[#f7fafa] text-[10px] tracking-[0.08em] text-[#779097] uppercase">
             <tr><th className="px-4 py-2.5">วันที่</th><th className="px-3 py-2.5">หน่วยงาน</th><th className="px-3 py-2.5">สินค้า · Lot</th><th className="px-3 py-2.5">Location</th><th className="px-3 py-2.5 text-right">จำนวน</th><th className="px-3 py-2.5">โดย</th><th className="px-3 py-2.5" /></tr>
           </thead>
           <tbody className="divide-y divide-[#edf2f2]">
-            {data.distributions.map((dist) => (
+            {pagedDistributions.map((dist) => (
               <tr key={dist.id} className="hover:bg-[#f7fbfc]">
                 <td className="mono px-4 py-2.5 text-[#315763]">{formatDate(dist.distributedOn)}</td>
                 <td className="px-3 py-2.5 font-semibold text-[#315763]">{dist.siteName}</td>
@@ -545,6 +545,7 @@ function DistributionTab({
         </table>
         {!data.distributions.length ? <p className="px-4 py-10 text-center text-sm text-[#91a4a9]">ยังไม่มีประวัติการเบิก</p> : null}
       </div>
+      {data.distributions.length > 10 ? <Pagination {...distributionsPagination} total={data.distributions.length} onChange={distributionsPagination.setPage} /> : null}
     </Card>
     </div>
   )
@@ -706,6 +707,9 @@ function ReturnsTab({ data, onWorkspace, onNotice }: {
     .map((item) => ({ ...item, quantity: Number(quantities[item.line.id ?? ''] ?? 0) }))
     .filter((item) => Number.isInteger(item.quantity) && item.quantity > 0)
 
+  const returnsPagination = usePagination(data.kitReturns.length, 10)
+  const pagedKitReturns = data.kitReturns.slice(returnsPagination.start, returnsPagination.end)
+
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     if (!selectedLines.length) return
@@ -805,8 +809,8 @@ function ReturnsTab({ data, onWorkspace, onNotice }: {
 
       <Card className="overflow-hidden">
         <div className="border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3 font-bold text-[#173d50]">ประวัติคืนชุดตรวจ</div>
-        <div className="max-h-[620px] divide-y divide-[#edf2f2] overflow-y-auto">
-          {data.kitReturns.map((kitReturn) => (
+        <div className="divide-y divide-[#edf2f2]">
+          {pagedKitReturns.map((kitReturn) => (
             <div key={kitReturn.id} className="space-y-2 px-4 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -828,6 +832,7 @@ function ReturnsTab({ data, onWorkspace, onNotice }: {
           ))}
           {!data.kitReturns.length ? <p className="px-4 py-10 text-center text-sm text-[#91a4a9]">ยังไม่มีประวัติคืนชุดตรวจ</p> : null}
         </div>
+        {data.kitReturns.length > 10 ? <Pagination {...returnsPagination} total={data.kitReturns.length} onChange={returnsPagination.setPage} /> : null}
       </Card>
     </div>
   )
@@ -1326,8 +1331,6 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
   const [destination, setDestination] = useState('Co-testing')
   const [customDestination, setCustomDestination] = useState('')
   const [busy, setBusy] = useState(false)
-  const [historyPage, setHistoryPage] = useState(1)
-  const historyPageSize = 10
   const effectiveDestination = destination === 'อื่นๆ' ? customDestination.trim() || 'อื่นๆ' : destination
   const storedSamples = data.boxes.flatMap((box) => box.samples.map((sample) => ({ ...sample, box }))).filter((sample) => sample.status === 'stored')
   const checkedOutSamples = useMemo(() => {
@@ -1335,9 +1338,8 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
     const external = data.externalSamples.filter((s) => s.status === 'checked_out').map((sample) => ({ ...sample, box: null as HpvStorageBox | null }))
     return [...fromBoxes, ...external].sort((a, b) => (b.checkedOutAt ?? '').localeCompare(a.checkedOutAt ?? ''))
   }, [data.boxes, data.externalSamples])
-  const historyPageCount = Math.max(1, Math.ceil(checkedOutSamples.length / historyPageSize))
-  const currentHistoryPage = Math.min(historyPage, historyPageCount)
-  const pagedCheckedOutSamples = checkedOutSamples.slice((currentHistoryPage - 1) * historyPageSize, currentHistoryPage * historyPageSize)
+  const historyPagination = usePagination(checkedOutSamples.length, 10)
+  const pagedCheckedOutSamples = checkedOutSamples.slice(historyPagination.start, historyPagination.end)
 
   function exportCheckout() {
     const rows = [
@@ -1443,32 +1445,7 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
           ))}
           {!checkedOutSamples.length ? <p className="px-4 py-10 text-center text-sm text-[#91a4a9]">ยังไม่มี Checkout</p> : null}
         </div>
-        {checkedOutSamples.length > historyPageSize ? (
-          <div className="flex items-center justify-between border-t border-[#e1eaeb] bg-[#fbfdfd] px-4 py-2.5">
-            <p className="text-xs text-[#8ba0a5]">
-              {(currentHistoryPage - 1) * historyPageSize + 1}–{Math.min(currentHistoryPage * historyPageSize, checkedOutSamples.length)} จาก {checkedOutSamples.length}
-            </p>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                disabled={currentHistoryPage <= 1}
-                onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
-                className="flex items-center gap-1 rounded border border-[#c9dadd] bg-white px-2 py-1 text-xs font-bold text-[#55727c] hover:bg-[#f5f9fa] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
-              >
-                <ChevronLeft className="size-3.5" aria-hidden="true" /> ก่อนหน้า
-              </button>
-              <span className="mono text-xs font-bold text-[#315763]">{currentHistoryPage} / {historyPageCount}</span>
-              <button
-                type="button"
-                disabled={currentHistoryPage >= historyPageCount}
-                onClick={() => setHistoryPage((p) => Math.min(historyPageCount, p + 1))}
-                className="flex items-center gap-1 rounded border border-[#c9dadd] bg-white px-2 py-1 text-xs font-bold text-[#55727c] hover:bg-[#f5f9fa] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
-              >
-                ถัดไป <ChevronRight className="size-3.5" aria-hidden="true" />
-              </button>
-            </div>
-          </div>
-        ) : null}
+        {checkedOutSamples.length > 10 ? <Pagination {...historyPagination} total={checkedOutSamples.length} onChange={historyPagination.setPage} /> : null}
       </Card>
     </div>
   )

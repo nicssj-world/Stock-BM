@@ -5,7 +5,7 @@ import { ArrowDownToLine, ArrowUpFromLine, FileDown, History, MoveRight, Package
 import type { BmActor, StockItem, StockLot, StockTransaction, StockWorkspace } from '@/lib/bm/types'
 import { formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
 import { printLotLabel } from '@/lib/bm/label-print'
-import { api, Button, Card, Input, Notice, PageHeader, Select } from '@/components/ui'
+import { api, Button, Card, Input, Notice, PageHeader, Pagination, Select, usePagination } from '@/components/ui'
 
 export function InventoryView({ actor, initialData, defaultLocationId }: { actor: BmActor; initialData: StockWorkspace; defaultLocationId?: string }) {
   const [data, setData] = useState(initialData)
@@ -152,7 +152,9 @@ function MobileInventoryList({
 }
 
 function StockDetail({ actor, item, transactions, locations, onReverse, onLotAction }: { actor: BmActor; item: StockItem | null; transactions: StockTransaction[]; locations: StockWorkspace['locations']; onReverse: (tx: StockTransaction) => void; onLotAction: (value: { item: StockItem; lot: StockLot }) => void }) {
+  const ledgerPagination = usePagination(transactions.length, 15)
   if (!item) return <div className="flex min-h-[520px] items-center justify-center p-8 text-center"><div><PackageSearch className="mx-auto size-10 text-[#b6c6c9]" /><p className="mt-3 text-sm text-[#82979d]">ยังไม่มีสินค้า / No items</p></div></div>
+  const pagedTransactions = transactions.slice(ledgerPagination.start, ledgerPagination.end)
   return <div className="min-w-0">
     <div className="border-b border-[#e0e9ea] bg-[linear-gradient(115deg,#fafdfe,#f0f9f7)] px-4 py-4">
       <p className="mono text-[11px] font-bold tracking-[0.14em] text-[#0b7f76] uppercase">{item.itemCode}</p>
@@ -174,10 +176,11 @@ function StockDetail({ actor, item, transactions, locations, onReverse, onLotAct
     </section>
     <section>
       <div className="flex items-center gap-2 border-b border-[#edf2f2] px-4 py-3"><History className="size-4 text-[#0b7f76]" /><h3 className="font-bold text-[#173d50]">Movement ledger</h3></div>
-      <div className="max-h-[360px] overflow-y-auto">
-        {transactions.map((transaction) => <TransactionRow key={transaction.id} actor={actor} transaction={transaction} onReverse={() => onReverse(transaction)} />)}
+      <div>
+        {pagedTransactions.map((transaction) => <TransactionRow key={transaction.id} actor={actor} transaction={transaction} onReverse={() => onReverse(transaction)} />)}
         {!transactions.length ? <p className="px-4 py-8 text-center text-sm text-[#91a4a9]">ยังไม่มี transaction</p> : null}
       </div>
+      {transactions.length > 15 ? <Pagination {...ledgerPagination} total={transactions.length} onChange={ledgerPagination.setPage} /> : null}
     </section>
   </div>
 }

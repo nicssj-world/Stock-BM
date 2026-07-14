@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import type { BmActor, StockItem, StockLot, StockTransaction, StockWorkspace } from '@/lib/bm/types'
 import { formatDate, formatDateTime, formatQuantity, suggestedUsableLot } from '@/lib/bm/rules'
-import { api, Button, Card, Field, Input, Loading, Notice, PageHeader, Select, Textarea } from '@/components/ui'
+import { api, Button, Card, Field, Input, Loading, Notice, PageHeader, Pagination, Select, Textarea, usePagination } from '@/components/ui'
 
 type Mode = 'receive' | 'issue' | 'move' | 'adjust' | 'history'
 const LAST_RECEIVE_LOCATION_KEY = 'bm-stock:last-receive-location-id'
@@ -761,6 +761,9 @@ function HistoryTab({
     })
   }, [transactions, q, typeFilter])
 
+  const historyPagination = usePagination(visible.length, 20)
+  const pagedVisible = visible.slice(historyPagination.start, historyPagination.end)
+
   function exportCsv() {
     const rows = [
       ['Date', 'Type', 'Item', 'Lot', 'Location', 'Qty', 'Purpose', 'Reference', 'Note', 'By'],
@@ -815,10 +818,11 @@ function HistoryTab({
         <span className="text-xs text-[#789097]">{visible.length} / {transactions.length}</span>
       </div>
       <Card className="overflow-hidden">
-        <div className="max-h-[640px] overflow-y-auto divide-y divide-[#edf2f2]">
-          {visible.map((tx) => <HistoryRow key={tx.id} transaction={tx} actor={actor} onReverse={() => void reverse(tx)} />)}
+        <div className="divide-y divide-[#edf2f2]">
+          {pagedVisible.map((tx) => <HistoryRow key={tx.id} transaction={tx} actor={actor} onReverse={() => void reverse(tx)} />)}
           {!visible.length ? <p className="px-4 py-14 text-center text-sm text-[#91a4a9]">ไม่มีรายการ</p> : null}
         </div>
+        {visible.length > 20 ? <Pagination {...historyPagination} total={visible.length} onChange={historyPagination.setPage} /> : null}
       </Card>
     </div>
   )

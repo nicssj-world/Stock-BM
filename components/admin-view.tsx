@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { KeyRound, MapPin, PackagePlus, Pencil, Plus, Tags, Trash2, UserCog, X } from 'lucide-react'
 import type { AdminUserRow, BmActor, StockCategory, StockItem, StockLocation, StockWorkspace } from '@/lib/bm/types'
-import { api, Button, Card, Field, Input, Loading, Notice, PageHeader, Select } from '@/components/ui'
+import { api, Button, Card, Field, Input, Loading, Notice, PageHeader, Pagination, Select, usePagination } from '@/components/ui'
 
 type Tab = 'items' | 'categories' | 'locations' | 'users'
 
@@ -68,6 +68,8 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
   const [busy, setBusy] = useState(false)
   const editingItem = data.items.find((item) => item.id === editingItemId) ?? null
   const categoryOptions = data.categories.filter((category) => category.isActive || category.id === form.categoryId)
+  const itemsPagination = usePagination(data.items.length, 20)
+  const pagedItems = data.items.slice(itemsPagination.start, itemsPagination.end)
 
   function resetForm() {
     setEditingItemId(null)
@@ -149,8 +151,8 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
   return <div className="grid gap-4 xl:grid-cols-[1fr_430px]">
     <Card className="overflow-hidden">
       <div className="flex items-center gap-2 border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3"><PackagePlus className="size-4 text-[#0b7f76]" /><h2 className="font-bold">Items</h2></div>
-      <div className="max-h-[650px] divide-y divide-[#edf2f2] overflow-y-auto">
-        {data.items.map((item) => <div key={item.id} className={`flex items-center justify-between gap-3 px-4 py-3 ${editingItemId === item.id ? 'bg-[#eef9f7]' : ''}`}>
+      <div className="divide-y divide-[#edf2f2]">
+        {pagedItems.map((item) => <div key={item.id} className={`flex items-center justify-between gap-3 px-4 py-3 ${editingItemId === item.id ? 'bg-[#eef9f7]' : ''}`}>
           <div className="min-w-0">
             <p className="mono text-xs font-bold text-[#315763]">{item.itemCode}</p>
             <p className="mt-0.5 truncate font-semibold text-[#58727b]">{item.name}</p>
@@ -164,6 +166,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
         </div>)}
         {!data.items.length ? <p className="px-4 py-10 text-center text-sm text-[#91a4a9]">No items</p> : null}
       </div>
+      {data.items.length > 20 ? <Pagination {...itemsPagination} total={data.items.length} onChange={itemsPagination.setPage} /> : null}
     </Card>
     <Card className="p-4">
       <form onSubmit={save} className="space-y-3">
