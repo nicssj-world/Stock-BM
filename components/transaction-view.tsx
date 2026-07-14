@@ -20,7 +20,8 @@ import {
 } from 'lucide-react'
 import type { BmActor, StockItem, StockLot, StockTransaction, StockWorkspace } from '@/lib/bm/types'
 import { formatDate, formatDateTime, formatQuantity, suggestedUsableLot } from '@/lib/bm/rules'
-import { api, Button, Card, Field, Input, Loading, Notice, PageHeader, Pagination, Select, Textarea, usePagination } from '@/components/ui'
+import { api, Button, Card, Field, Input, Loading, Notice, PageHeader, Select, Textarea } from '@/components/ui'
+import { Pagination, usePagination } from '@/components/pagination'
 
 type Mode = 'receive' | 'issue' | 'move' | 'adjust' | 'history'
 const LAST_RECEIVE_LOCATION_KEY = 'bm-stock:last-receive-location-id'

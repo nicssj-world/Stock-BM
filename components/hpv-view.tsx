@@ -28,7 +28,8 @@ import type { BmActor } from '@/lib/bm/types'
 import type { HpvBoxType, HpvKitDistribution, HpvSample, HpvSiteReceipt, HpvSpecimenType, HpvStorageBox, HpvWorkspace } from '@/lib/hpv/types'
 import { formatHpvBoxPosition, getHpvDestructionState, HPV_BOX_CAPACITY, specimenTypeLabel } from '@/lib/hpv/rules'
 import { bangkokDateKey, daysUntil, formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
-import { api, Button, Card, Field, Input, Notice, PageHeader, Pagination, Select, StatCard, StatusBadge, Tabs, Textarea, usePagination } from '@/components/ui'
+import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
+import { Pagination, usePagination } from '@/components/pagination'
 
 type Tab = 'distribution' | 'returns' | 'receipts' | 'storage' | 'checkout'
 

@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import { KeyRound, MapPin, PackagePlus, Pencil, Plus, Tags, Trash2, UserCog, X } from 'lucide-react'
 import type { AdminUserRow, BmActor, StockCategory, StockItem, StockLocation, StockWorkspace } from '@/lib/bm/types'
-import { api, Button, Card, Field, Input, Loading, Notice, PageHeader, Pagination, Select, usePagination } from '@/components/ui'
+import { api, Button, Card, Field, Input, Loading, Notice, PageHeader, Select } from '@/components/ui'
+import { Pagination, usePagination } from '@/components/pagination'
 
 type Tab = 'items' | 'categories' | 'locations' | 'users'
 

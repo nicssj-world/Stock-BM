@@ -5,7 +5,8 @@ import { ArrowDownToLine, ArrowUpFromLine, FileDown, History, MoveRight, Package
 import type { BmActor, StockItem, StockLot, StockTransaction, StockWorkspace } from '@/lib/bm/types'
 import { formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
 import { printLotLabel } from '@/lib/bm/label-print'
-import { api, Button, Card, Input, Notice, PageHeader, Pagination, Select, usePagination } from '@/components/ui'
+import { api, Button, Card, Input, Notice, PageHeader, Select } from '@/components/ui'
+import { Pagination, usePagination } from '@/components/pagination'
 
 export function InventoryView({ actor, initialData, defaultLocationId }: { actor: BmActor; initialData: StockWorkspace; defaultLocationId?: string }) {
   const [data, setData] = useState(initialData)
