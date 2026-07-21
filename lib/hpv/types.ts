@@ -12,7 +12,6 @@ export interface HpvSite {
   code: string | null
   name: string
   siteType: string
-  selfSupplied: boolean
   isActive: boolean
   createdAt: string
   updatedAt: string
@@ -87,6 +86,7 @@ export interface HpvSiteReceipt {
   siteName: string
   receivedOn: string
   sampleCount: number
+  selfSupplied: boolean
   note: string | null
   createdByName: string | null
   createdAt: string

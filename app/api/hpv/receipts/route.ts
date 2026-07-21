@@ -7,6 +7,7 @@ const schema = z.object({
   siteId: z.string().uuid(),
   receivedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   sampleCount: z.number().int().positive(),
+  selfSupplied: z.boolean().optional(),
   note: z.string().trim().max(500).nullable().optional(),
 })
 

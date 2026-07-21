@@ -11,6 +11,7 @@ export interface HpvDistributionLike {
 export interface HpvReceiptLike {
   siteId: string
   sampleCount: number
+  selfSupplied?: boolean
 }
 
 export interface HpvReturnLike {
@@ -22,9 +23,9 @@ export interface HpvSiteSummary {
   siteId: string
   issued: number
   received: number
+  receivedSelfSupplied: number
   returned: number
   outstanding: number
-  selfSupplied: boolean
 }
 
 export function nextHpvBoxPosition(occupiedPositions: number[], capacity = HPV_BOX_CAPACITY) {
@@ -60,8 +61,10 @@ export function addOneMonth(date: Date) {
 
 export function summarizeHpvSites(distributions: HpvDistributionLike[], receipts: HpvReceiptLike[], returns: HpvReturnLike[] = []): Record<string, HpvSiteSummary> {
   const summaries: Record<string, HpvSiteSummary> = {}
+  const receivedFromIssuedKits: Record<string, number> = {}
   function ensure(siteId: string) {
-    summaries[siteId] ??= { siteId, issued: 0, received: 0, returned: 0, outstanding: 0, selfSupplied: false }
+    summaries[siteId] ??= { siteId, issued: 0, received: 0, receivedSelfSupplied: 0, returned: 0, outstanding: 0 }
+    receivedFromIssuedKits[siteId] ??= 0
     return summaries[siteId]
   }
 
@@ -72,13 +75,18 @@ export function summarizeHpvSites(distributions: HpvDistributionLike[], receipts
   for (const receipt of receipts) {
     const summary = ensure(receipt.siteId)
     summary.received += receipt.sampleCount
+    // Self-supplied receipts are samples collected with the site's own kits, so they
+    // never reduce the outstanding balance of kits issued from central stock — but we
+    // still surface the count separately so it's clear why issued/received don't line up.
+    if (receipt.selfSupplied) summary.receivedSelfSupplied += receipt.sampleCount
+    else receivedFromIssuedKits[receipt.siteId] += receipt.sampleCount
   }
   for (const kitReturn of returns) {
     const summary = ensure(kitReturn.siteId)
     summary.returned += kitReturn.quantity
   }
   for (const summary of Object.values(summaries)) {
-    summary.outstanding = summary.selfSupplied ? 0 : summary.issued - summary.received - summary.returned
+    summary.outstanding = summary.issued - (receivedFromIssuedKits[summary.siteId] ?? 0) - summary.returned
   }
   return summaries
 }

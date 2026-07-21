@@ -9,6 +9,7 @@ import {
   ClipboardCheck,
   Download,
   Eye,
+  FileText,
   FileUp,
   Flame,
   Hospital,
@@ -31,7 +32,7 @@ import { bangkokDateKey, daysUntil, formatDate, formatDateTime, formatQuantity }
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
 import { Pagination, usePagination } from '@/components/pagination'
 
-type Tab = 'distribution' | 'returns' | 'receipts' | 'storage' | 'checkout'
+type Tab = 'distribution' | 'returns' | 'receipts' | 'storage' | 'checkout' | 'summary'
 
 function todayKey() {
   const now = new Date()
@@ -120,7 +121,7 @@ export function HpvView({ actor, initialData }: { actor: BmActor; initialData: H
   const openBoxes = data.boxes.filter((box) => box.status === 'open').length
   const fullBoxes = data.boxes.filter((box) => box.status === 'full').length
   const destroyedBoxes = data.boxes.filter((box) => box.status === 'destroyed').length
-  const totalOutstanding = data.summaries.filter((s) => !s.selfSupplied).reduce((sum, s) => sum + s.outstanding, 0)
+  const totalOutstanding = data.summaries.reduce((sum, s) => sum + s.outstanding, 0)
 
   return (
     <div className="mx-auto max-w-[1600px] space-y-5">
@@ -134,6 +135,7 @@ export function HpvView({ actor, initialData }: { actor: BmActor; initialData: H
           { key: 'receipts', label: 'Receive Log', icon: ClipboardCheck },
           { key: 'storage', label: 'Sample Storage', icon: Boxes },
           { key: 'checkout', label: 'Checkout', icon: Send },
+          { key: 'summary', label: 'สรุปรายงาน', icon: FileText },
         ]} active={tab} onChange={setTab} />}
       />
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
@@ -150,6 +152,7 @@ export function HpvView({ actor, initialData }: { actor: BmActor; initialData: H
       {tab === 'receipts' ? <ReceiptsTab actor={actor} data={data} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
       {tab === 'storage' ? <StorageTab data={data} today={today} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
       {tab === 'checkout' ? <CheckoutTab data={data} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
+      {tab === 'summary' ? <SummaryTab data={data} /> : null}
     </div>
   )
 }
@@ -166,7 +169,6 @@ function DistributionTab({
   onNotice: (notice: { tone: 'success' | 'danger' | 'warning' | 'info'; text: string } | null) => void
 }) {
   const activeSites = data.sites.filter((site) => site.isActive)
-  const distributionSites = activeSites.filter((site) => !site.selfSupplied)
   const [kitType, setKitType] = useState<'self_collected' | 'clinician_collected' | ''>('')
   const stockItems = useMemo(() => data.stock.items.filter((item) =>
     item.isHpv
@@ -183,19 +185,19 @@ function DistributionTab({
     }))),
   ])), [stockItems])
   const [form, setForm] = useState({
-    siteId: distributionSites[0]?.id ?? '',
+    siteId: activeSites[0]?.id ?? '',
     distributedOn: todayKey(),
     quantity: '1',
     note: '',
     overrideReason: '',
   })
   const [selectedLineKeys, setSelectedLineKeys] = useState<Record<string, string>>({})
-  const [siteForm, setSiteForm] = useState({ code: '', name: '', siteType: 'รพ.สต.', selfSupplied: false })
-  const [editingSite, setEditingSite] = useState<{ id: string; code: string; name: string; siteType: string; selfSupplied: boolean } | null>(null)
+  const [siteForm, setSiteForm] = useState({ code: '', name: '', siteType: 'รพ.สต.' })
+  const [editingSite, setEditingSite] = useState<{ id: string; code: string; name: string; siteType: string } | null>(null)
   const [distributionFile, setDistributionFile] = useState<File | null>(null)
   const distributionFileRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
-  const selectedSiteId = form.siteId || distributionSites[0]?.id || ''
+  const selectedSiteId = form.siteId || activeSites[0]?.id || ''
   const selectedBundleLines = stockItems.map((item) => {
     const itemLines = stockLinesByItem.get(item.id) ?? []
     const selectedKey = itemLines.some((line) => line.key === selectedLineKeys[item.id]) ? selectedLineKeys[item.id] : itemLines[0]?.key ?? ''
@@ -271,7 +273,7 @@ function DistributionTab({
     try {
       const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/sites', { method: 'POST', body: JSON.stringify(siteForm) })
       onWorkspace(result.workspace, 'เพิ่มหน่วยงานแล้ว')
-      setSiteForm({ code: '', name: '', siteType: 'รพ.สต.', selfSupplied: false })
+      setSiteForm({ code: '', name: '', siteType: 'รพ.สต.' })
     } catch (error) {
       onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'เพิ่มหน่วยงานไม่สำเร็จ' })
     } finally {
@@ -286,7 +288,7 @@ function DistributionTab({
     try {
       const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/sites', {
         method: 'PATCH',
-        body: JSON.stringify({ id: editingSite.id, name: editingSite.name, code: editingSite.code.trim() || null, siteType: editingSite.siteType, selfSupplied: editingSite.selfSupplied }),
+        body: JSON.stringify({ id: editingSite.id, name: editingSite.name, code: editingSite.code.trim() || null, siteType: editingSite.siteType }),
       })
       onWorkspace(result.workspace, 'อัปเดตหน่วยงานแล้ว')
       setEditingSite(null)
@@ -355,32 +357,26 @@ function DistributionTab({
                 return (
                   <tr key={site.id}>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <p className="font-bold text-[#315763]">{site.name}</p>
-                        {site.selfSupplied ? <span className="rounded-full border border-[#a6c6e8] bg-[#eef4fb] px-2 py-0.5 text-[10px] font-bold text-[#3a6fa8]">ชุดตรวจตัวเอง</span> : null}
-                      </div>
+                      <p className="font-bold text-[#315763]">{site.name}</p>
                       <p className="mono text-xs text-[#91a3a7]">{site.code ?? '-'} · {site.siteType}</p>
                     </td>
-                    <td className="mono px-3 py-3 text-right font-bold">{site.selfSupplied ? '—' : (summary?.issued ?? 0)}</td>
-                    <td className="mono px-3 py-3 text-right font-bold text-[#0b7f76]">{summary?.received ?? 0}</td>
+                    <td className="mono px-3 py-3 text-right font-bold">{summary?.issued ?? 0}</td>
+                    <td className="mono px-3 py-3 text-right font-bold text-[#0b7f76]">
+                      {summary?.received ?? 0}
+                      {summary?.receivedSelfSupplied ? <span className="mono block text-[10px] font-normal text-[#3a6fa8]">ใช้ชุดเอง {summary.receivedSelfSupplied}</span> : null}
+                    </td>
                     <td className="mono px-3 py-3 text-right font-bold text-[#3a6fa8]">{summary?.returned ?? 0}</td>
                     <td className="mono px-3 py-3 text-right font-bold">
-                      {site.selfSupplied
-                        ? <span className="text-xs font-normal text-[#91a3a7]">N/A</span>
-                        : <span className={(summary?.outstanding ?? 0) > 0 ? 'text-[#a9700f]' : 'text-[#55727c]'}>{summary?.outstanding ?? 0}</span>}
+                      <span className={(summary?.outstanding ?? 0) > 0 ? 'text-[#a9700f]' : 'text-[#55727c]'}>{summary?.outstanding ?? 0}</span>
                     </td>
                     <td className="px-4 py-3">
                       {actor.role === 'Admin' ? (
                         <div className="flex flex-wrap items-center gap-1.5">
                           <button onClick={() => toggleSite(site.id, site.isActive)} className={`rounded border px-2 py-1 text-[10px] font-bold ${site.isActive ? 'border-[#c7e0c8] bg-[#f0f8f1] text-[#518058]' : 'border-[#e0d7d8] bg-[#f7f4f4] text-[#8d7b7d]'}`}>{site.isActive ? 'ACTIVE' : 'INACTIVE'}</button>
-                          <span className={`rounded border px-2 py-1 text-[10px] font-bold ${site.selfSupplied ? 'border-[#a6c6e8] bg-[#eef4fb] text-[#3a6fa8]' : 'border-[#c7dde0] bg-[#f5f9fa] text-[#55727c]'}`}>{site.selfSupplied ? 'ชุดตรวจตัวเอง' : 'รับจากเรา'}</span>
-                          <button onClick={() => setEditingSite({ id: site.id, code: site.code ?? '', name: site.name, siteType: site.siteType, selfSupplied: site.selfSupplied })} className="flex items-center gap-1 rounded border border-[#c7dde0] bg-[#f5f9fa] px-2 py-1 text-[10px] font-bold text-[#55727c] hover:bg-[#ebf5f6]"><Pencil className="size-3" /> แก้ไข</button>
+                          <button onClick={() => setEditingSite({ id: site.id, code: site.code ?? '', name: site.name, siteType: site.siteType })} className="flex items-center gap-1 rounded border border-[#c7dde0] bg-[#f5f9fa] px-2 py-1 text-[10px] font-bold text-[#55727c] hover:bg-[#ebf5f6]"><Pencil className="size-3" /> แก้ไข</button>
                         </div>
                       ) : (
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <StatusBadge tone={site.isActive ? 'accepted' : 'neutral'} label={site.isActive ? 'ACTIVE' : 'INACTIVE'} />
-                          {site.selfSupplied ? <StatusBadge tone="warning" label="ชุดตรวจตัวเอง" /> : null}
-                        </div>
+                        <StatusBadge tone={site.isActive ? 'accepted' : 'neutral'} label={site.isActive ? 'ACTIVE' : 'INACTIVE'} />
                       )}
                     </td>
                   </tr>
@@ -396,8 +392,8 @@ function DistributionTab({
         <Card className="p-4">
           <form onSubmit={submit} className="space-y-3">
             <h2 className="font-bold text-[#173d50]">บันทึกเบิกชุด HPV</h2>
-            <Field label="หน่วยงาน / รพ.สต."><Select required value={selectedSiteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>{distributionSites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</Select></Field>
-            {distributionSites.length === 0 ? <p className="text-xs text-[#789097]">ไม่มีหน่วยงานที่รับชุดตรวจจากเรา</p> : null}
+            <Field label="หน่วยงาน / รพ.สต."><Select required value={selectedSiteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>{activeSites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</Select></Field>
+            {activeSites.length === 0 ? <p className="text-xs text-[#789097]">ไม่มีหน่วยงานที่ใช้งานอยู่</p> : null}
             <Field label="วันที่เบิก"><Input required type="date" value={form.distributedOn} onChange={(e) => setForm({ ...form, distributedOn: e.target.value })} /></Field>
             <Field label="หมวดชุดตรวจ">
               <div className="grid gap-2 sm:grid-cols-2">
@@ -483,11 +479,6 @@ function DistributionTab({
               </div>
               <div className="grid gap-2 sm:grid-cols-[120px_1fr]"><Field label="Code"><Input value={editingSite.code} onChange={(e) => setEditingSite({ ...editingSite, code: e.target.value })} /></Field><Field label="Name"><Input required value={editingSite.name} onChange={(e) => setEditingSite({ ...editingSite, name: e.target.value })} /></Field></div>
               <Field label="Type"><Select value={editingSite.siteType} onChange={(e) => setEditingSite({ ...editingSite, siteType: e.target.value })}><option>รพ.สต.</option><option>รพช.</option><option>คลินิก</option></Select></Field>
-              <label className="flex cursor-pointer items-center gap-2 text-sm">
-                <input type="checkbox" checked={editingSite.selfSupplied} onChange={(e) => setEditingSite({ ...editingSite, selfSupplied: e.target.checked })} className="size-4 rounded" />
-                <span className="font-medium text-[#315763]">ใช้ชุดตรวจของตัวเอง</span>
-                <span className="text-xs text-[#789097]">(ไม่รับชุดตรวจจากเรา)</span>
-              </label>
               <Button disabled={busy}><CheckCircle2 className="size-4" /> บันทึกแก้ไข</Button>
             </form>
           </Card>
@@ -498,11 +489,6 @@ function DistributionTab({
               <h2 className="font-bold text-[#173d50]">เพิ่ม รพ.สต./หน่วยงาน</h2>
               <div className="grid gap-2 sm:grid-cols-[120px_1fr]"><Field label="Code"><Input value={siteForm.code} onChange={(e) => setSiteForm({ ...siteForm, code: e.target.value })} /></Field><Field label="Name"><Input required value={siteForm.name} onChange={(e) => setSiteForm({ ...siteForm, name: e.target.value })} /></Field></div>
               <Field label="Type"><Select value={siteForm.siteType} onChange={(e) => setSiteForm({ ...siteForm, siteType: e.target.value })}><option>รพ.สต.</option><option>รพช.</option><option>คลินิก</option></Select></Field>
-              <label className="flex cursor-pointer items-center gap-2 text-sm">
-                <input type="checkbox" checked={siteForm.selfSupplied} onChange={(e) => setSiteForm({ ...siteForm, selfSupplied: e.target.checked })} className="size-4 rounded" />
-                <span className="font-medium text-[#315763]">ใช้ชุดตรวจของตัวเอง</span>
-                <span className="text-xs text-[#789097]">(ไม่รับชุดตรวจจากเรา)</span>
-              </label>
               <Button disabled={busy}><Plus className="size-4" /> เพิ่มหน่วยงาน</Button>
             </form>
           </Card>
@@ -664,6 +650,86 @@ function DistributionAttachmentActions({ distributionId, canDelete, onError }: {
         />
       </label>
     </span>
+  )
+}
+
+function SummaryTab({ data }: { data: HpvWorkspace }) {
+  const rows = data.sites.map((site) => ({
+    site,
+    summary: data.summaries.find((item) => item.siteId === site.id) ?? { siteId: site.id, issued: 0, received: 0, receivedSelfSupplied: 0, returned: 0, outstanding: 0 },
+  }))
+  const totals = rows.reduce((acc, row) => ({
+    issued: acc.issued + row.summary.issued,
+    received: acc.received + row.summary.received,
+    receivedSelfSupplied: acc.receivedSelfSupplied + row.summary.receivedSelfSupplied,
+    returned: acc.returned + row.summary.returned,
+    outstanding: acc.outstanding + row.summary.outstanding,
+  }), { issued: 0, received: 0, receivedSelfSupplied: 0, returned: 0, outstanding: 0 })
+  const hasSelfSupplied = totals.receivedSelfSupplied > 0
+
+  return (
+    <div className="space-y-4">
+      <Card className="overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3">
+          <h2 className="flex items-center gap-2 font-bold text-[#173d50]"><FileText className="size-4 text-[#0b7f76]" /> สรุปรายงานเบิก-จ่าย-รับคืน</h2>
+          <a href="/hpv/report" target="_blank" rel="noreferrer" className="flex items-center gap-1.5 rounded border border-[#c7dde0] bg-[#f5f9fa] px-2.5 py-1.5 text-xs font-bold text-[#55727c] hover:bg-[#ebf5f6]"><FileUp className="size-3.5" /> Export PDF</a>
+        </div>
+        <div className="border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3 text-xs text-[#6f868b]">
+          หมายเหตุ: ตัวอย่างที่บันทึกว่า &quot;ใช้ชุดตรวจของตัวเอง&quot; ใน Receive Log จะไม่ถูกหักออกจากยอดเบิก เนื่องจากหน่วยงานไม่ได้เบิกชุดตรวจจากคลังกลาง ดังนั้นยอด &quot;ส่งกลับ&quot; รวมและยอด &quot;คงค้าง&quot; จึงไม่จำเป็นต้องบวกลบกันตรงเป๊ะ
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px] text-left text-sm">
+            <thead className="bg-[#f7fafa] text-[10px] tracking-[0.08em] text-[#779097] uppercase">
+              <tr>
+                <th className="px-4 py-2.5">หน่วยงาน</th>
+                <th className="px-3 py-2.5 text-right">เบิก</th>
+                <th className="px-3 py-2.5 text-right">ส่งกลับ (รวม)</th>
+                <th className="px-3 py-2.5 text-right">ใช้ชุดตรวจของตัวเอง</th>
+                <th className="px-3 py-2.5 text-right">คืนชุดตรวจ</th>
+                <th className="px-3 py-2.5 text-right">คงค้าง</th>
+                <th className="px-4 py-2.5">หมายเหตุ</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#edf2f2]">
+              {rows.map(({ site, summary }) => (
+                <tr key={site.id}>
+                  <td className="px-4 py-3">
+                    <p className="font-bold text-[#315763]">{site.name}</p>
+                    <p className="mono text-xs text-[#91a3a7]">{site.code ?? '-'} · {site.siteType}</p>
+                  </td>
+                  <td className="mono px-3 py-3 text-right font-bold">{summary.issued}</td>
+                  <td className="mono px-3 py-3 text-right font-bold text-[#0b7f76]">{summary.received}</td>
+                  <td className="mono px-3 py-3 text-right font-bold text-[#3a6fa8]">{summary.receivedSelfSupplied || '-'}</td>
+                  <td className="mono px-3 py-3 text-right font-bold text-[#3a6fa8]">{summary.returned}</td>
+                  <td className="mono px-3 py-3 text-right font-bold">
+                    <span className={summary.outstanding > 0 ? 'text-[#a9700f]' : 'text-[#55727c]'}>{summary.outstanding}</span>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-[#6f868b]">
+                    {summary.receivedSelfSupplied
+                      ? `ส่งกลับ ${summary.received} ตัวอย่าง มี ${summary.receivedSelfSupplied} ตัวอย่างใช้ชุดตรวจของตัวเอง (ไม่หักยอดเบิก) จึงมีผลต่อยอดคงค้างเพียง ${summary.received - summary.receivedSelfSupplied} ตัวอย่าง`
+                      : '-'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            {rows.length ? (
+              <tfoot>
+                <tr className="border-t-2 border-[#d8e5e7] bg-[#fbfdfd] font-bold">
+                  <td className="px-4 py-3 text-[#173d50]">รวมทั้งหมด</td>
+                  <td className="mono px-3 py-3 text-right">{totals.issued}</td>
+                  <td className="mono px-3 py-3 text-right text-[#0b7f76]">{totals.received}</td>
+                  <td className="mono px-3 py-3 text-right text-[#3a6fa8]">{totals.receivedSelfSupplied || '-'}</td>
+                  <td className="mono px-3 py-3 text-right text-[#3a6fa8]">{totals.returned}</td>
+                  <td className="mono px-3 py-3 text-right"><span className={totals.outstanding > 0 ? 'text-[#a9700f]' : 'text-[#55727c]'}>{totals.outstanding}</span></td>
+                  <td className="px-4 py-3 text-xs font-normal text-[#6f868b]">{hasSelfSupplied ? `รวมใช้ชุดตรวจของตัวเอง ${totals.receivedSelfSupplied} ตัวอย่าง` : '-'}</td>
+                </tr>
+              </tfoot>
+            ) : null}
+          </table>
+          {!rows.length ? <p className="px-4 py-12 text-center text-sm text-[#91a4a9]">ยังไม่มีหน่วยงาน</p> : null}
+        </div>
+      </Card>
+    </div>
   )
 }
 
@@ -846,8 +912,8 @@ function ReceiptsTab({ actor, data, onWorkspace, onNotice }: {
   onNotice: (notice: { tone: 'success' | 'danger' | 'warning' | 'info'; text: string } | null) => void
 }) {
   const activeSites = data.sites.filter((site) => site.isActive)
-  const [form, setForm] = useState({ siteId: activeSites[0]?.id ?? '', receivedOn: todayKey(), sampleCount: '1', note: '' })
-  const [editingReceipt, setEditingReceipt] = useState<{ id: string; receivedOn: string; sampleCount: string; note: string } | null>(null)
+  const [form, setForm] = useState({ siteId: activeSites[0]?.id ?? '', receivedOn: todayKey(), sampleCount: '1', selfSupplied: false, note: '' })
+  const [editingReceipt, setEditingReceipt] = useState<{ id: string; receivedOn: string; sampleCount: string; selfSupplied: boolean; note: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const selectedSiteId = form.siteId || activeSites[0]?.id || ''
 
@@ -857,10 +923,10 @@ function ReceiptsTab({ actor, data, onWorkspace, onNotice }: {
     try {
       const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/receipts', {
         method: 'POST',
-        body: JSON.stringify({ siteId: selectedSiteId, receivedOn: form.receivedOn, sampleCount: Number(form.sampleCount), note: form.note.trim() || null }),
+        body: JSON.stringify({ siteId: selectedSiteId, receivedOn: form.receivedOn, sampleCount: Number(form.sampleCount), selfSupplied: form.selfSupplied, note: form.note.trim() || null }),
       })
       onWorkspace(result.workspace, 'บันทึก Receive Log แล้ว')
-      setForm((current) => ({ ...current, sampleCount: '1', note: '' }))
+      setForm((current) => ({ ...current, sampleCount: '1', selfSupplied: false, note: '' }))
     } catch (error) {
       onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'บันทึกรับตัวอย่างไม่สำเร็จ' })
     } finally {
@@ -869,8 +935,8 @@ function ReceiptsTab({ actor, data, onWorkspace, onNotice }: {
   }
 
   function exportReceipts() {
-    const headers = ['วันที่ส่ง', 'หน่วยงาน', 'จำนวนตัวอย่าง', 'Note', 'บันทึกโดย']
-    const rows = data.receipts.map((r: HpvSiteReceipt) => [r.receivedOn, r.siteName, String(r.sampleCount), r.note ?? '', r.createdByName ?? ''])
+    const headers = ['วันที่ส่ง', 'หน่วยงาน', 'จำนวนตัวอย่าง', 'ชุดตรวจตัวเอง', 'Note', 'บันทึกโดย']
+    const rows = data.receipts.map((r: HpvSiteReceipt) => [r.receivedOn, r.siteName, String(r.sampleCount), r.selfSupplied ? 'ใช่' : '', r.note ?? '', r.createdByName ?? ''])
     downloadCsv(`HPV_receipts_${todayKey()}.csv`, [headers, ...rows])
   }
 
@@ -881,7 +947,7 @@ function ReceiptsTab({ actor, data, onWorkspace, onNotice }: {
     try {
       const result = await api<{ workspace: HpvWorkspace }>(`/api/hpv/receipts/${editingReceipt.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ receivedOn: editingReceipt.receivedOn, sampleCount: Number(editingReceipt.sampleCount), note: editingReceipt.note.trim() || null }),
+        body: JSON.stringify({ receivedOn: editingReceipt.receivedOn, sampleCount: Number(editingReceipt.sampleCount), selfSupplied: editingReceipt.selfSupplied, note: editingReceipt.note.trim() || null }),
       })
       onWorkspace(result.workspace, 'แก้ไข Receive Log แล้ว')
       setEditingReceipt(null)
@@ -903,6 +969,11 @@ function ReceiptsTab({ actor, data, onWorkspace, onNotice }: {
             </div>
             <Field label="วันที่ส่ง"><Input required type="date" value={editingReceipt.receivedOn} onChange={(e) => setEditingReceipt({ ...editingReceipt, receivedOn: e.target.value })} /></Field>
             <Field label="จำนวนตัวอย่าง"><Input required type="number" min="1" step="1" value={editingReceipt.sampleCount} onChange={(e) => setEditingReceipt({ ...editingReceipt, sampleCount: e.target.value })} /></Field>
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input type="checkbox" checked={editingReceipt.selfSupplied} onChange={(e) => setEditingReceipt({ ...editingReceipt, selfSupplied: e.target.checked })} className="size-4 rounded" />
+              <span className="font-medium text-[#315763]">ใช้ชุดตรวจของตัวเอง</span>
+              <span className="text-xs text-[#789097]">(ไม่ตัดยอดคงค้าง)</span>
+            </label>
             <Field label="Note"><Textarea rows={3} value={editingReceipt.note} onChange={(e) => setEditingReceipt({ ...editingReceipt, note: e.target.value })} /></Field>
             <Button disabled={busy}><CheckCircle2 className="size-4" /> บันทึกแก้ไข</Button>
           </form>
@@ -912,6 +983,11 @@ function ReceiptsTab({ actor, data, onWorkspace, onNotice }: {
             <Field label="หน่วยงาน"><Select required value={selectedSiteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>{activeSites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</Select></Field>
             <Field label="วันที่ส่ง"><Input required type="date" value={form.receivedOn} onChange={(e) => setForm({ ...form, receivedOn: e.target.value })} /></Field>
             <Field label="จำนวนตัวอย่าง"><Input required type="number" min="1" step="1" value={form.sampleCount} onChange={(e) => setForm({ ...form, sampleCount: e.target.value })} /></Field>
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input type="checkbox" checked={form.selfSupplied} onChange={(e) => setForm({ ...form, selfSupplied: e.target.checked })} className="size-4 rounded" />
+              <span className="font-medium text-[#315763]">ใช้ชุดตรวจของตัวเอง</span>
+              <span className="text-xs text-[#789097]">(ไม่ตัดยอดคงค้าง)</span>
+            </label>
             <Field label="Note"><Textarea rows={3} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></Field>
             <Button disabled={busy || !selectedSiteId}><ClipboardCheck className="size-4" /> Save receive log</Button>
           </form>
@@ -925,11 +1001,18 @@ function ReceiptsTab({ actor, data, onWorkspace, onNotice }: {
         <div className="divide-y divide-[#edf2f2]">
           {data.receipts.map((receipt) => (
             <div key={receipt.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-              <div><p className="font-bold text-[#315763]">{receipt.siteName}</p><p className="text-xs text-[#8ba0a5]">{formatDate(receipt.receivedOn)} · {receipt.createdByName ?? '-'}</p>{receipt.note ? <p className="mt-1 text-xs text-[#6f868b]">{receipt.note}</p> : null}</div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="font-bold text-[#315763]">{receipt.siteName}</p>
+                  {receipt.selfSupplied ? <span className="rounded-full border border-[#a6c6e8] bg-[#eef4fb] px-2 py-0.5 text-[10px] font-bold text-[#3a6fa8]">ชุดตรวจตัวเอง</span> : null}
+                </div>
+                <p className="text-xs text-[#8ba0a5]">{formatDate(receipt.receivedOn)} · {receipt.createdByName ?? '-'}</p>
+                {receipt.note ? <p className="mt-1 text-xs text-[#6f868b]">{receipt.note}</p> : null}
+              </div>
               <div className="flex items-center gap-3">
                 <p className="mono text-lg font-bold text-[#0b7f76]">{receipt.sampleCount}</p>
                 {actor.role === 'Admin' ? (
-                  <button onClick={() => setEditingReceipt({ id: receipt.id, receivedOn: receipt.receivedOn, sampleCount: String(receipt.sampleCount), note: receipt.note ?? '' })} className="flex items-center gap-1 rounded border border-[#c7dde0] bg-[#f5f9fa] px-2 py-1 text-[10px] font-bold text-[#55727c] hover:bg-[#ebf5f6]"><Pencil className="size-3" /></button>
+                  <button onClick={() => setEditingReceipt({ id: receipt.id, receivedOn: receipt.receivedOn, sampleCount: String(receipt.sampleCount), selfSupplied: receipt.selfSupplied, note: receipt.note ?? '' })} className="flex items-center gap-1 rounded border border-[#c7dde0] bg-[#f5f9fa] px-2 py-1 text-[10px] font-bold text-[#55727c] hover:bg-[#ebf5f6]"><Pencil className="size-3" /></button>
                 ) : null}
               </div>
             </div>
@@ -1251,7 +1334,7 @@ function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onCl
             const isSelected = !sample && selectedPosition === position
             const isDragTarget = dragOver === position
 
-            let cellClass = 'aspect-square rounded-md border p-2 transition-colors '
+            let cellClass = 'aspect-square overflow-hidden rounded-md border p-1.5 transition-colors '
             if (isSelected) {
               cellClass += 'border-[#0b7f76] bg-[#d4f0ed] ring-2 ring-[#0b7f76] cursor-pointer'
             } else if (isDragTarget) {
@@ -1297,7 +1380,7 @@ function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onCl
               >
                 <p className="mono text-[10px] font-bold text-[#789097]">{formatHpvBoxPosition(position)}</p>
                 {sample
-                  ? <><p className={`mono mt-1 truncate text-[10px] font-bold leading-tight ${checkedOut ? 'text-[#6f868b]' : 'text-[#0b7f76]'}`}>{sample.barcode}</p><div className="mt-1"><SpecimenTypeBadge type={sample.specimenType} compact /></div></>
+                  ? <><p className={`mono mt-0.5 break-all text-[8px] font-bold leading-[1.15] ${checkedOut ? 'text-[#6f868b]' : 'text-[#0b7f76]'}`}>{sample.barcode}</p><div className="mt-0.5"><SpecimenTypeBadge type={sample.specimenType} compact /></div></>
                   : isSelected
                     ? <p className="mt-1 text-[10px] font-bold text-[#0b7f76]">selected</p>
                     : <p className="mt-1 text-[10px] text-[#b4c3c6]">empty</p>

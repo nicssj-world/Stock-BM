@@ -49,8 +49,8 @@ describe('HPV site summary rules', () => {
       [{ siteId: 'a', quantity: 10 }, { siteId: 'a', quantity: 5 }, { siteId: 'b', quantity: 3 }],
       [{ siteId: 'a', sampleCount: 4 }, { siteId: 'b', sampleCount: 5 }],
     )
-    expect(summaries.a).toEqual({ siteId: 'a', issued: 15, received: 4, returned: 0, outstanding: 11, selfSupplied: false })
-    expect(summaries.b).toEqual({ siteId: 'b', issued: 3, received: 5, returned: 0, outstanding: -2, selfSupplied: false })
+    expect(summaries.a).toEqual({ siteId: 'a', issued: 15, received: 4, receivedSelfSupplied: 0, returned: 0, outstanding: 11 })
+    expect(summaries.b).toEqual({ siteId: 'b', issued: 3, received: 5, receivedSelfSupplied: 0, returned: 0, outstanding: -2 })
   })
 
   it('subtracts returned kits from outstanding quantities', () => {
@@ -61,5 +61,15 @@ describe('HPV site summary rules', () => {
     )
     expect(summaries.a.outstanding).toBe(8)
     expect(summaries.a.returned).toBe(3)
+  })
+
+  it('does not reduce outstanding for self-supplied receipts', () => {
+    const summaries = summarizeHpvSites(
+      [{ siteId: 'a', quantity: 15 }],
+      [{ siteId: 'a', sampleCount: 4 }, { siteId: 'a', sampleCount: 6, selfSupplied: true }],
+    )
+    expect(summaries.a.received).toBe(10)
+    expect(summaries.a.receivedSelfSupplied).toBe(6)
+    expect(summaries.a.outstanding).toBe(11)
   })
 })

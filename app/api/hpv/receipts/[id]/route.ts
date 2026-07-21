@@ -6,6 +6,7 @@ import { readJson, respond } from '@/lib/server/route'
 const patchSchema = z.object({
   receivedOn: z.string().optional(),
   sampleCount: z.number().int().min(1).optional(),
+  selfSupplied: z.boolean().optional(),
   note: z.string().trim().max(500).nullable().optional(),
 })
 

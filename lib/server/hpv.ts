@@ -62,7 +62,6 @@ function siteFromRow(row: RecordRow): HpvSite {
     code: nullableString(row.code),
     name: asString(row.name),
     siteType: asString(row.site_type),
-    selfSupplied: Boolean(row.self_supplied),
     isActive: Boolean(row.is_active),
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
@@ -160,6 +159,7 @@ function receiptFromRow(row: RecordRow, names: Map<string, string>): HpvSiteRece
     siteName: siteName(row),
     receivedOn: asString(row.received_on),
     sampleCount: asNumber(row.sample_count),
+    selfSupplied: Boolean(row.self_supplied),
     note: nullableString(row.note),
     createdByName: names.get(asString(row.created_by)) ?? null,
     createdAt: asString(row.created_at),
@@ -311,12 +311,8 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
   const receipts = receiptRows.map((row) => receiptFromRow(row, names))
   const summaryMap = summarizeHpvSites(distributions, receipts, kitReturns)
   const sites = siteRows.map(siteFromRow)
-  const selfSuppliedIds = new Set(sites.filter((s) => s.selfSupplied).map((s) => s.id))
-  // Ensure every site has a summary entry, then annotate self-supplied flag
   for (const site of sites) {
-    summaryMap[site.id] ??= { siteId: site.id, issued: 0, received: 0, returned: 0, outstanding: 0, selfSupplied: false }
-    summaryMap[site.id].selfSupplied = selfSuppliedIds.has(site.id)
-    if (selfSuppliedIds.has(site.id)) summaryMap[site.id].outstanding = 0
+    summaryMap[site.id] ??= { siteId: site.id, issued: 0, received: 0, receivedSelfSupplied: 0, returned: 0, outstanding: 0 }
   }
 
   return {
@@ -331,7 +327,7 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
   }
 }
 
-export async function createHpvSite(input: { code?: string | null; name: string; siteType?: string | null; selfSupplied?: boolean }, actor: BmActor) {
+export async function createHpvSite(input: { code?: string | null; name: string; siteType?: string | null }, actor: BmActor) {
   assertAdmin(actor)
   const { data, error } = await getAdminClient()
     .from('bm_hpv_sites')
@@ -339,7 +335,6 @@ export async function createHpvSite(input: { code?: string | null; name: string;
       code: clean(input.code),
       name: input.name.trim(),
       site_type: clean(input.siteType) ?? 'รพ.สต.',
-      self_supplied: Boolean(input.selfSupplied),
       created_by: actor.id,
     })
     .select('id')
@@ -349,14 +344,13 @@ export async function createHpvSite(input: { code?: string | null; name: string;
   return getHpvWorkspace(actor)
 }
 
-export async function updateHpvSite(input: { id: string; code?: string | null; name?: string; siteType?: string | null; isActive?: boolean; selfSupplied?: boolean }, actor: BmActor) {
+export async function updateHpvSite(input: { id: string; code?: string | null; name?: string; siteType?: string | null; isActive?: boolean }, actor: BmActor) {
   assertAdmin(actor)
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (input.code !== undefined) updates.code = clean(input.code)
   if (input.name !== undefined) updates.name = input.name.trim()
   if (input.siteType !== undefined) updates.site_type = clean(input.siteType) ?? 'รพ.สต.'
   if (input.isActive !== undefined) updates.is_active = input.isActive
-  if (input.selfSupplied !== undefined) updates.self_supplied = input.selfSupplied
   const { error } = await getAdminClient().from('bm_hpv_sites').update(updates).eq('id', input.id)
   fail(error)
   await writeAudit(actor, 'hpv.site.update', 'hpv-site', input.id, input)
@@ -504,11 +498,12 @@ export async function createHpvDistribution(input: {
   return { workspace: await getHpvWorkspace(actor), distributionId }
 }
 
-export async function updateHpvReceipt(input: { id: string; receivedOn?: string; sampleCount?: number; note?: string | null }, actor: BmActor) {
+export async function updateHpvReceipt(input: { id: string; receivedOn?: string; sampleCount?: number; selfSupplied?: boolean; note?: string | null }, actor: BmActor) {
   assertAdmin(actor)
   const updates: Record<string, unknown> = {}
   if (input.receivedOn !== undefined) updates.received_on = input.receivedOn
   if (input.sampleCount !== undefined) updates.sample_count = input.sampleCount
+  if (input.selfSupplied !== undefined) updates.self_supplied = input.selfSupplied
   if (input.note !== undefined) updates.note = clean(input.note)
   if (!Object.keys(updates).length) return getHpvWorkspace(actor)
   const { error } = await getAdminClient().from('bm_hpv_site_receipts').update(updates).eq('id', input.id)
@@ -517,13 +512,14 @@ export async function updateHpvReceipt(input: { id: string; receivedOn?: string;
   return getHpvWorkspace(actor)
 }
 
-export async function createHpvReceipt(input: { siteId: string; receivedOn: string; sampleCount: number; note?: string | null }, actor: BmActor) {
+export async function createHpvReceipt(input: { siteId: string; receivedOn: string; sampleCount: number; selfSupplied?: boolean; note?: string | null }, actor: BmActor) {
   const { data, error } = await getAdminClient()
     .from('bm_hpv_site_receipts')
     .insert({
       site_id: input.siteId,
       received_on: input.receivedOn,
       sample_count: input.sampleCount,
+      self_supplied: Boolean(input.selfSupplied),
       note: clean(input.note),
       created_by: actor.id,
     })
