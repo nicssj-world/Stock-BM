@@ -1,6 +1,6 @@
 # Molecular-CBH QMS
 
-ระบบบริหารคุณภาพห้องปฏิบัติการงานอณูชีววิทยา โรงพยาบาลชลบุรี (เดิมชื่อ Stock-BM) ครอบคลุม 3 ส่วน: จัดการ stock น้ำยา/consumable, IQC (Internal Quality Control) และ EQA (External Quality Assessment)
+ระบบบริหารคุณภาพห้องปฏิบัติการงานอณูชีววิทยา โรงพยาบาลชลบุรี (เดิมชื่อ Stock-BM) ครอบคลุม 4 ส่วน: จัดการ stock น้ำยา/consumable, IQC (Internal Quality Control), EQA (External Quality Assessment) และ HPV Management (เบิก-จ่ายชุดเก็บตัวอย่างให้ รพ.สต./หน่วยงาน, รับตัวอย่างกลับ, จัดเก็บ sample storage box)
 
 ## Stack
 
@@ -53,5 +53,9 @@ npm run build
 
 ## Protected Routes
 
-ถ้าเพิ่มหน้า protected ใหม่ ต้องเพิ่ม path ใน matcher ของ `proxy.ts` ด้วย ไม่งั้น Proxy จะไม่ redirect ไป login
+ถ้าเพิ่มหน้า protected ใหม่ ต้องเพิ่ม path ใน matcher ของ `proxy.ts` ด้วย ไม่งั้น Proxy จะไม่ redirect ไป login (ถ้าเพิ่มหน้าใหม่ใต้ path ที่มี `:path*` อยู่แล้ว เช่น `/hpv/*`, `/environment/*` ก็ครอบคลุมอยู่แล้วไม่ต้องแก้)
+
+## PDF Reports
+
+หน้ารายงานที่ต้อง export เป็น PDF (เช่น `app/(protected)/environment/report`, `app/(protected)/hpv/report`) ใช้วิธี render เป็นหน้า HTML จัดหน้าแบบ A4 พร้อมปุ่ม "Print / Save PDF" ที่เรียก `window.print()` — ไม่ใช้ `lib/reports/pdf.ts` เพราะตัวนั้น generate PDF ด้วยการเขียน byte ตรง ๆ (font Helvetica, WinAnsi) และ strip ตัวอักษรที่ไม่ใช่ ASCII ทิ้ง ภาษาไทยจะกลายเป็น `?` ทั้งหมด ใช้ได้เฉพาะรายงานที่เป็นภาษาอังกฤษล้วนเท่านั้น (เช่น `/api/reports/stock-summary.pdf`)
 
