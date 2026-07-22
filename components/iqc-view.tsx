@@ -113,6 +113,7 @@ export function IqcView({ actor, initialData }: { actor: BmActor; initialData: I
 }
 
 type ChartStatusFilter = 'attention' | 'all' | 'accepted' | 'warning' | 'rejected' | 'unlocked' | 'expiring'
+type LotVisibility = 'active' | 'closed'
 
 function chartStatusRank(status: IqcWorkspace['charts'][number]['status']) {
   return status === 'rejected' ? 0 : status === 'warning' ? 1 : 2
@@ -135,6 +136,7 @@ function fmtCompact(value: number | null) {
 function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction }: { data: IqcWorkspace; isAdmin: boolean; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void; onOpenCorrectiveAction: (id: string) => void }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<ChartStatusFilter>('all')
+  const [lotVisibility, setLotVisibility] = useState<LotVisibility>('active')
   const [query, setQuery] = useState('')
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null)
@@ -216,16 +218,18 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
 
   const lotsById = new Map(data.controlLots.map((lot) => [lot.id, lot]))
   const expiringLotIds = new Set(data.controlLots.filter((lot) => {
+    if (!lot.isActive) return false
     const days = daysUntil(lot.expiryDate)
     return days != null && days >= 0 && days <= 30
   }).map((lot) => lot.id))
-  const attentionKeys = new Set(data.charts.filter((chart) => chart.status !== 'accepted' || !chart.labLockedAt || expiringLotIds.has(chart.controlLotId)).map((chart) => chart.key))
-  const rejectedCount = data.charts.filter((chart) => chart.status === 'rejected').length
-  const warningCount = data.charts.filter((chart) => chart.status === 'warning').length
-  const unlockedCount = data.charts.filter((chart) => !chart.labLockedAt).length
-  const expiringCount = new Set(data.charts.filter((chart) => expiringLotIds.has(chart.controlLotId)).map((chart) => chart.controlLotId)).size
+  const visibleLotCharts = data.charts.filter((chart) => lotsById.get(chart.controlLotId)?.isActive === (lotVisibility === 'active'))
+  const attentionKeys = new Set(visibleLotCharts.filter((chart) => chart.status !== 'accepted' || !chart.labLockedAt || expiringLotIds.has(chart.controlLotId)).map((chart) => chart.key))
+  const rejectedCount = visibleLotCharts.filter((chart) => chart.status === 'rejected').length
+  const warningCount = visibleLotCharts.filter((chart) => chart.status === 'warning').length
+  const unlockedCount = visibleLotCharts.filter((chart) => !chart.labLockedAt).length
+  const expiringCount = new Set(visibleLotCharts.filter((chart) => expiringLotIds.has(chart.controlLotId)).map((chart) => chart.controlLotId)).size
   const q = query.trim().toLowerCase()
-  const filteredCharts = data.charts
+  const filteredCharts = visibleLotCharts
     .filter((chart) => {
       if (statusFilter === 'attention' && !attentionKeys.has(chart.key)) return false
       if (statusFilter === 'accepted' && chart.status !== 'accepted') return false
@@ -288,11 +292,15 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
       </Card>
 
       <Card className="p-3">
-        <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
+        <div className="grid gap-3 lg:grid-cols-[1fr_190px_220px]">
           <label className="relative block">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-[#789097]" />
             <Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder="Search control, lot, analyte" />
           </label>
+          <Select value={lotVisibility} onChange={(event) => { setLotVisibility(event.target.value as LotVisibility); setSelectedKey(null); setSelectedPointId(null) }} aria-label="Lot visibility">
+            <option value="active">Active lots</option>
+            <option value="closed">Closed lots / History</option>
+          </Select>
           <Select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as ChartStatusFilter); setSelectedKey(null); setSelectedPointId(null) }}>
             <option value="attention">Needs attention</option>
             <option value="all">All charts</option>
@@ -379,7 +387,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
               </Card>
             )
           }) : (
-            <Card className="p-8 text-center text-sm text-[#8198a0]">No IQC charts match this filter.</Card>
+            <Card className="p-8 text-center text-sm text-[#8198a0]">{lotVisibility === 'active' ? 'No active IQC lots match this filter.' : 'No closed IQC lots match this filter.'}</Card>
           )}
         </div>
 
@@ -501,47 +509,6 @@ function PointDetailCard({
         </Button>
       </div>
     </Card>
-  )
-}
-
-// Kept temporarily as a fallback while the overview tab is being rolled out.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function ChartsTab({ data, isAdmin, onOk, onErr }: { data: IqcWorkspace; isAdmin: boolean; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void }) {
-  const [busy, setBusy] = useState<string | null>(null)
-  async function lock(controlLotId: string, analyteId: string, eligible: boolean) {
-    let overrideReason: string | undefined
-    if (!eligible) {
-      const reason = window.prompt('จุดยังไม่ครบ 20 — ระบุเหตุผลในการ override lock (เช่น "lot หมดแล้ว ไม่มี run เพิ่ม"):')
-      if (reason == null || !reason.trim()) return
-      overrideReason = reason.trim()
-    }
-    setBusy(`${controlLotId}:${analyteId}`)
-    try {
-      const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/lock', { method: 'POST', body: JSON.stringify({ controlLotId, analyteId, overrideReason }) })
-      onOk(eligible ? 'Lock lab mean/SD แล้ว' : 'Lock (override) แล้ว — บันทึกเหตุผลใน audit', result.iqc)
-    } catch (e) {
-      onErr(e instanceof Error ? e.message : 'Lock ไม่สำเร็จ')
-    } finally {
-      setBusy(null)
-    }
-  }
-  if (!data.charts.length) return <Card className="p-8 text-center text-sm text-[#8198a0]">ยังไม่มีข้อมูล IQC — เพิ่ม analyte/control แล้วบันทึกผลที่แท็บ &ldquo;บันทึกผล&rdquo;</Card>
-  return (
-    <div className="grid gap-4 xl:grid-cols-2">
-      {data.charts.map((chart) => (
-        <div key={chart.key} className="space-y-2">
-          <LjChart chart={chart} />
-          {isAdmin && chart.activeLimit !== 'lab' ? (
-            <div className="flex items-center justify-end gap-2">
-              {!chart.lockEligible ? <span className="text-[11px] text-[#a9700f]">n {chart.n} &lt; 20 — lock ได้แบบ override (Admin)</span> : null}
-              <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={chart.n < 2 || busy === chart.key} onClick={() => lock(chart.controlLotId, chart.analyteId, chart.lockEligible)}>
-                <Lock className="size-3.5" /> {chart.lockEligible ? 'Lock Lab Mean/SD' : `Lock (override, n ${chart.n})`}
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      ))}
-    </div>
   )
 }
 

@@ -16,4 +16,9 @@ describe('IQC lock and close lot', () => {
     expect(service).toContain("{ onConflict: 'control_lot_id,analyte_id' }")
     expect(service).toContain('const locked = await Promise.all(')
   })
+
+  it('does not retain the duplicate per-analyte lock action', () => {
+    expect(view).not.toContain('function ChartsTab')
+    expect(view).not.toContain('Lock Lab Mean/SD')
+  })
 })

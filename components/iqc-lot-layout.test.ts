@@ -9,4 +9,10 @@ describe('IQC control-lot header layout', () => {
     expect(source).toContain('mt-3 flex flex-wrap items-center justify-between gap-3')
     expect(source).toContain('ml-auto shrink-0 text-right text-xs text-[#789097]')
   })
+
+  it('shows active lots by default and provides a closed-lot history view', () => {
+    expect(source).toContain("useState<LotVisibility>('active')")
+    expect(source).toContain('Closed lots / History')
+    expect(source).toContain("lotsById.get(chart.controlLotId)?.isActive === (lotVisibility === 'active')")
+  })
 })
