@@ -72,6 +72,10 @@ export function IqcView({ actor, initialData }: { actor: BmActor; initialData: I
       },
     }
   }, [data, panel])
+  const visibleAlerts = useMemo(() => {
+    const activeLotIds = new Set(data.controlLots.filter((lot) => lot.isActive).map((lot) => lot.id))
+    return data.alerts.filter((alert) => alert.kind !== 'lot-expiring' || activeLotIds.has(alert.id.slice('lot:'.length)))
+  }, [data.alerts, data.controlLots])
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-5">
@@ -98,7 +102,7 @@ export function IqcView({ actor, initialData }: { actor: BmActor; initialData: I
         <StatCard label="Rejected" value={scoped.summary.rejected} tone="rejected" hint={`${data.summary.openCorrectiveActions} corrective action ค้าง`} />
       </div>
 
-      {data.alerts.length ? <Card className="p-3"><div className="flex flex-wrap gap-2">{data.alerts.map((alert) => <span key={alert.id} className={`inline-flex max-w-full items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold ${alert.tone === 'rejected' ? 'border-[#efc7cc] bg-[#fff5f6] text-[#c02a37]' : 'border-[#eed4a6] bg-[#fff9ed] text-[#a9700f]'}`}><AlertTriangle className="size-3.5 shrink-0" /> {alert.title} <span className="font-normal opacity-80">· {alert.detail}</span></span>)}</div></Card> : null}
+      {visibleAlerts.length ? <Card className="p-3"><div className="flex flex-wrap gap-2">{visibleAlerts.map((alert) => <span key={alert.id} className={`inline-flex max-w-full items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold ${alert.tone === 'rejected' ? 'border-[#efc7cc] bg-[#fff5f6] text-[#c02a37]' : 'border-[#eed4a6] bg-[#fff9ed] text-[#a9700f]'}`}><AlertTriangle className="size-3.5 shrink-0" /> {alert.title} <span className="font-normal opacity-80">· {alert.detail}</span></span>)}</div></Card> : null}
 
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
 
@@ -303,7 +307,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
           </Select>
           <Select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as ChartStatusFilter); setSelectedKey(null); setSelectedPointId(null) }}>
             <option value="attention">Needs attention</option>
-            <option value="all">All charts</option>
+            <option value="all">{lotVisibility === 'active' ? 'All active charts' : 'All closed charts'}</option>
             <option value="rejected">Rejected</option>
             <option value="warning">Warning</option>
             <option value="accepted">Accepted</option>
@@ -334,6 +338,8 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
                       {!lot?.isActive ? <span className="rounded-full border border-[#d2dee0] bg-[#f1f5f5] px-2 py-0.5 text-[11px] font-bold text-[#58747d]">closed</span> : null}
                     </div>
                     <p className="mono mt-1 text-xs text-[#5f7880]">Lot {charts[0]?.lotNumber}</p>
+                    {!lot?.isActive && lot?.lockedAt ? <p className="mt-1 text-xs text-[#789097]">Locked by {lot.lockedByName ?? '-'} · {formatDateTime(lot.lockedAt)}</p> : null}
+                    {!lot?.isActive && lot?.lockOverrideReason ? <p className="mt-2 rounded-md border border-[#eed4a6] bg-[#fff9ed] px-2.5 py-2 text-xs text-[#795d2d]"><span className="font-bold text-[#8b5a08]">เหตุผล Override:</span> {lot.lockOverrideReason}</p> : null}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                     {isAdmin ? (

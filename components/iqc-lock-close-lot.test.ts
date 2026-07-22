@@ -21,4 +21,8 @@ describe('IQC lock and close lot', () => {
     expect(view).not.toContain('function ChartsTab')
     expect(view).not.toContain('Lock Lab Mean/SD')
   })
+
+  it('loads the lock audit detail for the closed-lot history', () => {
+    expect(service).toContain(".from('bm_audit_logs').select('entity_id,actor_id,detail,created_at').eq('action', 'iqc.lot.lockAndClose')")
+  })
 })

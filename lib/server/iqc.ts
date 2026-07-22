@@ -169,6 +169,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     { data: planData, error: planError },
     { data: eqaBiasData, error: eqaBiasError },
     { data: userData, error: userError },
+    { data: lockAuditData, error: lockAuditError },
   ] = await Promise.all([
     admin.from('iqc_analytes').select('*').order('group_label', { nullsFirst: true }).order('code'),
     admin.from('iqc_instruments').select('*').order('code'),
@@ -184,6 +185,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     admin.from('iqc_control_plans').select('*').order('created_at'),
     admin.from('eqa_results').select('iqc_analyte_id,assigned_value,submitted_value,eqa_rounds(status,submission_date)').not('iqc_analyte_id', 'is', null),
     admin.from('nipt_users').select('id,display_name').order('display_name'),
+    admin.from('bm_audit_logs').select('entity_id,actor_id,detail,created_at').eq('action', 'iqc.lot.lockAndClose').order('created_at', { ascending: false }),
   ])
   fail(analyteError)
   fail(instrumentError)
@@ -199,12 +201,18 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   fail(planError)
   fail(eqaBiasError)
   fail(userError)
+  fail(lockAuditError)
 
   const analytes = ((analyteData ?? []) as RecordRow[]).map(mapAnalyte)
   const instruments = ((instrumentData ?? []) as RecordRow[]).map(mapInstrument)
   const controlMaterials = ((materialData ?? []) as RecordRow[]).map(mapMaterial)
   const materialMap = new Map(controlMaterials.map((m) => [m.id, m]))
   const lotRows = (lotData ?? []) as RecordRow[]
+  const lockAuditByLotId = new Map<string, RecordRow>()
+  for (const audit of (lockAuditData ?? []) as RecordRow[]) {
+    const lotId = nullableString(audit.entity_id)
+    if (lotId && !lockAuditByLotId.has(lotId)) lockAuditByLotId.set(lotId, audit)
+  }
   const controlLots: IqcControlLot[] = lotRows.map((row) => {
     const material = materialMap.get(asString(row.control_material_id))
     return {
@@ -216,6 +224,9 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
       expiryDate: nullableString(row.expiry_date),
       stockLotId: nullableString(row.stock_lot_id),
       isActive: Boolean(row.is_active),
+      lockedAt: null,
+      lockedByName: null,
+      lockOverrideReason: null,
     }
   })
   const lotMap = new Map(controlLots.map((lot) => [lot.id, lot]))
@@ -224,6 +235,14 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   const analyteMap = new Map(analytes.map((a) => [a.id, a]))
   const assignableUsers: IqcAssignableUser[] = ((userData ?? []) as RecordRow[]).map((row) => ({ id: asString(row.id), displayName: asString(row.display_name) }))
   const userNameMap = new Map(assignableUsers.map((user) => [user.id, user.displayName]))
+  for (const lot of controlLots) {
+    const audit = lockAuditByLotId.get(lot.id)
+    if (!audit) continue
+    const detail = audit.detail && typeof audit.detail === 'object' && !Array.isArray(audit.detail) ? audit.detail as RecordRow : {}
+    lot.lockedAt = nullableString(audit.created_at)
+    lot.lockedByName = userNameMap.get(asString(audit.actor_id)) ?? null
+    lot.lockOverrideReason = nullableString(detail.overrideReason)
+  }
   const controlPlans: IqcControlPlan[] = ((planData ?? []) as RecordRow[]).map((row) => {
     const analyte = analyteMap.get(asString(row.analyte_id))
     const instrument = instruments.find((item) => item.id === asString(row.instrument_id))

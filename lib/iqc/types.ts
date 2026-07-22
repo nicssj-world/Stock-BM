@@ -44,6 +44,9 @@ export interface IqcControlLot {
   expiryDate: string | null
   stockLotId: string | null
   isActive: boolean
+  lockedAt: string | null
+  lockedByName: string | null
+  lockOverrideReason: string | null
 }
 
 export interface IqcSpec {

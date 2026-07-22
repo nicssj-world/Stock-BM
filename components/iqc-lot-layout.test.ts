@@ -14,5 +14,10 @@ describe('IQC control-lot header layout', () => {
     expect(source).toContain("useState<LotVisibility>('active')")
     expect(source).toContain('Closed lots / History')
     expect(source).toContain("lotsById.get(chart.controlLotId)?.isActive === (lotVisibility === 'active')")
+    expect(source).toContain("lotVisibility === 'active' ? 'All active charts' : 'All closed charts'")
+  })
+
+  it('shows the override reason in closed-lot history', () => {
+    expect(source).toContain('lockOverrideReason')
   })
 })

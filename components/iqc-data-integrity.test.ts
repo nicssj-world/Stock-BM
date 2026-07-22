@@ -10,6 +10,8 @@ describe('IQC data integrity controls', () => {
   it('enforces active, unexpired lots at the server boundary', () => {
     expect(service).toContain('assertUsableControlLots(lotIds)')
     expect(service).toContain('assertUsableControlLots([input.controlLotId])')
+    expect(service).toContain('if (!lot.isActive || !lot.expiryDate) continue')
+    expect(view).toContain("alert.kind !== 'lot-expiring' || activeLotIds.has(alert.id.slice('lot:'.length))")
   })
 
   it('refuses to close a lot with analytes that cannot be locked', () => {
