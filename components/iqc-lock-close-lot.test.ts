@@ -10,4 +10,10 @@ describe('IQC lock and close lot', () => {
     expect(service).toContain(".from('iqc_control_lots').update({ is_active: false }).eq('id', controlLotId)")
     expect(view).toContain('Lock & ปิด Lot')
   })
+
+  it('locks every analyte as one batch before closing the lot', () => {
+    expect(service).toContain(".upsert(")
+    expect(service).toContain("{ onConflict: 'control_lot_id,analyte_id' }")
+    expect(service).toContain('const locked = await Promise.all(')
+  })
 })

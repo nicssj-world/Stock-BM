@@ -21,4 +21,10 @@ describe('IQC data integrity controls', () => {
     expect(view).toContain('เหตุผลแก้ไข Spec')
     expect(service).toContain('await recalculateChartStatuses(input.controlLotId, input.analyteId)')
   })
+
+  it('uses a UUID as the audit entity ID for control specs', () => {
+    expect(service).toContain("'iqc.spec.lockLab', 'iqc-control-spec', controlLotId")
+    expect(service).toContain("'iqc.spec.unlockLab', 'iqc-control-spec', controlLotId")
+    expect(service).not.toContain("'iqc.spec.lockLab', 'iqc-control-spec', `${controlLotId}:${analyteId}`")
+  })
 })

@@ -810,7 +810,7 @@ export async function upsertSpec(input: {
     fail(error)
   }
   if (specChanged) await recalculateChartStatuses(input.controlLotId, input.analyteId)
-  await writeAudit(actor, 'iqc.spec.upsert', 'iqc-control-spec', `${input.controlLotId}:${input.analyteId}`, { ...input, recalculated: specChanged })
+  await writeAudit(actor, 'iqc.spec.upsert', 'iqc-control-spec', input.controlLotId, { ...input, recalculated: specChanged })
   return getIqcWorkspace(actor)
 }
 
@@ -1321,8 +1321,15 @@ async function assertAllLotAnalytesLockable(controlLotId: string) {
   return counts
 }
 
-async function saveLabLock(controlLotId: string, analyteId: string, actor: BmActor, overrideReason?: string | null) {
-  const admin = getAdminClient()
+type PreparedLabLock = {
+  analyteId: string
+  labMean: number
+  labSd: number
+  labN: number
+  overridden: boolean
+}
+
+async function prepareLabLock(controlLotId: string, analyteId: string, overrideReason?: string | null): Promise<PreparedLabLock> {
   const usable = await getUsableLabValues(controlLotId, analyteId)
   if (usable.length < 2) {
     throw new HttpError(400, `ต้องมีอย่างน้อย 2 จุดจึงคำนวณ SD ได้ (ตอนนี้ ${usable.length})`)
@@ -1331,8 +1338,18 @@ async function saveLabLock(controlLotId: string, analyteId: string, actor: BmAct
   if (overridden && !overrideReason?.trim()) {
     throw new HttpError(400, `ต้องมีอย่างน้อย ${LAB_LOCK_MIN_POINTS} จุดก่อน lock (ตอนนี้ ${usable.length}) — หรือระบุเหตุผล override`)
   }
-  const labMean = mean(usable)
-  const labSd = sd(usable)
+  return {
+    analyteId,
+    labMean: mean(usable),
+    labSd: sd(usable),
+    labN: usable.length,
+    overridden,
+  }
+}
+
+async function saveLabLock(controlLotId: string, analyteId: string, actor: BmActor, overrideReason?: string | null) {
+  const admin = getAdminClient()
+  const lock = await prepareLabLock(controlLotId, analyteId, overrideReason)
 
   const { data: existing, error: existingError } = await admin
     .from('iqc_control_specs')
@@ -1342,9 +1359,9 @@ async function saveLabLock(controlLotId: string, analyteId: string, actor: BmAct
     .maybeSingle()
   fail(existingError)
   const payload = {
-    lab_mean: labMean,
-    lab_sd: labSd,
-    lab_n: usable.length,
+    lab_mean: lock.labMean,
+    lab_sd: lock.labSd,
+    lab_n: lock.labN,
     lab_locked_at: new Date().toISOString(),
     active_limit: 'lab',
     updated_at: new Date().toISOString(),
@@ -1356,14 +1373,15 @@ async function saveLabLock(controlLotId: string, analyteId: string, actor: BmAct
     const { error: insErr } = await admin.from('iqc_control_specs').insert({ control_lot_id: controlLotId, analyte_id: analyteId, created_by: actor.id, ...payload })
     fail(insErr)
   }
-  await writeAudit(actor, 'iqc.spec.lockLab', 'iqc-control-spec', `${controlLotId}:${analyteId}`, {
-    labMean,
-    labSd,
-    labN: usable.length,
-    overridden,
-    overrideReason: overridden ? overrideReason?.trim() : null,
+  await writeAudit(actor, 'iqc.spec.lockLab', 'iqc-control-spec', controlLotId, {
+    analyteId,
+    labMean: lock.labMean,
+    labSd: lock.labSd,
+    labN: lock.labN,
+    overridden: lock.overridden,
+    overrideReason: lock.overridden ? overrideReason?.trim() : null,
   })
-  return { analyteId, labMean, labSd, labN: usable.length, overridden }
+  return lock
 }
 
 async function recalculateChartStatuses(controlLotId: string, analyteId: string) {
@@ -1444,7 +1462,7 @@ export async function unlockLabStatistics(controlLotId: string, analyteId: strin
     .eq('control_lot_id', controlLotId)
     .eq('analyte_id', analyteId)
   fail(error)
-  await writeAudit(actor, 'iqc.spec.unlockLab', 'iqc-control-spec', `${controlLotId}:${analyteId}`, { reason: trimmedReason })
+  await writeAudit(actor, 'iqc.spec.unlockLab', 'iqc-control-spec', controlLotId, { analyteId, reason: trimmedReason })
   return getIqcWorkspace(actor)
 }
 
@@ -1457,14 +1475,47 @@ export async function lockControlLotStatistics(controlLotId: string, actor: BmAc
     throw new HttpError(400, `มีบาง analyte ยังไม่ครบ ${LAB_LOCK_MIN_POINTS} จุด — ระบุเหตุผล override เพื่อ lock ทั้ง lot`)
   }
 
-  const locked = []
-  for (const row of counts) {
-    locked.push(await saveLabLock(controlLotId, row.analyteId, actor, row.n < LAB_LOCK_MIN_POINTS ? overrideReason : null))
-  }
+  // A lot must never be left partly locked. Prepare every analyte first, then
+  // persist all statistics through one upsert statement before closing the lot.
+  const locked = await Promise.all(
+    counts.map((row) => prepareLabLock(controlLotId, row.analyteId, row.n < LAB_LOCK_MIN_POINTS ? overrideReason : null)),
+  )
+  const lockedAt = new Date().toISOString()
+  const { data: existingSpecs, error: existingSpecsError } = await admin
+    .from('iqc_control_specs')
+    .select('analyte_id,created_by')
+    .eq('control_lot_id', controlLotId)
+  fail(existingSpecsError)
+  const createdByByAnalyte = new Map(
+    ((existingSpecs ?? []) as RecordRow[]).map((spec) => [asString(spec.analyte_id), nullableString(spec.created_by)]),
+  )
+  const { error: lockError } = await admin
+    .from('iqc_control_specs')
+    .upsert(
+      locked.map((lock) => ({
+        control_lot_id: controlLotId,
+        analyte_id: lock.analyteId,
+        created_by: createdByByAnalyte.get(lock.analyteId) ?? actor.id,
+        lab_mean: lock.labMean,
+        lab_sd: lock.labSd,
+        lab_n: lock.labN,
+        lab_locked_at: lockedAt,
+        active_limit: 'lab',
+        updated_at: lockedAt,
+      })),
+      { onConflict: 'control_lot_id,analyte_id' },
+    )
+  fail(lockError)
   const { error: closeError } = await admin.from('iqc_control_lots').update({ is_active: false }).eq('id', controlLotId)
   fail(closeError)
   await writeAudit(actor, 'iqc.lot.lockAndClose', 'iqc-control-lot', controlLotId, {
-    locked: locked.map((row) => row.analyteId),
+    locked: locked.map((row) => ({
+      analyteId: row.analyteId,
+      labMean: row.labMean,
+      labSd: row.labSd,
+      labN: row.labN,
+      overridden: row.overridden,
+    })),
     overrideReason: needsOverride ? overrideReason?.trim() : null,
     isActive: false,
   })

@@ -143,11 +143,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
     let overrideReason: string | undefined
     const unlocked = charts.filter((chart) => !chart.labLockedAt)
     if (!unlocked.length) return
-    const tooFew = unlocked.filter((chart) => chart.n < 2)
     const needsOverride = unlocked.some((chart) => chart.n >= 2 && !chart.lockEligible)
-    if (tooFew.length) {
-      window.alert(`บาง analyte มีข้อมูลน้อยกว่า 2 จุด จะถูกข้าม: ${tooFew.map((chart) => chart.analyteCode).join(', ')}`)
-    }
     if (needsOverride) {
       const reason = window.prompt('บาง analyte ยังไม่ครบ 20 จุด — ระบุเหตุผลในการ override ก่อน Lock & ปิด Lot:')
       if (reason == null || !reason.trim()) return
