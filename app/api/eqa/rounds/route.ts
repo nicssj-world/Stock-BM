@@ -4,7 +4,7 @@ import { createRound } from '@/lib/server/eqa'
 import { readJson, respond } from '@/lib/server/route'
 
 const schema = z.object({
-  schemeId: z.string().uuid(),
+  planItemId: z.string().uuid(),
   roundLabel: z.string().trim().min(1).max(80),
   sampleReceivedDate: z.string().trim().nullable().optional(),
   resultDueDate: z.string().trim().nullable().optional(),

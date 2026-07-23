@@ -1,0 +1,8 @@
+TH Sarabun New webfont assets
+
+Downloaded from the Thai government Department of Groundwater Resources page:
+https://www.dgr.go.th/bgr1/th/download/601
+
+The government page distributes the THSarabunNew archive for official document
+work. The archive contains the regular, bold, italic, and bold-italic TTF files
+bundled in this directory. No separate license file was present in the archive.
