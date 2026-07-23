@@ -1120,7 +1120,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
   }
 
   async function closeBox(box: HpvStorageBox) {
-    if (!window.confirm(`ปิดกล่อง "${box.boxCode}" ใช่ไหม?\n\nจะเริ่มนับเวลารอทิ้ง 1 เดือนทันที`)) return
+    if (!window.confirm(`ปิดกล่อง "${box.boxCode}" ใช่ไหม?\n\nระบบจะเตือนเมื่อเก็บเกิน 1 เดือน และให้บันทึกทำลายเมื่อครบ 2 เดือน`)) return
     setBusy(true)
     try {
       const result = await api<{ workspace: HpvWorkspace }>(`/api/hpv/storage/boxes/${box.id}`, {
@@ -1269,14 +1269,14 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
                 <tbody className="divide-y divide-[#edf2f2]">
                   {data.boxes.map((box) => {
                     const isSelected = effectiveBoxId === box.id
-                    const destructionState = getHpvDestructionState(box.destroyDueAt, box.status, today)
+                    const destructionState = getHpvDestructionState(box.destroyDueAt, box.status, today, box.filledAt)
                     const remainingDays = box.destroyDueAt ? daysUntil(bangkokDateKey(box.destroyDueAt), today) : 0
                     const storedCount = box.samples.filter((s) => s.status === 'stored').length
                     return (
                       <tr key={box.id} onClick={() => { setViewBoxId(box.id); if (box.status === 'open') setIntakeBoxId(box.id); setSelectedPosition(null) }} className={`cursor-pointer transition-colors ${isSelected ? 'bg-[#eef9f7]' : 'hover:bg-[#f7fbfc]'}`}>
                         <td className="mono px-4 py-2 font-bold text-[#315763]">{box.boxCode}</td>
                         <td className="mono px-2 py-2 text-center font-bold text-[#315763]">{storedCount}/{box.capacity}</td>
-                        <td className="px-2 py-2"><StatusBadge tone={box.status === 'open' ? 'accepted' : box.status === 'full' ? 'warning' : 'neutral'} label={box.status.toUpperCase()} /></td>
+                        <td className="px-2 py-2"><HpvBoxAgeBadge box={box} today={today} /></td>
                         <td className="px-2 py-2 text-xs">{destructionState === 'due_soon' ? <StatusBadge tone="warning" label={`เหลือ ${remainingDays} วัน`} /> : destructionState === 'due_now' ? <StatusBadge tone="rejected" label="ครบกำหนดทำลาย" /> : <span className="text-[#8ba0a5]">{box.destroyDueAt ? formatDate(box.destroyDueAt) : '-'}</span>}</td>
                         <td className="px-2 py-2 text-right">{box.status === 'open' ? <button type="button" onClick={(event) => { event.stopPropagation(); void closeBox(box) }} className="rounded border border-[#c7a850] bg-[#fdf8ed] px-2 py-1 text-[10px] font-bold text-[#8a6d1e] hover:bg-[#f9efc8]">ปิดกล่อง</button> : box.status === 'full' ? <button type="button" onClick={(event) => { event.stopPropagation(); void reopenBox(box) }} className="rounded border border-[#83bcb6] bg-[#eef9f7] px-2 py-1 text-[10px] font-bold text-[#08766e] hover:bg-[#dff3ef]">เปิดกล่องกลับ</button> : null}</td>
                       </tr>
@@ -1312,7 +1312,7 @@ function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onCl
   if (!box) return <Card className="flex min-h-[520px] items-center justify-center p-8 text-center text-sm text-[#789097]">ยังไม่มี Storage box</Card>
   const sampleMap = new Map(box.samples.map((sample) => [sample.position, sample]))
   const occupied = box.samples.length
-  const destructionState = getHpvDestructionState(box.destroyDueAt, box.status, today)
+  const destructionState = getHpvDestructionState(box.destroyDueAt, box.status, today, box.filledAt)
   const remainingDays = box.destroyDueAt ? daysUntil(bangkokDateKey(box.destroyDueAt), today) : 0
   const canInteract = box.status === 'open'
 
@@ -1324,13 +1324,13 @@ function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onCl
           <p className="mt-1 text-xs text-[#789097]">{occupied}/{HPV_BOX_CAPACITY} positions · created {formatDateTime(box.createdAt)}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge tone={box.status === 'open' ? 'accepted' : box.status === 'full' ? 'warning' : 'neutral'} label={box.status.toUpperCase()} />
+          <HpvBoxAgeBadge box={box} today={today} />
           {destructionState === 'due_soon' ? <StatusBadge tone="warning" label={`เหลือ ${remainingDays} วัน`} /> : null}
           {destructionState === 'due_now' ? <StatusBadge tone="rejected" label="ครบกำหนดทำลาย" /> : null}
           {destructionState === 'none' && box.destroyDueAt ? <StatusBadge tone="neutral" label={`Destroy due ${formatDate(box.destroyDueAt)}`} /> : null}
           {onClose && box.status === 'open' ? <button onClick={() => onClose(box)} className="flex items-center gap-1 rounded border border-[#c7a850] bg-[#fdf8ed] px-2 py-1 text-[10px] font-bold text-[#8a6d1e] hover:bg-[#f9efc8]"><CheckCircle2 className="size-3" /> ปิดกล่อง</button> : null}
           {onReopen && box.status === 'full' ? <button onClick={() => onReopen(box)} className="flex items-center gap-1 rounded border border-[#83bcb6] bg-[#eef9f7] px-2 py-1 text-[10px] font-bold text-[#08766e] hover:bg-[#dff3ef]"><RotateCcw className="size-3" /> เปิดกล่องกลับ</button> : null}
-          {onDestroy && box.status === 'full' ? <button onClick={() => onDestroy(box)} className="flex items-center gap-1 rounded border border-red-300 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-700 hover:bg-red-100"><Flame className="size-3" /> ทำลาย</button> : null}
+          {onDestroy && box.status === 'full' && destructionState === 'due_now' ? <button onClick={() => onDestroy(box)} className="flex items-center gap-1 rounded border border-red-300 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-700 hover:bg-red-100"><Flame className="size-3" /> บันทึกทำลาย</button> : null}
           {onDelete ? <button onClick={() => onDelete(box)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-500 hover:bg-red-100"><Trash2 className="size-3" /> ลบกล่อง</button> : null}
         </div>
       </div>
@@ -1412,6 +1412,15 @@ function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onCl
       </div>
     </Card>
   )
+}
+
+function HpvBoxAgeBadge({ box, today }: { box: HpvStorageBox; today: string }) {
+  if (box.status === 'destroyed') return <StatusBadge tone="neutral" label="ทำลายแล้ว" />
+  if (box.status === 'open') return <StatusBadge tone="accepted" label="ปกติ" />
+  const state = getHpvDestructionState(box.destroyDueAt, box.status, today, box.filledAt)
+  if (state === 'due_now') return <StatusBadge tone="rejected" label="เกิน 2 เดือน" />
+  if (state === 'due_soon') return <StatusBadge tone="warning" label="เกิน 1 เดือน" />
+  return <StatusBadge tone="accepted" label="ปกติ" />
 }
 
 function CheckoutTab({ data, onWorkspace, onNotice }: {

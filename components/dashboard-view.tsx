@@ -128,8 +128,8 @@ export function DashboardView({ actor, stock, env, hpv, hivDrt, equipment }: { a
                 <CalendarClock className={`size-4 ${hpv.boxesDueSoon > 0 ? 'text-[#a76511]' : 'text-[#7b9298]'}`} />
               </div>
               <div>
-                <p className={`font-semibold ${hpv.boxesDueSoon > 0 ? 'text-[#a76511]' : 'text-[#315763]'}`}>กล่องใกล้ครบกำหนดทำลาย</p>
-                <p className="text-xs text-[#7b9298]">เหลือไม่เกิน 5 วัน</p>
+                <p className={`font-semibold ${hpv.boxesDueSoon > 0 ? 'text-[#a76511]' : 'text-[#315763]'}`}>กล่องเก็บเกิน 1 เดือน</p>
+                <p className="text-xs text-[#7b9298]">เตรียมดำเนินการก่อนครบ 2 เดือน</p>
               </div>
               <span className={`mono ml-auto text-lg font-bold ${hpv.boxesDueSoon > 0 ? 'text-[#a76511]' : 'text-[#173d50]'}`}>{hpv.boxesDueSoon}</span>
             </div>
@@ -146,15 +146,15 @@ export function DashboardView({ actor, stock, env, hpv, hivDrt, equipment }: { a
                 <AlertOctagon className={`size-4 ${hpv.boxesDueDestruction > 0 ? 'text-[#b33b46]' : 'text-[#7b9298]'}`} />
               </div>
               <div>
-                <p className={`font-semibold ${hpv.boxesDueDestruction > 0 ? 'text-[#a83541]' : 'text-[#315763]'}`}>กล่องครบกำหนดทำลาย</p>
-                <p className="text-xs text-[#7b9298]">destroy_due_at ≤ วันนี้</p>
+                <p className={`font-semibold ${hpv.boxesDueDestruction > 0 ? 'text-[#a83541]' : 'text-[#315763]'}`}>กล่องเก็บเกิน 2 เดือน</p>
+                <p className="text-xs text-[#7b9298]">สามารถบันทึกทำลายได้</p>
               </div>
               <span className={`mono ml-auto text-lg font-bold ${hpv.boxesDueDestruction > 0 ? 'text-[#be3d49]' : 'text-[#173d50]'}`}>{hpv.boxesDueDestruction}</span>
             </div>
           </div>
           {hpv.boxesDueSoon > 0 || hpv.boxesDueDestruction > 0 ? (
             <div className="border-t border-[#edf2f2] px-4 py-2 text-[11px] text-[#a76511]">
-              <Link href="/hpv" className="hover:underline">ดูกล่องที่ต้องทำลาย →</Link>
+              <Link href="/hpv" className="hover:underline">ดูกล่องที่ต้องดำเนินการ →</Link>
             </div>
           ) : null}
         </Card>

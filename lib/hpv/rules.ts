@@ -57,15 +57,38 @@ export function specimenTypeLabel(type: HpvSpecimenType) {
   return type === 'self_collected' ? 'Self-collected' : 'Clinician-collected'
 }
 
-export function getHpvDestructionState(destroyDueAt: string | null, status: HpvBoxStatus, today = todayBangkok()): HpvDestructionState {
-  if (!destroyDueAt || status === 'destroyed') return 'none'
-  const remaining = daysUntil(bangkokDateKey(destroyDueAt), today)
+export function getHpvDestructionState(destroyDueAt: string | null, status: HpvBoxStatus, today = todayBangkok(), filledAt?: string | null): HpvDestructionState {
+  if (!destroyDueAt || status !== 'full') return 'none'
+  const dueAt = new Date(destroyDueAt)
+  if (Number.isNaN(dueAt.getTime())) return 'none'
+  const remaining = daysUntil(bangkokDateKey(dueAt), today)
   if (remaining <= 0) return 'due_now'
-  return remaining <= 5 ? 'due_soon' : 'none'
+  const filledDate = filledAt ? new Date(filledAt) : null
+  const warningAt = filledDate && !Number.isNaN(filledDate.getTime())
+    ? shiftBangkokCalendarMonths(filledDate, 1)
+    : shiftBangkokCalendarMonths(dueAt, -1)
+  return daysUntil(bangkokDateKey(warningAt), today) <= 0 ? 'due_soon' : 'none'
 }
 
-export function addOneMonth(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth() + 1, date.getDate(), date.getHours(), date.getMinutes(), date.getSeconds(), date.getMilliseconds())
+export function addTwoMonths(date: Date) {
+  return shiftBangkokCalendarMonths(date, 2)
+}
+
+function shiftBangkokCalendarMonths(date: Date, months: number) {
+  const bangkokOffsetMs = 7 * 60 * 60 * 1000
+  const bangkokTime = new Date(date.getTime() + bangkokOffsetMs)
+  const targetMonth = new Date(Date.UTC(bangkokTime.getUTCFullYear(), bangkokTime.getUTCMonth() + months, 1))
+  const lastTargetDay = new Date(Date.UTC(targetMonth.getUTCFullYear(), targetMonth.getUTCMonth() + 1, 0)).getUTCDate()
+  const target = Date.UTC(
+    targetMonth.getUTCFullYear(),
+    targetMonth.getUTCMonth(),
+    Math.min(bangkokTime.getUTCDate(), lastTargetDay),
+    bangkokTime.getUTCHours(),
+    bangkokTime.getUTCMinutes(),
+    bangkokTime.getUTCSeconds(),
+    bangkokTime.getUTCMilliseconds(),
+  )
+  return new Date(target - bangkokOffsetMs)
 }
 
 export function summarizeHpvSites(distributions: HpvDistributionLike[], receipts: HpvReceiptLike[], returns: HpvReturnLike[] = []): Record<string, HpvSiteSummary> {

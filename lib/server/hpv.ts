@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { addOneMonth, getHpvDestructionState, nextHpvBoxPosition, summarizeHpvSites } from '@/lib/hpv/rules'
+import { addTwoMonths, getHpvDestructionState, nextHpvBoxPosition, summarizeHpvSites } from '@/lib/hpv/rules'
 import type { BmActor } from '@/lib/bm/types'
 import type {
   HpvDashboard,
@@ -662,7 +662,7 @@ export async function closeHpvStorageBox(id: string, actor: BmActor) {
   const closedAt = new Date()
   const { error } = await getAdminClient()
     .from('bm_hpv_storage_boxes')
-    .update({ status: 'full', filled_at: closedAt.toISOString(), destroy_due_at: addOneMonth(closedAt).toISOString(), updated_at: closedAt.toISOString() })
+    .update({ status: 'full', filled_at: closedAt.toISOString(), destroy_due_at: addTwoMonths(closedAt).toISOString(), updated_at: closedAt.toISOString() })
     .eq('id', id)
   fail(error)
   await writeAudit(actor, 'hpv.box.close', 'hpv-box', id, {})
@@ -736,7 +736,7 @@ export async function scanHpvSample(input: { barcode: string; boxId: string; spe
       .update({
         status: 'full',
         filled_at: filledAt.toISOString(),
-        destroy_due_at: addOneMonth(filledAt).toISOString(),
+        destroy_due_at: addTwoMonths(filledAt).toISOString(),
         updated_at: filledAt.toISOString(),
       })
       .eq('id', input.boxId)
@@ -803,12 +803,15 @@ export async function undoHpvSampleCheckout(id: string, actor: BmActor) {
 
 export async function destroyHpvStorageBox(id: string, actor: BmActor) {
   assertAdmin(actor)
-  const { data: box, error: boxError } = await getAdminClient().from('bm_hpv_storage_boxes').select('status').eq('id', id).maybeSingle()
+  const { data: box, error: boxError } = await getAdminClient().from('bm_hpv_storage_boxes').select('status,destroy_due_at').eq('id', id).maybeSingle()
   fail(boxError)
   const boxRow = box as RecordRow | null
   if (!boxRow) throw new HttpError(404, 'Storage box not found')
   if (boxRow.status === 'open') throw new HttpError(400, 'ปิดกล่องก่อนจึงจะทำลายได้')
   if (boxRow.status === 'destroyed') throw new HttpError(400, 'กล่องนี้ทำลายไปแล้ว')
+  if (getHpvDestructionState(nullableString(boxRow.destroy_due_at), boxRow.status as HpvBoxStatus) !== 'due_now') {
+    throw new HttpError(400, 'บันทึกทำลายได้เมื่อกล่องเก็บครบ 2 เดือนแล้วเท่านั้น')
+  }
   const destroyedAt = new Date().toISOString()
   const { error } = await getAdminClient()
     .from('bm_hpv_storage_boxes')
@@ -824,10 +827,10 @@ export async function getHpvDashboardData(): Promise<HpvDashboard> {
   const today = todayBangkok()
   const [{ count: storedCount }, { data: boxData, error: boxError }] = await Promise.all([
     admin.from('bm_hpv_samples').select('*', { count: 'exact', head: true }).eq('status', 'stored'),
-    admin.from('bm_hpv_storage_boxes').select('destroy_due_at,status').not('destroy_due_at', 'is', null).neq('status', 'destroyed'),
+    admin.from('bm_hpv_storage_boxes').select('destroy_due_at,filled_at,status').not('destroy_due_at', 'is', null).neq('status', 'destroyed'),
   ])
   fail(boxError)
-  const states = (boxData ?? []).map((box) => getHpvDestructionState(nullableString((box as RecordRow).destroy_due_at), asString((box as RecordRow).status) as HpvBoxStatus, today))
+  const states = (boxData ?? []).map((box) => getHpvDestructionState(nullableString((box as RecordRow).destroy_due_at), asString((box as RecordRow).status) as HpvBoxStatus, today, nullableString((box as RecordRow).filled_at)))
   return { storedSamples: storedCount ?? 0, boxesDueSoon: states.filter((state) => state === 'due_soon').length, boxesDueDestruction: states.filter((state) => state === 'due_now').length }
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addOneMonth, formatHpvBoxPosition, getHpvDestructionState, isHpvBoxFull, isHpvSpecimenType, nextHpvBoxPosition, resolveHpvStorageBoxes, specimenTypeLabel, summarizeHpvSites } from '@/lib/hpv/rules'
+import { addTwoMonths, formatHpvBoxPosition, getHpvDestructionState, isHpvBoxFull, isHpvSpecimenType, nextHpvBoxPosition, resolveHpvStorageBoxes, specimenTypeLabel, summarizeHpvSites } from '@/lib/hpv/rules'
 
 describe('HPV storage rules', () => {
   it('keeps a closed/full box viewable while intake moves to another open box', () => {
@@ -20,9 +20,10 @@ describe('HPV storage rules', () => {
     expect(nextHpvBoxPosition(Array.from({ length: 25 }, (_, index) => index + 1))).toBeNull()
   })
 
-  it('sets destruction due date one month after the box is filled', () => {
+  it('sets destruction due date two calendar months after the box is filled', () => {
     const filled = new Date('2026-06-22T03:30:00.000Z')
-    expect(addOneMonth(filled).toISOString()).toBe('2026-07-22T03:30:00.000Z')
+    expect(addTwoMonths(filled).toISOString()).toBe('2026-08-22T03:30:00.000Z')
+    expect(addTwoMonths(new Date('2026-12-31T03:30:00.000Z')).toISOString()).toBe('2027-02-28T03:30:00.000Z')
   })
 
   it('accepts the two allowed specimen types only', () => {
@@ -36,11 +37,19 @@ describe('HPV storage rules', () => {
     expect(specimenTypeLabel('clinician_collected')).toBe('Clinician-collected')
   })
 
-  it('classifies destruction dates in the Bangkok calendar', () => {
-    expect(getHpvDestructionState('2026-07-18T00:00:00.000Z', 'full', '2026-07-13')).toBe('due_soon')
-    expect(getHpvDestructionState('2026-07-19T00:00:00.000Z', 'full', '2026-07-13')).toBe('none')
-    expect(getHpvDestructionState('2026-07-13T00:00:00.000Z', 'full', '2026-07-13')).toBe('due_now')
-    expect(getHpvDestructionState('2026-07-12T00:00:00.000Z', 'full', '2026-07-13')).toBe('due_now')
+  it('uses green before one month, orange after one month, and red after two months', () => {
+    const filledAt = '2026-06-22T03:30:00.000Z'
+    const destroyDueAt = '2026-08-22T03:30:00.000Z'
+    expect(getHpvDestructionState(destroyDueAt, 'full', '2026-07-21', filledAt)).toBe('none')
+    expect(getHpvDestructionState(destroyDueAt, 'full', '2026-07-22', filledAt)).toBe('due_soon')
+    expect(getHpvDestructionState(destroyDueAt, 'full', '2026-08-21', filledAt)).toBe('due_soon')
+    expect(getHpvDestructionState(destroyDueAt, 'full', '2026-08-22', filledAt)).toBe('due_now')
+    expect(getHpvDestructionState(destroyDueAt, 'full', '2026-08-23', filledAt)).toBe('due_now')
+
+    const monthEndFilledAt = '2026-12-31T03:30:00.000Z'
+    const monthEndDueAt = '2027-02-28T03:30:00.000Z'
+    expect(getHpvDestructionState(monthEndDueAt, 'full', '2027-01-30', monthEndFilledAt)).toBe('none')
+    expect(getHpvDestructionState(monthEndDueAt, 'full', '2027-01-31', monthEndFilledAt)).toBe('due_soon')
   })
 
   it('does not warn for destroyed or undated boxes', () => {
