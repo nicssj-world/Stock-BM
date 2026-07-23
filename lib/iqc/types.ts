@@ -24,6 +24,10 @@ export interface IqcInstrument {
   name: string
   model: string | null
   isActive: boolean
+  equipmentId: string | null
+  equipmentCode: string | null
+  equipmentName: string | null
+  equipmentStatus: 'active' | 'maintenance' | 'out_of_service' | 'decommissioned' | null
 }
 
 export interface IqcControlMaterial {

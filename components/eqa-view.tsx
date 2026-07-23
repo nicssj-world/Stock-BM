@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { CalendarClock, ClipboardList, FolderOpen, Pencil, Send, Settings, Trash2, X } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { EqaResult, EqaRound, EqaWorkspace } from '@/lib/eqa/types'
@@ -11,7 +12,12 @@ import { AttachmentList } from '@/components/attachments'
 type Tab = 'rounds' | 'corrective' | 'manage'
 type NoticeState = { tone: 'success' | 'danger'; text: string } | null
 
-const OUTCOME_TONE: Record<string, StatusTone> = { acceptable: 'accepted', warning: 'warning', unacceptable: 'rejected', 'not-evaluated': 'neutral' }
+const OUTCOME_TONE: Record<string, StatusTone> = {
+  acceptable: 'accepted',
+  warning: 'warning',
+  unacceptable: 'rejected',
+  'not-evaluated': 'neutral',
+}
 
 export function EqaView({ actor, initialData }: { actor: BmActor; initialData: EqaWorkspace }) {
   const [data, setData] = useState(initialData)
@@ -30,7 +36,11 @@ export function EqaView({ actor, initialData }: { actor: BmActor; initialData: E
   const reminders = data.rounds.filter((r) => r.reminder)
   const tabs = [
     { key: 'rounds' as const, label: 'รอบ / Rounds', icon: CalendarClock },
-    { key: 'corrective' as const, label: 'Corrective action', icon: ClipboardList },
+    {
+      key: 'corrective' as const,
+      label: 'Corrective action',
+      icon: ClipboardList,
+    },
     ...(isAdmin ? [{ key: 'manage' as const, label: 'จัดการ / Manage', icon: Settings }] : []),
   ]
 
@@ -48,7 +58,9 @@ export function EqaView({ actor, initialData }: { actor: BmActor; initialData: E
 
       {reminders.length ? (
         <Card className="p-3">
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-bold tracking-wide text-[#55727c] uppercase"><CalendarClock className="size-3.5" /> เตือนกำหนดส่ง</p>
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-bold tracking-wide text-[#55727c] uppercase">
+            <CalendarClock className="size-3.5" /> เตือนกำหนดส่ง
+          </p>
           <div className="flex flex-wrap gap-2">
             {reminders.map((r) => (
               <span key={r.id} className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold ${r.reminder === 'overdue' ? 'border-[#efc7cc] bg-[#fff5f6] text-[#c02a37]' : 'border-[#eed4a6] bg-[#fff9ed] text-[#a9700f]'}`}>
@@ -72,12 +84,20 @@ function RoundsTab({ data, actor, onOk, onErr }: { data: EqaWorkspace; actor: Bm
   if (!data.rounds.length) return <Card className="p-8 text-center text-sm text-[#8198a0]">ยังไม่มี round — สร้างที่แท็บ จัดการ / Manage</Card>
   return (
     <div className="space-y-4">
-      {data.rounds.map((round) => <RoundCard key={round.id} round={round} iqcAnalytes={data.iqcAnalytes} actor={actor} onOk={onOk} onErr={onErr} />)}
+      {data.rounds.map((round) => (
+        <RoundCard key={round.id} round={round} iqcAnalytes={data.iqcAnalytes} actor={actor} onOk={onOk} onErr={onErr} />
+      ))}
     </div>
   )
 }
 
-const STATUS_TONE: Record<string, StatusTone> = { scheduled: 'neutral', received: 'warning', submitted: 'accepted', evaluated: 'accepted', closed: 'neutral' }
+const STATUS_TONE: Record<string, StatusTone> = {
+  scheduled: 'neutral',
+  received: 'warning',
+  submitted: 'accepted',
+  evaluated: 'accepted',
+  closed: 'neutral',
+}
 
 function RoundCard({ round, iqcAnalytes, actor, onOk, onErr }: { round: EqaRound; iqcAnalytes: EqaWorkspace['iqcAnalytes']; actor: BmActor; onOk: (t: string, d: EqaWorkspace) => void; onErr: (t: string) => void }) {
   const [analyte, setAnalyte] = useState('')
@@ -128,10 +148,20 @@ function RoundCard({ round, iqcAnalytes, actor, onOk, onErr }: { round: EqaRound
     if (!analyte.trim()) return
     setBusy(true)
     try {
-      const body = { analyte, submittedValue: value || null, evaluationScore: score === '' ? null : Number(score), outcome, iqcAnalyteId: iqcAnalyteId || null, assignedValue: assignedValue === '' ? null : Number(assignedValue) }
+      const body = {
+        analyte,
+        submittedValue: value || null,
+        evaluationScore: score === '' ? null : Number(score),
+        outcome,
+        iqcAnalyteId: iqcAnalyteId || null,
+        assignedValue: assignedValue === '' ? null : Number(assignedValue),
+      }
       const result = editingResultId
         ? await api<{ eqa: EqaWorkspace }>(`/api/eqa/results/${editingResultId}`, { method: 'PATCH', body: JSON.stringify(body) })
-        : await api<{ eqa: EqaWorkspace }>('/api/eqa/results', { method: 'POST', body: JSON.stringify({ roundId: round.id, ...body }) })
+        : await api<{ eqa: EqaWorkspace }>('/api/eqa/results', {
+            method: 'POST',
+            body: JSON.stringify({ roundId: round.id, ...body }),
+          })
       onOk(editingResultId ? 'แก้ไขผลแล้ว' : 'บันทึกผลแล้ว', result.eqa)
       resetResultForm()
     } catch (e) {
@@ -159,11 +189,20 @@ function RoundCard({ round, iqcAnalytes, actor, onOk, onErr }: { round: EqaRound
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="font-bold text-[#173d50]">{round.schemeName} · {round.roundLabel}</h3>
+            <h3 className="font-bold text-[#173d50]">
+              {round.schemeName} · {round.roundLabel}
+            </h3>
             <StatusBadge tone={STATUS_TONE[round.status]} label={round.status} />
+            {round.equipment.map((equipment) => (
+              <Link key={equipment.id} href={`/equipment?view=registry&equipment=${equipment.id}`} className={`rounded-full px-2 py-0.5 text-xs font-semibold underline ${equipment.status === 'maintenance' || equipment.status === 'out_of_service' ? 'bg-amber-100 text-amber-900' : 'bg-[#e9f5f3] text-[#087f75]'}`}>
+                {equipment.status === 'maintenance' || equipment.status === 'out_of_service' ? '⚠ ' : ''}{equipment.code} · {equipment.status}
+              </Link>
+            ))}
             {round.reminder ? <StatusBadge tone={round.reminder === 'overdue' ? 'rejected' : 'warning'} label={round.reminder === 'overdue' ? 'overdue' : 'due soon'} /> : null}
           </div>
-          <p className="mt-0.5 text-xs text-[#789097]">{round.providerName} · รับตัวอย่าง {formatDate(round.sampleReceivedDate)} · ครบกำหนด {formatDate(round.resultDueDate)} · ส่ง {formatDate(round.submissionDate)}</p>
+          <p className="mt-0.5 text-xs text-[#789097]">
+            {round.providerName} · รับตัวอย่าง {formatDate(round.sampleReceivedDate)} · ครบกำหนด {formatDate(round.resultDueDate)} · ส่ง {formatDate(round.submissionDate)}
+          </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {!isSubmitted ? (
@@ -184,14 +223,24 @@ function RoundCard({ round, iqcAnalytes, actor, onOk, onErr }: { round: EqaRound
       {round.results.length ? (
         <div className="mt-3 overflow-x-auto rounded-md border border-[#e9eff0]">
           <table className="w-full text-left text-xs">
-            <thead className="bg-[#f6fafa] text-[#55727c]"><tr><th className="px-2 py-1.5 font-semibold">Analyte</th><th className="px-2 py-1.5 font-semibold">Submitted</th><th className="px-2 py-1.5 text-right font-semibold">Score (z/SDI)</th><th className="px-2 py-1.5 font-semibold">Outcome</th><th className="px-2 py-1.5 text-right font-semibold">Action</th></tr></thead>
+            <thead className="bg-[#f6fafa] text-[#55727c]">
+              <tr>
+                <th className="px-2 py-1.5 font-semibold">Analyte</th>
+                <th className="px-2 py-1.5 font-semibold">Submitted</th>
+                <th className="px-2 py-1.5 text-right font-semibold">Score (z/SDI)</th>
+                <th className="px-2 py-1.5 font-semibold">Outcome</th>
+                <th className="px-2 py-1.5 text-right font-semibold">Action</th>
+              </tr>
+            </thead>
             <tbody className="divide-y divide-[#eef3f3]">
               {round.results.map((r) => (
                 <tr key={r.id}>
                   <td className="px-2 py-1.5 font-semibold text-[#315763]">{r.analyte}</td>
                   <td className="mono px-2 py-1.5 tabular-nums">{r.submittedValue ?? '—'}</td>
                   <td className="mono px-2 py-1.5 text-right tabular-nums">{r.evaluationScore ?? '—'}</td>
-                  <td className="px-2 py-1.5"><StatusBadge tone={OUTCOME_TONE[r.outcome]} label={r.outcome} /></td>
+                  <td className="px-2 py-1.5">
+                    <StatusBadge tone={OUTCOME_TONE[r.outcome]} label={r.outcome} />
+                  </td>
                   <td className="px-2 py-1.5">
                     <div className="flex items-center justify-end gap-1">
                       <Button type="button" variant="ghost" className="min-h-7 px-2 py-1" disabled={busy || resultBusyId === r.id} onClick={() => editResult(r)} title="แก้ไขผล">
@@ -210,14 +259,40 @@ function RoundCard({ round, iqcAnalytes, actor, onOk, onErr }: { round: EqaRound
       ) : null}
 
       <form onSubmit={saveResult} className="mt-3 grid gap-1.5 md:grid-cols-3 xl:grid-cols-[1fr_1fr_0.7fr_1fr_1fr_0.8fr_auto] items-end">
-        <Field label="Analyte"><Input className="h-9" value={analyte} onChange={(e) => setAnalyte(e.target.value)} /></Field>
-        <Field label="IQC analyte"><Select className="h-9" value={iqcAnalyteId} onChange={(e) => setIqcAnalyteId(e.target.value)}><option value="">— ไม่ใช้ Sigma —</option>{iqcAnalytes.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}</Select></Field>
-        <Field label="Submitted"><Input className="mono h-9" value={value} onChange={(e) => setValue(e.target.value)} /></Field>
-        <Field label="Assigned"><Input className="mono h-9" type="number" step="any" value={assignedValue} onChange={(e) => setAssignedValue(e.target.value)} /></Field>
-        <Field label="Score"><Input className="mono h-9" type="number" step="any" value={score} onChange={(e) => setScore(e.target.value)} /></Field>
-        <Field label="Outcome"><Select className="h-9" value={outcome} onChange={(e) => setOutcome(e.target.value)}><option value="not-evaluated">not-evaluated</option><option value="acceptable">acceptable</option><option value="warning">warning</option><option value="unacceptable">unacceptable</option></Select></Field>
+        <Field label="Analyte">
+          <Input className="h-9" value={analyte} onChange={(e) => setAnalyte(e.target.value)} />
+        </Field>
+        <Field label="IQC analyte">
+          <Select className="h-9" value={iqcAnalyteId} onChange={(e) => setIqcAnalyteId(e.target.value)}>
+            <option value="">— ไม่ใช้ Sigma —</option>
+            {iqcAnalytes.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.code} · {item.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Submitted">
+          <Input className="mono h-9" value={value} onChange={(e) => setValue(e.target.value)} />
+        </Field>
+        <Field label="Assigned">
+          <Input className="mono h-9" type="number" step="any" value={assignedValue} onChange={(e) => setAssignedValue(e.target.value)} />
+        </Field>
+        <Field label="Score">
+          <Input className="mono h-9" type="number" step="any" value={score} onChange={(e) => setScore(e.target.value)} />
+        </Field>
+        <Field label="Outcome">
+          <Select className="h-9" value={outcome} onChange={(e) => setOutcome(e.target.value)}>
+            <option value="not-evaluated">not-evaluated</option>
+            <option value="acceptable">acceptable</option>
+            <option value="warning">warning</option>
+            <option value="unacceptable">unacceptable</option>
+          </Select>
+        </Field>
         <div className="flex items-center gap-1">
-          <Button className="h-9 whitespace-nowrap" disabled={busy}>{editingResultId ? 'บันทึกแก้ไข' : '+ ผล'}</Button>
+          <Button className="h-9 whitespace-nowrap" disabled={busy}>
+            {editingResultId ? 'บันทึกแก้ไข' : '+ ผล'}
+          </Button>
           {editingResultId ? (
             <Button type="button" variant="ghost" className="h-9 px-2" disabled={busy} onClick={resetResultForm} title="ยกเลิกแก้ไข">
               <X className="size-4" />
@@ -246,9 +321,19 @@ function CorrectiveTab({ data, onOk, onErr }: { data: EqaWorkspace; onOk: (t: st
     if (!roundId || !problem.trim()) return onErr('เลือก round และระบุปัญหา')
     setBusy(true)
     try {
-      const result = await api<{ eqa: EqaWorkspace }>('/api/eqa/corrective-actions', { method: 'POST', body: JSON.stringify({ roundId, problem, rootCause: rootCause || null, actionTaken: actionTaken || null }) })
+      const result = await api<{ eqa: EqaWorkspace }>('/api/eqa/corrective-actions', {
+        method: 'POST',
+        body: JSON.stringify({
+          roundId,
+          problem,
+          rootCause: rootCause || null,
+          actionTaken: actionTaken || null,
+        }),
+      })
       onOk('เปิด corrective action แล้ว', result.eqa)
-      setProblem(''); setRootCause(''); setActionTaken('')
+      setProblem('')
+      setRootCause('')
+      setActionTaken('')
     } catch (e) {
       onErr(e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ')
     } finally {
@@ -269,10 +354,25 @@ function CorrectiveTab({ data, onOk, onErr }: { data: EqaWorkspace; onOk: (t: st
       <Card className="space-y-3 p-4">
         <h2 className="font-bold text-[#173d50]">เปิด corrective action</h2>
         <form onSubmit={create} className="space-y-3">
-          <Field label="Round"><Select value={roundId} onChange={(e) => setRoundId(e.target.value)} required><option value="">—</option>{data.rounds.map((r) => <option key={r.id} value={r.id}>{r.schemeName} · {r.roundLabel}</option>)}</Select></Field>
-          <Field label="ปัญหา / Problem"><Textarea rows={2} value={problem} onChange={(e) => setProblem(e.target.value)} required /></Field>
-          <Field label="Root cause"><Textarea rows={2} value={rootCause} onChange={(e) => setRootCause(e.target.value)} /></Field>
-          <Field label="Action taken"><Textarea rows={2} value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} /></Field>
+          <Field label="Round">
+            <Select value={roundId} onChange={(e) => setRoundId(e.target.value)} required>
+              <option value="">—</option>
+              {data.rounds.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.schemeName} · {r.roundLabel}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="ปัญหา / Problem">
+            <Textarea rows={2} value={problem} onChange={(e) => setProblem(e.target.value)} required />
+          </Field>
+          <Field label="Root cause">
+            <Textarea rows={2} value={rootCause} onChange={(e) => setRootCause(e.target.value)} />
+          </Field>
+          <Field label="Action taken">
+            <Textarea rows={2} value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} />
+          </Field>
           <Button disabled={busy}>บันทึก</Button>
         </form>
       </Card>
@@ -281,12 +381,19 @@ function CorrectiveTab({ data, onOk, onErr }: { data: EqaWorkspace; onOk: (t: st
           <Card key={ca.id} className="p-4">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
-                <div className="flex items-center gap-2"><span className="font-bold text-[#315763]">{ca.roundLabel}</span><StatusBadge tone={ca.status === 'open' ? 'warning' : 'accepted'} label={ca.status} /></div>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-[#315763]">{ca.roundLabel}</span>
+                  <StatusBadge tone={ca.status === 'open' ? 'warning' : 'accepted'} label={ca.status} />
+                </div>
                 <p className="mt-1 text-sm text-[#3f5c64]">{ca.problem}</p>
                 {ca.rootCause ? <p className="mt-1 text-xs text-[#789097]">Root cause: {ca.rootCause}</p> : null}
                 {ca.actionTaken ? <p className="text-xs text-[#789097]">Action: {ca.actionTaken}</p> : null}
               </div>
-              {ca.status === 'open' ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" onClick={() => close(ca.id)}>ปิด</Button> : null}
+              {ca.status === 'open' ? (
+                <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" onClick={() => close(ca.id)}>
+                  ปิด
+                </Button>
+              ) : null}
             </div>
           </Card>
         ))}
@@ -299,7 +406,10 @@ function CorrectiveTab({ data, onOk, onErr }: { data: EqaWorkspace; onOk: (t: st
 function ManageTab({ data, onOk, onErr }: { data: EqaWorkspace; onOk: (t: string, d: EqaWorkspace) => void; onErr: (t: string) => void }) {
   async function request(url: string, body: unknown, okText: string, method: 'POST' | 'PATCH' | 'DELETE' = 'POST') {
     try {
-      const result = await api<{ eqa: EqaWorkspace }>(url, { method, body: method === 'DELETE' ? undefined : JSON.stringify(body) })
+      const result = await api<{ eqa: EqaWorkspace }>(url, {
+        method,
+        body: method === 'DELETE' ? undefined : JSON.stringify(body),
+      })
       onOk(okText, result.eqa)
       return true
     } catch (e) {
@@ -337,8 +447,20 @@ function ProviderForm({ onSubmit, onUpdate, onDelete, data }: { onSubmit: (b: un
   return (
     <Card className="space-y-3 p-4">
       <h2 className="font-bold text-[#173d50]">Provider ({data.providers.length})</h2>
-      <form className="flex items-end gap-2" onSubmit={async (e) => { e.preventDefault(); setBusy(true); if (await onSubmit({ name })) setName(''); setBusy(false) }}>
-        <div className="flex-1"><Field label="ชื่อ provider"><Input value={name} onChange={(e) => setName(e.target.value)} required /></Field></div>
+      <form
+        className="flex items-end gap-2"
+        onSubmit={async (e) => {
+          e.preventDefault()
+          setBusy(true)
+          if (await onSubmit({ name })) setName('')
+          setBusy(false)
+        }}
+      >
+        <div className="flex-1">
+          <Field label="ชื่อ provider">
+            <Input value={name} onChange={(e) => setName(e.target.value)} required />
+          </Field>
+        </div>
         <Button disabled={busy}>เพิ่ม</Button>
       </form>
       <div className="space-y-2">
@@ -350,16 +472,23 @@ function ProviderForm({ onSubmit, onUpdate, onDelete, data }: { onSubmit: (b: un
                 <p className="truncate text-sm font-semibold text-[#173d50]">{provider.name}</p>
                 <p className="text-[11px] text-[#789097]">{schemeCount ? `${schemeCount} scheme` : 'ยังไม่มี scheme'}</p>
               </div>
-              <div className="flex gap-1"><Button type="button" variant="ghost" className="min-h-8 px-2.5 py-1.5" title="แก้ไข provider" onClick={async () => { const name = window.prompt('ชื่อ provider:', provider.name); if (name?.trim()) await onUpdate(provider.id, { name }) }}><Pencil className="size-3.5" /></Button><Button
-                type="button"
-                variant="danger"
-                className="min-h-8 px-2.5 py-1.5 text-xs"
-                disabled={deletingId === provider.id || schemeCount > 0}
-                title={schemeCount > 0 ? 'ลบไม่ได้ เพราะมี scheme ผูกอยู่' : 'ลบ provider'}
-                onClick={() => removeProvider(provider.id, provider.name)}
-              >
-                <Trash2 className="size-3.5" />
-              </Button></div>
+              <div className="flex gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="min-h-8 px-2.5 py-1.5"
+                  title="แก้ไข provider"
+                  onClick={async () => {
+                    const name = window.prompt('ชื่อ provider:', provider.name)
+                    if (name?.trim()) await onUpdate(provider.id, { name })
+                  }}
+                >
+                  <Pencil className="size-3.5" />
+                </Button>
+                <Button type="button" variant="danger" className="min-h-8 px-2.5 py-1.5 text-xs" disabled={deletingId === provider.id || schemeCount > 0} title={schemeCount > 0 ? 'ลบไม่ได้ เพราะมี scheme ผูกอยู่' : 'ลบ provider'} onClick={() => removeProvider(provider.id, provider.name)}>
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </div>
             </div>
           )
         })}
@@ -369,38 +498,192 @@ function ProviderForm({ onSubmit, onUpdate, onDelete, data }: { onSubmit: (b: un
 }
 
 function SchemeForm({ onSubmit, onUpdate, onDelete, data }: { onSubmit: (b: unknown) => Promise<boolean>; onUpdate: (id: string, b: unknown) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; data: EqaWorkspace }) {
-  const [form, setForm] = useState({ providerId: '', name: '', code: '', analyteScope: '', roundsPerYear: '' })
+  const [form, setForm] = useState({
+    providerId: '',
+    name: '',
+    code: '',
+    analyteScope: '',
+    roundsPerYear: '',
+  })
   const [busy, setBusy] = useState(false)
   return (
     <Card className="space-y-3 p-4">
       <h2 className="font-bold text-[#173d50]">Scheme ({data.schemes.length})</h2>
-      <form className="grid grid-cols-2 gap-2" onSubmit={async (e) => { e.preventDefault(); if (!form.providerId) return; setBusy(true); if (await onSubmit({ ...form, roundsPerYear: form.roundsPerYear ? Number(form.roundsPerYear) : null })) setForm({ providerId: '', name: '', code: '', analyteScope: '', roundsPerYear: '' }); setBusy(false) }}>
-        <Field label="Provider"><Select value={form.providerId} onChange={(e) => setForm({ ...form, providerId: e.target.value })} required><option value="">—</option>{data.providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
-        <Field label="ชื่อ scheme"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></Field>
-        <Field label="Code"><Input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} /></Field>
-        <Field label="Rounds/ปี"><Input className="mono" type="number" value={form.roundsPerYear} onChange={(e) => setForm({ ...form, roundsPerYear: e.target.value })} /></Field>
-        <div className="col-span-2"><Field label="Analyte scope"><Input value={form.analyteScope} onChange={(e) => setForm({ ...form, analyteScope: e.target.value })} placeholder="HIV VL, HBV VL…" /></Field></div>
-        <div className="col-span-2"><Button disabled={busy}>เพิ่ม scheme</Button></div>
+      <form
+        className="grid grid-cols-2 gap-2"
+        onSubmit={async (e) => {
+          e.preventDefault()
+          if (!form.providerId) return
+          setBusy(true)
+          if (
+            await onSubmit({
+              ...form,
+              roundsPerYear: form.roundsPerYear ? Number(form.roundsPerYear) : null,
+            })
+          )
+            setForm({
+              providerId: '',
+              name: '',
+              code: '',
+              analyteScope: '',
+              roundsPerYear: '',
+            })
+          setBusy(false)
+        }}
+      >
+        <Field label="Provider">
+          <Select value={form.providerId} onChange={(e) => setForm({ ...form, providerId: e.target.value })} required>
+            <option value="">—</option>
+            {data.providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="ชื่อ scheme">
+          <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+        </Field>
+        <Field label="Code">
+          <Input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
+        </Field>
+        <Field label="Rounds/ปี">
+          <Input className="mono" type="number" value={form.roundsPerYear} onChange={(e) => setForm({ ...form, roundsPerYear: e.target.value })} />
+        </Field>
+        <div className="col-span-2">
+          <Field label="Analyte scope">
+            <Input value={form.analyteScope} onChange={(e) => setForm({ ...form, analyteScope: e.target.value })} placeholder="HIV VL, HBV VL…" />
+          </Field>
+        </div>
+        <div className="col-span-2">
+          <Button disabled={busy}>เพิ่ม scheme</Button>
+        </div>
       </form>
-      <div className="space-y-1">{data.schemes.map((scheme) => <div key={scheme.id} className="flex items-center justify-between gap-2 rounded-md border border-[#e3ebec] px-2 py-1.5 text-xs"><span>{scheme.providerName} · {scheme.name}</span><span className="flex gap-1"><Button type="button" variant="ghost" className="min-h-7 px-2" title="แก้ไข scheme" onClick={async () => { const name = window.prompt('ชื่อ scheme:', scheme.name); if (!name?.trim()) return; await onUpdate(scheme.id, { providerId: scheme.providerId, name, code: scheme.code, analyteScope: scheme.analyteScope, roundsPerYear: scheme.roundsPerYear }) }}><Pencil className="size-3.5" /></Button><Button type="button" variant="danger" className="min-h-7 px-2" title="ลบ scheme" onClick={() => window.confirm(`ลบ scheme \"${scheme.name}\" ใช่ไหม?`) && onDelete(scheme.id)}><Trash2 className="size-3.5" /></Button></span></div>)}</div>
+      <div className="space-y-1">
+        {data.schemes.map((scheme) => (
+          <div key={scheme.id} className="flex items-center justify-between gap-2 rounded-md border border-[#e3ebec] px-2 py-1.5 text-xs">
+            <span>
+              {scheme.providerName} · {scheme.name}
+              {scheme.equipment.map((equipment) => (
+                <Link key={equipment.id} href={`/equipment?view=registry&equipment=${equipment.id}`} className={`ml-2 rounded-full px-2 py-0.5 font-semibold underline ${equipment.status === 'maintenance' || equipment.status === 'out_of_service' ? 'bg-amber-100 text-amber-900' : 'bg-[#e9f5f3] text-[#087f75]'}`}>
+                  {equipment.code} · {equipment.status}
+                </Link>
+              ))}
+            </span>
+            <span className="flex gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                className="min-h-7 px-2"
+                title="แก้ไข scheme"
+                onClick={async () => {
+                  const name = window.prompt('ชื่อ scheme:', scheme.name)
+                  if (!name?.trim()) return
+                  await onUpdate(scheme.id, {
+                    providerId: scheme.providerId,
+                    name,
+                    code: scheme.code,
+                    analyteScope: scheme.analyteScope,
+                    roundsPerYear: scheme.roundsPerYear,
+                  })
+                }}
+              >
+                <Pencil className="size-3.5" />
+              </Button>
+              <Button type="button" variant="danger" className="min-h-7 px-2" title="ลบ scheme" onClick={() => window.confirm(`ลบ scheme \"${scheme.name}\" ใช่ไหม?`) && onDelete(scheme.id)}>
+                <Trash2 className="size-3.5" />
+              </Button>
+            </span>
+          </div>
+        ))}
+      </div>
     </Card>
   )
 }
 
 function RoundForm({ onSubmit, onUpdate, onDelete, data }: { onSubmit: (b: unknown) => Promise<boolean>; onUpdate: (id: string, b: unknown) => Promise<boolean>; onDelete: (id: string) => Promise<boolean>; data: EqaWorkspace }) {
-  const [form, setForm] = useState({ schemeId: '', roundLabel: '', sampleReceivedDate: '', resultDueDate: '' })
+  const [form, setForm] = useState({
+    schemeId: '',
+    roundLabel: '',
+    sampleReceivedDate: '',
+    resultDueDate: '',
+  })
   const [busy, setBusy] = useState(false)
   return (
     <Card className="space-y-3 p-4">
       <h2 className="font-bold text-[#173d50]">Round ({data.rounds.length})</h2>
-      <form className="grid grid-cols-2 gap-2" onSubmit={async (e) => { e.preventDefault(); if (!form.schemeId) return; setBusy(true); if (await onSubmit({ ...form, sampleReceivedDate: form.sampleReceivedDate || null, resultDueDate: form.resultDueDate || null })) setForm({ schemeId: '', roundLabel: '', sampleReceivedDate: '', resultDueDate: '' }); setBusy(false) }}>
-        <Field label="Scheme"><Select value={form.schemeId} onChange={(e) => setForm({ ...form, schemeId: e.target.value })} required><option value="">—</option>{data.schemes.map((s) => <option key={s.id} value={s.id}>{s.providerName} · {s.name}</option>)}</Select></Field>
-        <Field label="Round label"><Input value={form.roundLabel} onChange={(e) => setForm({ ...form, roundLabel: e.target.value })} placeholder="2026-1" required /></Field>
-        <Field label="รับตัวอย่าง"><Input type="date" value={form.sampleReceivedDate} onChange={(e) => setForm({ ...form, sampleReceivedDate: e.target.value })} /></Field>
-        <Field label="ครบกำหนดส่ง"><Input type="date" value={form.resultDueDate} onChange={(e) => setForm({ ...form, resultDueDate: e.target.value })} /></Field>
-        <div className="col-span-2"><Button disabled={busy}>เพิ่ม round</Button></div>
+      <form
+        className="grid grid-cols-2 gap-2"
+        onSubmit={async (e) => {
+          e.preventDefault()
+          if (!form.schemeId) return
+          setBusy(true)
+          if (
+            await onSubmit({
+              ...form,
+              sampleReceivedDate: form.sampleReceivedDate || null,
+              resultDueDate: form.resultDueDate || null,
+            })
+          )
+            setForm({
+              schemeId: '',
+              roundLabel: '',
+              sampleReceivedDate: '',
+              resultDueDate: '',
+            })
+          setBusy(false)
+        }}
+      >
+        <Field label="Scheme">
+          <Select value={form.schemeId} onChange={(e) => setForm({ ...form, schemeId: e.target.value })} required>
+            <option value="">—</option>
+            {data.schemes.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.providerName} · {s.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Round label">
+          <Input value={form.roundLabel} onChange={(e) => setForm({ ...form, roundLabel: e.target.value })} placeholder="2026-1" required />
+        </Field>
+        <Field label="รับตัวอย่าง">
+          <Input type="date" value={form.sampleReceivedDate} onChange={(e) => setForm({ ...form, sampleReceivedDate: e.target.value })} />
+        </Field>
+        <Field label="ครบกำหนดส่ง">
+          <Input type="date" value={form.resultDueDate} onChange={(e) => setForm({ ...form, resultDueDate: e.target.value })} />
+        </Field>
+        <div className="col-span-2">
+          <Button disabled={busy}>เพิ่ม round</Button>
+        </div>
       </form>
-      <div className="space-y-1">{data.rounds.map((round) => <div key={round.id} className="flex items-center justify-between gap-2 rounded-md border border-[#e3ebec] px-2 py-1.5 text-xs"><span>{round.schemeName} · {round.roundLabel}</span><span className="flex gap-1"><Button type="button" variant="ghost" className="min-h-7 px-2" title="แก้ไข round" onClick={async () => { const roundLabel = window.prompt('ชื่อ round:', round.roundLabel); if (!roundLabel?.trim()) return; await onUpdate(round.id, { roundLabel }) }}><Pencil className="size-3.5" /></Button><Button type="button" variant="danger" className="min-h-7 px-2" title="ลบ round" onClick={() => window.confirm(`ลบ round \"${round.roundLabel}\" ใช่ไหม?`) && onDelete(round.id)}><Trash2 className="size-3.5" /></Button></span></div>)}</div>
+      <div className="space-y-1">
+        {data.rounds.map((round) => (
+          <div key={round.id} className="flex items-center justify-between gap-2 rounded-md border border-[#e3ebec] px-2 py-1.5 text-xs">
+            <span>
+              {round.schemeName} · {round.roundLabel}
+            </span>
+            <span className="flex gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                className="min-h-7 px-2"
+                title="แก้ไข round"
+                onClick={async () => {
+                  const roundLabel = window.prompt('ชื่อ round:', round.roundLabel)
+                  if (!roundLabel?.trim()) return
+                  await onUpdate(round.id, { roundLabel })
+                }}
+              >
+                <Pencil className="size-3.5" />
+              </Button>
+              <Button type="button" variant="danger" className="min-h-7 px-2" title="ลบ round" onClick={() => window.confirm(`ลบ round \"${round.roundLabel}\" ใช่ไหม?`) && onDelete(round.id)}>
+                <Trash2 className="size-3.5" />
+              </Button>
+            </span>
+          </div>
+        ))}
+      </div>
     </Card>
   )
 }
@@ -409,8 +692,19 @@ function AnnualSummary({ data }: { data: EqaWorkspace }) {
   const [schemeId, setSchemeId] = useState('')
   return (
     <Card className="space-y-3 p-4">
-      <h2 className="flex items-center gap-1.5 font-bold text-[#173d50]"><FolderOpen className="size-4" /> ใบสรุปผล EQA ประจำปี</h2>
-      <Field label="Scheme"><Select value={schemeId} onChange={(e) => setSchemeId(e.target.value)}><option value="">— เลือก scheme —</option>{data.schemes.map((s) => <option key={s.id} value={s.id}>{s.providerName} · {s.name}</option>)}</Select></Field>
+      <h2 className="flex items-center gap-1.5 font-bold text-[#173d50]">
+        <FolderOpen className="size-4" /> ใบสรุปผล EQA ประจำปี
+      </h2>
+      <Field label="Scheme">
+        <Select value={schemeId} onChange={(e) => setSchemeId(e.target.value)}>
+          <option value="">— เลือก scheme —</option>
+          {data.schemes.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.providerName} · {s.name}
+            </option>
+          ))}
+        </Select>
+      </Field>
       {schemeId ? <AttachmentList module="eqa" entityType="eqa-scheme" entityId={schemeId} kind="eqa-annual-summary" canDelete label="ใบสรุปประจำปี" /> : <p className="text-xs text-[#9aafb4]">เลือก scheme เพื่อแนบใบสรุปประจำปี</p>}
     </Card>
   )

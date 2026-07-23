@@ -117,7 +117,10 @@ function mapAnalyte(row: RecordRow): IqcAnalyte {
   }
 }
 function mapInstrument(row: RecordRow): IqcInstrument {
-  return { id: asString(row.id), code: asString(row.code), name: asString(row.name), model: nullableString(row.model), isActive: Boolean(row.is_active) }
+  return {
+    id: asString(row.id), code: asString(row.code), name: asString(row.name), model: nullableString(row.model), isActive: Boolean(row.is_active),
+    equipmentId: null, equipmentCode: null, equipmentName: null, equipmentStatus: null,
+  }
 }
 function mapMaterial(row: RecordRow): IqcControlMaterial {
   return {
@@ -170,6 +173,8 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     { data: eqaBiasData, error: eqaBiasError },
     { data: userData, error: userError },
     { data: lockAuditData, error: lockAuditError },
+    { data: equipmentLinkData, error: equipmentLinkError },
+    { data: equipmentData, error: equipmentError },
   ] = await Promise.all([
     admin.from('iqc_analytes').select('*').order('group_label', { nullsFirst: true }).order('code'),
     admin.from('iqc_instruments').select('*').order('code'),
@@ -186,6 +191,8 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     admin.from('eqa_results').select('iqc_analyte_id,assigned_value,submitted_value,eqa_rounds(status,submission_date)').not('iqc_analyte_id', 'is', null),
     admin.from('nipt_users').select('id,display_name').order('display_name'),
     admin.from('bm_audit_logs').select('entity_id,actor_id,detail,created_at').eq('action', 'iqc.lot.lockAndClose').order('created_at', { ascending: false }),
+    admin.from('bm_equipment_module_links').select('equipment_id,entity_id').eq('module', 'iqc').eq('entity_type', 'instrument'),
+    admin.from('bm_equipment').select('id,code,name,status'),
   ])
   fail(analyteError)
   fail(instrumentError)
@@ -202,9 +209,22 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   fail(eqaBiasError)
   fail(userError)
   fail(lockAuditError)
+  fail(equipmentLinkError)
+  fail(equipmentError)
 
   const analytes = ((analyteData ?? []) as RecordRow[]).map(mapAnalyte)
   const instruments = ((instrumentData ?? []) as RecordRow[]).map(mapInstrument)
+  const equipmentById = new Map(((equipmentData ?? []) as RecordRow[]).map((row) => [asString(row.id), row]))
+  const equipmentIdByInstrument = new Map(((equipmentLinkData ?? []) as RecordRow[]).map((row) => [asString(row.entity_id), asString(row.equipment_id)]))
+  for (const instrument of instruments) {
+    const equipmentId = equipmentIdByInstrument.get(instrument.id)
+    const equipment = equipmentId ? equipmentById.get(equipmentId) : undefined
+    if (!equipmentId || !equipment) continue
+    instrument.equipmentId = equipmentId
+    instrument.equipmentCode = asString(equipment.code)
+    instrument.equipmentName = asString(equipment.name)
+    instrument.equipmentStatus = asString(equipment.status) as IqcInstrument['equipmentStatus']
+  }
   const controlMaterials = ((materialData ?? []) as RecordRow[]).map(mapMaterial)
   const materialMap = new Map(controlMaterials.map((m) => [m.id, m]))
   const lotRows = (lotData ?? []) as RecordRow[]

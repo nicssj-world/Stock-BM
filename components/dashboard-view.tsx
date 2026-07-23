@@ -3,15 +3,16 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { AlertOctagon, ArrowDownToLine, ArrowUpFromLine, Biohazard, Boxes, CalendarClock, CheckCircle2, FlaskConical, MapPin, PackageSearch, QrCode, ScanLine, Thermometer } from 'lucide-react'
+import { AlertOctagon, ArrowDownToLine, ArrowUpFromLine, Biohazard, Boxes, CalendarClock, CheckCircle2, ClipboardCheck, FlaskConical, MapPin, PackageSearch, QrCode, ScanLine, Stethoscope, Thermometer } from 'lucide-react'
 import type { BmActor, ScanResolution, StockWorkspace } from '@/lib/bm/types'
 import type { EnvDashboard } from '@/lib/env/types'
 import type { HpvDashboard } from '@/lib/hpv/types'
 import type { HivDrtDashboard } from '@/lib/hiv-drt/types'
+import type { EquipmentDashboard } from '@/lib/equipment/types'
 import { formatDate, formatQuantity } from '@/lib/bm/rules'
 import { api, Button, Card, Input, Notice, PageHeader } from '@/components/ui'
 
-export function DashboardView({ actor, stock, env, hpv, hivDrt }: { actor: BmActor; stock: StockWorkspace; env: EnvDashboard; hpv: HpvDashboard; hivDrt: HivDrtDashboard }) {
+export function DashboardView({ actor, stock, env, hpv, hivDrt, equipment }: { actor: BmActor; stock: StockWorkspace; env: EnvDashboard; hpv: HpvDashboard; hivDrt: HivDrtDashboard; equipment: EquipmentDashboard }) {
   const router = useRouter()
   const [scan, setScan] = useState('')
   const [notice, setNotice] = useState('')
@@ -186,6 +187,15 @@ export function DashboardView({ actor, stock, env, hpv, hivDrt }: { actor: BmAct
             />
           </div>
         </Card>
+
+        {actor.role !== 'Assistant' ? <Card className="overflow-hidden">
+          <SectionTitle title="เครื่องมือ / Equipment" href="/equipment" />
+          <div className="divide-y divide-[#edf2f2]">
+            <DashboardMetricRow icon={<Stethoscope />} label="เครื่องมือพร้อมใช้งาน" detail={`ซ่อม ${equipment.maintenance} · หยุดใช้ ${equipment.outOfService}`} value={equipment.active} tone="teal" href="/equipment?view=registry" />
+            <DashboardMetricRow icon={<CalendarClock />} label="แผนใกล้/เกินกำหนด" detail={`ใกล้กำหนด ${equipment.dueSoon} · เกินกำหนด ${equipment.overdue}`} value={equipment.dueSoon + equipment.overdue} tone={equipment.overdue > 0 ? 'danger' : equipment.dueSoon > 0 ? 'warning' : 'neutral'} href="/equipment?view=plans" />
+            <DashboardMetricRow icon={<ClipboardCheck />} label="แบบฟอร์มช่างรอตรวจรับ" detail="รายการจาก QR ยังไม่เป็นประวัติทางการ" value={equipment.pending} tone={equipment.pending > 0 ? 'warning' : 'neutral'} href="/equipment?view=pending" />
+          </div>
+        </Card> : null}
       </div>
     </div>
   )

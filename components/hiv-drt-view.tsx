@@ -251,6 +251,9 @@ function StoragePanel({ workspace, busy, mutate, setNotice, initialFilter }: {
   const rack = workspace.racks.find((item) => item.id === effectiveRackId) ?? null
   const autoPosition = rack?.nextPosition ?? 1
   const selectedSample = workspace.samples.find((sample) => sample.id === selectedSampleId && sample.status === 'stored') ?? null
+  const canDestroySelectedSample = selectedSample
+    ? getHivDrtDestructionState(selectedSample.destroyDueOn, selectedSample.status) === 'due_now'
+    : false
   const searchResult = search.trim()
     ? workspace.samples.find((sample) => sample.status === 'stored' && sample.barcode.toLowerCase().includes(search.trim().toLowerCase())) ?? null
     : null
@@ -337,7 +340,7 @@ function StoragePanel({ workspace, busy, mutate, setNotice, initialFilter }: {
           <Card className="border-l-4 border-l-[#0b7f76] p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div><div className="flex flex-wrap items-center gap-2"><strong className="mono text-base text-[#173d50]">{selectedSample.barcode}</strong><StatusBadge tone="accepted" label="stored" /><DestructionBadge sample={selectedSample} /></div><p className="mt-2 text-xs text-[#789097]">{selectedSample.storedRackCode} · {formatHivDrtPosition(selectedSample.currentPosition)} · เก็บ {selectedSample.storedAt ? formatDateTime(selectedSample.storedAt) : '-'}</p><p className="mt-1 text-xs text-[#789097]">กำหนดทำลาย {formatDate(selectedSample.destroyDueOn)}</p></div>
-              <div className="flex flex-wrap gap-2"><Button variant="danger" disabled={busy} onClick={() => void deleteSample(selectedSample)}><Trash2 className="size-4" /> ลบ tube</Button><Button variant="secondary" disabled={busy} onClick={() => void destroySample(selectedSample, mutate)}><Archive className="size-4" /> บันทึกทำลาย</Button></div>
+              <div className="flex flex-wrap gap-2"><Button variant="danger" disabled={busy} onClick={() => void deleteSample(selectedSample)}><Trash2 className="size-4" /> ลบ tube</Button>{canDestroySelectedSample ? <Button variant="secondary" disabled={busy} onClick={() => void destroySample(selectedSample, mutate)}><Archive className="size-4" /> บันทึกทำลาย</Button> : null}</div>
             </div>
           </Card>
         ) : null}

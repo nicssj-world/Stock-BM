@@ -28,6 +28,6 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/inventory/:path*', '/movements/:path*', '/issue/:path*', '/scan/:path*', '/reports/:path*', '/hpv/:path*', '/hiv-drt/:path*', '/iqc/:path*', '/eqa/:path*', '/environment/:path*', '/lot-verification/:path*', '/admin/:path*'],
+  matcher: ['/dashboard/:path*', '/inventory/:path*', '/movements/:path*', '/issue/:path*', '/scan/:path*', '/reports/:path*', '/hpv/:path*', '/hiv-drt/:path*', '/iqc/:path*', '/eqa/:path*', '/environment/:path*', '/equipment/:path*', '/lot-verification/:path*', '/admin/:path*'],
 }
 

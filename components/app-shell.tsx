@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, Biohazard, Boxes, ClipboardCheck, Dna, GitCompareArrows, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck, Thermometer } from 'lucide-react'
+import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, Biohazard, Boxes, ClipboardCheck, Dna, GitCompareArrows, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck, Stethoscope, Thermometer } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import { api } from '@/components/ui'
 
@@ -50,6 +50,7 @@ const qualitySection: NavSection = {
 const monitoringSection: NavSection = {
   title: 'Monitoring',
   items: [
+    { href: '/equipment', label: 'เครื่องมือ / Equipment', icon: Stethoscope },
     { href: '/environment', label: 'อุณหภูมิ / Temperature', icon: Thermometer },
     { href: '/lot-verification', label: 'Lot verification', icon: GitCompareArrows },
   ],

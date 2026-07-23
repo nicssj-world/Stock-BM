@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Download, FileUp, Loader2, Paperclip, Trash2 } from 'lucide-react'
 import { api } from '@/components/ui'
 
-type AttachmentModule = 'iqc' | 'eqa' | 'stock' | 'env' | 'lotverif' | 'hpv'
+type AttachmentModule = 'iqc' | 'eqa' | 'stock' | 'env' | 'lotverif' | 'hpv' | 'equipment'
 
 interface Attachment {
   id: string
@@ -27,6 +27,8 @@ export function AttachmentList({
   entityId,
   kind,
   canDelete = false,
+  canUpload = true,
+  accept,
   label = 'ไฟล์แนบ / Attachments',
 }: {
   module: AttachmentModule
@@ -34,6 +36,8 @@ export function AttachmentList({
   entityId: string
   kind: string
   canDelete?: boolean
+  canUpload?: boolean
+  accept?: string
   label?: string
 }) {
   const [items, setItems] = useState<Attachment[] | null>(null)
@@ -105,11 +109,12 @@ export function AttachmentList({
     <div className="rounded-md border border-[#e3ebec] bg-[#fbfdfd] p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="flex items-center gap-1.5 text-xs font-semibold text-[#55727c]"><Paperclip className="size-3.5" /> {label}</p>
-        <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-[#c9dadd] bg-white px-2.5 py-1 text-xs font-semibold text-[#244854] hover:border-[#7fa9ad]">
+        {canUpload ? <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-[#c9dadd] bg-white px-2.5 py-1 text-xs font-semibold text-[#244854] hover:border-[#7fa9ad]">
           {busy ? <Loader2 className="size-3.5 animate-spin" /> : <FileUp className="size-3.5" />} แนบไฟล์
           <input
             ref={fileRef}
             type="file"
+            accept={accept}
             className="hidden"
             disabled={busy}
             onChange={(e) => {
@@ -117,7 +122,7 @@ export function AttachmentList({
               if (file) void upload(file)
             }}
           />
-        </label>
+        </label> : null}
       </div>
       {error ? <p className="mt-2 text-xs text-[#c02a37]">{error}</p> : null}
       <ul className="mt-2 space-y-1">

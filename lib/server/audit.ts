@@ -35,6 +35,22 @@ export async function writeAudit(
   fail(error)
 }
 
+export async function writeSystemAudit(
+  action: string,
+  entityType: string,
+  entityId?: string,
+  detail: Record<string, unknown> = {},
+) {
+  const { error } = await getAdminClient().from('bm_audit_logs').insert({
+    actor_id: null,
+    action,
+    entity_type: entityType,
+    entity_id: entityId ?? null,
+    detail,
+  })
+  fail(error)
+}
+
 export async function listAuditLogs(limit = 160) {
   const { data, error } = await getAdminClient().from('bm_audit_logs').select('*').order('created_at', { ascending: false }).limit(limit)
   fail(error)
@@ -56,4 +72,3 @@ export async function listAuditLogs(limit = 160) {
     createdAt: asString(row.created_at),
   }))
 }
-

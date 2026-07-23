@@ -16,6 +16,12 @@ export interface EqaScheme {
   analyteScope: string | null
   roundsPerYear: number | null
   isActive: boolean
+  equipment: Array<{
+    id: string
+    code: string
+    name: string
+    status: 'active' | 'maintenance' | 'out_of_service' | 'decommissioned'
+  }>
 }
 
 export interface EqaResult {
@@ -34,6 +40,7 @@ export interface EqaRound {
   schemeId: string
   schemeName: string
   providerName: string
+  equipment: EqaScheme['equipment']
   roundLabel: string
   sampleReceivedDate: string | null
   resultDueDate: string | null

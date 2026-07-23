@@ -47,6 +47,11 @@ describe('HIV DRT interface', () => {
     expect(overview).toContain('onDestroy(sample)')
   })
 
+  it('only shows the storage destruction action when the selected tube is due', () => {
+    expect(source).toContain("getHivDrtDestructionState(selectedSample.destroyDueOn, selectedSample.status) === 'due_now'")
+    expect(source).toContain('canDestroySelectedSample ? <Button')
+  })
+
   it('supports direct checkout, receiving results, deletion and tube destruction', () => {
     expect(source).toContain("'/api/hiv-drt/checkout'")
     expect(source).toContain('ได้รับผลแล้ว')

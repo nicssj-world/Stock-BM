@@ -58,6 +58,8 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
     { data: resultData, error: resultError },
     { data: caData, error: caError },
     { data: iqcAnalyteData, error: iqcAnalyteError },
+    { data: equipmentLinkData, error: equipmentLinkError },
+    { data: equipmentData, error: equipmentError },
   ] = await Promise.all([
     admin.from('eqa_providers').select('*').order('name'),
     admin.from('eqa_schemes').select('*').order('name'),
@@ -65,6 +67,8 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
     admin.from('eqa_results').select('*'),
     admin.from('eqa_corrective_actions').select('*').order('created_at', { ascending: false }).limit(200),
     admin.from('iqc_analytes').select('id,code,name').eq('is_active', true).order('code'),
+    admin.from('bm_equipment_module_links').select('equipment_id,entity_id').eq('module', 'eqa').eq('entity_type', 'scheme'),
+    admin.from('bm_equipment').select('id,code,name,status'),
   ])
   fail(providerError)
   fail(schemeError)
@@ -72,9 +76,17 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
   fail(resultError)
   fail(caError)
   fail(iqcAnalyteError)
+  fail(equipmentLinkError)
+  fail(equipmentError)
 
   const providers: EqaProvider[] = ((providerData ?? []) as RecordRow[]).map((row) => ({ id: asString(row.id), name: asString(row.name), isActive: Boolean(row.is_active) }))
   const providerMap = new Map(providers.map((p) => [p.id, p]))
+  const equipmentById = new Map(((equipmentData ?? []) as RecordRow[]).map((row) => [asString(row.id), row]))
+  const equipmentIdsByScheme = new Map<string, string[]>()
+  for (const link of (equipmentLinkData ?? []) as RecordRow[]) {
+    const schemeId = asString(link.entity_id)
+    equipmentIdsByScheme.set(schemeId, [...(equipmentIdsByScheme.get(schemeId) ?? []), asString(link.equipment_id)])
+  }
 
   const schemes: EqaScheme[] = ((schemeData ?? []) as RecordRow[]).map((row) => ({
     id: asString(row.id),
@@ -85,6 +97,10 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
     analyteScope: nullableString(row.analyte_scope),
     roundsPerYear: row.rounds_per_year == null ? null : Number(row.rounds_per_year),
     isActive: Boolean(row.is_active),
+    equipment: (equipmentIdsByScheme.get(asString(row.id)) ?? []).flatMap((equipmentId) => {
+      const equipment = equipmentById.get(equipmentId)
+      return equipment ? [{ id: equipmentId, code: asString(equipment.code), name: asString(equipment.name), status: asString(equipment.status) as EqaScheme['equipment'][number]['status'] }] : []
+    }),
   }))
   const schemeMap = new Map(schemes.map((s) => [s.id, s]))
 
@@ -121,6 +137,7 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
       schemeId: asString(row.scheme_id),
       schemeName: scheme?.name ?? '-',
       providerName: scheme?.providerName ?? '-',
+      equipment: scheme?.equipment ?? [],
       roundLabel: asString(row.round_label),
       sampleReceivedDate: nullableString(row.sample_received_date),
       resultDueDate: due,
