@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getExpiryState, sortLotsFefo } from '@/lib/bm/rules'
+import { formatDate, getExpiryState, sortLotsFefo } from '@/lib/bm/rules'
 import type { StockLot } from '@/lib/bm/types'
 
 function lot(id: string, expiryDate: string | null, createdAt = '2026-01-01T00:00:00Z'): StockLot {
@@ -29,5 +29,9 @@ describe('BM stock rules', () => {
   it('sorts lots by FEFO with no-expiry last', () => {
     expect(sortLotsFefo([lot('C', null), lot('A', '2026-08-01'), lot('B', '2026-07-01')]).map((item) => item.id)).toEqual(['B', 'A', 'C'])
   })
-})
 
+  it('formats date-only values and timestamps without crashing', () => {
+    expect(formatDate('2026-08-23T03:00:00.000Z')).toBe(formatDate('2026-08-23'))
+    expect(formatDate('not-a-date')).toBe('-')
+  })
+})
