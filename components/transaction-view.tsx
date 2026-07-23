@@ -448,7 +448,7 @@ function ReceiveForm({
               required={item?.trackExpiry}
               disabled={!item?.trackExpiry}
               type={item?.trackExpiry ? 'date' : 'text'}
-              className="h-12 text-base"
+              className="receive-expiry-date h-12 min-w-0 max-w-full text-base"
               value={item?.trackExpiry ? form.expiryDate : 'Not tracked'}
               onChange={(event) => setForm({ ...form, expiryDate: event.target.value })}
             />
@@ -1177,7 +1177,7 @@ function LotChoice({ lot, unit, selected, onClick }: { lot: StockLot; unit: stri
 
 function BigField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="block">
+    <label className="block min-w-0">
       <span className="mb-1 block text-xs font-bold text-[#58747d]">{label}</span>
       {children}
     </label>

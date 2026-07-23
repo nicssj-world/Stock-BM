@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { requireActor } from '@/lib/server/auth'
+import { requireStockOperator } from '@/lib/server/auth'
 import { issueBatch } from '@/lib/server/stock'
 import { readJson, respond } from '@/lib/server/route'
 
@@ -19,5 +19,5 @@ const schema = z.object({
 })
 
 export async function POST(request: Request) {
-  return respond(async () => await issueBatch(await readJson(request, schema), await requireActor()))
+  return respond(async () => await issueBatch(await readJson(request, schema), await requireStockOperator()))
 }

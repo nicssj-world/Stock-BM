@@ -56,6 +56,14 @@ export async function requireStockAdmin() {
   return actor
 }
 
+// Assistant is intentionally limited to the HPV workflow. Generic stock pages are
+// hidden for that role; API routes must enforce the same boundary.
+export async function requireStockOperator() {
+  const actor = await requireActor()
+  if (actor.role === 'Assistant') throw new HttpError(403, 'Stock Staff or Admin permission required')
+  return actor
+}
+
 export async function requirePageActor() {
   const actor = await getActor()
   if (!actor) redirect('/login')

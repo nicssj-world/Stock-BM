@@ -41,6 +41,11 @@ export function InventoryView({ actor, initialData, defaultLocationId }: { actor
     if (index >= 0) itemPagination.setPage(Math.floor(index / INVENTORY_PAGE_SIZE) + 1)
   }
 
+  function filterByStatus(nextStatus: string) {
+    setStatus(nextStatus)
+    itemPagination.setPage(1)
+  }
+
   async function reverse(transaction: StockTransaction) {
     const reason = window.prompt(`Reverse ${transaction.transactionType}?`)
     if (!reason?.trim()) return
@@ -62,10 +67,10 @@ export function InventoryView({ actor, initialData, defaultLocationId }: { actor
         actions={<div className="flex flex-wrap gap-2"><Button onClick={() => { window.location.href = '/movements?mode=receive' }}><ArrowDownToLine className="size-4" /> รับเข้า</Button><Button variant="secondary" onClick={() => { window.location.href = '/movements?mode=issue' }}><ArrowUpFromLine className="size-4" /> ตัด stock</Button>{actor.role === 'Admin' ? <Button variant="ghost" onClick={() => { window.location.href = '/inventory/qr' }}><Printer className="size-4" /> QR</Button> : null}</div>}
       />
       <StockMetricStrip>
-        <StockMetric label="Active items" value={data.activeItemCount} detail="รายการที่เปิดใช้งาน" tone="neutral" />
-        <StockMetric label="Low stock" value={data.lowStockItemCount} detail="ต่ำกว่าขั้นต่ำ" tone={data.lowStockItemCount ? 'danger' : 'ok'} />
-        <StockMetric label="Expiring" value={data.expiringLotCount} detail="lot ใกล้หมดอายุ" tone={data.expiringLotCount ? 'warning' : 'ok'} />
-        <StockMetric label="Expired" value={data.expiredLotCount} detail="lot หมดอายุคงเหลือ" tone={data.expiredLotCount ? 'danger' : 'ok'} />
+        <StockMetric label="Active items" value={data.activeItemCount} detail="รายการที่เปิดใช้งาน" tone="neutral" onClick={() => filterByStatus('all')} active={status === 'all'} />
+        <StockMetric label="Low stock" value={data.lowStockItemCount} detail="ต่ำกว่าขั้นต่ำ" tone={data.lowStockItemCount ? 'danger' : 'ok'} onClick={() => filterByStatus('low')} active={status === 'low'} />
+        <StockMetric label="Expiring" value={data.expiringLotCount} detail="lot ใกล้หมดอายุ" tone={data.expiringLotCount ? 'warning' : 'ok'} onClick={() => filterByStatus('expiring')} active={status === 'expiring'} />
+        <StockMetric label="Expired" value={data.expiredLotCount} detail="lot หมดอายุคงเหลือ" tone={data.expiredLotCount ? 'danger' : 'ok'} onClick={() => filterByStatus('expired')} active={status === 'expired'} />
       </StockMetricStrip>
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
       <Card className="overflow-hidden rounded-xl">

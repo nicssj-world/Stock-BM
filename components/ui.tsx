@@ -28,7 +28,7 @@ export function Button({
 export function Input({ className = '', ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
-      className={`w-full rounded-md border border-[#cfdee0] bg-white px-3 py-2 text-sm text-[#173d50] outline-none transition placeholder:text-[#9aafb4] focus:border-[#0b7f76] focus:ring-3 focus:ring-[#0b7f76]/10 ${className}`}
+      className={`min-w-0 max-w-full w-full rounded-md border border-[#cfdee0] bg-white px-3 py-2 text-sm text-[#173d50] outline-none transition placeholder:text-[#9aafb4] focus:border-[#0b7f76] focus:ring-3 focus:ring-[#0b7f76]/10 ${className}`}
       {...props}
     />
   )

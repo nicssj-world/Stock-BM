@@ -41,21 +41,22 @@ export function StockMetricStrip({ children }: { children: ReactNode }) {
   return <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:gap-3">{children}</section>
 }
 
-export function StockMetric({ label, value, detail, tone = 'neutral' }: { label: string; value: ReactNode; detail: string; tone?: 'neutral' | 'ok' | 'warning' | 'danger' }) {
+export function StockMetric({ label, value, detail, tone = 'neutral', onClick, active = false }: { label: string; value: ReactNode; detail: string; tone?: 'neutral' | 'ok' | 'warning' | 'danger'; onClick?: () => void; active?: boolean }) {
   const toneClass = {
     neutral: 'border-[#d7e5e5] bg-white text-[#173d50]',
     ok: 'border-[#c9e2d8] bg-[#f4fbf8] text-[#08766e]',
     warning: 'border-[#eed9a8] bg-[#fffaf0] text-[#9a6515]',
     danger: 'border-[#efcdd1] bg-[#fff7f7] text-[#b33b46]',
   }[tone]
-  return (
-    <div className={`relative overflow-hidden rounded-xl border px-3 py-3 shadow-[0_8px_22px_rgba(20,64,72,0.04)] ${toneClass}`}>
+  const content = <>
       <div className="absolute inset-y-0 left-0 w-1 bg-current opacity-70" />
       <p className="pl-2 text-[10px] font-bold tracking-[0.14em] uppercase opacity-70">{label}</p>
       <p className="mono mt-1 pl-2 text-2xl font-bold tabular-nums">{value}</p>
       <p className="mt-1 pl-2 text-[11px] opacity-70">{detail}</p>
-    </div>
-  )
+  </>
+  const className = `relative overflow-hidden rounded-xl border px-3 py-3 text-left shadow-[0_8px_22px_rgba(20,64,72,0.04)] ${toneClass} ${onClick ? 'cursor-pointer transition hover:-translate-y-0.5 hover:shadow-[0_12px_26px_rgba(20,64,72,0.10)] focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none' : ''} ${active ? 'ring-2 ring-[#0b7f76] ring-offset-1' : ''}`
+  if (onClick) return <button type="button" aria-pressed={active} onClick={onClick} className={className}>{content}</button>
+  return <div className={className}>{content}</div>
 }
 
 export function StockPanelTitle({ eyebrow, title, action }: { eyebrow?: string; title: string; action?: ReactNode }) {

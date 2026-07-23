@@ -1,9 +1,9 @@
-import { requireActor } from '@/lib/server/auth'
+import { requireStockOperator } from '@/lib/server/auth'
 import { buildBalancesCsv, buildMovementsCsv } from '@/lib/bm/csv'
 import { getStockWorkspace } from '@/lib/server/stock'
 
 export async function GET(request: Request) {
-  const actor = await requireActor()
+  const actor = await requireStockOperator()
   const stock = await getStockWorkspace(actor)
   const report = new URL(request.url).searchParams.get('report')
   const body = report === 'movements' ? buildMovementsCsv(stock) : buildBalancesCsv(stock)
@@ -15,4 +15,3 @@ export async function GET(request: Request) {
     },
   })
 }
-

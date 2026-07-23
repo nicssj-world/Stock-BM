@@ -42,6 +42,19 @@ textarea {
   font-family: "IBM Plex Mono", monospace;
 }
 
+/* Safari gives native date controls a minimum intrinsic width. Keep the receive
+   form inside its card on narrow iPhone viewports without removing the picker. */
+input.receive-expiry-date {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+input.receive-expiry-date::-webkit-date-and-time-value,
+input.receive-expiry-date::-webkit-datetime-edit {
+  min-width: 0;
+  text-align: left;
+}
+
 .paper {
   border: 1px solid #d6e2e3;
   background: rgba(255, 255, 255, 0.94);

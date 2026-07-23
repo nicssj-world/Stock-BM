@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { requireActor } from '@/lib/server/auth'
+import { requireStockOperator } from '@/lib/server/auth'
 import { readJson, respond } from '@/lib/server/route'
 import { moveStock } from '@/lib/server/stock'
 
@@ -13,6 +13,5 @@ const schema = z.object({
 })
 
 export async function POST(request: Request) {
-  return respond(async () => ({ stock: await moveStock(await readJson(request, schema), await requireActor()) }))
+  return respond(async () => ({ stock: await moveStock(await readJson(request, schema), await requireStockOperator()) }))
 }
-

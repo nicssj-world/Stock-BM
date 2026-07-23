@@ -65,7 +65,7 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
     { data: itemData, error: itemError },
     { data: lotData, error: lotError },
     { data: transactionData, error: transactionError },
-    { data: lineData, error: lineError },
+    { data: balanceData, error: balanceError },
   ] = await Promise.all([
     admin.from('bm_stock_categories').select('*').order('name'),
     admin.from('bm_stock_locations').select('*').order('code'),
@@ -74,21 +74,27 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
     includeTransactions
       ? admin.from('bm_stock_transactions').select('*').order('created_at', { ascending: false }).limit(500)
       : Promise.resolve({ data: [], error: null }),
-    admin.from('bm_stock_movement_lines').select('*').order('created_at', { ascending: false }).limit(2000),
+    admin.from('bm_stock_lot_location_balances').select('lot_id,location_id,on_hand'),
   ])
   fail(categoryError)
   fail(locationError)
   fail(itemError)
   fail(lotError)
   fail(transactionError)
-  fail(lineError)
+  fail(balanceError)
 
   const categoryRows = (categoryData ?? []) as RecordRow[]
   const locationRows = (locationData ?? []) as RecordRow[]
   const itemRows = (itemData ?? []) as RecordRow[]
   const lotRows = (lotData ?? []) as RecordRow[]
   const transactionRows = (transactionData ?? []) as RecordRow[]
-  const lineRows = (lineData ?? []) as RecordRow[]
+  const balanceRows = (balanceData ?? []) as RecordRow[]
+  const transactionIds = ids(transactionRows, 'id')
+  const { data: transactionLineData, error: transactionLineError } = transactionIds.length
+    ? await admin.from('bm_stock_movement_lines').select('*').in('transaction_id', transactionIds).order('created_at', { ascending: false })
+    : { data: [], error: null }
+  fail(transactionLineError)
+  const transactionLineRows = (transactionLineData ?? []) as RecordRow[]
   const nameMap = await getNameMap(ids(transactionRows, 'created_by'))
 
   const categories: StockCategory[] = categoryRows.map((row) => ({
@@ -108,11 +114,11 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
   const locationMap = new Map(locations.map((location) => [location.id, location]))
 
   const lineBalance = new Map<string, number>()
-  for (const line of lineRows) {
-    const lotId = asString(line.lot_id)
-    const locationId = asString(line.location_id)
+  for (const balance of balanceRows) {
+    const lotId = asString(balance.lot_id)
+    const locationId = asString(balance.location_id)
     const key = balanceKey(lotId, locationId)
-    lineBalance.set(key, (lineBalance.get(key) ?? 0) + number(line.quantity))
+    lineBalance.set(key, number(balance.on_hand))
   }
 
   const itemRawMap = new Map(itemRows.map((row) => [asString(row.id), row]))
@@ -195,7 +201,7 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
       .map((row) => [asString(row.source_transaction_id), asString(row.id)]),
   )
   const linesByTransaction = new Map<string, StockTransactionLine[]>()
-  for (const row of lineRows) {
+  for (const row of transactionLineRows) {
     const lot = lotMap.get(asString(row.lot_id))
     const item = itemMap.get(lot?.itemId ?? '')
     const location = locationMap.get(asString(row.location_id))
