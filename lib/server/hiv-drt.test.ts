@@ -18,6 +18,14 @@ describe('HIV DRT server safeguards', () => {
     expect(source).toContain('stored_rack_code:')
   })
 
+  it('frees the rack slot when a stored tube is recorded as destroyed', () => {
+    expect(source).toContain("status: 'destroyed'")
+    expect(source).toContain('current_rack_id: null')
+    expect(source).toContain('current_position: null')
+    expect(source).toContain('destroyed_at: destroyedAt')
+    expect(source).toContain('destroyed_by: actor.id')
+  })
+
   it('uses a persistent forward-only rack cursor for auto-fill', () => {
     expect(source).toContain("select('id,rack_code,next_position')")
     expect(source).toContain('nextHivDrtRackPosition(occupied, cursor)')

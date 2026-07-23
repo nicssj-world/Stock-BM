@@ -191,18 +191,18 @@ function Overview({ samples, stored, waiting, overdue, dueSoon, dueNow, onTab, o
           </div>
         </Card>
         <Card className="overflow-hidden">
-          <PanelTitle icon={<Archive />} title="Tube ที่ต้องทำลาย" count={dueNow.length + dueSoon.length} tone={dueNow.length ? 'danger' : 'warning'} action="เปิด Storage" onClick={() => onTab('storage')} />
+          <PanelTitle icon={<Archive />} title="Tube ครบกำหนดที่ต้องทำลาย" count={dueNow.length} tone="danger" action="เปิด Storage" onClick={() => onTab('storage')} />
           <div className="divide-y divide-[#edf2f2]">
-            {[...dueNow, ...dueSoon].slice(0, 8).map((sample) => (
+            {dueNow.slice(0, 8).map((sample) => (
               <div key={sample.id} className="flex items-center gap-3 px-4 py-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2"><strong className="mono text-sm text-[#173d50]">{sample.barcode}</strong><DestructionBadge sample={sample} /></div>
                   <p className="mt-1 text-xs text-[#789097]">{sample.storedRackCode} · {formatHivDrtPosition(sample.storedPosition)} · กำหนด {formatDate(sample.destroyDueOn)}</p>
                 </div>
-                <div className="flex gap-2"><Button variant="secondary" disabled={busy} onClick={() => onDestroy(sample)}><Archive className="size-4" /> ทำลาย</Button><Button variant="danger" disabled={busy} onClick={() => onDelete(sample)} aria-label={`ลบ ${sample.barcode}`}><Trash2 className="size-4" /> ลบ</Button></div>
+                <div className="flex gap-2"><Button variant="secondary" disabled={busy} onClick={() => onDestroy(sample)}><Archive className="size-4" /> บันทึกทำลาย</Button><Button variant="danger" disabled={busy} onClick={() => onDelete(sample)} aria-label={`ลบ ${sample.barcode}`}><Trash2 className="size-4" /> ลบ</Button></div>
               </div>
             ))}
-            {!dueNow.length && !dueSoon.length ? <EmptyState icon={<CheckCircle2 />} text="ไม่มี tube ใกล้กำหนดทำลาย" /> : null}
+            {!dueNow.length ? <EmptyState icon={<CheckCircle2 />} text="ไม่มี tube ที่ครบกำหนดทำลาย" /> : null}
           </div>
         </Card>
       </div>
@@ -355,6 +355,43 @@ function StoragePanel({ workspace, busy, mutate, setNotice, initialFilter }: {
   )
 }
 
+function rackSampleVisual(sample: HivDrtSample | undefined) {
+  if (!sample) return {
+    cell: 'border-dashed border-[#cbdedf] bg-white/80',
+    desktopCell: 'border-dashed border-[#d2e0e1] bg-white/70 hover:border-[#84b8b6] hover:bg-[#f4fbfa]',
+    dot: 'border-[#bcd0d3] bg-white',
+    label: 'ช่องว่าง',
+    marker: null,
+    markerClass: '',
+  }
+
+  const state = getHivDrtDestructionState(sample.destroyDueOn, sample.status)
+  if (state === 'due_now') return {
+    cell: 'border-[#ef9aa4] bg-[#fff1f2] shadow-[inset_0_-3px_0_rgba(179,59,70,.10)]',
+    desktopCell: 'border-[#ef9aa4] bg-[#fff1f2] shadow-[inset_0_-3px_0_rgba(179,59,70,.10)] hover:-translate-y-0.5 hover:border-[#b33b46]',
+    dot: 'border-[#b33b46] bg-[#d64a57]',
+    label: 'ครบกำหนดทำลาย',
+    marker: 'DUE',
+    markerClass: 'bg-[#b33b46] text-white',
+  }
+  if (state === 'due_soon') return {
+    cell: 'border-[#edc97f] bg-[#fff8e8] shadow-[inset_0_-3px_0_rgba(167,101,17,.10)]',
+    desktopCell: 'border-[#edc97f] bg-[#fff8e8] shadow-[inset_0_-3px_0_rgba(167,101,17,.10)] hover:-translate-y-0.5 hover:border-[#b87810]',
+    dot: 'border-[#b87810] bg-[#e2a53b]',
+    label: 'ใกล้ครบกำหนดทำลายภายใน 30 วัน',
+    marker: '30d',
+    markerClass: 'bg-[#b87810] text-white',
+  }
+  return {
+    cell: 'border-[#8bc8c1] bg-[#e6f6f3] shadow-[inset_0_-3px_0_rgba(11,127,118,.08)]',
+    desktopCell: 'border-[#8bc8c1] bg-[#e6f6f3] shadow-[inset_0_-3px_0_rgba(11,127,118,.08)] hover:-translate-y-0.5 hover:border-[#0b7f76]',
+    dot: 'border-[#0b7f76] bg-[#49b8ad]',
+    label: 'อยู่ในอายุจัดเก็บ',
+    marker: null,
+    markerClass: '',
+  }
+}
+
 function RackGrid({ rack, selectedSampleId, onSelect, onMove, busy }: { rack: HivDrtRack; selectedSampleId: string | null; onSelect: (id: string | null) => void; onMove: (sampleId: string, position: number) => void; busy: boolean }) {
   const byPosition = new Map(rack.samples.map((sample) => [sample.currentPosition, sample]))
   const [mobileRow, setMobileRow] = useState(0)
@@ -382,17 +419,19 @@ function RackGrid({ rack, selectedSampleId, onSelect, onMove, busy }: { rack: Hi
             const position = mobileRow * 12 + column + 1
             const sample = byPosition.get(position)
             const selected = sample?.id === selectedSampleId
+            const visual = rackSampleVisual(sample)
             return (
               <button
                 key={position}
                 type="button"
                 role="gridcell"
                 disabled={busy}
-                aria-label={`${formatHivDrtPosition(position)} ${sample?.barcode ?? 'ว่าง'}`}
+                aria-label={`${formatHivDrtPosition(position)} ${sample?.barcode ?? 'ว่าง'} · ${visual.label}`}
                 onClick={() => selectOrMove(sample, position)}
-                className={`relative min-h-18 touch-manipulation rounded-xl border px-2 py-2 text-center transition active:scale-[.97] disabled:opacity-50 ${sample ? 'border-[#8bc8c1] bg-[#e6f6f3] shadow-[inset_0_-3px_0_rgba(11,127,118,.08)]' : 'border-dashed border-[#cbdedf] bg-white/80'} ${selected ? 'ring-2 ring-[#0b7f76] ring-offset-2' : ''}`}
+                className={`relative min-h-18 touch-manipulation rounded-xl border px-2 py-2 text-center transition active:scale-[.97] disabled:opacity-50 ${visual.cell} ${selected ? 'ring-2 ring-[#0b7f76] ring-offset-2' : ''}`}
               >
-                <span className={`mx-auto block size-3.5 rounded-full border ${sample ? 'border-[#0b7f76] bg-[#49b8ad]' : 'border-[#bcd0d3] bg-white'}`} />
+                {visual.marker ? <span className={`absolute top-1.5 right-1.5 rounded px-1 py-0.5 text-[8px] font-bold leading-none ${visual.markerClass}`}>{visual.marker}</span> : null}
+                <span className={`mx-auto block size-3.5 rounded-full border ${visual.dot}`} />
                 <span className="mt-1.5 block mono text-[10px] font-bold text-[#315763]">{formatHivDrtPosition(position)}</span>
                 <span className="mt-0.5 block truncate mono text-[9px] text-[#6f888f]">{sample?.barcode ?? 'ว่าง'}</span>
               </button>
@@ -400,6 +439,7 @@ function RackGrid({ rack, selectedSampleId, onSelect, onMove, busy }: { rack: Hi
           })}
         </div>
         <div className="mt-3 flex items-center justify-between text-[11px] text-[#6f888f]"><span>แถว {String.fromCharCode(65 + mobileRow)} · 12 ช่อง</span><span>{Array.from({ length: 12 }, (_, column) => byPosition.has(mobileRow * 12 + column + 1)).filter(Boolean).length}/12 occupied</span></div>
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-[#6f888f]"><Legend color="bg-[#dff3f0] border-[#8bc8c1]" label="ปกติ" /><Legend color="bg-[#fff3d5] border-[#edc97f]" label="ใกล้ครบ ≤30 วัน" /><Legend color="bg-[#fff0f1] border-[#ef9aa4]" label="ครบกำหนด" /></div>
       </div>
 
       <div className="hidden overflow-x-auto p-4 sm:block">
@@ -410,7 +450,7 @@ function RackGrid({ rack, selectedSampleId, onSelect, onMove, busy }: { rack: Hi
             <RackRow key={row} row={row} byPosition={byPosition} selectedSampleId={selectedSampleId} onSelect={onSelect} onMove={onMove} busy={busy} />
           ))}
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-4 text-[11px] text-[#6f888f]"><Legend color="bg-[#dff3f0] border-[#8bc8c1]" label="มี tube" /><Legend color="bg-white border-[#d7e4e5]" label="ช่องว่าง" /><span>คลิก tube แล้วคลิกช่องปลายทาง หรือ Drag & Drop เพื่อย้าย/สลับ</span></div>
+        <div className="mt-4 flex flex-wrap items-center gap-4 text-[11px] text-[#6f888f]"><Legend color="bg-[#dff3f0] border-[#8bc8c1]" label="ปกติ" /><Legend color="bg-[#fff3d5] border-[#edc97f]" label="ใกล้ครบ ≤30 วัน" /><Legend color="bg-[#fff0f1] border-[#ef9aa4]" label="ครบกำหนดทำลาย" /><Legend color="bg-white border-[#d7e4e5]" label="ช่องว่าง" /><span>คลิก tube แล้วคลิกช่องปลายทาง หรือ Drag & Drop เพื่อย้าย/สลับ</span></div>
       </div>
     </div>
   )
@@ -424,13 +464,14 @@ function RackRow({ row, byPosition, selectedSampleId, onSelect, onMove, busy }: 
         const position = row * 12 + column + 1
         const sample = byPosition.get(position)
         const selected = sample?.id === selectedSampleId
+        const visual = rackSampleVisual(sample)
         return (
           <button
             key={position}
             type="button"
             role="gridcell"
             draggable={Boolean(sample) && !busy}
-            aria-label={`${formatHivDrtPosition(position)} ${sample?.barcode ?? 'ว่าง'}`}
+            aria-label={`${formatHivDrtPosition(position)} ${sample?.barcode ?? 'ว่าง'} · ${visual.label}`}
             onDragStart={(event) => { if (sample) event.dataTransfer.setData('text/hiv-drt-sample', sample.id) }}
             onDragOver={(event) => event.preventDefault()}
             onDrop={(event) => { event.preventDefault(); const id = event.dataTransfer.getData('text/hiv-drt-sample'); if (id) onMove(id, position) }}
@@ -438,9 +479,10 @@ function RackRow({ row, byPosition, selectedSampleId, onSelect, onMove, busy }: 
               if (selectedSampleId && selectedSampleId !== sample?.id) onMove(selectedSampleId, position)
               else onSelect(sample?.id ?? null)
             }}
-            className={`group relative h-14 rounded-lg border text-center transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${sample ? 'border-[#8bc8c1] bg-[#e6f6f3] shadow-[inset_0_-3px_0_rgba(11,127,118,.08)] hover:-translate-y-0.5 hover:border-[#0b7f76]' : 'border-dashed border-[#d2e0e1] bg-white/70 hover:border-[#84b8b6] hover:bg-[#f4fbfa]'} ${selected ? 'ring-2 ring-[#0b7f76] ring-offset-2' : ''}`}
+            className={`group relative h-14 rounded-lg border text-center transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${visual.desktopCell} ${selected ? 'ring-2 ring-[#0b7f76] ring-offset-2' : ''}`}
           >
-            <span className={`mx-auto block size-3 rounded-full border ${sample ? 'border-[#0b7f76] bg-[#49b8ad]' : 'border-[#c5d7d9] bg-white'}`} />
+            {visual.marker ? <span className={`absolute top-1 right-1 rounded px-1 py-0.5 text-[7px] font-bold leading-none ${visual.markerClass}`}>{visual.marker}</span> : null}
+            <span className={`mx-auto block size-3 rounded-full border ${visual.dot}`} />
             <span className="mt-1 block truncate px-1 mono text-[9px] font-semibold text-[#315763]">{sample?.barcode ?? formatHivDrtPosition(position)}</span>
           </button>
         )

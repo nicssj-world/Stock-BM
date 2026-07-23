@@ -30,6 +30,23 @@ describe('HIV DRT interface', () => {
     expect(source).toContain('hidden overflow-x-auto p-4 sm:block')
   })
 
+  it('shows destruction urgency in the rack with an accessible colour and text cue', () => {
+    expect(source).toContain('function rackSampleVisual')
+    expect(source).toContain("state === 'due_now'")
+    expect(source).toContain("state === 'due_soon'")
+    expect(source).toContain("marker: 'DUE'")
+    expect(source).toContain("marker: '30d'")
+    expect(source).toContain('ครบกำหนดทำลาย')
+    expect(source).toContain('ใกล้ครบ ≤30 วัน')
+  })
+
+  it('lets users record destruction directly from the overview for due tubes', () => {
+    const overview = source.slice(source.indexOf('function Overview'), source.indexOf('function Metric'))
+    expect(overview).toContain('title="Tube')
+    expect(overview).toContain('dueNow.slice(0, 8).map')
+    expect(overview).toContain('onDestroy(sample)')
+  })
+
   it('supports direct checkout, receiving results, deletion and tube destruction', () => {
     expect(source).toContain("'/api/hiv-drt/checkout'")
     expect(source).toContain('ได้รับผลแล้ว')
