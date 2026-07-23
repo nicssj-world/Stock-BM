@@ -7,7 +7,9 @@ import {
 import { HttpError } from "@/lib/server/errors";
 import { respond } from "@/lib/server/route";
 
-// GET returns a short-lived signed URL and redirects to it for download.
+// The route remains authenticated, but its immutable attachment URL can be
+// cached privately by the current browser. This avoids a new signed URL and
+// image download whenever the same equipment record is revisited.
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -17,7 +19,14 @@ export async function GET(
     const id = (await params).id;
     await assertAttachmentAccess(id, actor);
     const url = await signedUrl(id);
-    return Response.redirect(url, 302);
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: url,
+        "Cache-Control": "private, max-age=600, stale-while-revalidate=60",
+        Vary: "Cookie",
+      },
+    });
   } catch (error) {
     if (error instanceof HttpError)
       return Response.json({ error: error.message }, { status: error.status });

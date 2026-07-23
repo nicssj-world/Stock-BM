@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   Activity,
+  Building2,
   CalendarClock,
   ClipboardCheck,
   ExternalLink,
@@ -13,6 +14,8 @@ import {
   Image as ImageIcon,
   Link2,
   Plus,
+  Pencil,
+  Phone,
   Printer,
   QrCode,
   RefreshCw,
@@ -21,14 +24,19 @@ import {
   ShieldCheck,
   Stethoscope,
   Trash2,
+  UserRound,
   Wrench,
+  X,
 } from "lucide-react";
 import type { BmActor } from "@/lib/bm/types";
 import { formatDate, todayBangkok } from "@/lib/bm/rules";
 import {
   EQUIPMENT_EVENT_LABELS,
   EQUIPMENT_PLAN_TYPES,
+  endOfEquipmentDueMonth,
   equipmentStatusLabel,
+  equipmentDueMonthInput,
+  formatEquipmentDueMonth,
 } from "@/lib/equipment/rules";
 import type {
   Equipment,
@@ -103,6 +111,17 @@ export function EquipmentView({
       setBusy(false);
     }
   }
+  async function refreshWorkspace() {
+    try {
+      const result = await api<{ workspace: EquipmentWorkspace }>(
+        "/api/equipment/workspace",
+      );
+      setWorkspace(result.workspace);
+    } catch {
+      // The attachment list has already refreshed itself; keep the current
+      // workspace if its supplemental refresh is temporarily unavailable.
+    }
+  }
   return (
     <div className="mx-auto max-w-[1600px] space-y-5">
       <PageHeader
@@ -137,6 +156,7 @@ export function EquipmentView({
           workspace={workspace}
           busy={busy}
           mutate={mutate}
+          onAttachmentsChanged={refreshWorkspace}
         />
       ) : null}
       {tab === "plans" ? (
@@ -222,7 +242,7 @@ function Overview({
                   {equipmentMap.get(plan.equipmentId)?.code} · {plan.title}
                 </strong>
                 <p className="mt-1 text-xs text-[#789097]">
-                  กำหนด {formatDate(plan.nextDueOn)}
+                  กำหนด {formatEquipmentDueMonth(plan.nextDueOn)}
                 </p>
               </div>
               <DueBadge plan={plan} />
@@ -302,22 +322,29 @@ const emptyEquipmentForm = {
   model: "",
   serialNumber: "",
   assetNumber: "",
-  location: "",
+  locationId: "",
   installedOn: "",
   warrantyUntil: "",
   status: "active" as EquipmentStatus,
   note: "",
+};
+const emptyTechnicianForm = {
+  technicianName: "",
+  company: "",
+  phone: "",
 };
 function Registry({
   actor,
   workspace,
   busy,
   mutate,
+  onAttachmentsChanged,
 }: {
   actor: BmActor;
   workspace: EquipmentWorkspace;
   busy: boolean;
   mutate: Mutate;
+  onAttachmentsChanged: () => Promise<void>;
 }) {
   const requestedEquipment = useSearchParams().get("equipment");
   const [search, setSearch] = useState("");
@@ -331,6 +358,11 @@ function Registry({
   const [form, setForm] = useState(emptyEquipmentForm);
   const [linkModule, setLinkModule] = useState<"iqc" | "eqa">("iqc");
   const [linkEntity, setLinkEntity] = useState("");
+  const [technicianForm, setTechnicianForm] = useState(emptyTechnicianForm);
+  const [editingTechnicianId, setEditingTechnicianId] = useState<string | null>(
+    null,
+  );
+  const [isEquipmentFormOpen, setEquipmentFormOpen] = useState(false);
   const filtered = workspace.equipment.filter((item) =>
     [
       item.code,
@@ -346,8 +378,15 @@ function Registry({
     workspace.equipment.find((item) => item.id === selectedId) ??
     filtered[0] ??
     null;
+  function selectEquipment(id: string) {
+    setSelectedId(id);
+    setTechnicianForm(emptyTechnicianForm);
+    setEditingTechnicianId(null);
+    setLinkEntity("");
+  }
   function edit(item: Equipment) {
     setEditingId(item.id);
+    setEquipmentFormOpen(true);
     setForm({
       code: item.code,
       name: item.name,
@@ -356,7 +395,7 @@ function Registry({
       model: item.model ?? "",
       serialNumber: item.serialNumber ?? "",
       assetNumber: item.assetNumber ?? "",
-      location: item.location ?? "",
+      locationId: item.locationId ?? "",
       installedOn: item.installedOn ?? "",
       warrantyUntil: item.warrantyUntil ?? "",
       status: item.status,
@@ -370,6 +409,7 @@ function Registry({
       : "/api/equipment/items";
     const payload = {
       ...form,
+      locationId: form.locationId || null,
       installedOn: form.installedOn || null,
       warrantyUntil: form.warrantyUntil || null,
     };
@@ -381,6 +421,7 @@ function Registry({
     if (ok) {
       setEditingId(null);
       setForm(emptyEquipmentForm);
+      setEquipmentFormOpen(false);
     }
   }
   async function remove(item: Equipment) {
@@ -425,21 +466,116 @@ function Registry({
     );
     if (ok) setLinkEntity("");
   }
+  async function saveTechnician(event: React.FormEvent) {
+    event.preventDefault();
+    if (!selected) return;
+    const ok = await mutate(
+      editingTechnicianId
+        ? `/api/equipment/technicians/${editingTechnicianId}`
+        : "/api/equipment/technicians",
+      {
+        method: editingTechnicianId ? "PATCH" : "POST",
+        body: JSON.stringify({
+          equipmentId: selected.id,
+          technicianName: technicianForm.technicianName,
+          company: technicianForm.company || null,
+          phone: technicianForm.phone || null,
+        }),
+      },
+      editingTechnicianId
+        ? "แก้ไขข้อมูลช่างแล้ว"
+        : "เพิ่มช่างประจำเครื่องแล้ว",
+    );
+    if (ok) {
+      setTechnicianForm(emptyTechnicianForm);
+      setEditingTechnicianId(null);
+    }
+  }
+  function editTechnician(technician: EquipmentWorkspace["technicians"][number]) {
+    setEditingTechnicianId(technician.id);
+    setTechnicianForm({
+      technicianName: technician.technicianName,
+      company: technician.company ?? "",
+      phone: technician.phone ?? "",
+    });
+  }
+  async function removeTechnician(
+    technician: EquipmentWorkspace["technicians"][number],
+  ) {
+    if (!window.confirm(`ลบ ${technician.technicianName} ออกจากทะเบียนช่างของเครื่องนี้?`))
+      return;
+    const ok = await mutate(
+      `/api/equipment/technicians/${technician.id}`,
+      { method: "DELETE" },
+      "ลบข้อมูลช่างแล้ว",
+    );
+    if (ok && editingTechnicianId === technician.id) {
+      setTechnicianForm(emptyTechnicianForm);
+      setEditingTechnicianId(null);
+    }
+  }
   const links = selected
     ? workspace.links.filter((link) => link.equipmentId === selected.id)
+    : [];
+  const technicians = selected
+    ? workspace.technicians.filter(
+        (technician) => technician.equipmentId === selected.id,
+      )
     : [];
   return (
     <div className="grid gap-4 2xl:grid-cols-[400px_minmax(0,1fr)]">
       <div className="space-y-4">
         {actor.role === "Admin" ? (
-          <Card className="p-4">
-            <h2 className="font-bold text-[#173d50]">
-              {editingId ? "แก้ไขเครื่องมือ" : "เพิ่มเครื่องมือ"}
-            </h2>
-            <form
-              onSubmit={save}
-              className="mt-4 grid gap-3 sm:grid-cols-2 2xl:grid-cols-1"
+          <>
+            <Button
+              type="button"
+              className="w-full justify-center py-3"
+              onClick={() => {
+                setEditingId(null);
+                setForm(emptyEquipmentForm);
+                setEquipmentFormOpen(true);
+              }}
             >
+              <Plus className="size-4" /> เพิ่มเครื่องมือ
+            </Button>
+            {isEquipmentFormOpen ? (
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="equipment-form-title"
+                className="fixed inset-0 z-50 overflow-y-auto bg-[#08242b]/45 p-3 sm:p-6"
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget) {
+                    setEquipmentFormOpen(false);
+                    setEditingId(null);
+                    setForm(emptyEquipmentForm);
+                  }
+                }}
+              >
+                <Card className="mx-auto my-4 w-full max-w-3xl p-4 shadow-[0_24px_64px_rgba(8,36,43,0.3)] sm:my-8 sm:p-6">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="mono text-xs font-bold tracking-[.14em] text-[#0b7f76]">
+                        EQUIPMENT REGISTRY
+                      </p>
+                      <h2 id="equipment-form-title" className="mt-1 font-bold text-[#173d50]">
+                        {editingId ? "แก้ไขเครื่องมือ" : "เพิ่มเครื่องมือ"}
+                      </h2>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      aria-label="ปิดฟอร์ม"
+                      onClick={() => {
+                        setEquipmentFormOpen(false);
+                        setEditingId(null);
+                        setForm(emptyEquipmentForm);
+                      }}
+                    >
+                      <X className="size-4" /> ปิด
+                    </Button>
+                  </div>
+            <form onSubmit={save} className="mt-5 grid gap-3 sm:grid-cols-2">
               <Field label="รหัสเครื่องมือ *">
                 <Input
                   required
@@ -490,15 +626,29 @@ function Registry({
                   onChange={(e) =>
                     setForm({ ...form, assetNumber: e.target.value })
                   }
+                  placeholder="เว้นว่างได้ หรือใส่ -"
                 />
               </Field>
-              <Field label="สถานที่">
-                <Input
-                  value={form.location}
+              <Field label="สถานที่ (Location คลังน้ำยา)">
+                <Select
+                  value={form.locationId}
                   onChange={(e) =>
-                    setForm({ ...form, location: e.target.value })
+                    setForm({ ...form, locationId: e.target.value })
                   }
-                />
+                >
+                  <option value="">ไม่ระบุสถานที่</option>
+                  {workspace.locations.map((location) => (
+                    <option
+                      key={location.id}
+                      value={location.id}
+                      disabled={!location.isActive && location.id !== form.locationId}
+                    >
+                      {location.code} · {location.name}
+                      {location.storageCondition ? ` · ${location.storageCondition}` : ""}
+                      {!location.isActive ? " (ปิดใช้งาน)" : ""}
+                    </option>
+                  ))}
+                </Select>
               </Field>
               <Field label="วันที่ติดตั้ง">
                 <Input
@@ -548,25 +698,27 @@ function Registry({
                   onChange={(e) => setForm({ ...form, note: e.target.value })}
                 />
               </Field>
-              <div className="flex gap-2 sm:col-span-2 2xl:col-span-1">
+              <div className="flex gap-2 sm:col-span-2">
                 <Button disabled={busy}>
                   {editingId ? "บันทึกการแก้ไข" : "เพิ่มเครื่องมือ"}
                 </Button>
-                {editingId ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => {
-                      setEditingId(null);
-                      setForm(emptyEquipmentForm);
-                    }}
-                  >
-                    ยกเลิก
-                  </Button>
-                ) : null}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    setEquipmentFormOpen(false);
+                    setEditingId(null);
+                    setForm(emptyEquipmentForm);
+                  }}
+                >
+                  ยกเลิก
+                </Button>
               </div>
             </form>
-          </Card>
+                </Card>
+              </div>
+            ) : null}
+          </>
         ) : null}
         <Card className="overflow-hidden">
           <div className="relative border-b border-[#e1eaeb] p-3">
@@ -583,7 +735,7 @@ function Registry({
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setSelectedId(item.id)}
+                onClick={() => selectEquipment(item.id)}
                 className={`flex w-full items-center gap-3 px-4 py-3 text-left ${selected?.id === item.id ? "bg-[#eaf7f5]" : "hover:bg-[#f8fbfb]"}`}
               >
                 <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-[#e8f4f3] text-[#0b7f76]">
@@ -619,86 +771,218 @@ function Registry({
                     {selected.location ?? "-"}
                   </p>
                 </div>
-                <EquipmentStatusBadge status={selected.status} />
+                <div className="flex shrink-0 items-center gap-2">
+                  <EquipmentStatusBadge status={selected.status} />
+                </div>
               </div>
             </div>
-            <div className="grid gap-3 p-4 sm:grid-cols-3">
-              <Info label="Serial No." value={selected.serialNumber} />
-              <Info label="Asset No." value={selected.assetNumber} />
-              <Info
-                label="ติดตั้ง"
-                value={
-                  selected.installedOn ? formatDate(selected.installedOn) : null
-                }
+              <div id="selected-equipment-details">
+                <div className="grid gap-3 p-4 sm:grid-cols-3">
+                  <Info label="Serial No." value={selected.serialNumber} />
+                  <Info label="Asset No." value={selected.assetNumber} />
+                  <Info
+                    label="ติดตั้ง"
+                    value={
+                      selected.installedOn
+                        ? formatDate(selected.installedOn)
+                        : null
+                    }
+                  />
+                  <Info
+                    label="หมดประกัน"
+                    value={
+                      selected.warrantyUntil
+                        ? formatDate(selected.warrantyUntil)
+                        : null
+                    }
+                  />
+                  <Info label="ประเภท" value={selected.category} />
+                  <Info label="หมายเหตุ" value={selected.note} />
+                </div>
+                <div className="flex flex-wrap gap-2 border-t border-[#edf2f2] p-4">
+                  <a
+                    href={`/service/equipment/${selected.qrToken}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <Button variant="secondary">
+                      <ExternalLink className="size-4" /> เปิดฟอร์มช่าง
+                    </Button>
+                  </a>
+                  {actor.role === "Admin" ? (
+                    <>
+                      <Button
+                        variant="secondary"
+                        onClick={() => edit(selected)}
+                      >
+                        <Settings2 className="size-4" /> แก้ไข
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        disabled={busy}
+                        onClick={() => void rotate(selected)}
+                      >
+                        <RefreshCw className="size-4" /> เปลี่ยน QR
+                      </Button>
+                      <Button
+                        variant="danger"
+                        disabled={busy}
+                        onClick={() => void remove(selected)}
+                      >
+                        <Trash2 className="size-4" /> ลบ
+                      </Button>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+          </Card>
+          <section aria-label="รายละเอียดเครื่องมือเพิ่มเติม" className="space-y-4">
+              {selected.photos.length ? (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {selected.photos.map((photo) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={photo.id}
+                      src={`/api/attachments/${photo.id}`}
+                      alt={`รูป ${selected.name}`}
+                      className="aspect-[4/3] w-full rounded-xl border border-[#d9e5e5] bg-white object-cover"
+                    />
+                  ))}
+                </div>
+              ) : null}
+              <AttachmentList
+                module="equipment"
+                entityType="equipment"
+                entityId={selected.id}
+                kind="equipment-photo"
+                canDelete={actor.role === "Admin"}
+                canUpload={actor.role === "Admin"}
+                accept="image/jpeg,image/png,image/webp"
+                label="รูปเครื่องมือ"
+                onChanged={onAttachmentsChanged}
               />
-              <Info
-                label="หมดประกัน"
-                value={
-                  selected.warrantyUntil
-                    ? formatDate(selected.warrantyUntil)
-                    : null
-                }
-              />
-              <Info label="ประเภท" value={selected.category} />
-              <Info label="หมายเหตุ" value={selected.note} />
+              <Card className="overflow-hidden">
+            <div className="flex items-center gap-3 border-b border-[#e1eaeb] bg-[#f7fbfb] px-4 py-3">
+              <span className="grid size-9 place-items-center rounded-lg bg-[#e7f7f4] text-[#0b7f76]">
+                <UserRound className="size-4" />
+              </span>
+              <div>
+                <h3 className="font-bold text-[#173d50]">ทะเบียนช่างประจำเครื่อง</h3>
+                <p className="text-xs text-[#789097]">
+                  แสดงเป็นตัวเลือกเมื่อช่างสแกน QR
+                </p>
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2 border-t border-[#edf2f2] p-4">
-              <a
-                href={`/service/equipment/${selected.qrToken}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <Button variant="secondary">
-                  <ExternalLink className="size-4" /> เปิดฟอร์มช่าง
-                </Button>
-              </a>
-              {actor.role === "Admin" ? (
-                <>
-                  <Button variant="secondary" onClick={() => edit(selected)}>
-                    <Settings2 className="size-4" /> แก้ไข
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    disabled={busy}
-                    onClick={() => void rotate(selected)}
-                  >
-                    <RefreshCw className="size-4" /> เปลี่ยน QR
-                  </Button>
-                  <Button
-                    variant="danger"
-                    disabled={busy}
-                    onClick={() => void remove(selected)}
-                  >
-                    <Trash2 className="size-4" /> ลบ
-                  </Button>
-                </>
+            <div className="divide-y divide-[#edf2f2]">
+              {technicians.map((technician) => (
+                <div
+                  key={technician.id}
+                  className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center"
+                >
+                  <div className="min-w-0 flex-1">
+                    <strong className="block truncate text-sm text-[#173d50]">
+                      {technician.technicianName}
+                    </strong>
+                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[#789097]">
+                      <span className="flex items-center gap-1">
+                        <Building2 className="size-3" />
+                        {technician.company ?? "ไม่ระบุบริษัท"}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Phone className="size-3" />
+                        {technician.phone ?? "ไม่ระบุเบอร์"}
+                      </span>
+                    </div>
+                  </div>
+                  {actor.role === "Admin" ? (
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => editTechnician(technician)}
+                      >
+                        <Pencil className="size-3.5" /> แก้ไข
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="danger"
+                        disabled={busy}
+                        onClick={() => void removeTechnician(technician)}
+                      >
+                        <Trash2 className="size-3.5" /> ลบ
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+              {!technicians.length ? (
+                <p className="px-4 py-5 text-center text-sm text-[#8ba0a5]">
+                  ยังไม่มีช่างที่ผูกกับเครื่องมือนี้
+                </p>
               ) : null}
             </div>
-          </Card>
-          {selected.photos.length ? (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {selected.photos.map((photo) => (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  key={photo.id}
-                  src={`/api/attachments/${photo.id}`}
-                  alt={`รูป ${selected.name}`}
-                  className="aspect-[4/3] w-full rounded-xl border border-[#d9e5e5] bg-white object-cover"
-                />
-              ))}
-            </div>
-          ) : null}
-          <AttachmentList
-            module="equipment"
-            entityType="equipment"
-            entityId={selected.id}
-            kind="equipment-photo"
-            canDelete={actor.role === "Admin"}
-            canUpload={actor.role === "Admin"}
-            accept="image/jpeg,image/png,image/webp"
-            label="รูปเครื่องมือ"
-          />
-          <Card className="p-4">
+            {actor.role === "Admin" ? (
+              <form
+                onSubmit={saveTechnician}
+                className="grid gap-3 border-t border-[#e1eaeb] bg-[#fbfdfd] p-4 sm:grid-cols-3"
+              >
+                <Field label="ชื่อช่าง *">
+                  <Input
+                    required
+                    value={technicianForm.technicianName}
+                    onChange={(event) =>
+                      setTechnicianForm({
+                        ...technicianForm,
+                        technicianName: event.target.value,
+                      })
+                    }
+                  />
+                </Field>
+                <Field label="บริษัท">
+                  <Input
+                    value={technicianForm.company}
+                    onChange={(event) =>
+                      setTechnicianForm({
+                        ...technicianForm,
+                        company: event.target.value,
+                      })
+                    }
+                  />
+                </Field>
+                <Field label="เบอร์ติดต่อ">
+                  <Input
+                    inputMode="tel"
+                    value={technicianForm.phone}
+                    onChange={(event) =>
+                      setTechnicianForm({
+                        ...technicianForm,
+                        phone: event.target.value,
+                      })
+                    }
+                  />
+                </Field>
+                <div className="flex gap-2 sm:col-span-3">
+                  <Button disabled={busy}>
+                    <Plus className="size-4" />
+                    {editingTechnicianId ? "บันทึกการแก้ไข" : "เพิ่มช่าง"}
+                  </Button>
+                  {editingTechnicianId ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => {
+                        setTechnicianForm(emptyTechnicianForm);
+                        setEditingTechnicianId(null);
+                      }}
+                    >
+                      ยกเลิก
+                    </Button>
+                  ) : null}
+                </div>
+              </form>
+            ) : null}
+              </Card>
+              <Card className="p-4">
             <div className="flex items-center gap-2">
               <Link2 className="size-4 text-[#0b7f76]" />
               <h3 className="font-bold text-[#173d50]">เชื่อม IQC / EQA</h3>
@@ -777,7 +1061,8 @@ function Registry({
                 </Button>
               </div>
             ) : null}
-          </Card>
+              </Card>
+            </section>
         </div>
       ) : (
         <Empty text="ยังไม่มีเครื่องมือ" />
@@ -793,7 +1078,7 @@ const emptyPlan = {
   intervalValue: 1,
   intervalUnit: "year",
   scheduleBasis: "completion_based",
-  nextDueOn: todayBangkok(),
+  nextDueOn: endOfEquipmentDueMonth(todayBangkok()),
   reminderDays: 30,
   vendor: "",
   instruction: "",
@@ -914,13 +1199,18 @@ function Plans({
               </Select>
             </Field>
             <div className="grid grid-cols-2 gap-2">
-              <Field label="ครบกำหนดครั้งถัดไป">
+              <Field label="เดือนครบกำหนดครั้งถัดไป">
                 <Input
-                  type="date"
+                  type="month"
                   required
-                  value={form.nextDueOn}
+                  value={equipmentDueMonthInput(form.nextDueOn)}
                   onChange={(e) =>
-                    setForm({ ...form, nextDueOn: e.target.value })
+                    setForm({
+                      ...form,
+                      nextDueOn: e.target.value
+                        ? endOfEquipmentDueMonth(e.target.value)
+                        : "",
+                    })
                   }
                 />
               </Field>
@@ -981,7 +1271,7 @@ function Plans({
       <Card className="overflow-hidden">
         <div className="border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3">
           <h2 className="font-bold text-[#173d50]">แผนงานทั้งหมด</h2>
-          <p className="mt-1 text-xs text-[#789097]">เรียงตามวันครบกำหนด</p>
+          <p className="mt-1 text-xs text-[#789097]">เรียงตามเดือนครบกำหนด</p>
         </div>
         <div className="divide-y divide-[#edf2f2]">
           {workspace.plans.map((plan) => (
@@ -1004,7 +1294,7 @@ function Plans({
                     : "นับจากวันที่ทำจริง"}
                 </p>
                 <p className="mt-1 text-xs font-semibold text-[#315763]">
-                  ครบกำหนด {formatDate(plan.nextDueOn)}
+                  ครบกำหนด {formatEquipmentDueMonth(plan.nextDueOn)}
                 </p>
               </div>
               {actor.role === "Admin" ? (
@@ -1092,6 +1382,7 @@ function WorkHistory({
 }) {
   const [form, setForm] = useState(emptyRecord);
   const [search, setSearch] = useState("");
+  const [selectedTechnicianId, setSelectedTechnicianId] = useState("");
   const equipmentMap = new Map(
     workspace.equipment.map((item) => [item.id, item]),
   );
@@ -1112,6 +1403,19 @@ function WorkHistory({
   const plans = workspace.plans.filter(
     (plan) => plan.equipmentId === form.equipmentId && plan.isActive,
   );
+  const technicians = workspace.technicians.filter(
+    (technician) => technician.equipmentId === form.equipmentId,
+  );
+  function selectTechnician(id: string) {
+    setSelectedTechnicianId(id);
+    const technician = technicians.find((item) => item.id === id);
+    setForm((current) => ({
+      ...current,
+      technicianName: technician?.technicianName ?? "",
+      company: technician?.company ?? "",
+      technicianContact: technician?.phone ?? "",
+    }));
+  }
   async function save(e: React.FormEvent) {
     e.preventDefault();
     const payload = {
@@ -1132,7 +1436,10 @@ function WorkHistory({
       { method: "POST", body: JSON.stringify(payload) },
       "บันทึกประวัติงานแล้ว",
     );
-    if (ok) setForm(emptyRecord);
+    if (ok) {
+      setForm(emptyRecord);
+      setSelectedTechnicianId("");
+    }
   }
   return (
     <div className="grid gap-4 2xl:grid-cols-[420px_minmax(0,1fr)]">
@@ -1146,9 +1453,17 @@ function WorkHistory({
             <Select
               required
               value={form.equipmentId}
-              onChange={(e) =>
-                setForm({ ...form, equipmentId: e.target.value, planId: "" })
-              }
+              onChange={(e) => {
+                setSelectedTechnicianId("");
+                setForm({
+                  ...form,
+                  equipmentId: e.target.value,
+                  planId: "",
+                  technicianName: "",
+                  company: "",
+                  technicianContact: "",
+                });
+              }}
             >
               <option value="">เลือกเครื่องมือ</option>
               {workspace.equipment
@@ -1168,11 +1483,31 @@ function WorkHistory({
               <option value="">ไม่ผูกแผน</option>
               {plans.map((plan) => (
                 <option key={plan.id} value={plan.id}>
-                  {plan.title} · {formatDate(plan.nextDueOn)}
+                  {plan.title} · {formatEquipmentDueMonth(plan.nextDueOn)}
                 </option>
               ))}
             </Select>
           </Field>
+          <div className="rounded-xl border border-[#cfe4e1] bg-[#f1faf8] p-3">
+            <Field label="เลือกช่างจากทะเบียนเครื่องมือนี้">
+              <Select
+                value={selectedTechnicianId}
+                disabled={!form.equipmentId}
+                onChange={(event) => selectTechnician(event.target.value)}
+              >
+                <option value="">ช่างอื่น / กรอกเอง</option>
+                {technicians.map((technician) => (
+                  <option key={technician.id} value={technician.id}>
+                    {technician.technicianName}
+                    {technician.company ? ` · ${technician.company}` : ""}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <p className="mt-2 text-[11px] leading-5 text-[#68828a]">
+              เลือกช่างแล้วระบบจะเติมชื่อ บริษัท และเบอร์ติดต่อให้ โดยยังแก้ไขหรือกรอกช่างนอกทะเบียนได้
+            </p>
+          </div>
           <div className="grid grid-cols-2 gap-2">
             <Field label="ประเภทงาน">
               <Select

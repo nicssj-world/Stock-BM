@@ -17,6 +17,7 @@ import type {
 import {
   EQUIPMENT_EVENT_LABELS,
   equipmentStatusLabel,
+  formatEquipmentDueMonth,
 } from "@/lib/equipment/rules";
 import { todayBangkok } from "@/lib/bm/rules";
 import {
@@ -57,6 +58,18 @@ export function EquipmentPublicForm({
   const [returnStatus, setReturnStatus] = useState<
     "active" | "maintenance" | "out_of_service"
   >("active");
+  const [selectedTechnicianId, setSelectedTechnicianId] = useState("");
+  const [technicianName, setTechnicianName] = useState("");
+  const [company, setCompany] = useState("");
+  const [technicianContact, setTechnicianContact] = useState("");
+
+  function selectTechnician(id: string) {
+    setSelectedTechnicianId(id);
+    const technician = context.technicians.find((item) => item.id === id);
+    setTechnicianName(technician?.technicianName ?? "");
+    setCompany(technician?.company ?? "");
+    setTechnicianContact(technician?.phone ?? "");
+  }
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -199,21 +212,57 @@ export function EquipmentPublicForm({
                   <option value="">ไม่ผูกแผน</option>
                   {context.plans.map((plan) => (
                     <option key={plan.id} value={plan.id}>
-                      {plan.title} · {plan.nextDueOn}
+                      {plan.title} · {formatEquipmentDueMonth(plan.nextDueOn)}
                     </option>
                   ))}
                 </Select>
               </Field>
+              <div className="rounded-xl border border-[#cfe4e1] bg-[#f1faf8] p-3">
+                <Field label="เลือกช่างจากทะเบียนเครื่องนี้">
+                  <Select
+                    value={selectedTechnicianId}
+                    onChange={(event) => selectTechnician(event.target.value)}
+                  >
+                    <option value="">ช่างอื่น / กรอกเอง</option>
+                    {context.technicians.map((technician) => (
+                      <option key={technician.id} value={technician.id}>
+                        {technician.technicianName}
+                        {technician.company ? ` · ${technician.company}` : ""}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <p className="mt-2 text-[11px] leading-5 text-[#68828a]">
+                  เลือกแล้วระบบจะเติมข้อมูลให้ แต่ยังแก้ไขชื่อ บริษัท และเบอร์ได้
+                </p>
+              </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="ชื่อช่าง *">
-                  <Input required name="technicianName" autoComplete="name" />
+                  <Input
+                    required
+                    name="technicianName"
+                    autoComplete="name"
+                    value={technicianName}
+                    onChange={(event) => setTechnicianName(event.target.value)}
+                  />
                 </Field>
                 <Field label="บริษัท">
-                  <Input name="company" />
+                  <Input
+                    name="company"
+                    value={company}
+                    onChange={(event) => setCompany(event.target.value)}
+                  />
                 </Field>
               </div>
               <Field label="เบอร์ติดต่อ">
-                <Input name="technicianContact" inputMode="tel" />
+                <Input
+                  name="technicianContact"
+                  inputMode="tel"
+                  value={technicianContact}
+                  onChange={(event) =>
+                    setTechnicianContact(event.target.value)
+                  }
+                />
               </Field>
               <Field label="เลขที่ใบงาน">
                 <Input name="jobNumber" />

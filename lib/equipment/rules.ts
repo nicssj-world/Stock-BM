@@ -52,6 +52,26 @@ function daysInMonth(year: number, month: number) {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
+/** The planning workflow tracks a due month, not a specific day. */
+export function equipmentDueMonthInput(value: string) {
+  return value.slice(0, 7);
+}
+
+/** Stores every due month as its final calendar day for reliable reminders. */
+export function endOfEquipmentDueMonth(value: string) {
+  const [year, month] = equipmentDueMonthInput(value).split("-").map(Number);
+  return formatDate(year, month, daysInMonth(year, month));
+}
+
+export function formatEquipmentDueMonth(value: string) {
+  const month = equipmentDueMonthInput(value);
+  return new Intl.DateTimeFormat("th-TH", {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${month}-01T00:00:00Z`));
+}
+
 export function addEquipmentInterval(
   date: string,
   value: number,

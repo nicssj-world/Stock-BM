@@ -1,8 +1,11 @@
 import "server-only";
 
-import type { BmActor } from "@/lib/bm/types";
+import type { BmActor, StockLocation } from "@/lib/bm/types";
 import { todayBangkok } from "@/lib/bm/rules";
-import { getEquipmentDueState } from "@/lib/equipment/rules";
+import {
+  endOfEquipmentDueMonth,
+  getEquipmentDueState,
+} from "@/lib/equipment/rules";
 import type {
   Equipment,
   EquipmentAttachment,
@@ -17,6 +20,7 @@ import type {
   EquipmentScheduleBasis,
   EquipmentServiceRecord,
   EquipmentStatus,
+  EquipmentTechnician,
   EquipmentWorkspace,
   PublicEquipmentContext,
 } from "@/lib/equipment/types";
@@ -39,6 +43,10 @@ function nullableString(value: unknown) {
 }
 function clean(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+function cleanAssetNumber(value: unknown) {
+  const assetNumber = clean(value);
+  return assetNumber === "-" ? null : assetNumber;
 }
 function asNumber(value: unknown) {
   return Number(value) || 0;
@@ -120,7 +128,10 @@ function mapAttachment(row: RecordRow): EquipmentAttachment {
 function mapEquipment(
   row: RecordRow,
   photos: EquipmentAttachment[],
+  locations: Map<string, StockLocation>,
 ): Equipment {
+  const locationId = nullableString(row.location_id);
+  const linkedLocation = locationId ? locations.get(locationId) : null;
   return {
     id: asString(row.id),
     code: asString(row.code),
@@ -130,7 +141,10 @@ function mapEquipment(
     model: nullableString(row.model),
     serialNumber: nullableString(row.serial_number),
     assetNumber: nullableString(row.asset_number),
-    location: nullableString(row.location),
+    locationId,
+    location: linkedLocation
+      ? `${linkedLocation.code} · ${linkedLocation.name}`
+      : nullableString(row.location),
     installedOn: nullableString(row.installed_on),
     warrantyUntil: nullableString(row.warranty_until),
     status: asString(row.status) as EquipmentStatus,
@@ -205,6 +219,17 @@ function mapRecord(
   };
 }
 
+function mapTechnician(row: RecordRow): EquipmentTechnician {
+  return {
+    id: asString(row.id),
+    equipmentId: asString(row.equipment_id),
+    technicianName: asString(row.technician_name),
+    company: nullableString(row.company),
+    phone: nullableString(row.phone),
+    createdAt: asString(row.created_at),
+  };
+}
+
 export async function getEquipmentWorkspace(
   actor: BmActor,
 ): Promise<EquipmentWorkspace> {
@@ -219,6 +244,8 @@ export async function getEquipmentWorkspace(
     eqaResult,
     attachmentResult,
     userResult,
+    locationResult,
+    technicianResult,
   ] = await Promise.all([
     admin.from("bm_equipment").select("*").order("code"),
     admin.from("bm_equipment_plans").select("*").order("next_due_on"),
@@ -244,6 +271,15 @@ export async function getEquipmentWorkspace(
       .eq("module", "equipment")
       .order("created_at", { ascending: false }),
     admin.from("nipt_users").select("id,display_name"),
+    admin
+      .from("bm_stock_locations")
+      .select("id,code,name,storage_condition,is_active")
+      .order("is_active", { ascending: false })
+      .order("code"),
+    admin
+      .from("bm_equipment_technicians")
+      .select("*")
+      .order("technician_name"),
   ]);
   [
     equipmentResult.error,
@@ -254,6 +290,8 @@ export async function getEquipmentWorkspace(
     eqaResult.error,
     attachmentResult.error,
     userResult.error,
+    locationResult.error,
+    technicianResult.error,
   ].forEach((error) => fail(error));
   const attachments = ((attachmentResult.data ?? []) as RecordRow[]).map(
     mapAttachment,
@@ -271,17 +309,31 @@ export async function getEquipmentWorkspace(
       asString(row.display_name),
     ]),
   );
+  const locations: StockLocation[] = (
+    (locationResult.data ?? []) as RecordRow[]
+  ).map((row) => ({
+    id: asString(row.id),
+    code: asString(row.code),
+    name: asString(row.name),
+    storageCondition: nullableString(row.storage_condition),
+    isActive: Boolean(row.is_active),
+  }));
+  const locationMap = new Map(locations.map((location) => [location.id, location]));
   const equipment = ((equipmentResult.data ?? []) as RecordRow[]).map((row) =>
     mapEquipment(
       row,
       (attachmentsByEntity.get(asString(row.id)) ?? []).filter(
         (item) => item.kind === "equipment-photo",
       ),
+      locationMap,
     ),
   );
   const plans = ((planResult.data ?? []) as RecordRow[]).map(mapPlan);
   const records = ((recordResult.data ?? []) as RecordRow[]).map((row) =>
     mapRecord(row, attachmentsByEntity.get(asString(row.id)) ?? [], names),
+  );
+  const technicians = ((technicianResult.data ?? []) as RecordRow[]).map(
+    mapTechnician,
   );
   const iqcInstruments = ((iqcResult.data ?? []) as RecordRow[]).map((row) => ({
     id: asString(row.id),
@@ -322,8 +374,10 @@ export async function getEquipmentWorkspace(
     plans,
     records,
     links,
+    technicians,
     iqcInstruments,
     eqaSchemes,
+    locations,
     dashboard: summarizeDashboard(equipment, plans, records),
   };
 }
@@ -394,14 +448,26 @@ export interface EquipmentInput {
   model?: string | null;
   serialNumber?: string | null;
   assetNumber?: string | null;
-  location?: string | null;
+  locationId?: string | null;
   installedOn?: string | null;
   warrantyUntil?: string | null;
   status?: EquipmentStatus;
   note?: string | null;
 }
 
-function equipmentPayload(input: EquipmentInput) {
+async function equipmentPayload(input: EquipmentInput) {
+  const locationId = clean(input.locationId);
+  let location: RecordRow | null = null;
+  if (locationId) {
+    const { data, error } = await getAdminClient()
+      .from("bm_stock_locations")
+      .select("id,code,name")
+      .eq("id", locationId)
+      .maybeSingle();
+    fail(error);
+    location = data as RecordRow | null;
+    if (!location) throw new HttpError(400, "ไม่พบ Location คลังน้ำยาที่เลือก");
+  }
   return {
     code: input.code.trim().toUpperCase(),
     name: input.name.trim(),
@@ -409,8 +475,11 @@ function equipmentPayload(input: EquipmentInput) {
     manufacturer: clean(input.manufacturer),
     model: clean(input.model),
     serial_number: clean(input.serialNumber),
-    asset_number: clean(input.assetNumber),
-    location: clean(input.location),
+    // A dash is the UI convention for an omitted Asset No.; store it as null
+    // so it does not consume the unique Asset No. value for other equipment.
+    asset_number: cleanAssetNumber(input.assetNumber),
+    location_id: locationId,
+    location: location ? `${asString(location.code)} · ${asString(location.name)}` : null,
     installed_on: clean(input.installedOn),
     warranty_until: clean(input.warrantyUntil),
     status: input.status ?? "active",
@@ -423,7 +492,7 @@ export async function createEquipment(input: EquipmentInput, actor: BmActor) {
   const { data, error } = await getAdminClient()
     .from("bm_equipment")
     .insert({
-      ...equipmentPayload(input),
+      ...(await equipmentPayload(input)),
       created_by: actor.id,
       updated_by: actor.id,
     })
@@ -449,7 +518,7 @@ export async function updateEquipment(
   const { error } = await getAdminClient()
     .from("bm_equipment")
     .update({
-      ...equipmentPayload(input),
+      ...(await equipmentPayload(input)),
       updated_by: actor.id,
       updated_at: new Date().toISOString(),
     })
@@ -533,7 +602,7 @@ function planPayload(input: EquipmentPlanInput) {
     interval_value: input.intervalValue,
     interval_unit: input.intervalUnit,
     schedule_basis: input.scheduleBasis,
-    next_due_on: input.nextDueOn,
+    next_due_on: endOfEquipmentDueMonth(input.nextDueOn),
     reminder_days: input.reminderDays ?? 30,
     vendor: clean(input.vendor),
     instruction: clean(input.instruction),
@@ -818,6 +887,80 @@ export async function deleteEquipmentLink(id: string, actor: BmActor) {
   return getEquipmentWorkspace(actor);
 }
 
+export interface EquipmentTechnicianInput {
+  equipmentId: string;
+  technicianName: string;
+  company?: string | null;
+  phone?: string | null;
+}
+
+function technicianPayload(input: EquipmentTechnicianInput) {
+  return {
+    equipment_id: input.equipmentId,
+    technician_name: input.technicianName.trim(),
+    company: clean(input.company),
+    phone: clean(input.phone),
+  };
+}
+
+export async function createEquipmentTechnician(
+  input: EquipmentTechnicianInput,
+  actor: BmActor,
+) {
+  assertAdmin(actor);
+  const admin = getAdminClient();
+  const { data: equipment, error: equipmentError } = await admin
+    .from("bm_equipment")
+    .select("id")
+    .eq("id", input.equipmentId)
+    .maybeSingle();
+  fail(equipmentError);
+  if (!equipment) throw new HttpError(404, "ไม่พบเครื่องมือ");
+  const { data, error } = await admin
+    .from("bm_equipment_technicians")
+    .insert({
+      ...technicianPayload(input),
+      created_by: actor.id,
+      updated_by: actor.id,
+    })
+    .select("id")
+    .single();
+  fail(error);
+  const id = asString((data as RecordRow).id);
+  await writeAudit(actor, "equipment.technician.create", "equipment-technician", id, { ...input });
+  return getEquipmentWorkspace(actor);
+}
+
+export async function updateEquipmentTechnician(
+  id: string,
+  input: EquipmentTechnicianInput,
+  actor: BmActor,
+) {
+  assertAdmin(actor);
+  const { error } = await getAdminClient()
+    .from("bm_equipment_technicians")
+    .update({
+      ...technicianPayload(input),
+      updated_by: actor.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+  fail(error);
+  await writeAudit(actor, "equipment.technician.update", "equipment-technician", id, { ...input });
+  return getEquipmentWorkspace(actor);
+}
+
+export async function deleteEquipmentTechnician(id: string, actor: BmActor) {
+  assertAdmin(actor);
+  const { error } = await getAdminClient()
+    .from("bm_equipment_technicians")
+    .delete()
+    .eq("id", id);
+  fail(error);
+  await writeAudit(actor, "equipment.technician.delete", "equipment-technician", id, {});
+  return getEquipmentWorkspace(actor);
+}
+
 export async function resolvePublicEquipment(
   token: string,
 ): Promise<PublicEquipmentContext | null> {
@@ -831,14 +974,22 @@ export async function resolvePublicEquipment(
   fail(error);
   if (!data) return null;
   const row = data as RecordRow;
-  const equipment = mapEquipment(row, []);
-  const { data: plans, error: planError } = await admin
-    .from("bm_equipment_plans")
-    .select("*")
-    .eq("equipment_id", equipment.id)
-    .eq("is_active", true)
-    .order("next_due_on");
-  fail(planError);
+  const equipment = mapEquipment(row, [], new Map<string, StockLocation>());
+  const [planResult, technicianResult] = await Promise.all([
+    admin
+      .from("bm_equipment_plans")
+      .select("*")
+      .eq("equipment_id", equipment.id)
+      .eq("is_active", true)
+      .order("next_due_on"),
+    admin
+      .from("bm_equipment_technicians")
+      .select("id,equipment_id,technician_name,company,phone,created_at")
+      .eq("equipment_id", equipment.id)
+      .order("technician_name"),
+  ]);
+  fail(planResult.error);
+  fail(technicianResult.error);
   return {
     equipment: {
       code: equipment.code,
@@ -849,7 +1000,7 @@ export async function resolvePublicEquipment(
       serialNumber: equipment.serialNumber,
       status: equipment.status,
     },
-    plans: ((plans ?? []) as RecordRow[])
+    plans: ((planResult.data ?? []) as RecordRow[])
       .map(mapPlan)
       .map(({ id, activityType, title, nextDueOn, dueState }) => ({
         id,
@@ -857,6 +1008,14 @@ export async function resolvePublicEquipment(
         title,
         nextDueOn,
         dueState,
+      })),
+    technicians: ((technicianResult.data ?? []) as RecordRow[])
+      .map(mapTechnician)
+      .map(({ id, technicianName, company, phone }) => ({
+        id,
+        technicianName,
+        company,
+        phone,
       })),
   };
 }

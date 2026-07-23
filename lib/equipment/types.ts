@@ -1,3 +1,5 @@
+import type { StockLocation } from '@/lib/bm/types'
+
 export type EquipmentStatus = 'active' | 'maintenance' | 'out_of_service' | 'decommissioned'
 export type EquipmentPlanType = 'pm' | 'calibration' | 'verification' | 'qualification' | 'inspection_safety'
 export type EquipmentEventType = EquipmentPlanType | 'repair' | 'software_firmware' | 'relocation' | 'other'
@@ -27,6 +29,7 @@ export interface Equipment {
   model: string | null
   serialNumber: string | null
   assetNumber: string | null
+  locationId: string | null
   location: string | null
   installedOn: string | null
   warrantyUntil: string | null
@@ -95,6 +98,15 @@ export interface EquipmentModuleLink {
   entityLabel: string
 }
 
+export interface EquipmentTechnician {
+  id: string
+  equipmentId: string
+  technicianName: string
+  company: string | null
+  phone: string | null
+  createdAt: string
+}
+
 export interface EquipmentDashboard {
   active: number
   maintenance: number
@@ -109,12 +121,15 @@ export interface EquipmentWorkspace {
   plans: EquipmentPlan[]
   records: EquipmentServiceRecord[]
   links: EquipmentModuleLink[]
+  technicians: EquipmentTechnician[]
   iqcInstruments: { id: string; code: string; name: string }[]
   eqaSchemes: { id: string; code: string | null; name: string }[]
+  locations: StockLocation[]
   dashboard: EquipmentDashboard
 }
 
 export interface PublicEquipmentContext {
   equipment: Pick<Equipment, 'code' | 'name' | 'category' | 'manufacturer' | 'model' | 'serialNumber' | 'status'>
   plans: Pick<EquipmentPlan, 'id' | 'activityType' | 'title' | 'nextDueOn' | 'dueState'>[]
+  technicians: Pick<EquipmentTechnician, 'id' | 'technicianName' | 'company' | 'phone'>[]
 }

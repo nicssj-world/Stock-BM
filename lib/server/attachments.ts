@@ -234,7 +234,9 @@ export async function signedUrl(id: string): Promise<string> {
   const row = await getAttachmentRow(id);
   const { data, error } = await getAdminClient()
     .storage.from(BUCKET)
-    .createSignedUrl(asString(row.storage_path), 120);
+    // The authenticated route caches its redirect for ten minutes. Keep the
+    // signed URL valid a little longer so that cached redirects never expire.
+    .createSignedUrl(asString(row.storage_path), 900);
   if (error || !data)
     throw new HttpError(
       400,

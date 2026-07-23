@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   addEquipmentInterval,
+  endOfEquipmentDueMonth,
+  equipmentDueMonthInput,
+  formatEquipmentDueMonth,
   getEquipmentDueState,
   nextEquipmentDueDate,
 } from "@/lib/equipment/rules";
@@ -26,6 +29,12 @@ describe("equipment scheduling", () => {
       ),
     ).toBe("2026-03-31");
     expect(addEquipmentInterval("2024-02-29", 1, "year")).toBe("2025-02-28");
+  });
+
+  it("uses the end of a selected month internally while presenting month-year only", () => {
+    expect(equipmentDueMonthInput("2026-07-23")).toBe("2026-07");
+    expect(endOfEquipmentDueMonth("2026-02")).toBe("2026-02-28");
+    expect(formatEquipmentDueMonth("2026-07-31")).toContain("2569");
   });
 
   it("supports completion and fixed schedules", () => {

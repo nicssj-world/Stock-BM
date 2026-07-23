@@ -30,6 +30,7 @@ export function AttachmentList({
   canUpload = true,
   accept,
   label = 'ไฟล์แนบ / Attachments',
+  onChanged,
 }: {
   module: AttachmentModule
   entityType: string
@@ -39,6 +40,7 @@ export function AttachmentList({
   canUpload?: boolean
   accept?: string
   label?: string
+  onChanged?: () => void | Promise<void>
 }) {
   const [items, setItems] = useState<Attachment[] | null>(null)
   const [busy, setBusy] = useState(false)
@@ -84,6 +86,7 @@ export function AttachmentList({
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error ?? 'อัปโหลดไม่สำเร็จ')
       await refresh()
+      await onChanged?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'อัปโหลดไม่สำเร็จ')
     } finally {
@@ -98,6 +101,7 @@ export function AttachmentList({
     try {
       await api(`/api/attachments/${id}`, { method: 'DELETE' })
       await refresh()
+      await onChanged?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'ลบไม่สำเร็จ')
     } finally {
