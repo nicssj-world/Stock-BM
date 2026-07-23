@@ -40,6 +40,15 @@ export function isHpvBoxFull(occupiedPositions: number[], capacity = HPV_BOX_CAP
   return nextHpvBoxPosition(occupiedPositions, capacity) === null
 }
 
+export function resolveHpvStorageBoxes<T extends { id: string; status: HpvBoxStatus }>(boxes: T[], viewBoxId: string, intakeBoxId: string) {
+  const openBoxes = boxes.filter((box) => box.status === 'open')
+  return {
+    openBoxes,
+    viewBox: boxes.find((box) => box.id === viewBoxId) ?? boxes[0] ?? null,
+    intakeBox: openBoxes.find((box) => box.id === intakeBoxId) ?? openBoxes[0] ?? null,
+  }
+}
+
 export function isHpvSpecimenType(value: unknown): value is HpvSpecimenType {
   return value === 'self_collected' || value === 'clinician_collected'
 }

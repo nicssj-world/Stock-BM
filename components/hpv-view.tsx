@@ -27,7 +27,7 @@ import {
 } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { HpvBoxType, HpvKitDistribution, HpvSample, HpvSiteReceipt, HpvSpecimenType, HpvStorageBox, HpvWorkspace } from '@/lib/hpv/types'
-import { formatHpvBoxPosition, getHpvDestructionState, HPV_BOX_CAPACITY, specimenTypeLabel } from '@/lib/hpv/rules'
+import { formatHpvBoxPosition, getHpvDestructionState, HPV_BOX_CAPACITY, resolveHpvStorageBoxes, specimenTypeLabel } from '@/lib/hpv/rules'
 import { bangkokDateKey, daysUntil, formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
 import { Pagination, usePagination } from '@/components/pagination'
@@ -1030,18 +1030,18 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
   onWorkspace: (workspace: HpvWorkspace, text: string) => void
   onNotice: (notice: { tone: 'success' | 'danger' | 'warning' | 'info'; text: string } | null) => void
 }) {
-  const openBoxes = data.boxes.filter((box) => box.status === 'open')
-  const [selectedBoxId, setSelectedBoxId] = useState(openBoxes[0]?.id ?? data.boxes[0]?.id ?? '')
+  const initialOpenBox = data.boxes.find((box) => box.status === 'open')
+  const [viewBoxId, setViewBoxId] = useState(initialOpenBox?.id ?? data.boxes[0]?.id ?? '')
+  const [intakeBoxId, setIntakeBoxId] = useState(initialOpenBox?.id ?? '')
   const [selectedPosition, setSelectedPosition] = useState<number | null>(null)
   const [barcode, setBarcode] = useState('')
   const [busy, setBusy] = useState(false)
   const [boxForm, setBoxForm] = useState({ boxCode: `HPV-${todayKey().replaceAll('-', '')}-01` })
   const [specimenType, setSpecimenType] = useState<HpvSpecimenType>('self_collected')
-  const effectiveBoxId = data.boxes.some((box) => box.id === selectedBoxId) ? selectedBoxId : openBoxes[0]?.id ?? data.boxes[0]?.id ?? ''
-  const selectedBox = data.boxes.find((box) => box.id === effectiveBoxId) ?? data.boxes[0] ?? null
-  const scanBox = openBoxes.find((box) => box.id === effectiveBoxId) ?? openBoxes[0] ?? null
+  const { openBoxes, viewBox: selectedBox, intakeBox: scanBox } = resolveHpvStorageBoxes(data.boxes, viewBoxId, intakeBoxId)
+  const effectiveBoxId = selectedBox?.id ?? ''
   const [searchBarcode, setSearchBarcode] = useState('')
-  const searchResult = useMemo(() => {
+  const searchResult = (() => {
     const code = searchBarcode.trim()
     if (!code) return null
     for (const box of data.boxes) {
@@ -1049,9 +1049,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
       if (sample) return { box, sample }
     }
     return 'not_found' as const
-  }, [searchBarcode, data.boxes])
-
-  useEffect(() => { setSelectedPosition(null) }, [effectiveBoxId])
+  })()
 
   async function scan(codeInput = barcode) {
     const code = normalizeScan(codeInput)
@@ -1063,6 +1061,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
         body: JSON.stringify({ barcode: code, boxId: scanBox.id, specimenType, position: selectedPosition ?? undefined }),
       })
       onWorkspace(result.workspace, `จัดเก็บ sample ${code}${selectedPosition ? ` ที่ ${formatHpvBoxPosition(selectedPosition)}` : ''} แล้ว`)
+      setViewBoxId(scanBox.id)
       setBarcode('')
       setSelectedPosition(null)
     } catch (error) {
@@ -1080,6 +1079,9 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
     try {
       const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/storage/boxes', { method: 'POST', body: JSON.stringify(boxForm) })
       onWorkspace(result.workspace, 'เปิด storage box ใหม่แล้ว')
+      const createdBox = result.workspace.boxes.find((box) => box.boxCode === boxForm.boxCode.trim())
+      if (createdBox) { setViewBoxId(createdBox.id); setIntakeBoxId(createdBox.id) }
+      setSelectedPosition(null)
       const nextSuffix = String(data.boxes.length + 2).padStart(2, '0')
       setBoxForm((current) => ({ ...current, boxCode: `HPV-${todayKey().replaceAll('-', '')}-${nextSuffix}` }))
     } catch (error) {
@@ -1126,6 +1128,8 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
         body: JSON.stringify({ action: 'close' }),
       })
       onWorkspace(result.workspace, `ปิดกล่อง ${box.boxCode} แล้ว เริ่มนับเวลารอทิ้ง`)
+      setViewBoxId(box.id)
+      setSelectedPosition(null)
     } catch (error) {
       onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'ปิดกล่องไม่สำเร็จ' })
     } finally {
@@ -1142,6 +1146,9 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
         body: JSON.stringify({ action: 'reopen' }),
       })
       onWorkspace(result.workspace, `เปิดกล่อง ${box.boxCode} กลับใช้งานแล้ว`)
+      setViewBoxId(box.id)
+      setIntakeBoxId(box.id)
+      setSelectedPosition(null)
     } catch (error) {
       onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'เปิดกล่องกลับไม่สำเร็จ' })
     } finally {
@@ -1171,7 +1178,9 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
     try {
       const result = await api<{ workspace: HpvWorkspace }>(`/api/hpv/storage/boxes/${box.id}`, { method: 'DELETE' })
       onWorkspace(result.workspace, 'ลบ storage box แล้ว')
-      setSelectedBoxId('')
+      setViewBoxId('')
+      if (intakeBoxId === box.id) setIntakeBoxId('')
+      setSelectedPosition(null)
     } catch (error) {
       onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'ลบกล่องไม่สำเร็จ' })
     } finally {
@@ -1194,7 +1203,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
             <h2 className="font-bold text-[#173d50]">ยิงบาร์โค้ดเข้า box</h2>
             <Field label="Active box">
               {openBoxes.length ? (
-                <Select value={scanBox?.id ?? ''} onChange={(e) => { setSelectedBoxId(e.target.value) }}>{openBoxes.map((box) => <option key={box.id} value={box.id}>{box.boxCode}</option>)}</Select>
+                <Select value={scanBox?.id ?? ''} onChange={(e) => { setIntakeBoxId(e.target.value); setViewBoxId(e.target.value); setSelectedPosition(null) }}>{openBoxes.map((box) => <option key={box.id} value={box.id}>{box.boxCode}</option>)}</Select>
               ) : (
                 <p className="rounded-md border border-dashed border-[#d7e3e5] px-3 py-2 text-sm text-[#8ba0a5]">ยังไม่มีกล่องที่เปิดอยู่ — เปิดกล่องใหม่ก่อน</p>
               )}
@@ -1241,7 +1250,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
             <div className="rounded-md bg-[#eef9f7] p-3">
               <p className="text-sm font-bold text-[#0b7f76]">{searchResult.box.boxCode}</p>
               <div className="mt-1 flex items-center gap-2"><p className="text-xs text-[#789097]">{formatHpvBoxPosition(searchResult.sample.position)} · {searchResult.sample.status}</p><SpecimenTypeBadge type={searchResult.sample.specimenType} /></div>
-              <button type="button" onClick={() => { setSelectedBoxId(searchResult.box.id); setSelectedPosition(null) }} className="mt-1.5 text-xs font-bold text-[#0b7f76] underline hover:no-underline">ไปที่กล่องนี้</button>
+              <button type="button" onClick={() => { setViewBoxId(searchResult.box.id); if (searchResult.box.status === 'open') setIntakeBoxId(searchResult.box.id); setSelectedPosition(null) }} className="mt-1.5 text-xs font-bold text-[#0b7f76] underline hover:no-underline">ไปที่กล่องนี้</button>
             </div>
           ) : null}
         </Card>
@@ -1264,7 +1273,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
                     const remainingDays = box.destroyDueAt ? daysUntil(bangkokDateKey(box.destroyDueAt), today) : 0
                     const storedCount = box.samples.filter((s) => s.status === 'stored').length
                     return (
-                      <tr key={box.id} onClick={() => setSelectedBoxId(box.id)} className={`cursor-pointer transition-colors ${isSelected ? 'bg-[#eef9f7]' : 'hover:bg-[#f7fbfc]'}`}>
+                      <tr key={box.id} onClick={() => { setViewBoxId(box.id); if (box.status === 'open') setIntakeBoxId(box.id); setSelectedPosition(null) }} className={`cursor-pointer transition-colors ${isSelected ? 'bg-[#eef9f7]' : 'hover:bg-[#f7fbfc]'}`}>
                         <td className="mono px-4 py-2 font-bold text-[#315763]">{box.boxCode}</td>
                         <td className="mono px-2 py-2 text-center font-bold text-[#315763]">{storedCount}/{box.capacity}</td>
                         <td className="px-2 py-2"><StatusBadge tone={box.status === 'open' ? 'accepted' : box.status === 'full' ? 'warning' : 'neutral'} label={box.status.toUpperCase()} /></td>

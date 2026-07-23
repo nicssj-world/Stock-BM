@@ -30,4 +30,11 @@ describe('HPV sample storage interface', () => {
     expect(source).toContain("box.status === 'full' ? <button")
     expect(source).toContain('เปิดกล่องกลับ')
   })
+
+  it('keeps full or closed boxes viewable while intake falls back to an open box', () => {
+    expect(source).toContain('const [viewBoxId, setViewBoxId]')
+    expect(source).toContain('const [intakeBoxId, setIntakeBoxId]')
+    expect(source).toContain('resolveHpvStorageBoxes(data.boxes, viewBoxId, intakeBoxId)')
+    expect(source).toContain('setViewBoxId(scanBox.id)')
+  })
 })

@@ -705,7 +705,8 @@ export async function scanHpvSample(input: { barcode: string; boxId: string; spe
   const { data: box, error: boxError } = await admin.from('bm_hpv_storage_boxes').select('*').eq('id', input.boxId).maybeSingle()
   fail(boxError)
   const boxRow = box as RecordRow | null
-  if (!boxRow || asString(boxRow.status) !== 'open') throw new HttpError(400, 'Open HPV storage box not found')
+  if (!boxRow) throw new HttpError(404, 'ไม่พบ HPV storage box ที่เลือก')
+  if (asString(boxRow.status) !== 'open') throw new HttpError(409, 'กล่องนี้ปิดหรือเต็มแล้ว กรุณาเลือกกล่องที่ยังเปิดอยู่')
 
   const { data: sampleRows, error: sampleError } = await admin.from('bm_hpv_samples').select('position').eq('box_id', input.boxId)
   fail(sampleError)

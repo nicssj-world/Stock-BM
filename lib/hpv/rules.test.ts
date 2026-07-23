@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { addOneMonth, formatHpvBoxPosition, getHpvDestructionState, isHpvBoxFull, isHpvSpecimenType, nextHpvBoxPosition, specimenTypeLabel, summarizeHpvSites } from '@/lib/hpv/rules'
+import { addOneMonth, formatHpvBoxPosition, getHpvDestructionState, isHpvBoxFull, isHpvSpecimenType, nextHpvBoxPosition, resolveHpvStorageBoxes, specimenTypeLabel, summarizeHpvSites } from '@/lib/hpv/rules'
 
 describe('HPV storage rules', () => {
+  it('keeps a closed/full box viewable while intake moves to another open box', () => {
+    const full = { id: 'full-box', status: 'full' as const }
+    const open = { id: 'open-box', status: 'open' as const }
+    expect(resolveHpvStorageBoxes([full, open], full.id, full.id)).toEqual({ openBoxes: [open], viewBox: full, intakeBox: open })
+    expect(resolveHpvStorageBoxes([full], full.id, full.id)).toEqual({ openBoxes: [], viewBox: full, intakeBox: null })
+  })
   it('finds the first open position in a 5x5 box', () => {
     expect(nextHpvBoxPosition([1, 2, 4])).toBe(3)
     expect(formatHpvBoxPosition(1)).toBe('A1')
