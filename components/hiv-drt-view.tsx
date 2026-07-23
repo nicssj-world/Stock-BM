@@ -17,6 +17,7 @@ import {
   History,
   LayoutDashboard,
   LoaderCircle,
+  MapPin,
   Plus,
   QrCode,
   Search,
@@ -305,7 +306,7 @@ function StoragePanel({ workspace, busy, mutate, setNotice, initialFilter }: {
         ) : null}
         <Card className="p-4">
           <div className="flex items-center justify-between"><div><p className="text-xs font-bold tracking-[.14em] text-[#0b7f76] uppercase">Rack registry</p><h2 className="mt-1 font-bold text-[#173d50]">สร้าง Storage Rack</h2></div><Plus className="size-5 text-[#0b7f76]" /></div>
-          <form onSubmit={createRack} className="mt-4 flex gap-2"><Input value={rackCode} onChange={(event) => setRackCode(event.target.value)} placeholder="Rack code" /><Button disabled={busy}>สร้าง</Button></form>
+          <form onSubmit={createRack} className="mt-4 flex gap-2"><Input value={rackCode} onChange={(event) => setRackCode(event.target.value)} placeholder="Rack code" className="min-w-0 flex-1" /><Button disabled={busy}>สร้าง</Button></form>
         </Card>
         <Card className="p-4">
           <h2 className="font-bold text-[#173d50]">รับ tube เข้า Storage</h2>
@@ -356,16 +357,61 @@ function StoragePanel({ workspace, busy, mutate, setNotice, initialFilter }: {
 
 function RackGrid({ rack, selectedSampleId, onSelect, onMove, busy }: { rack: HivDrtRack; selectedSampleId: string | null; onSelect: (id: string | null) => void; onMove: (sampleId: string, position: number) => void; busy: boolean }) {
   const byPosition = new Map(rack.samples.map((sample) => [sample.currentPosition, sample]))
+  const [mobileRow, setMobileRow] = useState(0)
+  const selectedSample = rack.samples.find((sample) => sample.id === selectedSampleId) ?? null
+
+  function selectOrMove(sample: HivDrtSample | undefined, position: number) {
+    if (busy) return
+    if (selectedSampleId && selectedSampleId !== sample?.id) onMove(selectedSampleId, position)
+    else onSelect(sample?.id ?? null)
+  }
+
   return (
-    <div className="overflow-x-auto bg-[radial-gradient(circle_at_15%_0%,rgba(11,127,118,.08),transparent_35%)] p-4">
-      <div className="grid min-w-[930px] grid-cols-[34px_repeat(12,minmax(66px,1fr))] gap-2" role="grid" aria-label={`Rack ${rack.rackCode} 8 by 12`}>
-        <div />
-        {Array.from({ length: 12 }, (_, index) => <div key={index} className="text-center mono text-[10px] font-bold text-[#6e898f]">{index + 1}</div>)}
-        {Array.from({ length: 8 }, (_, row) => (
-          <RackRow key={row} row={row} byPosition={byPosition} selectedSampleId={selectedSampleId} onSelect={onSelect} onMove={onMove} busy={busy} />
-        ))}
+    <div className="bg-[radial-gradient(circle_at_15%_0%,rgba(11,127,118,.08),transparent_35%)]">
+      <div className="p-3 sm:hidden">
+        <div className="grid grid-cols-8 gap-1 rounded-lg border border-[#d4e3e3] bg-white/80 p-1" role="tablist" aria-label="เลือกแถว Rack">
+          {Array.from({ length: 8 }, (_, row) => <button key={row} type="button" role="tab" aria-selected={mobileRow === row} onClick={() => setMobileRow(row)} className={`min-h-10 touch-manipulation rounded-md mono text-xs font-bold transition ${mobileRow === row ? 'bg-[#0b7f76] text-white shadow-sm' : 'text-[#58747d] active:bg-[#e8f7f5]'}`}>{String.fromCharCode(65 + row)}</button>)}
+        </div>
+
+        <div className={`mt-3 flex min-h-12 items-center gap-2 rounded-lg border px-3 py-2 text-xs ${selectedSample ? 'border-[#8bc8c1] bg-[#e9f8f5] text-[#176b68]' : 'border-[#d6e2e3] bg-white/75 text-[#6f888f]'}`}>
+          {selectedSample ? <><CheckCircle2 className="size-4 shrink-0" /><span className="min-w-0 flex-1"><strong className="mono block truncate">{selectedSample.barcode}</strong>แตะช่องปลายทางเพื่อย้ายหรือสลับ</span><button type="button" onClick={() => onSelect(null)} aria-label="ยกเลิกการเลือก" className="grid size-8 shrink-0 place-items-center rounded-md text-[#55727c] active:bg-white"><X className="size-4" /></button></> : <><MapPin className="size-4 shrink-0 text-[#0b7f76]" /><span>แตะ tube เพื่อเลือก จากนั้นแตะช่องปลายทาง</span></>}
+        </div>
+
+        <div className="mt-3 grid grid-cols-3 gap-2" role="grid" aria-label={`Rack ${rack.rackCode} row ${String.fromCharCode(65 + mobileRow)}`}>
+          {Array.from({ length: 12 }, (_, column) => {
+            const position = mobileRow * 12 + column + 1
+            const sample = byPosition.get(position)
+            const selected = sample?.id === selectedSampleId
+            return (
+              <button
+                key={position}
+                type="button"
+                role="gridcell"
+                disabled={busy}
+                aria-label={`${formatHivDrtPosition(position)} ${sample?.barcode ?? 'ว่าง'}`}
+                onClick={() => selectOrMove(sample, position)}
+                className={`relative min-h-18 touch-manipulation rounded-xl border px-2 py-2 text-center transition active:scale-[.97] disabled:opacity-50 ${sample ? 'border-[#8bc8c1] bg-[#e6f6f3] shadow-[inset_0_-3px_0_rgba(11,127,118,.08)]' : 'border-dashed border-[#cbdedf] bg-white/80'} ${selected ? 'ring-2 ring-[#0b7f76] ring-offset-2' : ''}`}
+              >
+                <span className={`mx-auto block size-3.5 rounded-full border ${sample ? 'border-[#0b7f76] bg-[#49b8ad]' : 'border-[#bcd0d3] bg-white'}`} />
+                <span className="mt-1.5 block mono text-[10px] font-bold text-[#315763]">{formatHivDrtPosition(position)}</span>
+                <span className="mt-0.5 block truncate mono text-[9px] text-[#6f888f]">{sample?.barcode ?? 'ว่าง'}</span>
+              </button>
+            )
+          })}
+        </div>
+        <div className="mt-3 flex items-center justify-between text-[11px] text-[#6f888f]"><span>แถว {String.fromCharCode(65 + mobileRow)} · 12 ช่อง</span><span>{Array.from({ length: 12 }, (_, column) => byPosition.has(mobileRow * 12 + column + 1)).filter(Boolean).length}/12 occupied</span></div>
       </div>
-      <div className="mt-4 flex flex-wrap items-center gap-4 text-[11px] text-[#6f888f]"><Legend color="bg-[#dff3f0] border-[#8bc8c1]" label="มี tube" /><Legend color="bg-white border-[#d7e4e5]" label="ช่องว่าง" /><span>คลิก tube แล้วคลิกช่องปลายทาง หรือ Drag & Drop เพื่อย้าย/สลับ</span></div>
+
+      <div className="hidden overflow-x-auto p-4 sm:block">
+        <div className="grid min-w-[930px] grid-cols-[34px_repeat(12,minmax(66px,1fr))] gap-2" role="grid" aria-label={`Rack ${rack.rackCode} 8 by 12`}>
+          <div />
+          {Array.from({ length: 12 }, (_, index) => <div key={index} className="text-center mono text-[10px] font-bold text-[#6e898f]">{index + 1}</div>)}
+          {Array.from({ length: 8 }, (_, row) => (
+            <RackRow key={row} row={row} byPosition={byPosition} selectedSampleId={selectedSampleId} onSelect={onSelect} onMove={onMove} busy={busy} />
+          ))}
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-4 text-[11px] text-[#6f888f]"><Legend color="bg-[#dff3f0] border-[#8bc8c1]" label="มี tube" /><Legend color="bg-white border-[#d7e4e5]" label="ช่องว่าง" /><span>คลิก tube แล้วคลิกช่องปลายทาง หรือ Drag & Drop เพื่อย้าย/สลับ</span></div>
+      </div>
     </div>
   )
 }

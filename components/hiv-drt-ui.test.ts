@@ -22,6 +22,14 @@ describe('HIV DRT interface', () => {
     expect(source).toContain("occupied ? ' · ไม่ว่าง' : ''")
   })
 
+  it('renders a touch-first row-by-row rack on phones', () => {
+    expect(source).toContain('p-3 sm:hidden')
+    expect(source).toContain('เลือกแถว Rack')
+    expect(source).toContain('grid grid-cols-3 gap-2')
+    expect(source).toContain('แตะช่องปลายทางเพื่อย้ายหรือสลับ')
+    expect(source).toContain('hidden overflow-x-auto p-4 sm:block')
+  })
+
   it('supports direct checkout, receiving results, deletion and tube destruction', () => {
     expect(source).toContain("'/api/hiv-drt/checkout'")
     expect(source).toContain('ได้รับผลแล้ว')
