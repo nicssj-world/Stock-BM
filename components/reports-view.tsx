@@ -21,23 +21,32 @@ function downloadCsv(filename: string, rows: string[][]) {
 export function ReportsPanel({ stock }: { stock: StockWorkspace }) {
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-3">
-        <ReportCard title="Balances CSV" detail={`${stock.items.length} items`} href="/api/stock/export?report=balances" icon={<FileDown />} />
-        <ReportCard title="Movement CSV" detail={`${stock.transactions.length} transactions`} href="/api/stock/export?report=movements" icon={<BarChart3 />} />
-        <ReportCard title="Summary PDF" detail="Low stock / expiry summary" href="/api/reports/stock-summary.pdf" icon={<FileText />} />
-      </div>
+      <section>
+        <div className="mb-3"><p className="text-[10px] font-bold tracking-[0.14em] text-[#0b7f76] uppercase">Operational reports</p><h2 className="mt-0.5 font-bold text-[#173d50]">Export เพื่อใช้งานประจำวัน</h2></div>
+        <div className="grid gap-3 lg:grid-cols-2">
+          <ReportCard title="Balances CSV" detail={`${stock.items.length} items · ราย lot และ location`} href="/api/stock/export?report=balances" icon={<FileDown />} tone="teal" />
+          <ReportCard title="Movement CSV" detail={`${stock.transactions.length} transactions · ledger ที่โหลดแล้ว`} href="/api/stock/export?report=movements" icon={<BarChart3 />} tone="blue" />
+        </div>
+      </section>
+      <section>
+        <div className="mb-3"><p className="text-[10px] font-bold tracking-[0.14em] text-[#a76511] uppercase">Compliance report</p><h2 className="mt-0.5 font-bold text-[#173d50]">สรุปสถานะที่ต้องติดตาม</h2></div>
+        <div className="grid gap-3 lg:grid-cols-2">
+          <ReportCard title="Summary PDF" detail="Low stock และ expiry summary" href="/api/reports/stock-summary.pdf" icon={<FileText />} tone="amber" />
+        </div>
+      </section>
       <InventorySnapshot stock={stock} />
     </div>
   )
 }
 
-function ReportCard({ title, detail, href, icon }: { title: string; detail: string; href: string; icon: React.ReactNode }) {
+function ReportCard({ title, detail, href, icon, tone }: { title: string; detail: string; href: string; icon: React.ReactNode; tone: 'teal' | 'blue' | 'amber' }) {
+  const toneClasses = { teal: 'border-[#c7e4df] bg-[#f5fcfa] text-[#0b7f76]', blue: 'border-[#cfdcf1] bg-[#f7f9ff] text-[#4568a3]', amber: 'border-[#eeddbb] bg-[#fffaf1] text-[#a76511]' }[tone]
   return (
-    <Card className="p-4">
-      <div className="flex size-10 items-center justify-center rounded-md bg-[#e8f7f5] text-[#0b7f76] [&>svg]:size-5">{icon}</div>
+    <Card className={`flex min-h-40 flex-col rounded-xl border p-4 ${toneClasses}`}>
+      <div className="flex items-start justify-between gap-4"><div className="flex size-10 items-center justify-center rounded-lg bg-white/80 shadow-sm [&>svg]:size-5">{icon}</div><span className="rounded-full bg-white/70 px-2 py-1 text-[10px] font-bold">CSV / PDF</span></div>
       <h2 className="mt-4 font-bold text-[#173d50]">{title}</h2>
-      <p className="mt-1 text-sm text-[#789097]">{detail}</p>
-      <Button className="mt-5 w-full" onClick={() => { window.location.href = href }}>Download</Button>
+      <p className="mt-1 text-sm text-[#617c84]">{detail}</p>
+      <Button variant="secondary" className="mt-auto w-full border-white/80 bg-white/80" onClick={() => { window.location.href = href }}>Download report</Button>
     </Card>
   )
 }

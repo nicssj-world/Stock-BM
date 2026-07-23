@@ -22,6 +22,7 @@ import type { BmActor, StockItem, StockLot, StockTransaction, StockWorkspace } f
 import { formatDate, formatDateTime, formatQuantity, suggestedUsableLot } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Loading, Notice, PageHeader, Select, Textarea } from '@/components/ui'
 import { Pagination, usePagination } from '@/components/pagination'
+import { StockMetric, StockMetricStrip, StockModuleShell, StockPanelTitle } from '@/components/stock-module-shell'
 
 type Mode = 'receive' | 'issue' | 'move' | 'adjust' | 'history'
 const LAST_RECEIVE_LOCATION_KEY = 'bm-stock:last-receive-location-id'
@@ -180,9 +181,25 @@ export function TransactionView({
       })
   }, [historyLoaded, historyLoading, mode])
 
+  const workflow = mode === 'receive' ? (
+    <ReceiveForm items={activeItems} locations={activeLocations} defaultItemId={defaultItemId} defaultLocationId={defaultLocationId} onSaved={(stock) => { setData(stock); setNotice({ tone: 'success', text: 'บันทึกรับเข้าแล้ว / Receive saved' }) }} onError={(text) => setNotice({ tone: 'danger', text })} />
+  ) : mode === 'issue' ? (
+    <IssueForm items={activeItems} defaultLotId={defaultLotId} defaultLocationId={defaultLocationId} onSaved={(stock) => { setData(stock); setNotice({ tone: 'success', text: 'ตัด stock แล้ว / Issue saved' }) }} onError={(text) => setNotice({ tone: 'danger', text })} />
+  ) : mode === 'move' ? (
+    <MoveForm items={activeItems} locations={activeLocations} defaultLotId={defaultLotId} defaultLocationId={defaultLocationId} onSaved={(stock) => { setData(stock); setNotice({ tone: 'success', text: 'บันทึกย้ายที่เก็บแล้ว / Move saved' }) }} onError={(text) => setNotice({ tone: 'danger', text })} />
+  ) : (
+    <AdjustForm items={activeItems} locations={activeLocations} onSaved={(stock) => { setData(stock); setNotice({ tone: 'success', text: 'ปรับยอดแล้ว / Adjustment saved' }) }} onError={(text) => setNotice({ tone: 'danger', text })} />
+  )
+
   return (
-    <div className="mx-auto max-w-5xl space-y-4 pb-48 sm:pb-5">
-      <PageHeader eyebrow="Stock movement" title={title} description={description} />
+    <StockModuleShell className="pb-48 sm:pb-5">
+      <PageHeader eyebrow="Stock movement / workflow" title={title} description={description} />
+      <StockMetricStrip>
+        <StockMetric label="Active items" value={data.activeItemCount} detail="พร้อมทำรายการ" />
+        <StockMetric label="Low stock" value={data.lowStockItemCount} detail="ต้องติดตาม" tone={data.lowStockItemCount ? 'danger' : 'ok'} />
+        <StockMetric label="Locations" value={data.locationCount} detail="จุดจัดเก็บที่เปิดใช้" tone="neutral" />
+        <StockMetric label="Mode" value={mode === 'history' ? data.transactions.length : title.split(' / ')[0]} detail={mode === 'history' ? 'รายการที่โหลดแล้ว' : 'กำลังทำรายการ'} tone={mode === 'adjust' ? 'warning' : 'ok'} />
+      </StockMetricStrip>
       <div className="inline-flex flex-wrap gap-1 rounded-lg border border-[#d6e2e3] bg-white p-1" role="tablist" aria-label="ประเภทการเคลื่อนไหว stock">
         {visibleTabs.map(({ mode: tabMode, label, icon: Icon }) => {
           const active = mode === tabMode
@@ -205,55 +222,6 @@ export function TransactionView({
         })}
       </div>
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
-      {mode === 'receive' ? (
-        <ReceiveForm
-          items={activeItems}
-          locations={activeLocations}
-          defaultItemId={defaultItemId}
-          defaultLocationId={defaultLocationId}
-          onSaved={(stock) => {
-            setData(stock)
-            setNotice({ tone: 'success', text: 'บันทึกรับเข้าแล้ว / Receive saved' })
-          }}
-          onError={(text) => setNotice({ tone: 'danger', text })}
-        />
-      ) : null}
-      {mode === 'issue' ? (
-        <IssueForm
-          items={activeItems}
-          defaultLotId={defaultLotId}
-          defaultLocationId={defaultLocationId}
-          onSaved={(stock) => {
-            setData(stock)
-            setNotice({ tone: 'success', text: 'ตัด stock แล้ว / Issue saved' })
-          }}
-          onError={(text) => setNotice({ tone: 'danger', text })}
-        />
-      ) : null}
-      {mode === 'move' ? (
-        <MoveForm
-          items={activeItems}
-          locations={activeLocations}
-          defaultLotId={defaultLotId}
-          defaultLocationId={defaultLocationId}
-          onSaved={(stock) => {
-            setData(stock)
-            setNotice({ tone: 'success', text: 'บันทึกย้ายที่เก็บแล้ว / Move saved' })
-          }}
-          onError={(text) => setNotice({ tone: 'danger', text })}
-        />
-      ) : null}
-      {mode === 'adjust' ? (
-        <AdjustForm
-          items={activeItems}
-          locations={activeLocations}
-          onSaved={(stock) => {
-            setData(stock)
-            setNotice({ tone: 'success', text: 'ปรับยอดแล้ว / Adjustment saved' })
-          }}
-          onError={(text) => setNotice({ tone: 'danger', text })}
-        />
-      ) : null}
       {mode === 'history' && historyLoading ? (
         <Card className="p-6"><Loading label="กำลังโหลดประวัติ / Loading history" /></Card>
       ) : null}
@@ -269,8 +237,31 @@ export function TransactionView({
           onError={(text) => setNotice({ tone: 'danger', text })}
         />
       ) : null}
-    </div>
+      {mode !== 'history' ? <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="min-w-0">{workflow}</div>
+        <MovementCommandPanel mode={mode} activeItems={activeItems.length} locations={activeLocations.length} />
+      </div> : null}
+    </StockModuleShell>
   )
+}
+
+function MovementCommandPanel({ mode, activeItems, locations }: { mode: Exclude<Mode, 'history'>; activeItems: number; locations: number }) {
+  const guidance = mode === 'receive'
+    ? ['เลือก item และตำแหน่งจัดเก็บ', 'กรอก lot/expiry ตามการติดตามของ item', 'ตรวจจำนวนก่อนบันทึก']
+    : mode === 'issue'
+      ? ['เลือก lot ตาม FEFO ที่ระบบเรียงไว้', 'ตรวจ balance และวันหมดอายุ', 'ระบุเหตุผลเมื่อไม่ใช้ lot ที่แนะนำ']
+      : mode === 'move'
+        ? ['เลือก lot และต้นทางที่มีของคงเหลือ', 'ตรวจปลายทางก่อนบันทึก', 'ยอดรวมของ lot จะไม่เปลี่ยน']
+        : ['ใช้เมื่อยอด physical ไม่ตรงระบบ', 'ระบุเหตุผลทุกครั้ง', 'Admin เท่านั้นที่บันทึกได้']
+  return <aside className="hidden xl:block xl:sticky xl:top-6">
+    <Card className="overflow-hidden rounded-xl">
+      <StockPanelTitle eyebrow="Transaction command" title="ตรวจสอบก่อนบันทึก" />
+      <div className="space-y-4 p-4">
+        <div className="grid grid-cols-2 gap-2"><div className="rounded-lg bg-[#eef8f6] p-3"><p className="text-[10px] font-bold tracking-[0.12em] text-[#638b89] uppercase">Items</p><p className="mono mt-1 text-lg font-bold text-[#08766e]">{activeItems}</p></div><div className="rounded-lg bg-[#f4f7f7] p-3"><p className="text-[10px] font-bold tracking-[0.12em] text-[#72898e] uppercase">Locations</p><p className="mono mt-1 text-lg font-bold text-[#315763]">{locations}</p></div></div>
+        <ol className="space-y-3">{guidance.map((text, index) => <li key={text} className="flex gap-3 text-sm leading-5 text-[#55727c]"><span className="mono flex size-6 shrink-0 items-center justify-center rounded-full bg-[#123944] text-[11px] font-bold text-white">{index + 1}</span><span>{text}</span></li>)}</ol>
+      </div>
+    </Card>
+  </aside>
 }
 
 function ReceiveForm({

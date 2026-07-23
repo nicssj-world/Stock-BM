@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --background: #eef4f3;
+  --background: #edf4f2;
   --foreground: #173d50;
 }
 
@@ -13,7 +13,9 @@
 }
 
 body {
-  background: var(--background);
+  background:
+    radial-gradient(circle at 92% -10%, rgba(97, 190, 176, 0.14), transparent 25rem),
+    linear-gradient(180deg, #f5f9f8 0, var(--background) 22rem);
   color: var(--foreground);
   font-family: "Noto Sans Thai", sans-serif;
   min-width: 320px;
@@ -43,7 +45,20 @@ textarea {
 .paper {
   border: 1px solid #d6e2e3;
   background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 18px 50px rgba(20, 64, 72, 0.08);
+  box-shadow: 0 16px 40px rgba(20, 64, 72, 0.07);
+}
+
+.stock-command {
+  animation: stock-enter 360ms ease-out both;
+}
+
+@keyframes stock-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stock-command { animation: none; }
 }
 
 ::selection {
