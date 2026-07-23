@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, Boxes, ClipboardCheck, Dna, GitCompareArrows, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck, Thermometer } from 'lucide-react'
+import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, Biohazard, Boxes, ClipboardCheck, Dna, GitCompareArrows, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck, Thermometer } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import { api } from '@/components/ui'
 
@@ -26,11 +26,17 @@ const stockSection: NavSection = {
   ],
 }
 
-const hpvSection: NavSection = {
-  title: 'HPV',
-  items: [
-    { href: '/hpv', label: 'HPV Management', icon: Dna },
-  ],
+const hpvManagementItem: NavItem = { href: '/hpv', label: 'HPV Genotype', icon: Dna }
+const hivDrtManagementItem: NavItem = { href: '/hiv-drt', label: 'HIV DRT', icon: Biohazard }
+
+const managementSection: NavSection = {
+  title: 'Management',
+  items: [hpvManagementItem, hivDrtManagementItem],
+}
+
+const assistantManagementSection: NavSection = {
+  title: 'Management',
+  items: [hpvManagementItem],
 }
 
 const qualitySection: NavSection = {
@@ -54,11 +60,11 @@ export function AppShell({ actor, children }: { actor: BmActor; children: React.
   const searchParams = useSearchParams()
   const router = useRouter()
   const sections: NavSection[] = actor.role === 'Assistant'
-    ? [hpvSection]
-    : [homeSection, stockSection, hpvSection, qualitySection, monitoringSection]
+    ? [assistantManagementSection]
+    : [homeSection, stockSection, managementSection, qualitySection, monitoringSection]
   if (actor.role === 'Admin') sections.push({ title: 'System', items: [{ href: '/admin', label: 'Admin', icon: Settings }] })
   const mobileItems: NavItem[] = actor.role === 'Assistant'
-    ? hpvSection.items
+    ? assistantManagementSection.items
     : [
         { href: '/dashboard', label: 'Home', icon: Activity },
         { href: '/movements?mode=receive', label: 'Receive', icon: ArrowDownToLine },

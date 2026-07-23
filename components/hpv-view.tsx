@@ -126,8 +126,8 @@ export function HpvView({ actor, initialData }: { actor: BmActor; initialData: H
   return (
     <div className="mx-auto max-w-[1600px] space-y-5">
       <PageHeader
-        eyebrow="HPV Management"
-        title="HPV Management"
+        eyebrow="HPV Genotype"
+        title="HPV Genotype"
         description="เบิก-จ่ายชุดเก็บตัวอย่าง รพ.สต. และจัดเก็บ sample storage box 5x5"
         actions={<Tabs tabs={[
           { key: 'distribution', label: 'เบิก-จ่าย', icon: PackageMinus },

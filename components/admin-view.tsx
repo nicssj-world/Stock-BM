@@ -200,7 +200,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
                 hpvClinicianCollected: event.target.checked ? form.hpvClinicianCollected : false,
               })}
             />
-            HPV Management item
+            HPV Genotype item
           </label>
           <div className="mt-2 grid gap-2 sm:grid-cols-2">
             <label className="flex items-center gap-2 text-xs font-semibold text-[#58747d]">

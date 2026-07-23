@@ -1,6 +1,6 @@
 # Molecular-CBH QMS
 
-ระบบบริหารคุณภาพห้องปฏิบัติการงานอณูชีววิทยา โรงพยาบาลชลบุรี (เดิมชื่อ Stock-BM) ครอบคลุม 4 ส่วน: จัดการ stock น้ำยา/consumable, IQC (Internal Quality Control), EQA (External Quality Assessment) และ HPV Management (เบิก-จ่ายชุดเก็บตัวอย่างให้ รพ.สต./หน่วยงาน, รับตัวอย่างกลับ, จัดเก็บ sample storage box)
+ระบบบริหารคุณภาพห้องปฏิบัติการงานอณูชีววิทยา โรงพยาบาลชลบุรี (เดิมชื่อ Stock-BM) ครอบคลุม 4 ส่วน: จัดการ stock น้ำยา/consumable, IQC (Internal Quality Control), EQA (External Quality Assessment) และ HPV Genotype (เบิก-จ่ายชุดเก็บตัวอย่างให้ รพ.สต./หน่วยงาน, รับตัวอย่างกลับ, จัดเก็บ sample storage box)
 
 ## Stack
 

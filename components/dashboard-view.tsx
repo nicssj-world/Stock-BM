@@ -3,14 +3,15 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { AlertOctagon, ArrowDownToLine, ArrowUpFromLine, Boxes, CalendarClock, CheckCircle2, FlaskConical, MapPin, PackageSearch, QrCode, ScanLine, Thermometer } from 'lucide-react'
+import { AlertOctagon, ArrowDownToLine, ArrowUpFromLine, Biohazard, Boxes, CalendarClock, CheckCircle2, FlaskConical, MapPin, PackageSearch, QrCode, ScanLine, Thermometer } from 'lucide-react'
 import type { BmActor, ScanResolution, StockWorkspace } from '@/lib/bm/types'
 import type { EnvDashboard } from '@/lib/env/types'
 import type { HpvDashboard } from '@/lib/hpv/types'
+import type { HivDrtDashboard } from '@/lib/hiv-drt/types'
 import { formatDate, formatQuantity } from '@/lib/bm/rules'
 import { api, Button, Card, Input, Notice, PageHeader } from '@/components/ui'
 
-export function DashboardView({ actor, stock, env, hpv }: { actor: BmActor; stock: StockWorkspace; env: EnvDashboard; hpv: HpvDashboard }) {
+export function DashboardView({ actor, stock, env, hpv, hivDrt }: { actor: BmActor; stock: StockWorkspace; env: EnvDashboard; hpv: HpvDashboard; hivDrt: HivDrtDashboard }) {
   const router = useRouter()
   const [scan, setScan] = useState('')
   const [notice, setNotice] = useState('')
@@ -119,7 +120,7 @@ export function DashboardView({ actor, stock, env, hpv }: { actor: BmActor; stoc
         </Card>
 
         <Card className="overflow-hidden">
-          <SectionTitle title="HPV Samples" href="/hpv" />
+          <SectionTitle title="HPV Genotype" href="/hpv" />
           <div className="divide-y divide-[#edf2f2]">
             <div className="flex items-center gap-3 px-4 py-3">
               <div className={`flex size-8 items-center justify-center rounded-md ${hpv.boxesDueSoon > 0 ? 'bg-[#fff8e8]' : 'bg-[#f3f6f7]'}`}>
@@ -156,9 +157,50 @@ export function DashboardView({ actor, stock, env, hpv }: { actor: BmActor; stoc
             </div>
           ) : null}
         </Card>
+
+        <Card className="overflow-hidden">
+          <SectionTitle title="HIV DRT" href="/hiv-drt" />
+          <div className="divide-y divide-[#edf2f2]">
+            <DashboardMetricRow
+              icon={<Biohazard />}
+              label="กำลังรอผล HIV Genotyping"
+              detail="TAT 18 วันทำการ"
+              value={hivDrt.awaitingResults}
+              tone="teal"
+            />
+            <DashboardMetricRow
+              icon={<AlertOctagon />}
+              label="ยังไม่ได้รับผลเกิน TAT"
+              detail="เข้าสู่วันทำการที่ 19"
+              value={hivDrt.overdueResults}
+              tone={hivDrt.overdueResults > 0 ? 'danger' : 'neutral'}
+              href="/hiv-drt?view=tracking&filter=overdue"
+            />
+            <DashboardMetricRow
+              icon={<CalendarClock />}
+              label="Tube ใกล้/ครบกำหนดทำลาย"
+              detail={`ใกล้กำหนด ${hivDrt.destructionDueSoon} · ครบกำหนด ${hivDrt.destructionDueNow}`}
+              value={hivDrt.destructionDueSoon + hivDrt.destructionDueNow}
+              tone={hivDrt.destructionDueNow > 0 ? 'danger' : hivDrt.destructionDueSoon > 0 ? 'warning' : 'neutral'}
+              href="/hiv-drt?view=storage&filter=destroy_due"
+            />
+          </div>
+        </Card>
       </div>
     </div>
   )
+}
+
+function DashboardMetricRow({ icon, label, detail, value, tone, href }: { icon: React.ReactNode; label: string; detail: string; value: number; tone: 'teal' | 'warning' | 'danger' | 'neutral'; href?: string }) {
+  const colors = tone === 'danger' ? 'bg-[#fff1f2] text-[#b33b46]' : tone === 'warning' ? 'bg-[#fff8e8] text-[#a76511]' : tone === 'teal' ? 'bg-[#e8f7f5] text-[#0b7f76]' : 'bg-[#f3f6f7] text-[#7b9298]'
+  const content = (
+    <div className="flex items-center gap-3 px-4 py-3">
+      <div className={`flex size-8 shrink-0 items-center justify-center rounded-md [&>svg]:size-4 ${colors}`}>{icon}</div>
+      <div className="min-w-0 flex-1"><p className={`font-semibold ${tone === 'danger' ? 'text-[#a83541]' : tone === 'warning' ? 'text-[#a76511]' : 'text-[#315763]'}`}>{label}</p><p className="mt-0.5 text-xs text-[#7b9298]">{detail}</p></div>
+      <span className={`mono text-lg font-bold ${tone === 'danger' ? 'text-[#be3d49]' : 'text-[#173d50]'}`}>{value}</span>
+    </div>
+  )
+  return href ? <Link href={href} className="block transition hover:bg-[#f8fbfb]">{content}</Link> : content
 }
 
 function QuickAction({ href, icon, label, detail }: { href: string; icon: React.ReactNode; label: string; detail: string }) {

@@ -25,7 +25,7 @@ export default async function HpvSummaryReportPage() {
   return (
     <main className="report-page">
       <div className="toolbar print-hidden">
-        <Link href="/hpv" className="back-link">กลับ HPV Management</Link>
+        <Link href="/hpv" className="back-link">กลับ HPV Genotype</Link>
         <button id="print-report" type="button">Print / Save PDF</button>
       </div>
 

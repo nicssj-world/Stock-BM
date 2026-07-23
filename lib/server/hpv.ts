@@ -438,7 +438,7 @@ export async function createHpvDistribution(input: {
     const itemRow = (lotRow?.bm_stock_items as RecordRow | null) ?? null
     const itemId = asString(lotRow?.item_id)
     if (!itemRow?.is_active) throw new HttpError(400, 'Active stock item not found')
-    if (!itemRow.is_hpv) throw new HttpError(400, 'เลือกได้เฉพาะ Stock item ที่เชื่อมกับ HPV Management')
+    if (!itemRow.is_hpv) throw new HttpError(400, 'เลือกได้เฉพาะ Stock item ที่เชื่อมกับ HPV Genotype')
     if (input.kitType === 'self_collected' && !itemRow.hpv_self_collected) throw new HttpError(400, 'Stock item นี้ไม่ได้เชื่อมกับ HPV Self-collected')
     if (input.kitType === 'clinician_collected' && !itemRow.hpv_clinician_collected) throw new HttpError(400, 'Stock item นี้ไม่ได้เชื่อมกับ HPV Clinician-collected')
     if (!requiredItemIds.has(itemId)) throw new HttpError(400, 'Stock item ในชุดไม่ตรงกับหมวด HPV ที่เลือก')
