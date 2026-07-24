@@ -12,10 +12,18 @@ describe('IQC LAB Mean display', () => {
     expect(overview).toContain("chart.activeLimit === 'lab' ? 'LAB Mean/SD' : 'Assigned Mean/SD'")
   })
 
-  it('shows LAB Mean, SD, sample size and lock state on the selected chart', () => {
+  it('allows the three mean/SD cards to switch the chart reference', () => {
+    expect(chart).toContain("type MeanView = 'active' | 'assigned' | 'lab'")
+    expect(chart).toContain("const [meanView, setMeanView] = useState<MeanView>('active')")
+    expect(chart).toContain('aria-pressed={selected}')
+    expect(chart).toContain('onClick={() => setMeanView(view)}')
+    expect(chart).toContain('กดการ์ดเพื่อเปลี่ยนเส้นและสเกลของกราฟสำหรับเปรียบเทียบ')
+  })
+
+  it('keeps the three values explicit, including the LAB lock state', () => {
+    expect(chart).toContain('Active Westgard limit')
+    expect(chart).toContain('Assigned Mean / SD')
     expect(chart).toContain('LAB Mean / SD')
-    expect(chart).toContain('chart.labMean != null ? fmt(chart.labMean)')
-    expect(chart).toContain('chart.labSd != null ? fmt(chart.labSd)')
     expect(chart).toContain('chart.labLockedAt')
   })
 })

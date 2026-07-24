@@ -14,6 +14,7 @@ const PLOT_H = H - PAD.top - PAD.bottom
 
 const STATUS_COLOR: Record<string, string> = { accepted: '#16a34a', warning: '#d97706', rejected: '#dc2626' }
 const CONSUMABLE_LABEL: Record<string, string> = { 'trucount-tube': 'Trucount', 'staining-reagent': 'Reagent', mastermix: 'Mastermix', reagent: 'Reagent', other: 'Lot' }
+type MeanView = 'active' | 'assigned' | 'lab'
 
 function fmt(value: number) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 }).format(value)
@@ -60,12 +61,41 @@ export function LjChart({
   onPointSelect?: (point: IqcChart['points'][number]) => void
 }) {
   const [showTable, setShowTable] = useState(false)
-  const { mean, sd, points } = chart
+  const [meanView, setMeanView] = useState<MeanView>('active')
+  const { points } = chart
+
+  const activeLimitLabel = chart.activeLimit === 'lab' ? 'LAB Mean/SD' : 'Assigned Mean/SD'
+  const meanViews: Record<MeanView, { cardLabel: string; label: string; mean: number | null; sd: number | null; detail: string; tone: string }> = {
+    active: {
+      cardLabel: 'Active Westgard limit',
+      label: activeLimitLabel,
+      mean: chart.mean,
+      sd: chart.sd,
+      detail: 'เกณฑ์ที่ใช้ประเมิน Westgard อยู่ในปัจจุบัน',
+      tone: 'border-[#c7e2dc] bg-[#eef9f6] text-[#08766e]',
+    },
+    assigned: {
+      cardLabel: 'Assigned Mean / SD',
+      label: 'Assigned Mean/SD',
+      mean: chart.assignedMean,
+      sd: chart.assignedSd,
+      detail: 'ค่าจากผู้ผลิต / certificate',
+      tone: 'border-[#dbe7e8] bg-[#fbfefe] text-[#789097]',
+    },
+    lab: {
+      cardLabel: 'LAB Mean / SD',
+      label: 'LAB Mean/SD',
+      mean: chart.labMean,
+      sd: chart.labSd,
+      detail: chart.labLockedAt ? `Locked · n ${chart.labN ?? chart.n}` : `ยังไม่ lock · run ปัจจุบัน n ${chart.n}`,
+      tone: chart.labLockedAt ? 'border-[#bfe3cf] bg-[#f1fbf4] text-[#18763a]' : 'border-[#eed4a6] bg-[#fff9ed] text-[#a9700f]',
+    },
+  }
+  const displayedMean = meanViews[meanView]
+  const { mean, sd } = displayedMean
   const hasStats = mean != null && sd != null && sd > 0
   const visible = points
 
-  const limitLabel = chart.activeLimit === 'lab' ? 'Lab mean/SD' : 'Assigned'
-  const activeLimitLabel = chart.activeLimit === 'lab' ? 'LAB Mean/SD' : 'Assigned Mean/SD'
   const scaleHint = chart.scale === 'log10' ? ' · log10' : ''
   const xTicks = xTickIndexes(visible.length)
   const monthLabel = visible[0]?.runDatetime ? formatRunMonth(visible[0].runDatetime) : null
@@ -118,7 +148,7 @@ export function LjChart({
           ) : null}
         </div>
         <div className="text-right">
-          <span className="inline-block rounded border border-[#cfe0e2] bg-[#f3f9f9] px-2 py-0.5 text-[10px] font-bold text-[#3f6470]">{limitLabel}</span>
+          <span className="inline-block rounded border border-[#cfe0e2] bg-[#f3f9f9] px-2 py-0.5 text-[10px] font-bold text-[#3f6470]">{displayedMean.label}</span>
           <p className="mono mt-1 text-[11px] tabular-nums text-[#55727c]">
             x̄ {mean != null ? fmt(mean) : '—'} · SD {sd != null ? fmt(sd) : '—'} · CV {chart.cv != null ? `${chart.cv.toFixed(1)}%` : '—'} · n {chart.n}
           </p>
@@ -126,26 +156,30 @@ export function LjChart({
       </div>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-3">
-        <div className="rounded-md border border-[#c7e2dc] bg-[#eef9f6] px-3 py-2">
-          <p className="text-[10px] font-bold tracking-wide text-[#08766e] uppercase">Active Westgard limit</p>
-          <p className="mt-1 text-xs font-bold text-[#173d50]">{activeLimitLabel}</p>
-          <p className="mono mt-1 text-xs tabular-nums text-[#315763]">Mean {mean != null ? fmt(mean) : '—'} · SD {sd != null ? fmt(sd) : '—'}</p>
-        </div>
-        <div className="rounded-md border border-[#dbe7e8] bg-[#fbfefe] px-3 py-2">
-          <p className="text-[10px] font-bold tracking-wide text-[#789097] uppercase">Assigned Mean / SD</p>
-          <p className="mono mt-1 text-xs tabular-nums text-[#315763]">Mean {chart.assignedMean != null ? fmt(chart.assignedMean) : '—'} · SD {chart.assignedSd != null ? fmt(chart.assignedSd) : '—'}</p>
-          <p className="mt-1 text-[10px] text-[#91a3a7]">ค่าจากผู้ผลิต / certificate</p>
-        </div>
-        <div className={`rounded-md border px-3 py-2 ${chart.labLockedAt ? 'border-[#bfe3cf] bg-[#f1fbf4]' : 'border-[#eed4a6] bg-[#fff9ed]'}`}>
-          <p className={`text-[10px] font-bold tracking-wide uppercase ${chart.labLockedAt ? 'text-[#18763a]' : 'text-[#a9700f]'}`}>LAB Mean / SD</p>
-          <p className="mono mt-1 text-xs tabular-nums text-[#315763]">Mean {chart.labMean != null ? fmt(chart.labMean) : '—'} · SD {chart.labSd != null ? fmt(chart.labSd) : '—'}</p>
-          <p className={`mt-1 text-[10px] ${chart.labLockedAt ? 'text-[#4f825d]' : 'text-[#99601b]'}`}>{chart.labLockedAt ? `Locked · n ${chart.labN ?? chart.n}` : `ยังไม่ lock · run ปัจจุบัน n ${chart.n}`}</p>
-        </div>
+        {(Object.keys(meanViews) as MeanView[]).map((view) => {
+          const option = meanViews[view]
+          const selected = meanView === view
+          return (
+            <button
+              key={view}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => setMeanView(view)}
+              className={`rounded-md border px-3 py-2 text-left transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${option.tone} ${selected ? 'ring-2 ring-[#0b7f76] ring-offset-1' : 'hover:brightness-[0.98]'}`}
+            >
+              <p className="text-[10px] font-bold tracking-wide uppercase">{option.cardLabel}</p>
+              <p className="mt-1 text-xs font-bold text-[#173d50]">{option.label}</p>
+              <p className="mono mt-1 text-xs tabular-nums text-[#315763]">Mean {option.mean != null ? fmt(option.mean) : '—'} · SD {option.sd != null ? fmt(option.sd) : '—'}</p>
+              <p className="mt-1 text-[10px] text-[#58747d]">{selected ? 'กำลังแสดงบนกราฟ' : option.detail}</p>
+            </button>
+          )
+        })}
       </div>
+      <p className="mt-2 text-[10px] text-[#789097]">กดการ์ดเพื่อเปลี่ยนเส้นและสเกลของกราฟสำหรับเปรียบเทียบ · สีสถานะและ z-score ยังคำนวณตาม Active Westgard limit</p>
 
       {!hasStats ? (
         <p className="mt-3 rounded-md border border-[#eed4a6] bg-[#fff9ed] px-3 py-2 text-xs text-[#99601b]">
-          ยังไม่ได้ตั้ง mean/SD (assigned หรือ lab) — บันทึกผลได้แต่ยังไม่ประเมิน Westgard
+          {displayedMean.label} ยังไม่มี mean/SD ที่ใช้แสดงกราฟ — เลือกการ์ดอื่นเพื่อเปรียบเทียบได้
         </p>
       ) : null}
 
