@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { KeyRound, MapPin, PackagePlus, Pencil, Plus, Tags, Trash2, UserCog, X } from 'lucide-react'
+import { ExternalLink, KeyRound, MapPin, PackagePlus, Pencil, Plus, Tags, Trash2, UserCog, X } from 'lucide-react'
 import type { AdminUserRow, BmActor, StockCategory, StockItem, StockLocation, StockWorkspace } from '@/lib/bm/types'
 import { api, Button, Card, Field, Input, Loading, Notice, PageHeader, Select } from '@/components/ui'
 import { Pagination, usePagination } from '@/components/pagination'
@@ -58,6 +58,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
     catalogNo: '',
     manufacturer: '',
     manufacturerBarcode: '',
+    equipmentIds: [] as string[],
     trackLot: true,
     trackExpiry: true,
     isHpv: false,
@@ -95,6 +96,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
       catalogNo: item.catalogNo ?? '',
       manufacturer: item.manufacturer ?? '',
       manufacturerBarcode: item.manufacturerBarcode ?? '',
+      equipmentIds: item.equipmentIds ?? [],
       trackLot: item.trackLot,
       trackExpiry: item.trackExpiry,
       isHpv: item.isHpv,
@@ -157,6 +159,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
           <div className="min-w-0">
             <p className="mono text-xs font-bold text-[#315763]">{item.itemCode}</p>
             <p className="mt-0.5 truncate font-semibold text-[#58727b]">{item.name}</p>
+            {item.equipmentIds?.length ? <p className="mt-0.5 text-[10px] text-[#0b7f76]">{item.equipmentIds.length} linked equipment</p> : null}
             <p className="mt-0.5 text-[10px] text-[#91a3a7]">{item.categoryName} · {item.unit} · min {item.minimumStock}</p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
@@ -186,6 +189,26 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
         <div className="grid gap-3 sm:grid-cols-2"><Field label="Storage condition"><Input value={form.storageCondition} onChange={(event) => setForm({ ...form, storageCondition: event.target.value })} /></Field><Field label="Supplier"><Input value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} /></Field></div>
         <div className="grid gap-3 sm:grid-cols-2"><Field label="Catalog no"><Input value={form.catalogNo} onChange={(event) => setForm({ ...form, catalogNo: event.target.value })} /></Field><Field label="Manufacturer"><Input value={form.manufacturer} onChange={(event) => setForm({ ...form, manufacturer: event.target.value })} /></Field></div>
         <Field label="Manufacturer barcode"><Input value={form.manufacturerBarcode} onChange={(event) => setForm({ ...form, manufacturerBarcode: event.target.value })} /></Field>
+        <div className="rounded-md border border-[#d8e6e6] bg-[#f8fbfc] p-3">
+          <p className="text-xs font-bold text-[#315763]">เครื่องมือที่ใช้กับน้ำยา / Equipment</p>
+          <p className="mt-1 text-[11px] text-[#81979c]">เลือกได้หลายเครื่องมือ และกดชื่อเพื่อเปิดทะเบียนเครื่องมือ</p>
+          <div className="mt-2 space-y-2">
+            {(data.equipmentOptions ?? []).map((equipment) => <label key={equipment.id} className="flex items-start gap-2 text-xs text-[#58747d]">
+              <input
+                type="checkbox"
+                checked={form.equipmentIds.includes(equipment.id)}
+                onChange={(event) => setForm({ ...form, equipmentIds: event.target.checked ? [...form.equipmentIds, equipment.id] : form.equipmentIds.filter((id) => id !== equipment.id) })}
+              />
+              <span className="min-w-0">
+                <a className="inline-flex items-center gap-1 font-semibold text-[#0b7f76] hover:underline" href={`/equipment?view=registry&equipment=${equipment.id}`} target="_blank" rel="noreferrer">
+                  {equipment.code} · {equipment.name} <ExternalLink className="size-3" />
+                </a>
+                <span className="ml-1 text-[10px] text-[#91a3a7]">({equipment.status})</span>
+              </span>
+            </label>)}
+            {!(data.equipmentOptions ?? []).length ? <p className="text-xs text-[#81979c]">ยังไม่มีเครื่องมือในทะเบียน</p> : null}
+          </div>
+        </div>
         <label className="flex items-center gap-2 text-xs font-semibold text-[#58747d]"><input type="checkbox" checked={form.trackLot} onChange={(event) => setForm({ ...form, trackLot: event.target.checked, trackExpiry: event.target.checked ? form.trackExpiry : false })} /> Track lot</label>
         <label className="flex items-center gap-2 text-xs font-semibold text-[#58747d]"><input type="checkbox" disabled={!form.trackLot} checked={form.trackExpiry} onChange={(event) => setForm({ ...form, trackExpiry: event.target.checked })} /> Track expiry</label>
         <div className="rounded-md border border-[#d8e6e6] bg-[#f8fbfc] p-3">

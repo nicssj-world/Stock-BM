@@ -36,6 +36,16 @@ function nullableBool(value: unknown) {
 function clean(value: string | null | undefined) {
   return value?.trim() || null
 }
+
+function stockItemCategoryName(item: RecordRow | undefined) {
+  const category = item?.bm_stock_categories
+  if (Array.isArray(category)) return asString((category[0] as RecordRow | undefined)?.name)
+  return category && typeof category === 'object' ? asString((category as RecordRow).name) : ''
+}
+
+function isReagentStockItem(item: RecordRow | undefined) {
+  return stockItemCategoryName(item).trim().toLowerCase() === 'reagent'
+}
 function assertAdmin(actor: BmActor) {
   if (actor.role !== 'Admin') throw new HttpError(403, 'Admin permission required')
 }
@@ -82,7 +92,7 @@ async function loadLotLabels(): Promise<{ reagent: Map<string, string>; control:
   const itemIds = [...new Set(lots.map((row) => asString(row.item_id)))]
   const materialIds = [...new Set(ctrls.map((row) => asString(row.control_material_id)))]
   const [{ data: itemRows }, { data: materialRows }] = await Promise.all([
-    itemIds.length ? admin.from('bm_stock_items').select('id,item_code,name').in('id', itemIds) : Promise.resolve({ data: [] }),
+    itemIds.length ? admin.from('bm_stock_items').select('id,item_code,name,is_active,bm_stock_categories(name)').in('id', itemIds) : Promise.resolve({ data: [] }),
     materialIds.length ? admin.from('iqc_control_materials').select('id,name,level').in('id', materialIds) : Promise.resolve({ data: [] }),
   ])
   const items = new Map(((itemRows ?? []) as RecordRow[]).map((row) => [asString(row.id), row]))
@@ -118,19 +128,20 @@ async function loadLotOptions(): Promise<{ reagentLots: LotOption[]; controlLots
   const itemIds = [...new Set(lots.map((row) => asString(row.item_id)))]
   const materialIds = [...new Set(ctrls.map((row) => asString(row.control_material_id)))]
   const [{ data: itemRows }, { data: materialRows }] = await Promise.all([
-    itemIds.length ? admin.from('bm_stock_items').select('id,item_code,name').in('id', itemIds) : Promise.resolve({ data: [] }),
+    itemIds.length ? admin.from('bm_stock_items').select('id,item_code,name,is_active,bm_stock_categories(name)').in('id', itemIds) : Promise.resolve({ data: [] }),
     materialIds.length ? admin.from('iqc_control_materials').select('id,name,level').in('id', materialIds) : Promise.resolve({ data: [] }),
   ])
   const items = new Map(((itemRows ?? []) as RecordRow[]).map((row) => [asString(row.id), row]))
   const materials = new Map(((materialRows ?? []) as RecordRow[]).map((row) => [asString(row.id), row]))
 
-  const reagentLots: LotOption[] = lots.map((row) => {
+  const reagentLots: LotOption[] = lots.flatMap((row) => {
     const item = items.get(asString(row.item_id))
-    return {
+    if (!item || !Boolean(item.is_active) || !isReagentStockItem(item)) return []
+    return [{
       id: asString(row.id),
       label: `${item ? `${asString(item.item_code)} · ` : ''}LOT ${asString(row.lot_number)}`,
       subLabel: item ? asString(item.name) : null,
-    }
+    }]
   })
   const controlLots: LotOption[] = ctrls.map((row) => {
     const material = materials.get(asString(row.control_material_id))
@@ -247,9 +258,31 @@ interface CreateInput {
   oldControlLotId?: string | null
 }
 
+async function assertReagentStockLots(lotIds: string[]) {
+  const uniqueLotIds = [...new Set(lotIds.filter(Boolean))]
+  if (!uniqueLotIds.length) return
+  const admin = getAdminClient()
+  const { data: lotData, error: lotError } = await admin.from('bm_stock_lots').select('id,item_id').in('id', uniqueLotIds)
+  fail(lotError)
+  const lotRows = (lotData ?? []) as RecordRow[]
+  if (lotRows.length !== uniqueLotIds.length) throw new HttpError(400, 'ไม่พบ Reagent lot ที่เลือก')
+  const itemIds = [...new Set(lotRows.map((row) => asString(row.item_id)).filter(Boolean))]
+  const { data: itemData, error: itemError } = await admin
+    .from('bm_stock_items')
+    .select('id,is_active,bm_stock_categories(name)')
+    .in('id', itemIds)
+  fail(itemError)
+  const itemsById = new Map(((itemData ?? []) as RecordRow[]).map((row) => [asString(row.id), row]))
+  if (lotRows.some((lot) => {
+    const item = itemsById.get(asString(lot.item_id))
+    return !item || !Boolean(item.is_active) || !isReagentStockItem(item)
+  })) throw new HttpError(400, 'Lot-to-Lot สำหรับ Reagent เลือกได้เฉพาะ Stock item หมวด Reagent ที่ยังใช้งาน')
+}
+
 export async function createVerification(input: CreateInput, actor: BmActor): Promise<string> {
   if (input.subjectKind === 'reagent-lot' && !input.newStockLotId) throw new HttpError(400, 'Select the new reagent lot')
   if (input.subjectKind === 'control-lot' && !input.newControlLotId) throw new HttpError(400, 'Select the new control lot')
+  if (input.subjectKind === 'reagent-lot') await assertReagentStockLots([input.newStockLotId ?? '', input.oldStockLotId ?? ''])
   const admin = getAdminClient()
   const { data, error } = await admin
     .from('lotverif_verifications')

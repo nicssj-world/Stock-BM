@@ -65,6 +65,7 @@ export function LjChart({
   const visible = points
 
   const limitLabel = chart.activeLimit === 'lab' ? 'Lab mean/SD' : 'Assigned'
+  const activeLimitLabel = chart.activeLimit === 'lab' ? 'LAB Mean/SD' : 'Assigned Mean/SD'
   const scaleHint = chart.scale === 'log10' ? ' · log10' : ''
   const xTicks = xTickIndexes(visible.length)
   const monthLabel = visible[0]?.runDatetime ? formatRunMonth(visible[0].runDatetime) : null
@@ -121,6 +122,24 @@ export function LjChart({
           <p className="mono mt-1 text-[11px] tabular-nums text-[#55727c]">
             x̄ {mean != null ? fmt(mean) : '—'} · SD {sd != null ? fmt(sd) : '—'} · CV {chart.cv != null ? `${chart.cv.toFixed(1)}%` : '—'} · n {chart.n}
           </p>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        <div className="rounded-md border border-[#c7e2dc] bg-[#eef9f6] px-3 py-2">
+          <p className="text-[10px] font-bold tracking-wide text-[#08766e] uppercase">Active Westgard limit</p>
+          <p className="mt-1 text-xs font-bold text-[#173d50]">{activeLimitLabel}</p>
+          <p className="mono mt-1 text-xs tabular-nums text-[#315763]">Mean {mean != null ? fmt(mean) : '—'} · SD {sd != null ? fmt(sd) : '—'}</p>
+        </div>
+        <div className="rounded-md border border-[#dbe7e8] bg-[#fbfefe] px-3 py-2">
+          <p className="text-[10px] font-bold tracking-wide text-[#789097] uppercase">Assigned Mean / SD</p>
+          <p className="mono mt-1 text-xs tabular-nums text-[#315763]">Mean {chart.assignedMean != null ? fmt(chart.assignedMean) : '—'} · SD {chart.assignedSd != null ? fmt(chart.assignedSd) : '—'}</p>
+          <p className="mt-1 text-[10px] text-[#91a3a7]">ค่าจากผู้ผลิต / certificate</p>
+        </div>
+        <div className={`rounded-md border px-3 py-2 ${chart.labLockedAt ? 'border-[#bfe3cf] bg-[#f1fbf4]' : 'border-[#eed4a6] bg-[#fff9ed]'}`}>
+          <p className={`text-[10px] font-bold tracking-wide uppercase ${chart.labLockedAt ? 'text-[#18763a]' : 'text-[#a9700f]'}`}>LAB Mean / SD</p>
+          <p className="mono mt-1 text-xs tabular-nums text-[#315763]">Mean {chart.labMean != null ? fmt(chart.labMean) : '—'} · SD {chart.labSd != null ? fmt(chart.labSd) : '—'}</p>
+          <p className={`mt-1 text-[10px] ${chart.labLockedAt ? 'text-[#4f825d]' : 'text-[#99601b]'}`}>{chart.labLockedAt ? `Locked · n ${chart.labN ?? chart.n}` : `ยังไม่ lock · run ปัจจุบัน n ${chart.n}`}</p>
         </div>
       </div>
 

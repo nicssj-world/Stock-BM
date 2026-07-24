@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { AlertOctagon, ArrowUpRight, BarChart3, CalendarClock, ChevronLeft, ChevronRight, Download, FileDown, FileText, PackageSearch, Search } from 'lucide-react'
 import type { StockItem, StockWorkspace } from '@/lib/bm/types'
 import { formatDate, formatQuantity } from '@/lib/bm/rules'
+import { filterStockWorkspaceByEquipment } from '@/lib/bm/stock-equipment-filter'
 import { Button, Card, Input, Select, StatusBadge } from '@/components/ui'
 
 function downloadCsv(filename: string, rows: string[][]) {
@@ -19,6 +20,9 @@ function downloadCsv(filename: string, rows: string[][]) {
 }
 
 export function ReportsPanel({ stock }: { stock: StockWorkspace }) {
+  const [equipmentId, setEquipmentId] = useState('all')
+  const filteredStock = useMemo(() => filterStockWorkspaceByEquipment(stock, equipmentId), [equipmentId, stock])
+  const equipmentQuery = equipmentId === 'all' ? '' : `&equipmentId=${encodeURIComponent(equipmentId)}`
   return (
     <div className="space-y-4">
       <section className="grid gap-3 xl:grid-cols-[1.18fr_.82fr]">
@@ -27,13 +31,13 @@ export function ReportsPanel({ stock }: { stock: StockWorkspace }) {
             <p className="text-[10px] font-bold tracking-[0.16em] text-[#0b7f76] uppercase">Export center</p>
             <div className="mt-1 flex flex-wrap items-end justify-between gap-2">
               <div><h2 className="font-bold text-[#173d50]">รายงานพร้อมใช้งาน</h2><p className="mt-0.5 text-xs text-[#789097]">เลือกไฟล์ตามจุดประสงค์ แล้วดาวน์โหลดได้ทันที</p></div>
-              <span className="mono rounded-full bg-[#e2f3f0] px-2.5 py-1 text-xs font-bold text-[#08766e]">3 formats</span>
+              <div className="flex flex-wrap items-center gap-2"><Select value={equipmentId} onChange={(event) => setEquipmentId(event.target.value)} className="min-w-52"><option value="all">ทุกเครื่องมือ</option>{(stock.equipmentOptions ?? []).map((equipment) => <option key={equipment.id} value={equipment.id}>{equipment.code} · {equipment.name}</option>)}</Select><span className="mono rounded-full bg-[#e2f3f0] px-2.5 py-1 text-xs font-bold text-[#08766e]">3 formats</span></div>
             </div>
           </div>
           <div className="grid divide-y divide-[#e8f0ef] sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-            <ReportCard title="Balance ledger" format="CSV" detail="ยอดตาม lot และ location" href="/api/stock/export?report=balances" icon={<FileDown />} tone="teal" />
-            <ReportCard title="Movement ledger" format="CSV" detail="การรับ จ่าย ย้าย และปรับ" href="/api/stock/export?report=movements" icon={<BarChart3 />} tone="blue" />
-            <ReportCard title="Compliance brief" format="PRINT / PDF" detail="รายงานภาษาไทยสำหรับบันทึกหลักฐาน" href="/reports/stock-summary" icon={<FileText />} tone="amber" />
+            <ReportCard title="Balance ledger" format="CSV" detail="ยอดตาม lot และ location" href={`/api/stock/export?report=balances${equipmentQuery}`} icon={<FileDown />} tone="teal" />
+            <ReportCard title="Movement ledger" format="CSV" detail="การรับ จ่าย ย้าย และปรับ" href={`/api/stock/export?report=movements${equipmentQuery}`} icon={<BarChart3 />} tone="blue" />
+            <ReportCard title="Compliance brief" format="PRINT / PDF" detail="รายงานภาษาไทยสำหรับบันทึกหลักฐาน" href={`/reports/stock-summary${equipmentId === 'all' ? '' : `?equipmentId=${encodeURIComponent(equipmentId)}`}`} icon={<FileText />} tone="amber" />
           </div>
         </Card>
 
@@ -48,7 +52,7 @@ export function ReportsPanel({ stock }: { stock: StockWorkspace }) {
           </ol>
         </Card>
       </section>
-      <InventorySnapshot stock={stock} />
+      <InventorySnapshot stock={filteredStock} />
     </div>
   )
 }

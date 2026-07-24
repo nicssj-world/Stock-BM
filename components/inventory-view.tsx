@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { ArrowDownToLine, ArrowUpFromLine, FileDown, History, MoveRight, PackageCheck, PackageSearch, Printer, RotateCcw, X } from 'lucide-react'
 import type { BmActor, StockItem, StockLot, StockTransaction, StockWorkspace } from '@/lib/bm/types'
 import { formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
+import { stockItemMatchesEquipment } from '@/lib/bm/stock-equipment-filter'
 import { printLotLabel } from '@/lib/bm/label-print'
 import { api, Button, Card, Input, Notice, PageHeader, Select } from '@/components/ui'
 import { Pagination, usePagination } from '@/components/pagination'
@@ -17,6 +18,7 @@ export function InventoryView({ actor, initialData, defaultLocationId }: { actor
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('all')
   const [locationFilter, setLocationFilter] = useState(defaultLocationId && initialData.locations.some((location) => location.id === defaultLocationId) ? defaultLocationId : 'all')
+  const [equipmentFilter, setEquipmentFilter] = useState('all')
   const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
   const [actionLot, setActionLot] = useState<{ item: StockItem; lot: StockLot } | null>(null)
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
@@ -27,9 +29,9 @@ export function InventoryView({ actor, initialData, defaultLocationId }: { actor
       const matches = !term || `${item.itemCode} ${item.name} ${item.categoryName}`.toLowerCase().includes(term)
       const statusOk = status === 'all' || (status === 'low' && item.isLowStock) || (status === 'expiring' && item.lots.some((lot) => lot.expiryState === 'expiring')) || (status === 'expired' && item.lots.some((lot) => lot.expiryState === 'expired'))
       const locationOk = locationFilter === 'all' || item.lots.some((lot) => lot.balances.some((balance) => balance.locationId === locationFilter && balance.onHand > 0))
-      return matches && statusOk && locationOk
+      return matches && statusOk && locationOk && stockItemMatchesEquipment(item, equipmentFilter)
     })
-  }, [data.items, locationFilter, q, status])
+  }, [data.items, equipmentFilter, locationFilter, q, status])
   const itemPagination = usePagination(visibleItems.length, INVENTORY_PAGE_SIZE)
   const pagedItems = visibleItems.slice(itemPagination.start, itemPagination.end)
   const selectedItem = visibleItems.find((item) => item.id === selectedItemId) ?? visibleItems[0] ?? null
@@ -44,6 +46,11 @@ export function InventoryView({ actor, initialData, defaultLocationId }: { actor
   function filterByStatus(nextStatus: string) {
     setStatus(nextStatus)
     itemPagination.setPage(1)
+  }
+
+  function exportHref(report: 'balances' | 'movements') {
+    const equipmentQuery = equipmentFilter === 'all' ? '' : `&equipmentId=${encodeURIComponent(equipmentFilter)}`
+    return `/api/stock/export?report=${report}${equipmentQuery}`
   }
 
   async function reverse(transaction: StockTransaction) {
@@ -74,7 +81,7 @@ export function InventoryView({ actor, initialData, defaultLocationId }: { actor
       </StockMetricStrip>
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
       <Card className="overflow-hidden rounded-xl">
-        <div className="grid gap-2 border-b border-[#e0e9ea] bg-[#f8fcfb] p-3 lg:grid-cols-[minmax(0,1fr)_170px_190px_auto]">
+        <div className="grid gap-2 border-b border-[#e0e9ea] bg-[#f8fcfb] p-3 lg:grid-cols-[minmax(0,1fr)_150px_170px_190px_auto]">
           <div className="relative"><PackageSearch className="absolute top-2.5 left-3 size-4 text-[#8ca1a5]" /><Input value={q} onChange={(event) => setQ(event.target.value)} className="pl-9" placeholder="ค้นหา item code, ชื่อ, หมวดหมู่" /></div>
           <Select value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="all">All status</option>
@@ -82,11 +89,15 @@ export function InventoryView({ actor, initialData, defaultLocationId }: { actor
             <option value="expiring">Expiring</option>
             <option value="expired">Expired</option>
           </Select>
+          <Select value={equipmentFilter} onChange={(event) => { setEquipmentFilter(event.target.value); itemPagination.setPage(1) }}>
+            <option value="all">ทุกเครื่องมือ</option>
+            {(data.equipmentOptions ?? []).map((equipment) => <option key={equipment.id} value={equipment.id}>{equipment.code} · {equipment.name}</option>)}
+          </Select>
           <Select value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}>
             <option value="all">All locations</option>
             {data.locations.map((location) => <option key={location.id} value={location.id}>{location.code} · {location.name}</option>)}
           </Select>
-          <div className="hidden items-center justify-end gap-1 lg:flex"><Button variant="ghost" className="px-2" onClick={() => { window.location.href = '/api/stock/export?report=balances' }} title="Export balances"><FileDown className="size-4" /></Button><Button variant="ghost" className="px-2" onClick={() => { window.location.href = '/api/stock/export?report=movements' }} title="Export movements"><History className="size-4" /></Button></div>
+          <div className="hidden items-center justify-end gap-1 lg:flex"><Button variant="ghost" className="px-2" onClick={() => { window.location.href = exportHref('balances') }} title="Export balances"><FileDown className="size-4" /></Button><Button variant="ghost" className="px-2" onClick={() => { window.location.href = exportHref('movements') }} title="Export movements"><History className="size-4" /></Button></div>
         </div>
         <MobileInventoryList
           items={pagedItems}

@@ -47,6 +47,13 @@ export interface StockLot {
   balances: StockBalance[]
 }
 
+export interface StockEquipmentOption {
+  id: string
+  code: string
+  name: string
+  status: string
+}
+
 export interface StockItem {
   id: string
   itemCode: string
@@ -67,6 +74,7 @@ export interface StockItem {
   isHpv: boolean
   hpvSelfCollected: boolean
   hpvClinicianCollected: boolean
+  equipmentIds?: string[]
   isActive: boolean
   totalOnHand: number
   usableOnHand: number
@@ -106,6 +114,7 @@ export interface StockTransaction {
 export interface StockWorkspace {
   categories: StockCategory[]
   locations: StockLocation[]
+  equipmentOptions?: StockEquipmentOption[]
   items: StockItem[]
   transactions: StockTransaction[]
   activeItemCount: number

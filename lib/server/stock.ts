@@ -8,6 +8,7 @@ import type {
   ScanResolution,
   StockBalance,
   StockCategory,
+  StockEquipmentOption,
   StockItem,
   StockLocation,
   StockLot,
@@ -66,6 +67,8 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
     { data: lotData, error: lotError },
     { data: transactionData, error: transactionError },
     { data: balanceData, error: balanceError },
+    { data: equipmentData, error: equipmentError },
+    { data: itemEquipmentLinkData, error: itemEquipmentLinkError },
   ] = await Promise.all([
     admin.from('bm_stock_categories').select('*').order('name'),
     admin.from('bm_stock_locations').select('*').order('code'),
@@ -75,6 +78,8 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
       ? admin.from('bm_stock_transactions').select('*').order('created_at', { ascending: false }).limit(500)
       : Promise.resolve({ data: [], error: null }),
     admin.from('bm_stock_lot_location_balances').select('lot_id,location_id,on_hand'),
+    admin.from('bm_equipment').select('id,code,name,status').order('code'),
+    admin.from('bm_stock_item_equipment_links').select('stock_item_id,equipment_id'),
   ])
   fail(categoryError)
   fail(locationError)
@@ -82,6 +87,8 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
   fail(lotError)
   fail(transactionError)
   fail(balanceError)
+  fail(equipmentError)
+  fail(itemEquipmentLinkError)
 
   const categoryRows = (categoryData ?? []) as RecordRow[]
   const locationRows = (locationData ?? []) as RecordRow[]
@@ -89,6 +96,19 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
   const lotRows = (lotData ?? []) as RecordRow[]
   const transactionRows = (transactionData ?? []) as RecordRow[]
   const balanceRows = (balanceData ?? []) as RecordRow[]
+  const equipmentOptions: StockEquipmentOption[] = ((equipmentData ?? []) as RecordRow[]).map((row) => ({
+    id: asString(row.id),
+    code: asString(row.code),
+    name: asString(row.name),
+    status: asString(row.status),
+  }))
+  const equipmentIdsByItem = new Map<string, string[]>()
+  for (const row of (itemEquipmentLinkData ?? []) as RecordRow[]) {
+    const itemId = asString(row.stock_item_id)
+    const equipmentId = asString(row.equipment_id)
+    if (!itemId || !equipmentId) continue
+    equipmentIdsByItem.set(itemId, [...(equipmentIdsByItem.get(itemId) ?? []), equipmentId])
+  }
   const transactionIds = ids(transactionRows, 'id')
   const { data: transactionLineData, error: transactionLineError } = transactionIds.length
     ? await admin.from('bm_stock_movement_lines').select('*').in('transaction_id', transactionIds).order('created_at', { ascending: false })
@@ -187,6 +207,7 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
       isHpv: Boolean(row.is_hpv),
       hpvSelfCollected: Boolean(row.hpv_self_collected),
       hpvClinicianCollected: Boolean(row.hpv_clinician_collected),
+      equipmentIds: equipmentIdsByItem.get(asString(row.id)) ?? [],
       isActive: Boolean(row.is_active),
       totalOnHand,
       usableOnHand,
@@ -248,6 +269,7 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
   return {
     categories,
     locations,
+    equipmentOptions,
     items,
     transactions,
     activeItemCount: activeItems.length,
@@ -270,6 +292,28 @@ async function assertActiveCategory(categoryId: string) {
 
 function assertTracking(trackLot: boolean, trackExpiry: boolean) {
   if (trackExpiry && !trackLot) throw new HttpError(400, 'Expiry tracking requires lot tracking')
+}
+
+async function replaceItemEquipmentLinks(itemId: string, equipmentIds: string[] | undefined, actor: BmActor) {
+  if (equipmentIds === undefined) return
+  const uniqueEquipmentIds = [...new Set(equipmentIds.filter(Boolean))]
+  const admin = getAdminClient()
+  if (uniqueEquipmentIds.length) {
+    const { data, error } = await admin.from('bm_equipment').select('id').in('id', uniqueEquipmentIds)
+    fail(error)
+    const foundIds = new Set(((data ?? []) as RecordRow[]).map((row) => asString(row.id)))
+    if (foundIds.size !== uniqueEquipmentIds.length) throw new HttpError(400, 'One or more selected equipment records were not found')
+  }
+  const { error: deleteError } = await admin.from('bm_stock_item_equipment_links').delete().eq('stock_item_id', itemId)
+  fail(deleteError)
+  if (uniqueEquipmentIds.length) {
+    const { error: insertError } = await admin.from('bm_stock_item_equipment_links').insert(uniqueEquipmentIds.map((equipmentId) => ({
+      stock_item_id: itemId,
+      equipment_id: equipmentId,
+      created_by: actor.id,
+    })))
+    fail(insertError)
+  }
 }
 
 export async function createCategory(name: string, actor: BmActor) {
@@ -358,6 +402,7 @@ export async function createItem(input: {
   catalogNo?: string | null
   manufacturer?: string | null
   manufacturerBarcode?: string | null
+  equipmentIds?: string[]
   trackLot: boolean
   trackExpiry: boolean
   isHpv?: boolean
@@ -392,6 +437,7 @@ export async function createItem(input: {
     .select('id')
     .single()
   fail(error)
+  await replaceItemEquipmentLinks(asString((data as RecordRow).id), input.equipmentIds, actor)
   await writeAudit(actor, 'item.create', 'stock-item', asString((data as RecordRow).id), input)
   return getStockWorkspace(actor)
 }
@@ -439,6 +485,7 @@ export async function updateItem(itemId: string, input: Partial<Parameters<typeo
   if (input.isActive !== undefined) updates.is_active = input.isActive
   const { error } = await getAdminClient().from('bm_stock_items').update(updates).eq('id', itemId)
   fail(error)
+  await replaceItemEquipmentLinks(itemId, input.equipmentIds, actor)
   await writeAudit(actor, 'item.update', 'stock-item', itemId, input)
   return getStockWorkspace(actor)
 }

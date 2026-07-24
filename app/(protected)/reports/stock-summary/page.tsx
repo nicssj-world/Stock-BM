@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
 import type { StockItem } from '@/lib/bm/types'
+import { filterStockWorkspaceByEquipment } from '@/lib/bm/stock-equipment-filter'
 import { requireFullPageActor } from '@/lib/server/auth'
 import { getStockWorkspace } from '@/lib/server/stock'
 
@@ -25,9 +26,13 @@ function riskTags(item: StockItem) {
   return tags
 }
 
-export default async function StockSummaryReportPage() {
+export default async function StockSummaryReportPage({ searchParams }: { searchParams: Promise<{ equipmentId?: string | string[] }> }) {
   const actor = await requireFullPageActor()
-  const stock = await getStockWorkspace(actor)
+  const workspace = await getStockWorkspace(actor)
+  const requestedEquipmentId = (await searchParams).equipmentId
+  const equipmentId = typeof requestedEquipmentId === 'string' ? requestedEquipmentId : 'all'
+  const selectedEquipment = workspace.equipmentOptions?.find((equipment) => equipment.id === equipmentId)
+  const stock = filterStockWorkspaceByEquipment(workspace, selectedEquipment ? equipmentId : 'all')
   const riskItems = stock.items
     .filter((item) => item.isActive && (item.isLowStock || atRiskLots(item).length > 0))
     .sort((a, b) => {
@@ -40,6 +45,14 @@ export default async function StockSummaryReportPage() {
     <main className="stock-report-page">
       <div className="stock-report-toolbar print-hidden">
         <Link href="/reports" className="stock-report-back">กลับ Reports</Link>
+        <form action="/reports/stock-summary" className="stock-report-filter">
+          <label htmlFor="stock-report-equipment">เครื่องมือ</label>
+          <select id="stock-report-equipment" name="equipmentId" defaultValue={selectedEquipment?.id ?? 'all'}>
+            <option value="all">ทุกเครื่องมือ</option>
+            {(workspace.equipmentOptions ?? []).map((equipment) => <option key={equipment.id} value={equipment.id}>{equipment.code} · {equipment.name}</option>)}
+          </select>
+          <button type="submit">กรอง</button>
+        </form>
         <button id="print-stock-report" type="button">Print / Save PDF</button>
       </div>
 
@@ -53,6 +66,7 @@ export default async function StockSummaryReportPage() {
           <dl className="stock-report-meta">
             <div><dt>จัดทำเมื่อ</dt><dd>{printedAt()}</dd></div>
             <div><dt>ผู้จัดทำ</dt><dd>{actor.displayName} ({actor.ephisId})</dd></div>
+            <div><dt>เครื่องมือ</dt><dd>{selectedEquipment ? `${selectedEquipment.code} · ${selectedEquipment.name}` : 'ทุกเครื่องมือ'}</dd></div>
           </dl>
         </header>
 
@@ -101,9 +115,10 @@ export default async function StockSummaryReportPage() {
         @page { size: A4 landscape; margin: 10mm; }
         body { background: #e9eef0; }
         .stock-report-page { color: #173d50; font-family: "Noto Sans Thai", sans-serif; }
-        .stock-report-toolbar { display: flex; align-items: center; justify-content: space-between; max-width: 1120px; margin: 0 auto 12px; }
+        .stock-report-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; max-width: 1120px; margin: 0 auto 12px; }
         .stock-report-back, #print-stock-report { border: 1px solid #b8c8cc; background: white; border-radius: 7px; padding: 8px 12px; color: #173d50; font-size: 13px; font-weight: 700; text-decoration: none; cursor: pointer; }
         #print-stock-report { background: #0b7f76; border-color: #0b7f76; color: white; }
+        .stock-report-filter { display: flex; align-items: center; gap: 6px; margin-left: auto; color: #55727c; font-size: 12px; font-weight: 700; }.stock-report-filter select { min-width: 210px; border: 1px solid #b8c8cc; border-radius: 7px; background: white; padding: 8px; color: #173d50; }.stock-report-filter button { border: 1px solid #0b7f76; border-radius: 7px; background: #eef8f5; padding: 8px 12px; color: #08766e; font-size: 12px; font-weight: 700; cursor: pointer; }
         .stock-report-sheet { width: 1120px; min-height: 780px; margin: 0 auto; padding: 28px; background: white; box-shadow: 0 10px 40px rgba(20,64,72,.16); }
         .stock-report-heading { display: flex; justify-content: space-between; gap: 28px; padding-bottom: 18px; border-bottom: 2px solid #123944; }
         .stock-report-kicker, .stock-report-section-heading p { margin: 0; color: #0b7f76; font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }

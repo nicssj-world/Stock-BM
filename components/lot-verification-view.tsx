@@ -101,7 +101,7 @@ function CreateForm({ data, onDone }: { data: LotVerifWorkspace; onDone: () => v
     <Card className="p-4">
       <h3 className="flex items-center gap-2 font-bold text-[#173d50]"><GitCompareArrows className="size-4" /> สร้าง verification</h3>
       <form onSubmit={submit} className="mt-3 grid gap-3 lg:grid-cols-2">
-        <Field label="ชนิด / Subject">
+        <Field label="ชนิด / Subject" hint={subjectKind === 'reagent-lot' ? 'แสดงเฉพาะ Stock item หมวด Reagent ที่ยังใช้งาน' : undefined}>
           <Select value={subjectKind} onChange={(e) => { setSubjectKind(e.target.value as 'reagent-lot' | 'control-lot'); setForm({ ...form, newLot: '', oldLot: '' }) }}>
             <option value="control-lot">Control lot (IQC)</option>
             <option value="reagent-lot">Reagent lot (Stock)</option>

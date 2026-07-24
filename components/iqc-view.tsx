@@ -459,8 +459,11 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
                               {!chart.labLockedAt ? <span className="rounded-full border border-[#eed4a6] bg-[#fff9ed] px-2 py-0.5 text-[11px] font-bold text-[#a9700f]">not locked</span> : <span className="rounded-full border border-[#bfe3cf] bg-[#f1fbf4] px-2 py-0.5 text-[11px] font-bold text-[#18763a]">locked</span>}
                             </div>
                             <p className="mt-1 text-xs text-[#789097]">
-                              n {chart.n} · mean {fmtCompact(chart.mean)} · SD {fmtCompact(chart.sd)}
+                              เกณฑ์ที่ใช้: {chart.activeLimit === 'lab' ? 'LAB Mean/SD' : 'Assigned Mean/SD'} · n {chart.n} · mean {fmtCompact(chart.mean)} · SD {fmtCompact(chart.sd)}
                               {latest ? ` · latest ${fmtCompact(latest.value)} (${formatDateTime(latest.runDatetime)})` : ''}
+                            </p>
+                            <p className="mt-1 text-[11px] text-[#58747d]">
+                              Assigned: {fmtCompact(chart.assignedMean)} / SD {fmtCompact(chart.assignedSd)} · LAB: {fmtCompact(chart.labMean)} / SD {fmtCompact(chart.labSd)}{chart.labN != null ? ` (n ${chart.labN})` : ' (รอ Lock & ปิด Lot)'}
                             </p>
                           </div>
                           <div className="flex flex-wrap items-center justify-start gap-2 sm:justify-end">
