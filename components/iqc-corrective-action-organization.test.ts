@@ -29,4 +29,14 @@ describe('IQC corrective action organization', () => {
     expect(view).toContain('function startEditing(ca: IqcCorrectiveAction)')
     expect(view).toContain("method: 'PATCH'")
   })
+
+  it('shows who recorded the effectiveness result', () => {
+    expect(view).toContain('ตรวจโดย ${ca.effectivenessVerifiedByName}')
+    expect(view).toContain('formatDateTime(ca.effectivenessVerifiedAt)')
+  })
+
+  it('uses confirmation-of-correction wording for the effectiveness step', () => {
+    expect(view).toContain('ยืนยันผลการแก้ไข')
+    expect(view).toContain('รอยืนยันผลการแก้ไข')
+  })
 })

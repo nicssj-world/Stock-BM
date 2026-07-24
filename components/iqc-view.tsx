@@ -1407,7 +1407,7 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
     setBusy(true)
     try {
       const result = await api<{ iqc: IqcWorkspace }>(`/api/iqc/corrective-actions/${id}/close`, { method: 'POST', body: JSON.stringify({}) })
-      onOk('ส่ง CAPA เพื่อรอตรวจ effectiveness แล้ว', result.iqc)
+      onOk('ส่ง CAPA เพื่อรอยืนยันผลการแก้ไขแล้ว', result.iqc)
     } catch (e) {
       onErr(e instanceof Error ? e.message : 'ปิดไม่สำเร็จ')
     } finally {
@@ -1457,8 +1457,8 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
     await close(ca.id)
   }
   async function verify(id: string) {
-    const effective = window.confirm('Corrective action นี้มีประสิทธิผลหรือไม่?\nกด OK = effective, Cancel = ineffective')
-    const note = window.prompt('บันทึกผลการตรวจ effectiveness:')
+    const effective = window.confirm('ยืนยันว่าการแก้ไขนี้มีประสิทธิผลหรือไม่?\nกด OK = effective, Cancel = ineffective')
+    const note = window.prompt('บันทึกผลการยืนยันการแก้ไข:')
     if (!note?.trim()) return
     setBusy(true)
     try {
@@ -1469,9 +1469,9 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
           effectivenessNote: note.trim(),
         }),
       })
-      onOk(effective ? 'ตรวจ effectiveness แล้ว และปิด CAPA' : 'บันทึกว่า ineffective และเปิด CAPA ต่อ', result.iqc)
+      onOk(effective ? 'ยืนยันผลการแก้ไขแล้ว และปิด CAPA' : 'บันทึกว่า ineffective และเปิด CAPA ต่อ', result.iqc)
     } catch (e) {
-      onErr(e instanceof Error ? e.message : 'ตรวจ effectiveness ไม่สำเร็จ')
+      onErr(e instanceof Error ? e.message : 'ยืนยันผลการแก้ไขไม่สำเร็จ')
     } finally {
       setBusy(false)
     }
@@ -1567,7 +1567,7 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
               {([
                 ['active', `กำลังดำเนินการ ${actionCounts.open + actionCounts.awaitingEffectiveness}`],
                 ['open', `Open ${actionCounts.open}`],
-                ['awaiting-effectiveness', `รอตรวจผล ${actionCounts.awaitingEffectiveness}`],
+                ['awaiting-effectiveness', `รอยืนยันผลการแก้ไข ${actionCounts.awaitingEffectiveness}`],
                 ['closed', `Closed ${actionCounts.closed}`],
                 ['all', `ทั้งหมด ${data.correctiveActions.length}`],
               ] as [CorrectiveActionFilter, string][]).map(([value, label]) => (
@@ -1606,7 +1606,7 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
                   ) : null}
                   {ca.status === 'awaiting-effectiveness' ? (
                     <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => verify(ca.id)}>
-                      ตรวจ effectiveness
+                      ยืนยันผลการแก้ไข
                     </Button>
                   ) : null}
                   <Button variant="danger" className="min-h-8 px-2 py-1.5" disabled={busy} onClick={() => void remove(ca.id)} aria-label={`ลบ corrective action ${ca.problem}`}>
@@ -1640,7 +1640,9 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
                       ) : null}
                       {ca.effectivenessNote ? (
                         <p className="text-xs text-[#789097]">
-                          Effectiveness: {ca.effectivenessOutcome} · {ca.effectivenessNote}
+                          ผลการยืนยันการแก้ไข: {ca.effectivenessOutcome} · {ca.effectivenessNote}
+                          {ca.effectivenessVerifiedByName ? ` · ตรวจโดย ${ca.effectivenessVerifiedByName}` : ''}
+                          {ca.effectivenessVerifiedAt ? ` (${formatDateTime(ca.effectivenessVerifiedAt)})` : ''}
                         </p>
                       ) : null}
                       {ca.status !== 'closed' ? <div className="mt-3 flex justify-end"><Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => startEditing(ca)}>แก้ไข</Button></div> : null}
