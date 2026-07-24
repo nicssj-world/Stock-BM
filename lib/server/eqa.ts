@@ -329,8 +329,10 @@ export async function updateScheme(id: string, input: { providerId: string; name
   await writeAudit(actor, 'eqa.scheme.update', 'eqa-scheme', id, input); return getEqaWorkspace(actor)
 }
 export async function deleteScheme(id: string, actor: BmActor) {
-  assertAdmin(actor); const admin = getAdminClient(); const { count, error } = await admin.from('eqa_rounds').select('id', { count: 'exact', head: true }).eq('scheme_id', id); fail(error)
-  if (count) throw new HttpError(409, 'ลบ scheme ไม่ได้ เพราะมี round ผูกอยู่')
+  assertAdmin(actor); const admin = getAdminClient(); const { count: roundCount, error: roundError } = await admin.from('eqa_rounds').select('id', { count: 'exact', head: true }).eq('scheme_id', id); fail(roundError)
+  const { count: planItemCount, error: planItemError } = await admin.from('eqa_plan_items').select('id', { count: 'exact', head: true }).eq('scheme_id', id); fail(planItemError)
+  if (planItemCount) throw new HttpError(409, 'ลบ scheme ไม่ได้ เพราะมีรายการในแผนประจำปีผูกอยู่')
+  if (roundCount) throw new HttpError(409, 'ลบ scheme ไม่ได้ เพราะมี round ผูกอยู่')
   fail((await admin.from('eqa_schemes').delete().eq('id', id)).error); await writeAudit(actor, 'eqa.scheme.delete', 'eqa-scheme', id, {}); return getEqaWorkspace(actor)
 }
 
@@ -410,6 +412,8 @@ export async function updateResult(id: string, input: { analyte: string; sampleC
 }
 export async function deleteResult(id: string, actor: BmActor) {
   assertOperator(actor); const admin = getAdminClient(); const { data, error } = await admin.from('eqa_results').select('round_id,analyte').eq('id', id).maybeSingle(); fail(error); if (!data) throw new HttpError(404, 'EQA result not found')
+  const { count, error: correctiveActionError } = await admin.from('eqa_corrective_actions').select('id', { count: 'exact', head: true }).eq('result_id', id); fail(correctiveActionError)
+  if (count) throw new HttpError(409, 'ลบผลไม่ได้ เพราะมี corrective action ผูกอยู่')
   fail((await admin.from('eqa_results').delete().eq('id', id)).error); await invalidateRoundDocuments(asString((data as RecordRow).round_id)); await writeAudit(actor, 'eqa.result.delete', 'eqa-result', id, { analyte: asString((data as RecordRow).analyte) }); return getEqaWorkspace(actor)
 }
 
@@ -427,7 +431,9 @@ export async function closeEqaCorrectiveAction(id: string, input: { rootCause?: 
 export async function setEqaApproverAssignment(role: EqaAssignedApprovalRole, userId: string, actor: BmActor) {
   assertAdmin(actor); if (!ASSIGNED_APPROVAL_ROLES.includes(role)) throw new HttpError(400, 'Invalid approval role')
   fail((await getAdminClient().from('eqa_approver_assignments').upsert({ approval_role: role, user_id: userId, updated_by: actor.id, updated_at: new Date().toISOString() }, { onConflict: 'approval_role' })).error)
-  await writeAudit(actor, 'eqa.approver.assign', 'eqa-approver-assignment', role, { userId }); return getEqaWorkspace(actor)
+  // The assignment key is the role slug, not a UUID. Keep it in the audit
+  // detail because bm_audit_logs.entity_id is UUID-typed.
+  await writeAudit(actor, 'eqa.approver.assign', 'eqa-approver-assignment', undefined, { role, userId }); return getEqaWorkspace(actor)
 }
 
 function documentReadiness(workspace: EqaWorkspace, type: EqaDocumentType, entityId: string) {
