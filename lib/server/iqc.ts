@@ -35,6 +35,7 @@ import { combinedRelative, divisorFor, expandedRelative, pooledRsd, relativeStan
 import type { BmActor } from '@/lib/bm/types'
 import { bangkokDateKey, todayBangkok } from '@/lib/bm/rules'
 import { writeAudit } from '@/lib/server/audit'
+import { deleteEntityAttachments } from '@/lib/server/attachments'
 import { HttpError } from '@/lib/server/errors'
 import { getAdminClient } from '@/lib/supabase/admin'
 
@@ -1611,6 +1612,42 @@ export async function createCorrectiveAction(input: {
   return getIqcWorkspace(actor)
 }
 
+export async function updateCorrectiveAction(id: string, input: {
+  problem?: string
+  rootCause?: string | null
+  actionTaken?: string | null
+  ownerId?: string | null
+  dueDate?: string | null
+}, actor: BmActor) {
+  assertAdmin(actor)
+  const admin = getAdminClient()
+  const { data: existing, error: existingError } = await admin
+    .from('iqc_corrective_actions')
+    .select('status')
+    .eq('id', id)
+    .maybeSingle()
+  fail(existingError)
+  if (!existing) throw new HttpError(404, 'Corrective action not found')
+  if (asString((existing as RecordRow).status) === 'closed') throw new HttpError(400, 'Closed corrective action cannot be edited')
+
+  const update: Record<string, unknown> = {}
+  if (input.problem !== undefined) {
+    const problem = input.problem.trim()
+    if (!problem) throw new HttpError(400, 'Problem description is required')
+    update.problem = problem
+  }
+  if (input.rootCause !== undefined) update.root_cause = clean(input.rootCause)
+  if (input.actionTaken !== undefined) update.action_taken = clean(input.actionTaken)
+  if (input.ownerId !== undefined) update.owner_id = input.ownerId || null
+  if (input.dueDate !== undefined) update.due_date = input.dueDate || null
+  if (!Object.keys(update).length) throw new HttpError(400, 'No changes provided')
+
+  const { error } = await admin.from('iqc_corrective_actions').update(update).eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'iqc.correctiveAction.update', 'iqc-corrective-action', id, input)
+  return getIqcWorkspace(actor)
+}
+
 export async function closeCorrectiveAction(id: string, input: { rootCause?: string | null; actionTaken?: string | null; effectivenessOutcome?: 'effective' | 'ineffective' | null; effectivenessNote?: string | null }, actor: BmActor) {
   const admin = getAdminClient()
   const { data: existing, error: existingError } = await admin
@@ -1650,5 +1687,28 @@ export async function closeCorrectiveAction(id: string, input: { rootCause?: str
   const { error } = await admin.from('iqc_corrective_actions').update(update).eq('id', id)
   fail(error)
   await writeAudit(actor, 'iqc.correctiveAction.close', 'iqc-corrective-action', id, input)
+  return getIqcWorkspace(actor)
+}
+
+export async function deleteCorrectiveAction(id: string, actor: BmActor) {
+  assertAdmin(actor)
+  const admin = getAdminClient()
+  const { data: existing, error: existingError } = await admin
+    .from('iqc_corrective_actions')
+    .select('run_id,problem,status')
+    .eq('id', id)
+    .maybeSingle()
+  fail(existingError)
+  if (!existing) throw new HttpError(404, 'Corrective action not found')
+
+  const attachmentCount = await deleteEntityAttachments({ module: 'iqc', entityType: 'corrective-action', entityId: id })
+  const { error } = await admin.from('iqc_corrective_actions').delete().eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'iqc.correctiveAction.delete', 'iqc-corrective-action', id, {
+    runId: asString((existing as RecordRow).run_id),
+    problem: asString((existing as RecordRow).problem),
+    status: asString((existing as RecordRow).status),
+    attachmentCount,
+  })
   return getIqcWorkspace(actor)
 }

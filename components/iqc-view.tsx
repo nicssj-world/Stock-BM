@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { AlertTriangle, CalendarClock, Calculator, ClipboardList, Eye, Gauge, Layers3, Lock, LineChart, ListFilter, PlusCircle, Printer, Search, Settings, Sigma, Trash2, Wrench } from 'lucide-react'
+import { AlertTriangle, CalendarClock, Calculator, ChevronDown, ClipboardList, Eye, Gauge, Layers3, Lock, LineChart, ListFilter, PlusCircle, Printer, Search, Settings, Sigma, Trash2, Wrench } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
-import type { IqcUncertaintyBudget, IqcWorkspace } from '@/lib/iqc/types'
+import type { IqcCorrectiveAction, IqcUncertaintyBudget, IqcWorkspace } from '@/lib/iqc/types'
 import { findCorrectiveActionForPoint, runsWithoutCorrectiveActions } from '@/lib/iqc/corrective-actions'
 import { formatDate, formatDateTime } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
@@ -14,6 +14,8 @@ import { ManagedList } from '@/components/managed-list'
 
 type Tab = 'charts' | 'enter' | 'sixsigma' | 'uncertainty' | 'corrective' | 'manage'
 type NoticeState = { tone: 'success' | 'danger'; text: string } | null
+type CorrectiveActionFilter = 'active' | 'open' | 'awaiting-effectiveness' | 'closed' | 'all'
+type CorrectiveActionEdit = { problem: string; rootCause: string; actionTaken: string; ownerId: string; dueDate: string }
 
 function nowForDatetimeLocalInput() {
   const now = new Date()
@@ -1321,11 +1323,37 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
   const [dueDate, setDueDate] = useState('')
   const [busy, setBusy] = useState(false)
   const [showAll, setShowAll] = useState(false)
+  const [actionFilter, setActionFilter] = useState<CorrectiveActionFilter>('active')
+  const [query, setQuery] = useState('')
+  const [expandedActionIds, setExpandedActionIds] = useState<Set<string>>(new Set())
+  const [visibleActionCount, setVisibleActionCount] = useState(20)
+  const [editingActionId, setEditingActionId] = useState<string | null>(null)
+  const [editingAction, setEditingAction] = useState<CorrectiveActionEdit>({ problem: '', rootCause: '', actionTaken: '', ownerId: '', dueDate: '' })
 
   const controlLotLabels = useMemo(() => new Map(data.controlLots.map((lot) => [lot.id, `${lot.controlMaterialName}${lot.level ? ` ${lot.level}` : ''} · ${lot.lotNumber}`])), [data.controlLots])
   const runById = useMemo(() => new Map(data.runs.map((run) => [run.id, run])), [data.runs])
   const flaggedOf = (r: IqcWorkspace['runs'][number]) => r.results.filter((res) => !res.isVoided && res.status !== 'accepted')
   const runOptions = runsWithoutCorrectiveActions(data.runs, data.correctiveActions).filter((r) => showAll || flaggedOf(r).length > 0)
+  const actionCounts = useMemo(() => ({
+    open: data.correctiveActions.filter((action) => action.status === 'open').length,
+    awaitingEffectiveness: data.correctiveActions.filter((action) => action.status === 'awaiting-effectiveness').length,
+    closed: data.correctiveActions.filter((action) => action.status === 'closed').length,
+  }), [data.correctiveActions])
+  const effectiveActionFilter = focusId && actionFilter === 'active' ? 'all' : actionFilter
+  const filteredActions = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase()
+    return data.correctiveActions.filter((action) => {
+      const statusMatches = effectiveActionFilter === 'all'
+        || (effectiveActionFilter === 'active' && action.status !== 'closed')
+        || action.status === effectiveActionFilter
+      const textMatches = !normalizedQuery || [action.problem, action.analyteName, action.ownerName, action.createdByName]
+        .filter((value): value is string => Boolean(value))
+        .some((value) => value.toLocaleLowerCase().includes(normalizedQuery))
+      return statusMatches && textMatches
+    })
+  }, [data.correctiveActions, effectiveActionFilter, query])
+  const focusedActionIndex = focusId ? filteredActions.findIndex((action) => action.id === focusId) : -1
+  const visibleActions = filteredActions.slice(0, Math.max(visibleActionCount, focusedActionIndex + 1))
   useEffect(() => {
     if (!focusId) return
     document.getElementById(`corrective-action-${focusId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -1386,6 +1414,48 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
       setBusy(false)
     }
   }
+  function startEditing(ca: IqcCorrectiveAction) {
+    setEditingActionId(ca.id)
+    setEditingAction({
+      problem: ca.problem,
+      rootCause: ca.rootCause ?? '',
+      actionTaken: ca.actionTaken ?? '',
+      ownerId: ca.ownerId ?? '',
+      dueDate: ca.dueDate ?? '',
+    })
+    setExpandedActionIds((ids) => new Set(ids).add(ca.id))
+  }
+  async function saveEditing(event: React.FormEvent) {
+    event.preventDefault()
+    if (!editingActionId || !editingAction.problem.trim()) return onErr('ระบุปัญหา / Problem ก่อนบันทึก')
+    setBusy(true)
+    try {
+      const result = await api<{ iqc: IqcWorkspace }>(`/api/iqc/corrective-actions/${editingActionId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          problem: editingAction.problem.trim(),
+          rootCause: editingAction.rootCause.trim() || null,
+          actionTaken: editingAction.actionTaken.trim() || null,
+          ownerId: editingAction.ownerId || null,
+          dueDate: editingAction.dueDate || null,
+        }),
+      })
+      setEditingActionId(null)
+      onOk('แก้ไข corrective action แล้ว', result.iqc)
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : 'แก้ไข corrective action ไม่สำเร็จ')
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function submitForReview(ca: IqcCorrectiveAction) {
+    if (!ca.rootCause || !ca.actionTaken) {
+      startEditing(ca)
+      onErr('กรอก Root cause และ Action taken ก่อนส่งตรวจผล')
+      return
+    }
+    await close(ca.id)
+  }
   async function verify(id: string) {
     const effective = window.confirm('Corrective action นี้มีประสิทธิผลหรือไม่?\nกด OK = effective, Cancel = ineffective')
     const note = window.prompt('บันทึกผลการตรวจ effectiveness:')
@@ -1405,6 +1475,39 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
     } finally {
       setBusy(false)
     }
+  }
+  async function remove(id: string) {
+    if (!window.confirm('ลบ Corrective action นี้ใช่ไหม?\n\nรายการและไฟล์แนบทั้งหมดจะถูกลบถาวร')) return
+    setBusy(true)
+    try {
+      const result = await api<{ iqc: IqcWorkspace }>(`/api/iqc/corrective-actions/${id}`, { method: 'DELETE' })
+      setExpandedActionIds((ids) => {
+        const next = new Set(ids)
+        next.delete(id)
+        return next
+      })
+      onOk('ลบ corrective action แล้ว', result.iqc)
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : 'ลบ corrective action ไม่สำเร็จ')
+    } finally {
+      setBusy(false)
+    }
+  }
+  function toggleExpanded(id: string) {
+    setExpandedActionIds((ids) => {
+      const next = new Set(ids)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  function selectActionFilter(value: CorrectiveActionFilter) {
+    setActionFilter(value)
+    setVisibleActionCount(20)
+  }
+  function updateQuery(value: string) {
+    setQuery(value)
+    setVisibleActionCount(20)
   }
 
   return (
@@ -1454,52 +1557,113 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
         </form>
       </Card>
       <div className="space-y-3">
-        {data.correctiveActions.map((ca) => (
+        <Card className="space-y-3 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="font-bold text-[#173d50]">รายการ Corrective action</h2>
+              <p className="mt-0.5 text-xs text-[#789097]">แสดง {visibleActions.length} จาก {filteredActions.length} รายการที่ตรงเงื่อนไข · กดรายการเพื่อดูรายละเอียดและไฟล์แนบ</p>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {([
+                ['active', `กำลังดำเนินการ ${actionCounts.open + actionCounts.awaitingEffectiveness}`],
+                ['open', `Open ${actionCounts.open}`],
+                ['awaiting-effectiveness', `รอตรวจผล ${actionCounts.awaitingEffectiveness}`],
+                ['closed', `Closed ${actionCounts.closed}`],
+                ['all', `ทั้งหมด ${data.correctiveActions.length}`],
+              ] as [CorrectiveActionFilter, string][]).map(([value, label]) => (
+                <button key={value} type="button" aria-pressed={effectiveActionFilter === value} onClick={() => selectActionFilter(value)} className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${effectiveActionFilter === value ? 'border-[#0b7f76] bg-[#e6f5f2] text-[#08766e]' : 'border-[#d6e2e3] bg-white text-[#58747d] hover:bg-[#f3f9f9]'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <Input value={query} onChange={(event) => updateQuery(event.target.value)} placeholder="ค้นหาปัญหา, analyte, ผู้รับผิดชอบ หรือผู้บันทึก" aria-label="ค้นหา corrective action" />
+        </Card>
+        {visibleActions.map((ca) => {
+          const isExpanded = ca.id === focusId || expandedActionIds.has(ca.id)
+          const run = runById.get(ca.runId)
+          const needsCompletion = ca.status === 'open' && (!ca.rootCause || !ca.actionTaken)
+          return (
           <div key={ca.id} id={ca.id === focusId ? `corrective-action-${focusId}` : undefined}>
-            <Card className="p-4">
+            <Card className="overflow-hidden">
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
+                <button type="button" onClick={() => toggleExpanded(ca.id)} aria-expanded={isExpanded} className="min-w-0 flex-1 p-4 text-left focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0b7f76] focus-visible:outline-none">
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-[#315763]">{formatDateTime(ca.runDatetime)}</span>
                     <StatusBadge tone={ca.status === 'closed' ? 'accepted' : 'warning'} label={ca.status} />
+                    {needsCompletion ? <span className="rounded-full border border-[#eed4a6] bg-[#fff9ed] px-2 py-0.5 text-[10px] font-bold text-[#a9700f]">ข้อมูลไม่ครบ</span> : null}
+                    <ChevronDown className={`size-4 shrink-0 text-[#789097] transition-transform ${isExpanded ? 'rotate-180' : ''}`} aria-hidden="true" />
                   </div>
-                  {runById.get(ca.runId) ? <p className="mt-1 text-xs font-semibold text-[#58747d]">{summarizeResults(flaggedOf(runById.get(ca.runId)!), true) || summarizeResults(runById.get(ca.runId)!.results, false)}</p> : null}
-                  <p className="mt-1 text-sm text-[#3f5c64]">{ca.problem}</p>
-                  {ca.rootCause ? <p className="mt-1 text-xs text-[#789097]">Root cause: {ca.rootCause}</p> : null}
-                  {ca.actionTaken ? <p className="text-xs text-[#789097]">Action: {ca.actionTaken}</p> : null}
-                  {ca.ownerName || ca.dueDate ? (
-                    <p className="text-xs text-[#789097]">
-                      Owner: {ca.ownerName ?? '-'} · Due: {formatDate(ca.dueDate)}
-                    </p>
+                  {run ? <p className="mt-1 truncate text-xs font-semibold text-[#58747d]">{summarizeResults(flaggedOf(run), true) || summarizeResults(run.results, false)}</p> : null}
+                  <p className="mt-1 truncate text-sm text-[#3f5c64]">{ca.problem}</p>
+                  <p className="mt-1 text-[11px] text-[#9aafb4]">โดย {ca.createdByName ?? '-'}{ca.ownerName ? ` · ผู้รับผิดชอบ ${ca.ownerName}` : ''}</p>
+                </button>
+                <div className="flex shrink-0 items-center gap-1 p-3">
+                  {ca.status === 'open' ? (
+                    <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => void submitForReview(ca)}>
+                      {needsCompletion ? 'กรอกก่อนส่งตรวจผล' : 'ส่งตรวจผล'}
+                    </Button>
                   ) : null}
-                  {ca.effectivenessNote ? (
-                    <p className="text-xs text-[#789097]">
-                      Effectiveness: {ca.effectivenessOutcome} · {ca.effectivenessNote}
-                    </p>
+                  {ca.status === 'awaiting-effectiveness' ? (
+                    <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => verify(ca.id)}>
+                      ตรวจ effectiveness
+                    </Button>
                   ) : null}
-                  <p className="mt-1 text-[11px] text-[#9aafb4]">โดย {ca.createdByName ?? '-'}</p>
+                  <Button variant="danger" className="min-h-8 px-2 py-1.5" disabled={busy} onClick={() => void remove(ca.id)} aria-label={`ลบ corrective action ${ca.problem}`}>
+                    <Trash2 className="size-3.5" />
+                  </Button>
                 </div>
-                {ca.status === 'open' ? (
-                  <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => close(ca.id)}>
-                    ส่งตรวจผล
-                  </Button>
-                ) : null}
-                {ca.status === 'awaiting-effectiveness' ? (
-                  <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => verify(ca.id)}>
-                    ตรวจ effectiveness
-                  </Button>
-                ) : null}
               </div>
-              <div className="mt-3">
-                <AttachmentList module="iqc" entityType="corrective-action" entityId={ca.id} kind="corrective-action" canDelete />
-              </div>
+              {isExpanded ? (
+                <div className="border-t border-[#e8efef] px-4 pb-4 pt-3">
+                  {editingActionId === ca.id ? (
+                    <form className="space-y-3" onSubmit={saveEditing}>
+                      <p className="text-xs font-bold text-[#315763]">แก้ไข Corrective action</p>
+                      <Field label="ปัญหา / Problem"><Textarea rows={2} value={editingAction.problem} onChange={(event) => setEditingAction({ ...editingAction, problem: event.target.value })} required /></Field>
+                      <Field label="Root cause"><Textarea rows={2} value={editingAction.rootCause} onChange={(event) => setEditingAction({ ...editingAction, rootCause: event.target.value })} required /></Field>
+                      <Field label="Action taken"><Textarea rows={2} value={editingAction.actionTaken} onChange={(event) => setEditingAction({ ...editingAction, actionTaken: event.target.value })} required /></Field>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <Field label="ผู้รับผิดชอบ"><Select value={editingAction.ownerId} onChange={(event) => setEditingAction({ ...editingAction, ownerId: event.target.value })}><option value="">— ยังไม่กำหนด —</option>{data.assignableUsers.map((user) => <option key={user.id} value={user.id}>{user.displayName}</option>)}</Select></Field>
+                        <Field label="Due date"><Input type="date" value={editingAction.dueDate} onChange={(event) => setEditingAction({ ...editingAction, dueDate: event.target.value })} /></Field>
+                      </div>
+                      <div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="ghost" disabled={busy} onClick={() => setEditingActionId(null)}>ยกเลิก</Button><Button disabled={busy}>บันทึกการแก้ไข</Button></div>
+                    </form>
+                  ) : (
+                    <>
+                      {needsCompletion ? <Notice tone="warning">กรอก Root cause และ Action taken ก่อนส่งตรวจผล</Notice> : null}
+                      {ca.rootCause ? <p className="mt-1 text-xs text-[#789097]">Root cause: {ca.rootCause}</p> : null}
+                      {ca.actionTaken ? <p className="text-xs text-[#789097]">Action: {ca.actionTaken}</p> : null}
+                      {ca.ownerName || ca.dueDate ? (
+                        <p className="text-xs text-[#789097]">
+                          Owner: {ca.ownerName ?? '-'} · Due: {formatDate(ca.dueDate)}
+                        </p>
+                      ) : null}
+                      {ca.effectivenessNote ? (
+                        <p className="text-xs text-[#789097]">
+                          Effectiveness: {ca.effectivenessOutcome} · {ca.effectivenessNote}
+                        </p>
+                      ) : null}
+                      {ca.status !== 'closed' ? <div className="mt-3 flex justify-end"><Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => startEditing(ca)}>แก้ไข</Button></div> : null}
+                    </>
+                  )}
+                  <div className="mt-3">
+                    <AttachmentList module="iqc" entityType="corrective-action" entityId={ca.id} kind="corrective-action" canDelete />
+                  </div>
+                </div>
+              ) : null}
             </Card>
           </div>
-        ))}
-        {!data.correctiveActions.length ? (
+        )
+        })}
+        {filteredActions.length > visibleActions.length ? (
+          <div className="flex justify-center">
+            <Button variant="secondary" onClick={() => setVisibleActionCount((count) => count + 20)}>แสดงเพิ่มอีก {Math.min(20, filteredActions.length - visibleActions.length)} รายการ</Button>
+          </div>
+        ) : null}
+        {!filteredActions.length ? (
           <Card className="p-8 text-center text-sm text-[#8198a0]">
             <ClipboardList className="mx-auto mb-2 size-6 text-[#b8c9cd]" />
-            ยังไม่มี corrective action
+            {data.correctiveActions.length ? 'ไม่พบ corrective action ที่ตรงเงื่อนไข' : 'ยังไม่มี corrective action'}
           </Card>
         ) : null}
       </div>

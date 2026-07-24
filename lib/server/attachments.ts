@@ -195,6 +195,39 @@ export async function deletePublicEquipmentAttachments(
   }
 }
 
+export async function deleteEntityAttachments(input: {
+  module: AttachmentModule;
+  entityType: string;
+  entityId: string;
+}): Promise<number> {
+  const admin = getAdminClient();
+  const { data, error } = await admin
+    .from("bm_attachments")
+    .select("id,storage_path")
+    .eq("module", input.module)
+    .eq("entity_type", input.entityType)
+    .eq("entity_id", input.entityId);
+  fail(error);
+
+  const rows = (data ?? []) as RecordRow[];
+  const paths = rows.map((row) => asString(row.storage_path)).filter(Boolean);
+  if (paths.length) {
+    const { error: storageError } = await admin.storage.from(BUCKET).remove(paths);
+    fail(storageError);
+  }
+  if (rows.length) {
+    const { error: metadataError } = await admin
+      .from("bm_attachments")
+      .delete()
+      .in(
+        "id",
+        rows.map((row) => asString(row.id)),
+      );
+    fail(metadataError);
+  }
+  return rows.length;
+}
+
 export async function listAttachments(
   module: AttachmentModule,
   entityType: string,
