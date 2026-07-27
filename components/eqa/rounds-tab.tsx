@@ -14,6 +14,25 @@ import { ApprovalPanel, OUTCOME_TONE, STATUS_TONE, UserSelect, type EqaFocus, ty
 
 type EqaRoundFilter = 'active' | 'closed' | 'all'
 
+// The global page Notice banner lives above the tabs, which is out of view
+// once the user has scrolled into a round card lower down the (possibly
+// long, 6-rounds-a-year) list -- so save actions inside a card also get
+// this local, transient confirmation right next to the button that was clicked.
+function useSavedFlash(): [boolean, () => void] {
+  const [saved, setSaved] = useState(false)
+  useEffect(() => {
+    if (!saved) return
+    const id = setTimeout(() => setSaved(false), 2500)
+    return () => clearTimeout(id)
+  }, [saved])
+  return [saved, () => setSaved(true)]
+}
+
+function SavedFlash({ show }: { show: boolean }) {
+  if (!show) return null
+  return <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#2f7d44]"><CheckCircle2 className="size-3.5" /> บันทึกแล้ว</span>
+}
+
 export function RoundsTab({ data, actor, focus, onNavigate, onOk, onErr }: { data: EqaWorkspace; actor: BmActor; focus?: EqaFocus | null; onNavigate: (target: EqaReadinessTarget) => void; onOk: Update; onErr: (text: string) => void }) {
   const planYears = useMemo(() => [...new Set(data.rounds.map((round) => round.planYear).filter((year): year is number => year != null))].sort((a, b) => b - a), [data.rounds])
   const planItemsByYear = useMemo(() => data.annualPlans.flatMap((plan) => plan.items.map((item) => ({ ...item, planYear: plan.planYear }))), [data.annualPlans])
@@ -53,6 +72,15 @@ export function RoundsTab({ data, actor, focus, onNavigate, onOk, onErr }: { dat
     return [...map.values()]
   }, [visible, planItemsByYear])
 
+  // Rounds keep their own collapsed state locally (so per-round toggling
+  // doesn't disturb sibling cards mid-edit); this bump signal is how a
+  // group-level "collapse all/expand all" reaches down into each card
+  // without lifting -- and thus losing -- their in-progress form state.
+  const [groupCollapseSignal, setGroupCollapseSignal] = useState<Record<string, { signal: number; value: boolean }>>({})
+  function collapseGroup(key: string, value: boolean) {
+    setGroupCollapseSignal((prev) => ({ ...prev, [key]: { signal: (prev[key]?.signal ?? 0) + 1, value } }))
+  }
+
   if (!data.rounds.length) return <Card className="p-8 text-center text-sm text-[#8198a0]">ยังไม่มี round — สร้างอัตโนมัติได้จากแท็บแผนรายปี หรือให้ Admin สร้างจากแท็บจัดการ</Card>
 
   const activeCount = data.rounds.filter((round) => round.status !== 'closed').length
@@ -81,9 +109,15 @@ export function RoundsTab({ data, actor, focus, onNavigate, onOk, onErr }: { dat
       <div key={group.key} className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2 px-1">
           <p className="text-sm font-bold text-[#315763]">{group.label}{group.planItem?.expectedRounds != null ? <span className="ml-1 font-normal text-[#8ba0a5]">({group.rounds.length}/{group.planItem.expectedRounds} รอบ)</span> : null}</p>
-          {group.planItem ? <GeneratePlannedRoundsButton item={group.planItem} planYear={group.planItem.planYear} itemRounds={data.rounds.filter((round) => round.planItemId === group.planItem!.id)} onOk={onOk} onErr={onErr} /> : null}
+          <div className="flex items-center gap-2">
+            {group.rounds.length > 1 ? <div className="flex gap-1">
+              <Button type="button" variant="ghost" className="min-h-6 px-2 py-0.5 text-[11px]" onClick={() => collapseGroup(group.key, true)}>ย่อทั้งหมด</Button>
+              <Button type="button" variant="ghost" className="min-h-6 px-2 py-0.5 text-[11px]" onClick={() => collapseGroup(group.key, false)}>ขยายทั้งหมด</Button>
+            </div> : null}
+            {group.planItem ? <GeneratePlannedRoundsButton item={group.planItem} planYear={group.planItem.planYear} itemRounds={data.rounds.filter((round) => round.planItemId === group.planItem!.id)} onOk={onOk} onErr={onErr} /> : null}
+          </div>
         </div>
-        {group.rounds.map((round) => <div key={round.id} id={`eqa-round-${round.id}`}><RoundCard round={round} data={data} actor={actor} focus={focus} onNavigate={onNavigate} onOk={onOk} onErr={onErr} /></div>)}
+        {group.rounds.map((round) => <div key={round.id} id={`eqa-round-${round.id}`}><RoundCard round={round} data={data} actor={actor} focus={focus} onNavigate={onNavigate} onOk={onOk} onErr={onErr} forceCollapsed={groupCollapseSignal[group.key]} /></div>)}
       </div>
     ))}
     {filtered.length > visible.length ? <div className="flex justify-center"><Button variant="secondary" onClick={() => setVisibleCount((count) => count + 10)}>แสดงเพิ่มอีก {Math.min(10, filtered.length - visible.length)} รายการ</Button></div> : null}
@@ -110,11 +144,18 @@ function RoundProgressStrip({ round, onNavigate }: { round: EqaRound; onNavigate
   )
 }
 
-function RoundCard({ round, data, actor, focus, onNavigate, onOk, onErr }: { round: EqaRound; data: EqaWorkspace; actor: BmActor; focus?: EqaFocus | null; onNavigate: (target: EqaReadinessTarget) => void; onOk: Update; onErr: (text: string) => void }) {
+function RoundCard({ round, data, actor, focus, onNavigate, onOk, onErr, forceCollapsed }: { round: EqaRound; data: EqaWorkspace; actor: BmActor; focus?: EqaFocus | null; onNavigate: (target: EqaReadinessTarget) => void; onOk: Update; onErr: (text: string) => void; forceCollapsed?: { signal: number; value: boolean } }) {
   const [showReceipt, setShowReceipt] = useState(false)
   const isFocused = focus?.roundId === round.id
   const allStepsDone = roundProgress(round).every((step) => step.done)
-  const [collapsed, setCollapsed] = useState(allStepsDone)
+  // A round nobody has touched yet (still "scheduled", no receipt or
+  // results) is just as safe to start collapsed as a finished one -- plan
+  // items with up to 6 rounds/year otherwise render a wall of empty forms.
+  const untouched = round.status === 'scheduled' && !round.sampleReceivedDate && !round.externalSentDate && round.results.length === 0
+  const [collapsed, setCollapsed] = useState(allStepsDone || untouched)
+  useEffect(() => {
+    if (forceCollapsed) setCollapsed(forceCollapsed.value)
+  }, [forceCollapsed])
   const showDetails = !collapsed || isFocused
   // Adjusting state during render (not in an effect) when the focus target
   // changes, per React's "you might not need an Effect" pattern -- this is
@@ -140,16 +181,17 @@ function RoundCard({ round, data, actor, focus, onNavigate, onOk, onErr }: { rou
   function resetResult() { setEditingResult(null); setResultForm({ analyte: '', sampleCode: '', submittedValue: '', unit: '', ctValue: '', assignedValue: '', evaluationScore: '', outcome: '', iqcAnalyteId: '' }) }
   async function saveResult(event: React.FormEvent) { event.preventDefault(); setBusy(true); const body = { ...resultForm, sampleCode: resultForm.sampleCode || null, submittedValue: resultForm.submittedValue || null, unit: resultForm.unit || null, ctValue: resultForm.ctValue ? Number(resultForm.ctValue) : null, assignedValue: resultForm.assignedValue ? Number(resultForm.assignedValue) : null, evaluationScore: resultForm.evaluationScore ? Number(resultForm.evaluationScore) : null, iqcAnalyteId: resultForm.iqcAnalyteId || null }; try { const result = await api<{ eqa: EqaWorkspace }>(editingResult ? `/api/eqa/results/${editingResult.id}` : '/api/eqa/results', { method: editingResult ? 'PATCH' : 'POST', body: JSON.stringify(editingResult ? body : { roundId: round.id, ...body }) }); onOk(editingResult ? 'แก้ไขผลแล้ว' : 'เพิ่มผลแล้ว', result.eqa); resetResult() } catch (error) { onErr(error instanceof Error ? error.message : 'บันทึกผลไม่สำเร็จ') } finally { setBusy(false) } }
   async function removeResult(result: EqaResult) { if (!window.confirm(`ลบผล ${result.sampleCode ?? result.analyte} ใช่ไหม?`)) return; try { const response = await api<{ eqa: EqaWorkspace }>(`/api/eqa/results/${result.id}`, { method: 'DELETE' }); onOk('ลบผลแล้ว', response.eqa) } catch (error) { onErr(error instanceof Error ? error.message : 'ลบผลไม่สำเร็จ') } }
-  async function saveSummary() { try { const result = await api<{ eqa: EqaWorkspace }>(`/api/eqa/rounds/${round.id}/summary`, { method: 'PATCH', body: JSON.stringify({ summaryOutcome, summaryNote: summaryNote || null }) }); onOk('บันทึกสรุปผลรอบแล้ว', result.eqa) } catch (error) { onErr(error instanceof Error ? error.message : 'บันทึกไม่สำเร็จ') } }
+  const [summarySaved, flashSummarySaved] = useSavedFlash()
+  async function saveSummary() { try { const result = await api<{ eqa: EqaWorkspace }>(`/api/eqa/rounds/${round.id}/summary`, { method: 'PATCH', body: JSON.stringify({ summaryOutcome, summaryNote: summaryNote || null }) }); onOk('บันทึกสรุปผลรอบแล้ว', result.eqa); flashSummarySaved() } catch (error) { onErr(error instanceof Error ? error.message : 'บันทึกไม่สำเร็จ') } }
   return <Card className="p-4">
-    <div className="flex flex-wrap items-start justify-between gap-2"><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-bold text-[#173d50]">{round.planItemName ?? round.schemeName} · {round.roundLabel}</h3><StatusBadge tone={STATUS_TONE[round.status]} label={round.status} />{!round.planItemId ? <StatusBadge tone="warning" label="ยังไม่จัดเข้าปี" /> : null}{allStepsDone ? <Button type="button" variant="ghost" className="min-h-6 px-2 py-0.5 text-[11px]" onClick={() => setCollapsed(!collapsed)}>{showDetails ? 'ซ่อนรายละเอียด' : 'แสดงรายละเอียด'}</Button> : null}</div><p className="mt-1 text-xs text-[#789097]">{round.providerName} · ปี {round.planYear ? round.planYear + 543 : '-'} · รับ {formatDate(round.sampleReceivedDate)} · ส่ง {formatDate(round.submissionDate)}</p><RoundProgressStrip round={round} onNavigate={onNavigate} /></div><div className="flex flex-wrap gap-2"><Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => { setCollapsed(false); setShowReceipt(!showReceipt) }}>{showReceipt ? 'ซ่อนแบบรับ' : 'กรอกแบบรับตัวอย่าง'}</Button><Link href={`/eqa/report/round-receipt/${round.id}?tab=rounds`} className="inline-flex items-center gap-1 rounded-md border border-[#b8c8cc] bg-white px-3 py-2 text-xs font-bold text-[#173d50]"><Printer className="size-4" /> Fm-QP-LAB-19/02</Link><Select className="h-9 w-36" value={round.status} onChange={(event) => setStatus(event.target.value)}><option value="scheduled">scheduled</option><option value="received">received</option><option value="submitted">submitted</option><option value="evaluated">evaluated</option><option value="closed">closed</option></Select></div></div>
+    <div className="flex flex-wrap items-start justify-between gap-2"><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-bold text-[#173d50]">{round.planItemName ?? round.schemeName} · {round.roundLabel}</h3><StatusBadge tone={STATUS_TONE[round.status]} label={round.status} />{!round.planItemId ? <StatusBadge tone="warning" label="ยังไม่จัดเข้าปี" /> : null}                <Button type="button" variant="ghost" className="min-h-6 px-2 py-0.5 text-[11px]" onClick={() => setCollapsed(!collapsed)}>{showDetails ? 'ซ่อนรายละเอียด' : 'แสดงรายละเอียด'}</Button></div><p className="mt-1 text-xs text-[#789097]">{round.providerName} · ปี {round.planYear ? round.planYear + 543 : '-'} · รับ {formatDate(round.sampleReceivedDate)} · ส่ง {formatDate(round.submissionDate)}</p><RoundProgressStrip round={round} onNavigate={onNavigate} /></div><div className="flex flex-wrap gap-2"><Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => { setCollapsed(false); setShowReceipt(!showReceipt) }}>{showReceipt ? 'ซ่อนแบบรับ' : 'กรอกแบบรับตัวอย่าง'}</Button><Link href={`/eqa/report/round-receipt/${round.id}?tab=rounds`} className="inline-flex items-center gap-1 rounded-md border border-[#b8c8cc] bg-white px-3 py-2 text-xs font-bold text-[#173d50]"><Printer className="size-4" /> Fm-QP-LAB-19/02</Link><Select className="h-9 w-36" value={round.status} onChange={(event) => setStatus(event.target.value)}><option value="scheduled">scheduled</option><option value="received">received</option><option value="submitted">submitted</option><option value="evaluated">evaluated</option><option value="closed">closed</option></Select></div></div>
     {showDetails ? <>
     {showReceipt ? <ReceiptEditor round={round} data={data} onOk={onOk} onErr={onErr} /> : null}
     <div id={`eqa-round-${round.id}-results`}>
     {round.results.length ? <div className="mt-3 overflow-x-auto rounded-md border border-[#e9eff0]"><table className="w-full min-w-[850px] text-left text-xs"><thead className="bg-[#f6fafa] text-[#55727c]"><tr><th className="p-2">Sample</th><th className="p-2">Analyte</th><th className="p-2">Submitted</th><th className="p-2">Ct</th><th className="p-2">Assigned</th><th className="p-2">Score</th><th className="p-2">Outcome</th><th className="p-2">Action</th></tr></thead><tbody className="divide-y divide-[#eef3f3]">{round.results.map((result) => <tr key={result.id}><td className="p-2 font-semibold">{result.sampleCode ?? '-'}</td><td className="p-2">{result.analyte}</td><td className="p-2">{result.submittedValue ?? '-'} {result.unit ?? ''}</td><td className="p-2">{result.ctValue ?? '-'}</td><td className="p-2">{result.assignedValue ?? '-'}</td><td className="p-2">{result.evaluationScore ?? '-'}</td><td className="p-2"><StatusBadge tone={OUTCOME_TONE[result.outcome]} label={result.outcome} /></td><td className="p-2"><div className="flex gap-1"><Button variant="ghost" className="min-h-7 px-2 py-1" onClick={() => editResult(result)}><Pencil className="size-3.5" /></Button><Button variant="danger" className="min-h-7 px-2 py-1" onClick={() => removeResult(result)}><Trash2 className="size-3.5" /></Button></div></td></tr>)}</tbody></table></div> : null}
     <form onSubmit={saveResult} className="mt-3 grid items-end gap-2 md:grid-cols-4 xl:grid-cols-10"><Field label="Sample code"><Input value={resultForm.sampleCode} onChange={(event) => setResultForm({ ...resultForm, sampleCode: event.target.value })} /></Field><Field label="Analyte"><Input value={resultForm.analyte} onChange={(event) => setResultForm({ ...resultForm, analyte: event.target.value })} required /></Field><Field label="IQC analyte"><Select value={resultForm.iqcAnalyteId} onChange={(event) => setResultForm({ ...resultForm, iqcAnalyteId: event.target.value })}><option value="">— ไม่ใช้ Sigma —</option>{data.iqcAnalytes.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}</Select></Field><Field label="Submitted"><Input value={resultForm.submittedValue} onChange={(event) => setResultForm({ ...resultForm, submittedValue: event.target.value })} /></Field><Field label="Unit"><Input value={resultForm.unit} onChange={(event) => setResultForm({ ...resultForm, unit: event.target.value })} /></Field><Field label="Ct"><Input type="number" step="any" value={resultForm.ctValue} onChange={(event) => setResultForm({ ...resultForm, ctValue: event.target.value })} /></Field><Field label="Assigned"><Input type="number" step="any" value={resultForm.assignedValue} onChange={(event) => setResultForm({ ...resultForm, assignedValue: event.target.value })} /></Field><Field label="Score"><Input type="number" step="any" value={resultForm.evaluationScore} onChange={(event) => setResultForm({ ...resultForm, evaluationScore: event.target.value })} /></Field><Field label="Outcome"><Select value={resultForm.outcome} onChange={(event) => setResultForm({ ...resultForm, outcome: event.target.value })} required><option value="" disabled>— เลือกผลประเมิน —</option><option value="acceptable">acceptable</option><option value="warning">warning</option><option value="unacceptable">unacceptable</option><option value="not-evaluated">not-evaluated</option></Select></Field><div className="flex gap-1"><Button disabled={busy}>{editingResult ? 'แก้ไข' : '+ ผล'}</Button>{editingResult ? <Button type="button" variant="ghost" className="px-2" onClick={resetResult}><X className="size-4" /></Button> : null}</div></form>
     </div>
-    <div id={`eqa-round-${round.id}-summary`} className="mt-3 grid gap-2 md:grid-cols-[200px_1fr_auto]"><Field label="สรุปผลรอบ"><Select value={summaryOutcome} onChange={(event) => setSummaryOutcome(event.target.value as typeof summaryOutcome)}><option value="not-evaluated">ยังไม่ประเมิน</option><option value="pass">ผ่านเกณฑ์</option><option value="fail">ไม่ผ่านเกณฑ์</option></Select></Field><Field label="หมายเหตุ/การปรับปรุงแก้ไข"><Textarea rows={2} value={summaryNote} onChange={(event) => setSummaryNote(event.target.value)} /></Field><Button className="self-end" onClick={saveSummary}>บันทึกสรุป</Button></div>
+    <div id={`eqa-round-${round.id}-summary`} className="mt-3 grid gap-2 md:grid-cols-[200px_1fr_auto]"><Field label="สรุปผลรอบ"><Select value={summaryOutcome} onChange={(event) => setSummaryOutcome(event.target.value as typeof summaryOutcome)}><option value="not-evaluated">ยังไม่ประเมิน</option><option value="pass">ผ่านเกณฑ์</option><option value="fail">ไม่ผ่านเกณฑ์</option></Select></Field><Field label="หมายเหตุ/การปรับปรุงแก้ไข"><Textarea rows={2} value={summaryNote} onChange={(event) => setSummaryNote(event.target.value)} /></Field><div className="flex items-end gap-2"><Button className="self-end" onClick={saveSummary}>บันทึกสรุป</Button><SavedFlash show={summarySaved} /></div></div>
     <div className="mt-3 grid gap-2 sm:grid-cols-2"><AttachmentList module="eqa" entityType="eqa-round-receipt" entityId={round.id} kind="eqa-receipt" canDelete={actor.role === 'Admin'} label="เอกสารรับตัวอย่างเดิม" /><AttachmentList module="eqa" entityType="eqa-round" entityId={round.id} kind="eqa-certificate" canDelete={actor.role === 'Admin'} label="Certificate / รายงานผล" /></div>
     <ApprovalPanel actor={actor} data={data} type="round-receipt" entityId={round.id} state={round.documentState} approvals={round.approvals} readiness={roundReceiptIssues(round)} analystId={round.analystId} onNavigate={onNavigate} onOk={onOk} onErr={onErr} />
     </> : null}
@@ -161,6 +203,7 @@ const RECEIPT_MISSING_RING = 'ring-2 ring-inset ring-[#eed4a6] border-[#eed4a6]'
 function ReceiptEditor({ round, data, onOk, onErr }: { round: EqaRound; data: EqaWorkspace; onOk: Update; onErr: (text: string) => void }) {
   const [form, setForm] = useState({ planItemId: round.planItemId ?? '', externalSentDate: round.externalSentDate ?? '', sampleReceivedDate: round.sampleReceivedDate ?? '', packageCondition: round.packageCondition ?? '', packageNote: round.packageNote ?? '', receivedTemperature: round.receivedTemperature ?? '', receivedTemperatureNote: round.receivedTemperatureNote ?? '', sampleCondition: round.sampleCondition ?? '', sampleConditionNote: round.sampleConditionNote ?? '', storageCondition: round.storageCondition ?? '', storageTemperatureC: round.storageTemperatureC == null ? '' : String(round.storageTemperatureC), storageNote: round.storageNote ?? '', specimenType: round.specimenType ?? '', receiverId: round.receiverId ?? '', analystId: round.analystId ?? '', analysisDate: round.analysisDate ?? '', submissionDate: round.submissionDate ?? '', submissionMethod: round.submissionMethod ?? '', otherDetails: round.otherDetails ?? '' })
   const [busy, setBusy] = useState(false)
+  const [saved, flashSaved] = useSavedFlash()
   const [movingPlanItem, setMovingPlanItem] = useState(false)
   const hasPlanItem = Boolean(round.planItemId)
   const showPlanItemSelect = !hasPlanItem || movingPlanItem
@@ -188,7 +231,7 @@ function ReceiptEditor({ round, data, onOk, onErr }: { round: EqaRound; data: Eq
       receiverId: form.receiverId || null, analystId: form.analystId || null, analysisDate: form.analysisDate || null, submissionDate: form.submissionDate || null, submissionMethod: form.submissionMethod || null, otherDetails: form.otherDetails || null,
     }
     if (showPlanItemSelect) body.planItemId = form.planItemId
-    try { const result = await api<{ eqa: EqaWorkspace }>(`/api/eqa/rounds/${round.id}/receipt`, { method: 'PATCH', body: JSON.stringify(body) }); onOk('บันทึกแบบรับตัวอย่างแล้ว', result.eqa); setMovingPlanItem(false) }
+    try { const result = await api<{ eqa: EqaWorkspace }>(`/api/eqa/rounds/${round.id}/receipt`, { method: 'PATCH', body: JSON.stringify(body) }); onOk('บันทึกแบบรับตัวอย่างแล้ว', result.eqa); setMovingPlanItem(false); flashSaved() }
     catch (error) { onErr(error instanceof Error ? error.message : 'บันทึกไม่สำเร็จ') } finally { setBusy(false) }
   }
   const allItems = data.annualPlans.flatMap((plan) => plan.items.map((item) => ({ ...item, planYear: plan.planYear })))
@@ -244,5 +287,5 @@ function ReceiptEditor({ round, data, onOk, onErr }: { round: EqaRound; data: Eq
     <Field label="วันที่ตรวจวิเคราะห์"><Input className={missing.analysisDate ? RECEIPT_MISSING_RING : ''} type="date" value={form.analysisDate} onChange={(event) => setForm({ ...form, analysisDate: event.target.value })} /></Field>
     <Field label="วันที่ส่งผล"><Input className={missing.submissionDate ? RECEIPT_MISSING_RING : ''} type="date" value={form.submissionDate} onChange={(event) => setForm({ ...form, submissionDate: event.target.value })} /></Field>
     <Field label="วิธีส่งผล"><Input className={missing.submissionMethod ? RECEIPT_MISSING_RING : ''} value={form.submissionMethod} onChange={(event) => setForm({ ...form, submissionMethod: event.target.value })} /></Field>
-  </div><Field label="รายละเอียดอื่นๆ"><Textarea rows={2} value={form.otherDetails} onChange={(event) => setForm({ ...form, otherDetails: event.target.value })} /></Field><Button disabled={busy}>บันทึกแบบรับตัวอย่าง</Button></form>
+  </div><Field label="รายละเอียดอื่นๆ"><Textarea rows={2} value={form.otherDetails} onChange={(event) => setForm({ ...form, otherDetails: event.target.value })} /></Field><div className="flex items-center gap-2"><Button disabled={busy}>บันทึกแบบรับตัวอย่าง</Button><SavedFlash show={saved} /></div></form>
 }
