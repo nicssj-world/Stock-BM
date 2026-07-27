@@ -1,4 +1,13 @@
-import type { EqaPlanItem, EqaRound, EqaCorrectiveAction } from '@/lib/eqa/types'
+import type { EqaPlanItem, EqaRound, EqaRoundStatus, EqaCorrectiveAction } from '@/lib/eqa/types'
+
+// The real-world sequence a round's status moves through. Shared between the
+// server (which auto-advances a round to the next status as the matching
+// action happens -- receipt saved, analyst confirms, summary saved, technical
+// manager confirms) and the client (which uses the same order to decide how
+// much of the round card to reveal, so an empty round doesn't dump every
+// field on the user at once).
+export const ROUND_STATUS_ORDER: EqaRoundStatus[] = ['scheduled', 'received', 'submitted', 'evaluated', 'closed']
+export function roundStatusIndex(status: EqaRoundStatus) { return ROUND_STATUS_ORDER.indexOf(status) }
 
 export function plannedRoundLabel(sequence: number, planYear: number) {
   return `ครั้งที่ ${sequence}/${planYear + 543}`

@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { CheckCircle2, Pencil, Printer, Trash2, X } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { EqaResult, EqaRound, EqaWorkspace } from '@/lib/eqa/types'
-import { roundProgress, roundReceiptIssues, type EqaReadinessTarget } from '@/lib/eqa/rules'
+import { roundProgress, roundReceiptIssues, roundStatusIndex, type EqaReadinessTarget } from '@/lib/eqa/rules'
 import { formatDate } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Select, StatusBadge, Textarea } from '@/components/ui'
 import { AttachmentList } from '@/components/attachments'
@@ -31,6 +31,14 @@ function useSavedFlash(): [boolean, () => void] {
 function SavedFlash({ show }: { show: boolean }) {
   if (!show) return null
   return <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#2f7d44]"><CheckCircle2 className="size-3.5" /> บันทึกแล้ว</span>
+}
+
+// Fields for a step the round hasn't reached yet are hidden rather than
+// rendered disabled -- an empty scheduled round used to dump the receipt,
+// results, summary, and approval sections on screen at once, which read as
+// "everything is required right now" instead of "do these in order."
+function StepLocked({ text }: { text: string }) {
+  return <p className="mt-3 rounded-md border border-dashed border-[#dbe6e7] bg-[#fbfdfd] px-3 py-2 text-xs text-[#91a3a7]">{text}</p>
 }
 
 export function RoundsTab({ data, actor, focus, onNavigate, onOk, onErr }: { data: EqaWorkspace; actor: BmActor; focus?: EqaFocus | null; onNavigate: (target: EqaReadinessTarget) => void; onOk: Update; onErr: (text: string) => void }) {
@@ -125,7 +133,7 @@ export function RoundsTab({ data, actor, focus, onNavigate, onOk, onErr }: { dat
   </div>
 }
 
-function RoundProgressStrip({ round, onNavigate }: { round: EqaRound; onNavigate: (target: EqaReadinessTarget) => void }) {
+function RoundProgressStrip({ round, onNavigate, lockedSteps }: { round: EqaRound; onNavigate: (target: EqaReadinessTarget) => void; lockedSteps?: Set<string> }) {
   const steps = roundProgress(round)
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -133,7 +141,7 @@ function RoundProgressStrip({ round, onNavigate }: { round: EqaRound; onNavigate
         <span key={step.key} className="inline-flex items-center gap-1 rounded-full border border-[#bfe3d8] bg-[#eefaf5] px-2 py-0.5 text-[11px] font-semibold text-[#2f7d44]">
           <CheckCircle2 className="size-3" /> {step.label}
         </span>
-      ) : step.target ? (
+      ) : step.target && !lockedSteps?.has(step.key) ? (
         <button key={step.key} type="button" onClick={() => onNavigate(step.target!)} className="rounded-full border border-[#eed4a6] bg-[#fff9ed] px-2 py-0.5 text-[11px] font-semibold text-[#a9700f] underline decoration-dotted hover:bg-[#fff3dc]">
           {step.label}
         </button>
@@ -183,17 +191,32 @@ function RoundCard({ round, data, actor, focus, onNavigate, onOk, onErr, forceCo
   async function removeResult(result: EqaResult) { if (!window.confirm(`ลบผล ${result.sampleCode ?? result.analyte} ใช่ไหม?`)) return; try { const response = await api<{ eqa: EqaWorkspace }>(`/api/eqa/results/${result.id}`, { method: 'DELETE' }); onOk('ลบผลแล้ว', response.eqa) } catch (error) { onErr(error instanceof Error ? error.message : 'ลบผลไม่สำเร็จ') } }
   const [summarySaved, flashSummarySaved] = useSavedFlash()
   async function saveSummary() { try { const result = await api<{ eqa: EqaWorkspace }>(`/api/eqa/rounds/${round.id}/summary`, { method: 'PATCH', body: JSON.stringify({ summaryOutcome, summaryNote: summaryNote || null }) }); onOk('บันทึกสรุปผลรอบแล้ว', result.eqa); flashSummarySaved() } catch (error) { onErr(error instanceof Error ? error.message : 'บันทึกไม่สำเร็จ') } }
+  // Status normally auto-advances (receipt saved -> received, analyst
+  // confirms -> submitted, summary saved -> evaluated, technical manager
+  // confirms -> closed), so it doubles as how far through the round we are.
+  // Data that already exists always stays visible even if it's "ahead of"
+  // the stored status -- e.g. an older round entered before this gating
+  // existed -- so this never hides something the user already filled in.
+  const statusIndex = roundStatusIndex(round.status)
+  const showResults = statusIndex >= 1 || round.results.length > 0
+  const showSummary = statusIndex >= 2 || round.summaryOutcome !== 'not-evaluated' || Boolean(round.summaryNote)
+  const showApproval = statusIndex >= 1 || round.approvals.length > 0
+  const technicalManagerReady = statusIndex >= 3 || round.approvals.some((approval) => approval.approvalRole === 'technical-manager')
+  const lockedSteps = useMemo(() => new Set<string>([...(showResults ? [] : ['results']), ...(showSummary ? [] : ['summary'])]), [showResults, showSummary])
   return <Card className="p-4">
-    <div className="flex flex-wrap items-start justify-between gap-2"><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-bold text-[#173d50]">{round.planItemName ?? round.schemeName} · {round.roundLabel}</h3><StatusBadge tone={STATUS_TONE[round.status]} label={round.status} />{!round.planItemId ? <StatusBadge tone="warning" label="ยังไม่จัดเข้าปี" /> : null}                <Button type="button" variant="ghost" className="min-h-6 px-2 py-0.5 text-[11px]" onClick={() => setCollapsed(!collapsed)}>{showDetails ? 'ซ่อนรายละเอียด' : 'แสดงรายละเอียด'}</Button></div><p className="mt-1 text-xs text-[#789097]">{round.providerName} · ปี {round.planYear ? round.planYear + 543 : '-'} · รับ {formatDate(round.sampleReceivedDate)} · ส่ง {formatDate(round.submissionDate)}</p><RoundProgressStrip round={round} onNavigate={onNavigate} /></div><div className="flex flex-wrap gap-2"><Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => { setCollapsed(false); setShowReceipt(!showReceipt) }}>{showReceipt ? 'ซ่อนแบบรับ' : 'กรอกแบบรับตัวอย่าง'}</Button><Link href={`/eqa/report/round-receipt/${round.id}?tab=rounds`} className="inline-flex items-center gap-1 rounded-md border border-[#b8c8cc] bg-white px-3 py-2 text-xs font-bold text-[#173d50]"><Printer className="size-4" /> Fm-QP-LAB-19/02</Link><Select className="h-9 w-36" value={round.status} onChange={(event) => setStatus(event.target.value)}><option value="scheduled">scheduled</option><option value="received">received</option><option value="submitted">submitted</option><option value="evaluated">evaluated</option><option value="closed">closed</option></Select></div></div>
+    <div className="flex flex-wrap items-start justify-between gap-2"><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-bold text-[#173d50]">{round.planItemName ?? round.schemeName} · {round.roundLabel}</h3><StatusBadge tone={STATUS_TONE[round.status]} label={round.status} />{!round.planItemId ? <StatusBadge tone="warning" label="ยังไม่จัดเข้าปี" /> : null}                <Button type="button" variant="ghost" className="min-h-6 px-2 py-0.5 text-[11px]" onClick={() => setCollapsed(!collapsed)}>{showDetails ? 'ซ่อนรายละเอียด' : 'แสดงรายละเอียด'}</Button></div><p className="mt-1 text-xs text-[#789097]">{round.providerName} · ปี {round.planYear ? round.planYear + 543 : '-'} · รับ {formatDate(round.sampleReceivedDate)} · ส่ง {formatDate(round.submissionDate)}</p><RoundProgressStrip round={round} onNavigate={onNavigate} lockedSteps={lockedSteps} /></div><div className="flex flex-wrap gap-2"><Button variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => { setCollapsed(false); setShowReceipt(!showReceipt) }}>{showReceipt ? 'ซ่อนแบบรับ' : 'กรอกแบบรับตัวอย่าง'}</Button><Link href={`/eqa/report/round-receipt/${round.id}?tab=rounds`} className="inline-flex items-center gap-1 rounded-md border border-[#b8c8cc] bg-white px-3 py-2 text-xs font-bold text-[#173d50]"><Printer className="size-4" /> Fm-QP-LAB-19/02</Link><Select className="h-9 w-36" value={round.status} onChange={(event) => setStatus(event.target.value)}><option value="scheduled">scheduled</option><option value="received">received</option><option value="submitted">submitted</option><option value="evaluated">evaluated</option><option value="closed">closed</option></Select></div></div>
     {showDetails ? <>
     {showReceipt ? <ReceiptEditor round={round} data={data} onOk={onOk} onErr={onErr} /> : null}
-    <div id={`eqa-round-${round.id}-results`}>
+    {showResults ? <div id={`eqa-round-${round.id}-results`}>
     {round.results.length ? <div className="mt-3 overflow-x-auto rounded-md border border-[#e9eff0]"><table className="w-full min-w-[850px] text-left text-xs"><thead className="bg-[#f6fafa] text-[#55727c]"><tr><th className="p-2">Sample</th><th className="p-2">Analyte</th><th className="p-2">Submitted</th><th className="p-2">Ct</th><th className="p-2">Assigned</th><th className="p-2">Score</th><th className="p-2">Outcome</th><th className="p-2">Action</th></tr></thead><tbody className="divide-y divide-[#eef3f3]">{round.results.map((result) => <tr key={result.id}><td className="p-2 font-semibold">{result.sampleCode ?? '-'}</td><td className="p-2">{result.analyte}</td><td className="p-2">{result.submittedValue ?? '-'} {result.unit ?? ''}</td><td className="p-2">{result.ctValue ?? '-'}</td><td className="p-2">{result.assignedValue ?? '-'}</td><td className="p-2">{result.evaluationScore ?? '-'}</td><td className="p-2"><StatusBadge tone={OUTCOME_TONE[result.outcome]} label={result.outcome} /></td><td className="p-2"><div className="flex gap-1"><Button variant="ghost" className="min-h-7 px-2 py-1" onClick={() => editResult(result)}><Pencil className="size-3.5" /></Button><Button variant="danger" className="min-h-7 px-2 py-1" onClick={() => removeResult(result)}><Trash2 className="size-3.5" /></Button></div></td></tr>)}</tbody></table></div> : null}
     <form onSubmit={saveResult} className="mt-3 grid items-end gap-2 md:grid-cols-4 xl:grid-cols-10"><Field label="Sample code"><Input value={resultForm.sampleCode} onChange={(event) => setResultForm({ ...resultForm, sampleCode: event.target.value })} /></Field><Field label="Analyte"><Input value={resultForm.analyte} onChange={(event) => setResultForm({ ...resultForm, analyte: event.target.value })} required /></Field><Field label="IQC analyte"><Select value={resultForm.iqcAnalyteId} onChange={(event) => setResultForm({ ...resultForm, iqcAnalyteId: event.target.value })}><option value="">— ไม่ใช้ Sigma —</option>{data.iqcAnalytes.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}</Select></Field><Field label="Submitted"><Input value={resultForm.submittedValue} onChange={(event) => setResultForm({ ...resultForm, submittedValue: event.target.value })} /></Field><Field label="Unit"><Input value={resultForm.unit} onChange={(event) => setResultForm({ ...resultForm, unit: event.target.value })} /></Field><Field label="Ct"><Input type="number" step="any" value={resultForm.ctValue} onChange={(event) => setResultForm({ ...resultForm, ctValue: event.target.value })} /></Field><Field label="Assigned"><Input type="number" step="any" value={resultForm.assignedValue} onChange={(event) => setResultForm({ ...resultForm, assignedValue: event.target.value })} /></Field><Field label="Score"><Input type="number" step="any" value={resultForm.evaluationScore} onChange={(event) => setResultForm({ ...resultForm, evaluationScore: event.target.value })} /></Field><Field label="Outcome"><Select value={resultForm.outcome} onChange={(event) => setResultForm({ ...resultForm, outcome: event.target.value })} required><option value="" disabled>— เลือกผลประเมิน —</option><option value="acceptable">acceptable</option><option value="warning">warning</option><option value="unacceptable">unacceptable</option><option value="not-evaluated">not-evaluated</option></Select></Field><div className="flex gap-1"><Button disabled={busy}>{editingResult ? 'แก้ไข' : '+ ผล'}</Button>{editingResult ? <Button type="button" variant="ghost" className="px-2" onClick={resetResult}><X className="size-4" /></Button> : null}</div></form>
-    </div>
-    <div id={`eqa-round-${round.id}-summary`} className="mt-3 grid gap-2 md:grid-cols-[200px_1fr_auto]"><Field label="สรุปผลรอบ"><Select value={summaryOutcome} onChange={(event) => setSummaryOutcome(event.target.value as typeof summaryOutcome)}><option value="not-evaluated">ยังไม่ประเมิน</option><option value="pass">ผ่านเกณฑ์</option><option value="fail">ไม่ผ่านเกณฑ์</option></Select></Field><Field label="หมายเหตุ/การปรับปรุงแก้ไข"><Textarea rows={2} value={summaryNote} onChange={(event) => setSummaryNote(event.target.value)} /></Field><div className="flex items-end gap-2"><Button className="self-end" onClick={saveSummary}>บันทึกสรุป</Button><SavedFlash show={summarySaved} /></div></div>
+    </div> : <StepLocked text="กรอกและบันทึกแบบรับตัวอย่างก่อน จึงจะบันทึกผลได้" />}
+    {showSummary ? <div id={`eqa-round-${round.id}-summary`} className="mt-3 grid gap-2 md:grid-cols-[200px_1fr_auto]"><Field label="สรุปผลรอบ"><Select value={summaryOutcome} onChange={(event) => setSummaryOutcome(event.target.value as typeof summaryOutcome)}><option value="not-evaluated">ยังไม่ประเมิน</option><option value="pass">ผ่านเกณฑ์</option><option value="fail">ไม่ผ่านเกณฑ์</option></Select></Field><Field label="หมายเหตุ/การปรับปรุงแก้ไข"><Textarea rows={2} value={summaryNote} onChange={(event) => setSummaryNote(event.target.value)} /></Field><div className="flex items-end gap-2"><Button className="self-end" onClick={saveSummary}>บันทึกสรุป</Button><SavedFlash show={summarySaved} /></div></div> : showResults ? <StepLocked text="ให้ผู้ทำการตรวจวิเคราะห์ยืนยันแบบรับตัวอย่างก่อน จึงจะสรุปผลได้" /> : null}
+    {showApproval ? <>
     <div className="mt-3 grid gap-2 sm:grid-cols-2"><AttachmentList module="eqa" entityType="eqa-round-receipt" entityId={round.id} kind="eqa-receipt" canDelete={actor.role === 'Admin'} label="เอกสารรับตัวอย่างเดิม" /><AttachmentList module="eqa" entityType="eqa-round" entityId={round.id} kind="eqa-certificate" canDelete={actor.role === 'Admin'} label="Certificate / รายงานผล" /></div>
-    <ApprovalPanel actor={actor} data={data} type="round-receipt" entityId={round.id} state={round.documentState} approvals={round.approvals} readiness={roundReceiptIssues(round)} analystId={round.analystId} onNavigate={onNavigate} onOk={onOk} onErr={onErr} />
+    <ApprovalPanel actor={actor} data={data} type="round-receipt" entityId={round.id} state={round.documentState} approvals={round.approvals} readiness={roundReceiptIssues(round)} analystId={round.analystId} visibleRoles={technicalManagerReady ? undefined : ['analyst']} onNavigate={onNavigate} onOk={onOk} onErr={onErr} />
+    {!technicalManagerReady ? <StepLocked text="การยืนยันของผู้จัดการวิชาการจะแสดงหลังบันทึกสรุปผลรอบ" /> : null}
+    </> : null}
     </> : null}
   </Card>
 }

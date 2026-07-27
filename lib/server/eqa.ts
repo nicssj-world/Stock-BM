@@ -24,7 +24,7 @@ import type {
   EqaWorkspace,
 } from '@/lib/eqa/types'
 import { EQA_DUE_SOON_DAYS } from '@/lib/eqa/types'
-import { annualPlanReadiness, annualSummaryReadiness, missingPlannedRounds, roundReceiptReadiness } from '@/lib/eqa/rules'
+import { ROUND_STATUS_ORDER, annualPlanReadiness, annualSummaryReadiness, missingPlannedRounds, roundReceiptReadiness } from '@/lib/eqa/rules'
 import type { BmActor } from '@/lib/bm/types'
 import { daysUntil, todayBangkok } from '@/lib/bm/rules'
 import { writeAudit } from '@/lib/server/audit'
@@ -86,6 +86,17 @@ function assertAdmin(actor: BmActor) { if (actor.role !== 'Admin') throw new Htt
 function assertOperator(actor: BmActor) { if (actor.role === 'Assistant') throw new HttpError(403, 'EQA Staff or Admin permission required') }
 function documentKey(documentType: EqaDocumentType, entityId: string) { return `${documentType}:${entityId}` }
 function approvalKey(documentType: EqaDocumentType, entityId: string, revision: number) { return `${documentType}:${entityId}:${revision}` }
+
+// Moves a round's status forward to `target` when the matching real-world
+// action happens (receipt saved, analyst confirms, summary saved, technical
+// manager confirms) -- but never backward, so e.g. editing a receipt after
+// the round has already been evaluated doesn't regress it back to "received".
+async function advanceRoundStatus(admin: ReturnType<typeof getAdminClient>, id: string, target: EqaRoundStatus) {
+  const { data, error } = await admin.from('eqa_rounds').select('status').eq('id', id).maybeSingle()
+  fail(error); const current = (data as RecordRow | null)?.status as EqaRoundStatus | undefined; if (!current) return
+  if (ROUND_STATUS_ORDER.indexOf(target) <= ROUND_STATUS_ORDER.indexOf(current)) return
+  fail((await admin.from('eqa_rounds').update({ status: target, updated_at: new Date().toISOString() }).eq('id', id)).error)
+}
 
 const OPEN_STATUSES = new Set<EqaRoundStatus>(['scheduled', 'received'])
 const ASSIGNED_APPROVAL_ROLES: EqaAssignedApprovalRole[] = ['technical-manager', 'quality-manager', 'section-head', 'department-head']
@@ -491,6 +502,7 @@ export async function updateRoundReceipt(id: string, input: EqaRoundReceiptInput
     update.scheme_id = asString((item as RecordRow).scheme_id)
   }
   fail((await admin.from('eqa_rounds').update(update).eq('id', id)).error)
+  await advanceRoundStatus(admin, id, 'received')
 
   await invalidateRoundDocuments(id)
   // invalidateRoundDocuments only sees the round's *new* plan item -- if this
@@ -503,7 +515,9 @@ export async function updateRoundReceipt(id: string, input: EqaRoundReceiptInput
   await writeAudit(actor, 'eqa.round.receipt.update', 'eqa-round', id, { ...input }); return getEqaWorkspace(actor)
 }
 export async function updateRoundSummary(id: string, input: { summaryOutcome: EqaRoundSummaryOutcome; summaryNote?: string | null }, actor: BmActor) {
-  assertOperator(actor); fail((await getAdminClient().from('eqa_rounds').update({ summary_outcome: input.summaryOutcome, summary_note: clean(input.summaryNote), updated_at: new Date().toISOString() }).eq('id', id)).error)
+  assertOperator(actor); const admin = getAdminClient()
+  fail((await admin.from('eqa_rounds').update({ summary_outcome: input.summaryOutcome, summary_note: clean(input.summaryNote), updated_at: new Date().toISOString() }).eq('id', id)).error)
+  await advanceRoundStatus(admin, id, 'evaluated')
   await invalidateRoundDocuments(id, false); await writeAudit(actor, 'eqa.round.summary.update', 'eqa-round', id, input); return getEqaWorkspace(actor)
 }
 export async function deleteRound(id: string, actor: BmActor) {
@@ -649,6 +663,13 @@ export async function approveEqaDocument(type: EqaDocumentType, entityId: string
   const approvedRoles = new Set([...documentApprovals(workspace, type, entityId).map((approval) => approval.approvalRole), role])
   const complete = REQUIRED_APPROVALS[type].every((requiredRole) => approvedRoles.has(requiredRole))
   fail((await admin.from('eqa_document_states').update({ status: complete ? 'approved' : 'draft', updated_at: new Date().toISOString() }).eq('document_type', type).eq('entity_id', entityId)).error)
+  // The receipt document's two signatures double as the round's workflow gate:
+  // the analyst confirming it means the round has been submitted, and the
+  // technical manager's signature (the one that completes the approval) closes it out.
+  if (type === 'round-receipt') {
+    if (role === 'analyst') await advanceRoundStatus(admin, entityId, 'submitted')
+    else if (role === 'technical-manager' && complete) await advanceRoundStatus(admin, entityId, 'closed')
+  }
   await writeAudit(actor, 'eqa.document.approve', `eqa-${type}`, entityId, { role, revision: state.revision, complete }); return getEqaWorkspace(actor)
 }
 

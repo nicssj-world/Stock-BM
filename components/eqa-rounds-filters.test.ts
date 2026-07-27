@@ -22,6 +22,6 @@ describe('EQA rounds tab filters and progress', () => {
 
   it('renders a per-round progress strip and collapses fully-approved rounds by default', () => {
     expect(source).toContain('function RoundProgressStrip')
-    expect(source).toContain('const [collapsed, setCollapsed] = useState(allStepsDone)')
+    expect(source).toContain('const [collapsed, setCollapsed] = useState(allStepsDone || untouched)')
   })
 })

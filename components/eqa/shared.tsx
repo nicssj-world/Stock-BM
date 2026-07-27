@@ -25,10 +25,11 @@ export function UserSelect({ users, value, onChange, className }: { users: EqaWo
   return <Select className={className} value={value} onChange={(event) => onChange(event.target.value)}><option value="">—</option>{users.map((user) => <option key={user.id} value={user.id}>{user.displayName}</option>)}</Select>
 }
 
-export function ApprovalPanel({ actor, data, type, entityId, state, approvals, readiness, analystId, onNavigate, onOk, onErr }: {
-  actor: BmActor; data: EqaWorkspace; type: EqaDocumentType; entityId: string; state: EqaDocumentState; approvals: EqaDocumentApproval[]; readiness: EqaReadinessIssue[]; analystId?: string | null; onNavigate?: (target: EqaReadinessTarget) => void; onOk: Update; onErr: (text: string) => void
+export function ApprovalPanel({ actor, data, type, entityId, state, approvals, readiness, analystId, visibleRoles, onNavigate, onOk, onErr }: {
+  actor: BmActor; data: EqaWorkspace; type: EqaDocumentType; entityId: string; state: EqaDocumentState; approvals: EqaDocumentApproval[]; readiness: EqaReadinessIssue[]; analystId?: string | null; visibleRoles?: EqaApprovalRole[]; onNavigate?: (target: EqaReadinessTarget) => void; onOk: Update; onErr: (text: string) => void
 }) {
-  const roles: EqaApprovalRole[] = type === 'round-receipt' ? ['analyst', 'technical-manager'] : APPROVAL_ROLES
+  const allRoles: EqaApprovalRole[] = type === 'round-receipt' ? ['analyst', 'technical-manager'] : APPROVAL_ROLES
+  const roles = visibleRoles ? allRoles.filter((role) => visibleRoles.includes(role)) : allRoles
   const [busyRole, setBusyRole] = useState<EqaApprovalRole | null>(null)
   async function mutate(role: EqaApprovalRole, method: 'POST' | 'DELETE') {
     setBusyRole(role)
