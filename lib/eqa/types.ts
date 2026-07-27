@@ -159,10 +159,20 @@ export interface EqaCorrectiveAction {
   id: string
   roundId: string
   roundLabel: string
+  resultId: string | null
+  resultLabel: string | null
   problem: string
   rootCause: string | null
   actionTaken: string | null
   status: 'open' | 'closed'
+  ownerId: string | null
+  ownerName: string | null
+  dueDate: string | null
+  dueInDays: number | null
+  effectivenessOutcome: 'pending' | 'effective' | 'ineffective'
+  effectivenessNote: string | null
+  effectivenessVerifiedByName: string | null
+  effectivenessVerifiedAt: string | null
   createdByName: string | null
   createdAt: string
   closedByName: string | null
@@ -194,6 +204,7 @@ export interface EqaWorkspace {
     dueSoon: number
     unacceptable: number
     openCorrectiveActions: number
+    overdueCorrectiveActions: number
   }
 }
 

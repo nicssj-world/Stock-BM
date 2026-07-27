@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import { requireFullPageActor } from '@/lib/server/auth'
 import { getEqaWorkspace } from '@/lib/server/eqa'
 import { EQA_DOCUMENT_CODES } from '@/lib/eqa/types'
-import { EqaApprovalGrid, EqaReportFrame } from '@/components/eqa-report-frame'
+import { EqaApprovalGrid, EqaReportFrame, eqaBackHref } from '@/components/eqa-report-frame'
 
 export async function generateMetadata({ params }: { params: Promise<{ roundId: string }> }): Promise<Metadata> {
   return { title: `EQA-Round-${(await params).roundId}-Fm-QP-LAB-19-02` }
@@ -12,22 +12,23 @@ function date(value: string | null) { return value ? new Intl.DateTimeFormat('th
 function approvalDate(value: string | undefined) { return value ? new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Bangkok' }).format(new Date(value)) : '' }
 function Box({ checked }: { checked: boolean }) { return <span className={`choice-box ${checked ? 'checked' : ''}`} aria-hidden="true" /> }
 
-export default async function EqaRoundReceiptReportPage({ params }: { params: Promise<{ roundId: string }> }) {
+export default async function EqaRoundReceiptReportPage({ params, searchParams }: { params: Promise<{ roundId: string }>; searchParams: Promise<{ tab?: string }> }) {
   const actor = await requireFullPageActor(); const workspace = await getEqaWorkspace(actor)
   const { roundId } = await params
+  const { tab } = await searchParams
   const round = workspace.rounds.find((item) => item.id === roundId); if (!round) notFound()
   const summary = round.planItemId ? workspace.annualSummaries.find((item) => item.planItem.id === round.planItemId) : null
   const sampleSet = summary?.planItem.sampleSetName ?? round.planItemName ?? round.schemeName
   const analystApproval = round.approvals.find((item) => item.approvalRole === 'analyst')
   const managerApproval = round.approvals.find((item) => item.approvalRole === 'technical-manager')
-  return <EqaReportFrame backHref="/eqa" code={EQA_DOCUMENT_CODES['round-receipt']} orientation="portrait" draft={round.documentState.status !== 'approved'}>
+  return <EqaReportFrame backHref={eqaBackHref(tab)} code={EQA_DOCUMENT_CODES['round-receipt']} orientation="portrait" draft={round.documentState.status !== 'approved'}>
     <h1 className="receipt-title">แบบบันทึกการดำเนินการทดสอบตัวอย่างโครงการ EQAS/PT/Interlaboratory comparison</h1>
     <table className="receipt-table"><tbody>
       <tr><th>ชื่อชุดตัวอย่างทดสอบ</th><td colSpan={3}>{sampleSet}</td></tr><tr><th>ชื่อองค์กรภายนอกที่ส่งตัวอย่าง</th><td colSpan={3}>{round.providerName}</td></tr><tr><th>วันที่ส่งตัวอย่างจากองค์กรภายนอก</th><td colSpan={3}>{date(round.externalSentDate)}</td></tr><tr><th>วันที่รับตัวอย่าง</th><td colSpan={3}>{date(round.sampleReceivedDate)}</td></tr>
       <tr><th>สภาพความเรียบร้อยของ<br />ห่อตัวอย่างที่ได้รับ</th><td><Box checked={round.packageCondition === 'acceptable'} /> เรียบร้อย</td><td colSpan={2}><Box checked={round.packageCondition === 'unacceptable'} /> ไม่เรียบร้อย ระบุ {round.packageNote ?? '........................................'}</td></tr>
       <tr><th>อุณหภูมิของตัวอย่างที่ได้รับ</th><td><Box checked={round.receivedTemperature === 'refrigerated'} /> แช่เย็น</td><td><Box checked={round.receivedTemperature === 'room'} /> อุณหภูมิห้อง</td><td><Box checked={round.receivedTemperature === 'other'} /> อื่นๆ {round.receivedTemperatureNote ?? '........................'}</td></tr>
       <tr><th>สภาพของตัวอย่าง</th><td><Box checked={round.sampleCondition === 'acceptable'} /> เรียบร้อย</td><td colSpan={2}><Box checked={round.sampleCondition === 'unacceptable'} /> ไม่เรียบร้อย ระบุ {round.sampleConditionNote ?? '........................................'}</td></tr>
-      <tr><th>ระบุการเก็บตัวอย่าง</th><td colSpan={2}><Box checked={round.storageCondition === 'refrigerated'} /> แช่เย็นที่อุณหภูมิ {round.storageTemperatureC ?? '.......'} °C</td><td><Box checked={round.storageCondition === 'room'} /> เก็บที่อุณหภูมิห้อง {round.storageCondition === 'other' ? round.storageNote : ''}</td></tr>
+      <tr><th>ระบุการเก็บตัวอย่าง</th><td><Box checked={round.storageCondition === 'refrigerated'} /> แช่เย็นที่อุณหภูมิ {round.storageTemperatureC ?? '.......'} °C</td><td><Box checked={round.storageCondition === 'room'} /> เก็บที่อุณหภูมิห้อง</td><td><Box checked={round.storageCondition === 'other'} /> อื่นๆ {round.storageNote ?? '........................'}</td></tr>
       <tr><th>ชนิดของตัวอย่าง</th><td colSpan={3}>{round.specimenType ?? ''}</td></tr><tr><th>รหัสตัวอย่าง</th><td colSpan={3}>{round.results.map((result) => result.sampleCode).filter(Boolean).join(', ')}</td></tr><tr><th>ผู้บันทึกการรับตัวอย่าง</th><td colSpan={3}>{round.receiverName ?? ''}</td></tr><tr><th>ผู้ทำการตรวจวิเคราะห์</th><td colSpan={3}>{round.analystName ?? ''}</td></tr><tr><th>วันที่ตรวจวิเคราะห์</th><td colSpan={3}>{date(round.analysisDate)}</td></tr><tr><th>วันที่ส่งผลการตรวจวิเคราะห์</th><td colSpan={3}>{date(round.submissionDate)}</td></tr><tr><th>วิธีส่งผลการตรวจวิเคราะห์</th><td colSpan={3}>{round.submissionMethod ?? ''}</td></tr><tr className="details"><th>รายละเอียดอื่นๆ (ถ้ามี)</th><td colSpan={3}>{round.otherDetails ?? '-'}</td></tr>
     </tbody></table>
     <section className="analyst-review"><h2>บันทึกการตรวจสอบโดยผู้ทำการตรวจวิเคราะห์</h2><div className="review-grid"><div className="result-lines">{round.results.map((result) => <p key={result.id}>{result.sampleCode ?? result.analyte}&nbsp;&nbsp;-&nbsp;&nbsp;{result.submittedValue ?? '-'} {result.unit ?? ''}{result.ctValue == null ? '' : `  - Ct ${result.ctValue}`}</p>)}{!round.results.length ? <p>&nbsp;</p> : null}</div><div className="review-sign"><div className="mini-line">{analystApproval?.approvedByName ?? ''}</div><p>({round.analystName ?? 'ผู้ทำการตรวจวิเคราะห์'})</p><p>วันที่ {approvalDate(analystApproval?.approvedAt) || '........................'}</p></div></div></section>

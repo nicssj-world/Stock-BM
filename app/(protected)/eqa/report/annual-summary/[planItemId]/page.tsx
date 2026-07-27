@@ -3,19 +3,20 @@ import { notFound } from 'next/navigation'
 import { requireFullPageActor } from '@/lib/server/auth'
 import { getEqaWorkspace } from '@/lib/server/eqa'
 import { EQA_DOCUMENT_CODES } from '@/lib/eqa/types'
-import { EqaApprovalGrid, EqaReportFrame } from '@/components/eqa-report-frame'
+import { EqaApprovalGrid, EqaReportFrame, eqaBackHref } from '@/components/eqa-report-frame'
 
 export async function generateMetadata({ params }: { params: Promise<{ planItemId: string }> }): Promise<Metadata> {
   return { title: `EQA-Annual-Summary-${(await params).planItemId}-Fm-QP-LAB-19-04` }
 }
 function Tick({ show }: { show: boolean }) { return show ? <span className="css-tick" aria-label="เลือก" /> : null }
 
-export default async function EqaAnnualSummaryReportPage({ params }: { params: Promise<{ planItemId: string }> }) {
+export default async function EqaAnnualSummaryReportPage({ params, searchParams }: { params: Promise<{ planItemId: string }>; searchParams: Promise<{ tab?: string }> }) {
   const actor = await requireFullPageActor(); const workspace = await getEqaWorkspace(actor)
   const { planItemId } = await params
+  const { tab } = await searchParams
   const summary = workspace.annualSummaries.find((item) => item.planItem.id === planItemId); if (!summary) notFound()
   const item = summary.planItem
-  return <EqaReportFrame backHref="/eqa" code={EQA_DOCUMENT_CODES['annual-summary']} orientation="portrait" draft={summary.documentState.status !== 'approved'}>
+  return <EqaReportFrame backHref={eqaBackHref(tab)} code={EQA_DOCUMENT_CODES['annual-summary']} orientation="portrait" draft={summary.documentState.status !== 'approved'}>
     <header className="summary-header"><h1>สรุปผลการเปรียบเทียบผลการทดสอบระหว่างห้องปฏิบัติการ&nbsp;&nbsp; ประจำปี {summary.plan.planYear + 543}</h1><h2>(EQAS/PT/Interlaboratory comparison)</h2></header>
     <section className="summary-meta"><div><strong>ชื่อโครงการ:</strong> {item.projectName}</div><div><strong>หน่วยงาน:</strong> {item.providerName}</div><div><strong>ชื่อชุดตัวอย่างทดสอบ:</strong> {item.sampleSetName}</div><div><strong>เครื่องมือ:</strong> {item.equipmentName ?? ''}</div><div className="wide"><strong>รหัสตัวอย่างทดสอบ:</strong> {summary.rounds.flatMap((round) => round.results.map((result) => result.sampleCode)).filter(Boolean).join(', ')}</div></section>
     <section className="criteria"><strong>เกณฑ์การประเมิน:</strong><div>{item.evaluationCriteria?.split('\n').map((line, index) => <p key={index}>{line || <>&nbsp;</>}</p>)}</div></section>

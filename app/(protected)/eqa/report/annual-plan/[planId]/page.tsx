@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import { requireFullPageActor } from '@/lib/server/auth'
 import { getEqaWorkspace } from '@/lib/server/eqa'
 import { EQA_DOCUMENT_CODES } from '@/lib/eqa/types'
-import { EqaApprovalGrid, EqaReportFrame } from '@/components/eqa-report-frame'
+import { EqaApprovalGrid, EqaReportFrame, eqaBackHref } from '@/components/eqa-report-frame'
 
 export async function generateMetadata({ params }: { params: Promise<{ planId: string }> }): Promise<Metadata> {
   return { title: `EQA-Annual-Plan-${(await params).planId}-Fm-QP-LAB-19-01` }
@@ -11,13 +11,14 @@ export async function generateMetadata({ params }: { params: Promise<{ planId: s
 const MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
 function Tick({ show }: { show: boolean }) { return show ? <span className="css-tick" aria-label="เลือก" /> : null }
 
-export default async function EqaAnnualPlanReportPage({ params }: { params: Promise<{ planId: string }> }) {
+export default async function EqaAnnualPlanReportPage({ params, searchParams }: { params: Promise<{ planId: string }>; searchParams: Promise<{ tab?: string }> }) {
   const actor = await requireFullPageActor()
   const workspace = await getEqaWorkspace(actor)
   const { planId } = await params
+  const { tab } = await searchParams
   const plan = workspace.annualPlans.find((item) => item.id === planId)
   if (!plan) notFound()
-  return <EqaReportFrame backHref="/eqa" code={EQA_DOCUMENT_CODES['annual-plan']} orientation="landscape" draft={plan.documentState.status !== 'approved'}>
+  return <EqaReportFrame backHref={eqaBackHref(tab)} code={EQA_DOCUMENT_CODES['annual-plan']} orientation="landscape" draft={plan.documentState.status !== 'approved'}>
     <header className="plan-header"><h1>แผนการเปรียบเทียบผลการทดสอบระหว่างห้องปฏิบัติการ&nbsp;&nbsp; (EQAS/PT/Interlaboratory comparison) ประจำปี {plan.planYear + 543}</h1><div className="plan-org"><strong>{plan.workSection}</strong><strong>{plan.departmentName}&nbsp;&nbsp; {plan.organizationName}</strong></div></header>
     <table className="plan-table"><thead><tr><th className="no">ลำดับ<br />ที่</th><th className="program">ชื่อการควบคุมคุณภาพภายนอก</th><th className="provider">หน่วยงานผู้<br />จัดส่ง</th><th className="vertical">เงินบำรุง</th><th className="vertical">TOR</th><th className="price">ราคา<br />(บาท)</th><th className="test">รายการทดสอบ</th><th className="frequency">ความถี่</th>{MONTHS.map((month) => <th className="month" key={month}>{month}</th>)}<th className="note">หมายเหตุ</th></tr></thead><tbody>{plan.items.map((item, index) => {
       const responsibleNames = [...new Set(item.occurrences.map((occurrence) => occurrence.responsibleName).filter(Boolean))].join(', ')

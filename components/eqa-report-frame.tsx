@@ -8,6 +8,11 @@ function thaiDateTime(value: string) {
   return new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'Asia/Bangkok' }).format(new Date(value))
 }
 
+const EQA_TABS = ['plans', 'rounds', 'corrective', 'reports', 'manage']
+export function eqaBackHref(tab: string | undefined) {
+  return tab && EQA_TABS.includes(tab) ? `/eqa?tab=${tab}` : '/eqa'
+}
+
 export function EqaApprovalGrid({ roles, approvals }: { roles: EqaApprovalRole[]; approvals: EqaDocumentApproval[] }) {
   return <div className="approval-grid">{roles.map((role) => {
     const approval = approvals.find((item) => item.approvalRole === role)

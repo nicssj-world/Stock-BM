@@ -24,11 +24,12 @@ import type {
   EqaWorkspace,
 } from '@/lib/eqa/types'
 import { EQA_DUE_SOON_DAYS } from '@/lib/eqa/types'
-import { annualPlanReadiness, annualSummaryReadiness, roundReceiptReadiness } from '@/lib/eqa/rules'
+import { annualPlanReadiness, annualSummaryReadiness, missingPlannedRounds, roundReceiptReadiness } from '@/lib/eqa/rules'
 import type { BmActor } from '@/lib/bm/types'
 import { daysUntil, todayBangkok } from '@/lib/bm/rules'
 import { writeAudit } from '@/lib/server/audit'
 import { HttpError } from '@/lib/server/errors'
+import { deleteEntityAttachments } from '@/lib/server/attachments'
 import { getAdminClient } from '@/lib/supabase/admin'
 
 type RecordRow = Record<string, unknown>
@@ -53,7 +54,7 @@ export interface EqaPlanItemInput {
 }
 
 export interface EqaRoundReceiptInput {
-  planItemId: string
+  planItemId?: string
   externalSentDate?: string | null
   sampleReceivedDate?: string | null
   packageCondition?: EqaCondition | null
@@ -180,6 +181,7 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
   const planYearById = new Map(planRows.map((row) => [asString(row.id), Number(row.plan_year)]))
 
   const resultsByRound = new Map<string, EqaResult[]>()
+  const resultById = new Map<string, EqaResult>()
   for (const row of resultData as RecordRow[]) {
     const result: EqaResult = {
       id: asString(row.id), roundId: asString(row.round_id), analyte: asString(row.analyte), sampleCode: nullableString(row.sample_code),
@@ -187,6 +189,7 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
       outcome: asString(row.outcome) as EqaOutcome, iqcAnalyteId: nullableString(row.iqc_analyte_id), assignedValue: nullableNumber(row.assigned_value),
     }
     resultsByRound.set(result.roundId, [...(resultsByRound.get(result.roundId) ?? []), result])
+    resultById.set(result.id, result)
   }
 
   const today = todayBangkok()
@@ -225,12 +228,26 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
   const roundMap = new Map(rounds.map((round) => [round.id, round]))
 
   const correctiveRows = caData as RecordRow[]
-  const correctiveActions: EqaCorrectiveAction[] = correctiveRows.map((row) => ({
-    id: asString(row.id), roundId: asString(row.round_id), roundLabel: roundMap.get(asString(row.round_id))?.roundLabel ?? '-', problem: asString(row.problem),
-    rootCause: nullableString(row.root_cause), actionTaken: nullableString(row.action_taken), status: asString(row.status) === 'closed' ? 'closed' : 'open',
-    createdByName: userNameMap.get(asString(row.created_by)) ?? null, createdAt: asString(row.created_at),
-    closedByName: row.closed_by ? userNameMap.get(asString(row.closed_by)) ?? null : null, closedAt: nullableString(row.closed_at),
-  }))
+  const correctiveActions: EqaCorrectiveAction[] = correctiveRows.map((row) => {
+    const status = asString(row.status) === 'closed' ? 'closed' : 'open'
+    const resultId = nullableString(row.result_id)
+    const result = resultId ? resultById.get(resultId) : null
+    const dueDate = nullableString(row.due_date)
+    return {
+      id: asString(row.id), roundId: asString(row.round_id), roundLabel: roundMap.get(asString(row.round_id))?.roundLabel ?? '-',
+      resultId, resultLabel: result ? `${result.sampleCode ?? '-'} · ${result.analyte}` : null,
+      problem: asString(row.problem), rootCause: nullableString(row.root_cause), actionTaken: nullableString(row.action_taken),
+      status,
+      ownerId: nullableString(row.owner_id), ownerName: row.owner_id ? userNameMap.get(asString(row.owner_id)) ?? null : null,
+      dueDate, dueInDays: dueDate && status !== 'closed' ? daysUntil(dueDate, today) : null,
+      effectivenessOutcome: (asString(row.effectiveness_outcome) || 'pending') as EqaCorrectiveAction['effectivenessOutcome'],
+      effectivenessNote: nullableString(row.effectiveness_note),
+      effectivenessVerifiedByName: row.effectiveness_verified_by ? userNameMap.get(asString(row.effectiveness_verified_by)) ?? null : null,
+      effectivenessVerifiedAt: nullableString(row.effectiveness_verified_at),
+      createdByName: userNameMap.get(asString(row.created_by)) ?? null, createdAt: asString(row.created_at),
+      closedByName: row.closed_by ? userNameMap.get(asString(row.closed_by)) ?? null : null, closedAt: nullableString(row.closed_at),
+    }
+  })
 
   const annualPlans: EqaAnnualPlan[] = planRows.map((row) => {
     const id = asString(row.id)
@@ -267,7 +284,8 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
       overdue: rounds.filter((round) => round.reminder === 'overdue').length,
       dueSoon: rounds.filter((round) => round.reminder === 'due-soon').length,
       unacceptable: rounds.reduce((sum, round) => sum + round.results.filter((result) => result.outcome === 'unacceptable').length, 0),
-      openCorrectiveActions: correctiveActions.filter((action) => action.status === 'open').length,
+      openCorrectiveActions: correctiveActions.filter((action) => action.status !== 'closed').length,
+      overdueCorrectiveActions: correctiveActions.filter((action) => action.status !== 'closed' && action.dueInDays != null && action.dueInDays < 0).length,
     },
   }
 }
@@ -374,9 +392,69 @@ export async function deletePlanItem(id: string, actor: BmActor) {
 }
 
 export async function createRound(input: { planItemId: string; roundLabel: string; sampleReceivedDate?: string | null; resultDueDate?: string | null; note?: string | null }, actor: BmActor) {
-  assertAdmin(actor); const admin = getAdminClient(); const { data: item, error: itemError } = await admin.from('eqa_plan_items').select('scheme_id').eq('id', input.planItemId).maybeSingle(); fail(itemError); if (!item) throw new HttpError(404, 'Plan item not found')
+  assertOperator(actor); const admin = getAdminClient(); const { data: item, error: itemError } = await admin.from('eqa_plan_items').select('scheme_id').eq('id', input.planItemId).maybeSingle(); fail(itemError); if (!item) throw new HttpError(404, 'Plan item not found')
   const { data, error } = await admin.from('eqa_rounds').insert({ scheme_id: asString((item as RecordRow).scheme_id), plan_item_id: input.planItemId, round_label: input.roundLabel.trim(), sample_received_date: input.sampleReceivedDate || null, result_due_date: input.resultDueDate || null, note: clean(input.note), created_by: actor.id }).select('id').single(); fail(error)
   const id = asString((data as RecordRow).id); await invalidateRoundDocuments(id); await writeAudit(actor, 'eqa.round.create', 'eqa-round', id, input); return getEqaWorkspace(actor)
+}
+
+export async function generateRoundsFromPlanItem(planItemId: string, actor: BmActor) {
+  assertOperator(actor)
+  const admin = getAdminClient()
+  const { data: itemRow, error: itemError } = await admin.from('eqa_plan_items').select('scheme_id,plan_id,expected_rounds').eq('id', planItemId).maybeSingle()
+  fail(itemError); if (!itemRow) throw new HttpError(404, 'Plan item not found')
+  const item = itemRow as RecordRow
+
+  const { data: planRow, error: planError } = await admin.from('eqa_annual_plans').select('plan_year').eq('id', asString(item.plan_id)).maybeSingle()
+  fail(planError); if (!planRow) throw new HttpError(404, 'Annual plan not found')
+  const planYear = Number((planRow as RecordRow).plan_year)
+
+  const { data: occurrenceRows, error: occurrenceError } = await admin.from('eqa_plan_occurrences').select('planned_month,sort_order').eq('plan_item_id', planItemId).order('sort_order').order('planned_month')
+  fail(occurrenceError)
+  const occurrences = (occurrenceRows ?? []) as RecordRow[]
+
+  const expectedRounds = nullableNumber(item.expected_rounds)
+  if (expectedRounds != null && occurrences.length !== expectedRounds) throw new HttpError(400, 'จำนวนเดือนในแผนยังไม่ตรงกับจำนวนครั้ง/ปี — แก้แผนก่อน')
+
+  const { data: existingRoundRows, error: existingError } = await admin.from('eqa_rounds').select('id,sequence_no,result_due_date,sample_received_date,created_at').eq('plan_item_id', planItemId)
+  fail(existingError)
+  const existingRounds = (existingRoundRows ?? []) as RecordRow[]
+
+  // Adopt hand-created rounds (sequence_no is null) into the sequence first,
+  // ordered by their real-world timeline, so generation never duplicates a
+  // round someone already created by hand -- it just fills in the rest.
+  const alreadySequenced = existingRounds.filter((round) => round.sequence_no != null)
+  const toAdopt = existingRounds.filter((round) => round.sequence_no == null).sort((a, b) => {
+    const dueA = nullableString(a.result_due_date); const dueB = nullableString(b.result_due_date)
+    if (dueA && dueB) return dueA.localeCompare(dueB)
+    if (dueA) return -1
+    if (dueB) return 1
+    const receivedA = nullableString(a.sample_received_date); const receivedB = nullableString(b.sample_received_date)
+    if (receivedA && receivedB) return receivedA.localeCompare(receivedB)
+    return asString(a.created_at).localeCompare(asString(b.created_at))
+  })
+  let nextSequence = alreadySequenced.length + 1
+  for (const round of toAdopt) {
+    fail((await admin.from('eqa_rounds').update({ sequence_no: nextSequence }).eq('id', asString(round.id))).error)
+    nextSequence += 1
+  }
+
+  const totalExisting = alreadySequenced.length + toAdopt.length
+  const missing = missingPlannedRounds({ occurrences: occurrences.map((row) => ({ id: '', planItemId, plannedMonth: Number(row.planned_month), responsibleUserId: null, responsibleName: null, responsibleCode: '', sortOrder: Number(row.sort_order ?? 0) })) }, totalExisting, planYear)
+  if (!missing.length) throw new HttpError(409, 'มี round ครบตามแผนแล้ว')
+
+  const rows = missing.map((round) => ({
+    scheme_id: asString(item.scheme_id), plan_item_id: planItemId, sequence_no: round.sequence,
+    round_label: round.roundLabel, result_due_date: round.resultDueDate, created_by: actor.id,
+  }))
+  fail((await admin.from('eqa_rounds').insert(rows)).error)
+
+  // Only the derived summary changes -- the plan itself and each round's own
+  // receipt weren't touched, and stateFor() already falls back to a default
+  // draft state for receipts that don't have a row yet, so there's nothing
+  // to invalidate there.
+  await invalidateDocument('annual-summary', planItemId)
+  await writeAudit(actor, 'eqa.round.generate', 'eqa-plan-item', planItemId, { created: rows.length, sequences: rows.map((row) => row.sequence_no) })
+  return getEqaWorkspace(actor)
 }
 export async function updateRound(id: string, input: { roundLabel?: string; status?: EqaRoundStatus; submissionDate?: string | null; sampleReceivedDate?: string | null; resultDueDate?: string | null; note?: string | null }, actor: BmActor) {
   assertOperator(actor); const updates: RecordRow = {}
@@ -387,9 +465,42 @@ export async function updateRound(id: string, input: { roundLabel?: string; stat
   await writeAudit(actor, 'eqa.round.update', 'eqa-round', id, input); return getEqaWorkspace(actor)
 }
 export async function updateRoundReceipt(id: string, input: EqaRoundReceiptInput, actor: BmActor) {
-  assertOperator(actor); const admin = getAdminClient(); const { data: item, error: itemError } = await admin.from('eqa_plan_items').select('scheme_id').eq('id', input.planItemId).maybeSingle(); fail(itemError); if (!item) throw new HttpError(404, 'Plan item not found')
-  fail((await admin.from('eqa_rounds').update({ plan_item_id: input.planItemId, scheme_id: asString((item as RecordRow).scheme_id), external_sent_date: input.externalSentDate || null, sample_received_date: input.sampleReceivedDate || null, package_condition: input.packageCondition ?? null, package_note: clean(input.packageNote), received_temperature: input.receivedTemperature ?? null, received_temperature_note: clean(input.receivedTemperatureNote), sample_condition: input.sampleCondition ?? null, sample_condition_note: clean(input.sampleConditionNote), storage_condition: input.storageCondition ?? null, storage_temperature_c: input.storageTemperatureC ?? null, storage_note: clean(input.storageNote), specimen_type: clean(input.specimenType), receiver_id: input.receiverId || null, analyst_id: input.analystId || null, analysis_date: input.analysisDate || null, submission_date: input.submissionDate || null, submission_method: clean(input.submissionMethod), other_details: clean(input.otherDetails), updated_at: new Date().toISOString() }).eq('id', id)).error)
-  await invalidateRoundDocuments(id); await writeAudit(actor, 'eqa.round.receipt.update', 'eqa-round', id, { ...input }); return getEqaWorkspace(actor)
+  assertOperator(actor)
+  const admin = getAdminClient()
+  const { data: currentRound, error: currentError } = await admin.from('eqa_rounds').select('plan_item_id').eq('id', id).maybeSingle()
+  fail(currentError); if (!currentRound) throw new HttpError(404, 'Round not found')
+  const previousPlanItemId = nullableString((currentRound as RecordRow).plan_item_id)
+
+  const update: RecordRow = {
+    external_sent_date: input.externalSentDate || null, sample_received_date: input.sampleReceivedDate || null,
+    package_condition: input.packageCondition ?? null, package_note: clean(input.packageNote),
+    received_temperature: input.receivedTemperature ?? null, received_temperature_note: clean(input.receivedTemperatureNote),
+    sample_condition: input.sampleCondition ?? null, sample_condition_note: clean(input.sampleConditionNote),
+    storage_condition: input.storageCondition ?? null, storage_temperature_c: input.storageTemperatureC ?? null, storage_note: clean(input.storageNote),
+    specimen_type: clean(input.specimenType), receiver_id: input.receiverId || null, analyst_id: input.analystId || null,
+    analysis_date: input.analysisDate || null, submission_date: input.submissionDate || null, submission_method: clean(input.submissionMethod),
+    other_details: clean(input.otherDetails), updated_at: new Date().toISOString(),
+  }
+  // planItemId is optional -- the round already knows its plan item from
+  // creation/generation, so the receipt form only sends this when the user
+  // deliberately re-assigns the round to a different plan item.
+  if (input.planItemId !== undefined) {
+    const { data: item, error: itemError } = await admin.from('eqa_plan_items').select('scheme_id').eq('id', input.planItemId).maybeSingle()
+    fail(itemError); if (!item) throw new HttpError(404, 'Plan item not found')
+    update.plan_item_id = input.planItemId
+    update.scheme_id = asString((item as RecordRow).scheme_id)
+  }
+  fail((await admin.from('eqa_rounds').update(update).eq('id', id)).error)
+
+  await invalidateRoundDocuments(id)
+  // invalidateRoundDocuments only sees the round's *new* plan item -- if this
+  // call re-assigned the round away from a plan item, that old plan item's
+  // annual summary still has stale approvals sitting on data that no longer
+  // includes this round, so it must be invalidated separately.
+  if (input.planItemId !== undefined && previousPlanItemId && previousPlanItemId !== input.planItemId) {
+    await invalidateDocument('annual-summary', previousPlanItemId)
+  }
+  await writeAudit(actor, 'eqa.round.receipt.update', 'eqa-round', id, { ...input }); return getEqaWorkspace(actor)
 }
 export async function updateRoundSummary(id: string, input: { summaryOutcome: EqaRoundSummaryOutcome; summaryNote?: string | null }, actor: BmActor) {
   assertOperator(actor); fail((await getAdminClient().from('eqa_rounds').update({ summary_outcome: input.summaryOutcome, summary_note: clean(input.summaryNote), updated_at: new Date().toISOString() }).eq('id', id)).error)
@@ -417,15 +528,87 @@ export async function deleteResult(id: string, actor: BmActor) {
   fail((await admin.from('eqa_results').delete().eq('id', id)).error); await invalidateRoundDocuments(asString((data as RecordRow).round_id)); await writeAudit(actor, 'eqa.result.delete', 'eqa-result', id, { analyte: asString((data as RecordRow).analyte) }); return getEqaWorkspace(actor)
 }
 
-export async function createEqaCorrectiveAction(input: { roundId: string; resultId?: string | null; problem: string; rootCause?: string | null; actionTaken?: string | null }, actor: BmActor) {
+export async function createEqaCorrectiveAction(input: { roundId: string; resultId?: string | null; problem: string; rootCause?: string | null; actionTaken?: string | null; ownerId?: string | null; dueDate?: string | null }, actor: BmActor) {
   assertOperator(actor); if (!input.problem.trim()) throw new HttpError(400, 'Problem description is required')
-  const { data, error } = await getAdminClient().from('eqa_corrective_actions').insert({ round_id: input.roundId, result_id: input.resultId || null, problem: input.problem.trim(), root_cause: clean(input.rootCause), action_taken: clean(input.actionTaken), created_by: actor.id }).select('id').single(); fail(error)
+  const { data, error } = await getAdminClient().from('eqa_corrective_actions').insert({ round_id: input.roundId, result_id: input.resultId || null, problem: input.problem.trim(), root_cause: clean(input.rootCause), action_taken: clean(input.actionTaken), owner_id: input.ownerId || null, due_date: input.dueDate || null, created_by: actor.id }).select('id').single(); fail(error)
   const id = asString((data as RecordRow).id); await invalidateRoundDocuments(input.roundId, false); await writeAudit(actor, 'eqa.correctiveAction.create', 'eqa-corrective-action', id, input); return getEqaWorkspace(actor)
 }
+
+export async function updateEqaCorrectiveAction(id: string, input: { problem?: string; rootCause?: string | null; actionTaken?: string | null; ownerId?: string | null; dueDate?: string | null }, actor: BmActor) {
+  assertOperator(actor)
+  const admin = getAdminClient()
+  const { data: existing, error: existingError } = await admin.from('eqa_corrective_actions').select('status').eq('id', id).maybeSingle()
+  fail(existingError); if (!existing) throw new HttpError(404, 'Corrective action not found')
+  if (asString((existing as RecordRow).status) === 'closed') throw new HttpError(400, 'Closed corrective action cannot be edited')
+
+  const update: RecordRow = {}
+  if (input.problem !== undefined) {
+    const problem = input.problem.trim(); if (!problem) throw new HttpError(400, 'Problem description is required'); update.problem = problem
+  }
+  if (input.rootCause !== undefined) update.root_cause = clean(input.rootCause)
+  if (input.actionTaken !== undefined) update.action_taken = clean(input.actionTaken)
+  if (input.ownerId !== undefined) update.owner_id = input.ownerId || null
+  if (input.dueDate !== undefined) update.due_date = input.dueDate || null
+  if (!Object.keys(update).length) throw new HttpError(400, 'No changes provided')
+
+  fail((await admin.from('eqa_corrective_actions').update(update).eq('id', id)).error)
+  await writeAudit(actor, 'eqa.correctiveAction.update', 'eqa-corrective-action', id, input); return getEqaWorkspace(actor)
+}
+
 export async function closeEqaCorrectiveAction(id: string, input: { rootCause?: string | null; actionTaken?: string | null }, actor: BmActor) {
-  assertOperator(actor); const admin = getAdminClient(); const { data, error } = await admin.from('eqa_corrective_actions').select('round_id').eq('id', id).maybeSingle(); fail(error); if (!data) throw new HttpError(404, 'Corrective action not found')
-  fail((await admin.from('eqa_corrective_actions').update({ root_cause: clean(input.rootCause), action_taken: clean(input.actionTaken), status: 'closed', closed_by: actor.id, closed_at: new Date().toISOString() }).eq('id', id)).error)
-  await invalidateRoundDocuments(asString((data as RecordRow).round_id), false); await writeAudit(actor, 'eqa.correctiveAction.close', 'eqa-corrective-action', id, input); return getEqaWorkspace(actor)
+  assertOperator(actor)
+  const admin = getAdminClient()
+  const { data, error } = await admin.from('eqa_corrective_actions').select('round_id,root_cause,action_taken,status').eq('id', id).maybeSingle()
+  fail(error); if (!data) throw new HttpError(404, 'Corrective action not found')
+  const row = data as RecordRow
+  if (asString(row.status) === 'closed') throw new HttpError(400, 'Corrective action is already closed')
+
+  // Fall back to the value already on the record so closing with an empty
+  // body (as the old UI did) can never blank out root cause / action taken.
+  const rootCause = clean(input.rootCause) ?? clean(nullableString(row.root_cause))
+  const actionTaken = clean(input.actionTaken) ?? clean(nullableString(row.action_taken))
+  if (!rootCause || !actionTaken) throw new HttpError(400, 'ต้องระบุ Root cause และ Action taken ก่อนปิด')
+
+  fail((await admin.from('eqa_corrective_actions').update({
+    root_cause: rootCause, action_taken: actionTaken, status: 'closed', closed_by: actor.id, closed_at: new Date().toISOString(),
+  }).eq('id', id)).error)
+  await invalidateRoundDocuments(asString(row.round_id), false)
+  await writeAudit(actor, 'eqa.correctiveAction.close', 'eqa-corrective-action', id, input); return getEqaWorkspace(actor)
+}
+
+export async function verifyEqaCorrectiveActionEffectiveness(id: string, input: { outcome: 'effective' | 'ineffective'; note: string }, actor: BmActor) {
+  assertOperator(actor)
+  const admin = getAdminClient()
+  const { data, error } = await admin.from('eqa_corrective_actions').select('round_id,status').eq('id', id).maybeSingle()
+  fail(error); if (!data) throw new HttpError(404, 'Corrective action not found')
+  const row = data as RecordRow
+  if (asString(row.status) !== 'closed') throw new HttpError(400, 'ยืนยันประสิทธิผลได้เฉพาะ corrective action ที่ปิดแล้ว')
+  const note = clean(input.note); if (!note) throw new HttpError(400, 'Effectiveness note is required')
+
+  const update: RecordRow = {
+    effectiveness_outcome: input.outcome, effectiveness_note: note, effectiveness_verified_by: actor.id, effectiveness_verified_at: new Date().toISOString(),
+  }
+  // An ineffective fix reopens the CAPA -- the problem is still live, and
+  // annualSummaryReadiness (rules.ts) requires status === 'closed', so this
+  // correctly blocks the annual summary again until it's redone.
+  if (input.outcome === 'ineffective') update.status = 'open'
+  fail((await admin.from('eqa_corrective_actions').update(update).eq('id', id)).error)
+  if (input.outcome === 'ineffective') await invalidateRoundDocuments(asString(row.round_id), false)
+  await writeAudit(actor, 'eqa.correctiveAction.verifyEffectiveness', 'eqa-corrective-action', id, input); return getEqaWorkspace(actor)
+}
+
+export async function deleteEqaCorrectiveAction(id: string, actor: BmActor) {
+  assertAdmin(actor)
+  const admin = getAdminClient()
+  const { data: existing, error: existingError } = await admin.from('eqa_corrective_actions').select('round_id,problem,status').eq('id', id).maybeSingle()
+  fail(existingError); if (!existing) throw new HttpError(404, 'Corrective action not found')
+  const row = existing as RecordRow
+
+  const attachmentCount = await deleteEntityAttachments({ module: 'eqa', entityType: 'eqa-corrective-action', entityId: id })
+  fail((await admin.from('eqa_corrective_actions').delete().eq('id', id)).error)
+  await invalidateRoundDocuments(asString(row.round_id), false)
+  await writeAudit(actor, 'eqa.correctiveAction.delete', 'eqa-corrective-action', id, { roundId: asString(row.round_id), problem: asString(row.problem), status: asString(row.status), attachmentCount })
+  return getEqaWorkspace(actor)
 }
 
 export async function setEqaApproverAssignment(role: EqaAssignedApprovalRole, userId: string, actor: BmActor) {
