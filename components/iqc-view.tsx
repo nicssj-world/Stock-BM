@@ -2201,6 +2201,7 @@ function SpecForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolea
     changeReason: '',
   })
   const [busy, setBusy] = useState(false)
+  const lotSpecs = data.specs.filter((s) => s.controlLotId === form.controlLotId)
   return (
     <Card className="space-y-3 p-4 lg:col-span-2">
       <h2 className="font-bold text-[#173d50]">Assigned spec (mean/SD ของผู้ผลิต)</h2>
@@ -2267,6 +2268,51 @@ function SpecForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolea
           <Button disabled={busy}>บันทึก spec</Button>
         </div>
       </form>
+      {form.controlLotId ? (
+        <div className="space-y-1.5 border-t border-[#e9eff0] pt-3">
+          <p className="text-xs font-semibold text-[#58747d]">Spec ที่กรอกแล้วของ Lot นี้ ({lotSpecs.length})</p>
+          {lotSpecs.length ? (
+            <div className="max-h-72 space-y-1.5 overflow-auto pr-1">
+              {lotSpecs.map((s) => {
+                const analyte = data.analytes.find((a) => a.id === s.analyteId)
+                return (
+                  <div key={s.id} className="flex items-center justify-between gap-2 rounded-md border border-[#e3ebec] bg-white px-2.5 py-1.5 text-xs">
+                    <span className="min-w-0 truncate">
+                      <span className="font-semibold text-[#315763]">{analyte?.code ?? s.analyteId}</span>
+                      <span className="text-[#9aafb4]">
+                        {' '}
+                        · Assigned {fmtCompact(s.assignedMean)} / SD {fmtCompact(s.assignedSd)}
+                        {s.expectedQualitative ? ` · Expected ${s.expectedQualitative}` : ''}
+                        {' · ใช้เกณฑ์: '}
+                        {s.activeLimit === 'lab' ? 'LAB' : 'Assigned'}
+                      </span>
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="min-h-7 shrink-0 px-2 py-1 text-xs"
+                      onClick={() =>
+                        setForm({
+                          ...form,
+                          analyteId: s.analyteId,
+                          assignedMean: s.assignedMean == null ? '' : String(s.assignedMean),
+                          assignedSd: s.assignedSd == null ? '' : String(s.assignedSd),
+                          expectedQualitative: s.expectedQualitative ?? '',
+                          changeReason: '',
+                        })
+                      }
+                    >
+                      แก้ไข
+                    </Button>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="px-1 py-3 text-center text-xs text-[#9aafb4]">ยังไม่มี spec สำหรับ Lot นี้</p>
+          )}
+        </div>
+      ) : null}
     </Card>
   )
 }
