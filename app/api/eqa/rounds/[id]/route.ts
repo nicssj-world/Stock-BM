@@ -4,7 +4,6 @@ import { deleteRound, updateRound } from '@/lib/server/eqa'
 import { readJson, respond } from '@/lib/server/route'
 
 const schema = z.object({
-  status: z.enum(['scheduled', 'received', 'submitted', 'evaluated', 'closed']).optional(),
   submissionDate: z.string().trim().nullable().optional(),
   sampleReceivedDate: z.string().trim().nullable().optional(),
   resultDueDate: z.string().trim().nullable().optional(),

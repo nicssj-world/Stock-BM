@@ -1,4 +1,4 @@
-import type { EqaPlanItem, EqaRound, EqaRoundStatus, EqaCorrectiveAction } from '@/lib/eqa/types'
+import type { EqaPlanItem, EqaRound, EqaRoundStatus, EqaCorrectiveAction, EqaOutcome, EqaRoundSummaryOutcome } from '@/lib/eqa/types'
 
 // The real-world sequence a round's status moves through. Shared between the
 // server (which auto-advances a round to the next status as the matching
@@ -8,6 +8,20 @@ import type { EqaPlanItem, EqaRound, EqaRoundStatus, EqaCorrectiveAction } from 
 // field on the user at once).
 export const ROUND_STATUS_ORDER: EqaRoundStatus[] = ['scheduled', 'received', 'submitted', 'evaluated', 'closed']
 export function roundStatusIndex(status: EqaRoundStatus) { return ROUND_STATUS_ORDER.indexOf(status) }
+
+// The overall result is not entered separately: it is a faithful summary of
+// the provider's outcome for every sample in the round. A warning remains a
+// passing round, while an unacceptable result requires the round to fail.
+export function deriveRoundSummaryOutcome(outcomes: EqaOutcome[]): EqaRoundSummaryOutcome {
+  if (!outcomes.length || outcomes.includes('not-evaluated')) return 'not-evaluated'
+  return outcomes.includes('unacceptable') ? 'fail' : 'pass'
+}
+
+// Scheme scope is stored as text so existing data remains compatible. Each
+// non-empty line is one selectable analyte when recording a sample result.
+export function analyteScopeOptions(scope: string | null | undefined) {
+  return [...new Set((scope ?? '').split(/\r?\n/).map((item) => item.trim()).filter(Boolean))]
+}
 
 export function plannedRoundLabel(sequence: number, planYear: number) {
   return `ครั้งที่ ${sequence}/${planYear + 543}`

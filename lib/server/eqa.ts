@@ -24,7 +24,7 @@ import type {
   EqaWorkspace,
 } from '@/lib/eqa/types'
 import { EQA_DUE_SOON_DAYS } from '@/lib/eqa/types'
-import { ROUND_STATUS_ORDER, annualPlanReadiness, annualSummaryReadiness, missingPlannedRounds, roundReceiptReadiness } from '@/lib/eqa/rules'
+import { ROUND_STATUS_ORDER, annualPlanReadiness, annualSummaryReadiness, deriveRoundSummaryOutcome, missingPlannedRounds, roundReceiptReadiness } from '@/lib/eqa/rules'
 import type { BmActor } from '@/lib/bm/types'
 import { daysUntil, todayBangkok } from '@/lib/bm/rules'
 import { writeAudit } from '@/lib/server/audit'
@@ -80,6 +80,7 @@ function fail(error: { message: string } | null, message = 'EQA database operati
 }
 function asString(value: unknown) { return typeof value === 'string' ? value : '' }
 function nullableString(value: unknown) { return typeof value === 'string' ? value : null }
+function nullableText(value: unknown) { return value == null || value === '' ? null : String(value) }
 function nullableNumber(value: unknown) { return value == null || value === '' ? null : Number(value) }
 function clean(value: string | null | undefined) { return value?.trim() || null }
 function assertAdmin(actor: BmActor) { if (actor.role !== 'Admin') throw new HttpError(403, 'Admin permission required') }
@@ -101,9 +102,12 @@ async function advanceRoundStatus(admin: ReturnType<typeof getAdminClient>, id: 
 const OPEN_STATUSES = new Set<EqaRoundStatus>(['scheduled', 'received'])
 const ASSIGNED_APPROVAL_ROLES: EqaAssignedApprovalRole[] = ['technical-manager', 'quality-manager', 'section-head', 'department-head']
 const REQUIRED_APPROVALS: Record<EqaDocumentType, EqaApprovalRole[]> = {
-  'annual-plan': ['technical-manager', 'quality-manager', 'section-head', 'department-head'],
+  // EQA is managed at laboratory-project level. The technical manager and
+  // section head approve the annual result summary in the portal; quality
+  // manager and department head sign the printed document externally.
+  'annual-plan': ['technical-manager'],
   'round-receipt': ['analyst', 'technical-manager'],
-  'annual-summary': ['technical-manager', 'quality-manager', 'section-head', 'department-head'],
+  'annual-summary': ['technical-manager', 'section-head'],
 }
 
 function defaultDocumentState(documentType: EqaDocumentType, entityId: string): EqaDocumentState {
@@ -170,7 +174,15 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
     const key = approvalKey(approval.documentType, approval.entityId, approval.revision)
     approvalsByRevision.set(key, [...(approvalsByRevision.get(key) ?? []), approval])
   }
-  const stateFor = (type: EqaDocumentType, id: string) => states.get(documentKey(type, id)) ?? defaultDocumentState(type, id)
+  const stateFor = (type: EqaDocumentType, id: string) => {
+    const state = states.get(documentKey(type, id)) ?? defaultDocumentState(type, id)
+    const approvals = approvalsByRevision.get(approvalKey(type, id, state.revision)) ?? []
+    const approvedRoles = new Set(approvals.map((approval) => approval.approvalRole))
+    // Reconcile approvals already recorded under an earlier workflow change
+    // so a complete document is never presented as a draft.
+    const status: EqaDocumentState['status'] = REQUIRED_APPROVALS[type].every((role) => approvedRoles.has(role)) ? 'approved' : 'draft'
+    return { ...state, status }
+  }
 
   const occurrencesByItem = new Map<string, EqaPlanOccurrence[]>()
   for (const row of occurrenceData as RecordRow[]) {
@@ -197,7 +209,7 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
     const result: EqaResult = {
       id: asString(row.id), roundId: asString(row.round_id), analyte: asString(row.analyte), sampleCode: nullableString(row.sample_code),
       submittedValue: nullableString(row.submitted_value), unit: nullableString(row.unit), ctValue: nullableNumber(row.ct_value), evaluationScore: nullableNumber(row.evaluation_score),
-      outcome: asString(row.outcome) as EqaOutcome, iqcAnalyteId: nullableString(row.iqc_analyte_id), assignedValue: nullableNumber(row.assigned_value),
+      outcome: asString(row.outcome) as EqaOutcome, iqcAnalyteId: nullableString(row.iqc_analyte_id), assignedValue: nullableText(row.assigned_value),
     }
     resultsByRound.set(result.roundId, [...(resultsByRound.get(result.roundId) ?? []), result])
     resultById.set(result.id, result)
@@ -325,6 +337,17 @@ async function invalidateRoundDocuments(roundId: string, includeReceipt = true) 
   if (planItemId) await invalidateDocument('annual-summary', planItemId)
 }
 
+// Before submission, a changed sample result changes what the analyst is
+// confirming. Once submitted, later provider evaluation fields (reference,
+// score, outcome, and summary) must not revoke that one analyst confirmation.
+async function invalidateResultDocuments(roundId: string) {
+  const admin = getAdminClient()
+  const { data, error } = await admin.from('eqa_rounds').select('status').eq('id', roundId).maybeSingle()
+  fail(error)
+  const status = asString((data as RecordRow | null)?.status) as EqaRoundStatus
+  await invalidateRoundDocuments(roundId, ROUND_STATUS_ORDER.indexOf(status) < ROUND_STATUS_ORDER.indexOf('submitted'))
+}
+
 const EQA_ENTITY = { provider: 'eqa_providers', scheme: 'eqa_schemes' } as const
 
 export async function setEqaEntityActive(entity: keyof typeof EQA_ENTITY, id: string, isActive: boolean, actor: BmActor) {
@@ -354,7 +377,17 @@ export async function createScheme(input: { providerId: string; name: string; co
   fail(error); await writeAudit(actor, 'eqa.scheme.create', 'eqa-scheme', asString((data as RecordRow).id), input); return getEqaWorkspace(actor)
 }
 export async function updateScheme(id: string, input: { providerId: string; name: string; code?: string | null; analyteScope?: string | null; roundsPerYear?: number | null }, actor: BmActor) {
-  assertAdmin(actor); fail((await getAdminClient().from('eqa_schemes').update({ provider_id: input.providerId, name: input.name.trim(), code: clean(input.code), analyte_scope: clean(input.analyteScope), rounds_per_year: input.roundsPerYear ?? null }).eq('id', id)).error)
+  assertAdmin(actor)
+  const admin = getAdminClient()
+  const name = input.name.trim()
+  const { data: planItems, error: planItemsError } = await admin.from('eqa_plan_items').select('id,plan_id').eq('scheme_id', id)
+  fail(planItemsError)
+  fail((await admin.from('eqa_schemes').update({ provider_id: input.providerId, name, code: clean(input.code), analyte_scope: clean(input.analyteScope), rounds_per_year: input.roundsPerYear ?? null }).eq('id', id)).error)
+  if (planItems?.length) {
+    fail((await admin.from('eqa_plan_items').update({ project_name: input.name.trim(), sample_set_name: input.name.trim(), updated_at: new Date().toISOString() }).eq('scheme_id', id)).error)
+    for (const planId of new Set((planItems as RecordRow[]).map((item) => asString(item.plan_id)))) await invalidateDocument('annual-plan', planId)
+    for (const item of planItems as RecordRow[]) await invalidateDocument('annual-summary', asString(item.id))
+  }
   await writeAudit(actor, 'eqa.scheme.update', 'eqa-scheme', id, input); return getEqaWorkspace(actor)
 }
 export async function deleteScheme(id: string, actor: BmActor) {
@@ -467,9 +500,9 @@ export async function generateRoundsFromPlanItem(planItemId: string, actor: BmAc
   await writeAudit(actor, 'eqa.round.generate', 'eqa-plan-item', planItemId, { created: rows.length, sequences: rows.map((row) => row.sequence_no) })
   return getEqaWorkspace(actor)
 }
-export async function updateRound(id: string, input: { roundLabel?: string; status?: EqaRoundStatus; submissionDate?: string | null; sampleReceivedDate?: string | null; resultDueDate?: string | null; note?: string | null }, actor: BmActor) {
+export async function updateRound(id: string, input: { roundLabel?: string; submissionDate?: string | null; sampleReceivedDate?: string | null; resultDueDate?: string | null; note?: string | null }, actor: BmActor) {
   assertOperator(actor); const updates: RecordRow = {}
-  if (input.roundLabel !== undefined) updates.round_label = input.roundLabel.trim(); if (input.status !== undefined) updates.status = input.status
+  if (input.roundLabel !== undefined) updates.round_label = input.roundLabel.trim()
   if (input.submissionDate !== undefined) updates.submission_date = input.submissionDate || null; if (input.sampleReceivedDate !== undefined) updates.sample_received_date = input.sampleReceivedDate || null
   if (input.resultDueDate !== undefined) updates.result_due_date = input.resultDueDate || null; if (input.note !== undefined) updates.note = clean(input.note); updates.updated_at = new Date().toISOString()
   fail((await getAdminClient().from('eqa_rounds').update(updates).eq('id', id)).error); await invalidateRoundDocuments(id, input.sampleReceivedDate !== undefined || input.submissionDate !== undefined)
@@ -514,10 +547,34 @@ export async function updateRoundReceipt(id: string, input: EqaRoundReceiptInput
   }
   await writeAudit(actor, 'eqa.round.receipt.update', 'eqa-round', id, { ...input }); return getEqaWorkspace(actor)
 }
-export async function updateRoundSummary(id: string, input: { summaryOutcome: EqaRoundSummaryOutcome; summaryNote?: string | null }, actor: BmActor) {
-  assertOperator(actor); const admin = getAdminClient()
-  fail((await admin.from('eqa_rounds').update({ summary_outcome: input.summaryOutcome, summary_note: clean(input.summaryNote), updated_at: new Date().toISOString() }).eq('id', id)).error)
+async function syncRoundSummary(admin: ReturnType<typeof getAdminClient>, roundId: string) {
+  const { data, error } = await admin.from('eqa_results').select('outcome').eq('round_id', roundId)
+  fail(error)
+  const summaryOutcome = deriveRoundSummaryOutcome((data as RecordRow[]).map((row) => asString(row.outcome) as EqaOutcome))
+  fail((await admin.from('eqa_rounds').update({ summary_outcome: summaryOutcome, updated_at: new Date().toISOString() }).eq('id', roundId)).error)
+}
+
+export async function confirmRoundEvaluation(id: string, input: { summaryNote?: string | null }, actor: BmActor) {
+  assertOperator(actor)
+  const admin = getAdminClient()
+  const { data: round, error: roundError } = await admin.from('eqa_rounds').select('status').eq('id', id).maybeSingle()
+  fail(roundError); if (!round) throw new HttpError(404, 'Round not found')
+  if (asString((round as RecordRow).status) !== 'submitted') throw new HttpError(400, 'ยืนยันรับผลประเมินได้เฉพาะ round ที่ส่งผลแล้ว')
+  const { data: results, error: resultsError } = await admin.from('eqa_results').select('outcome').eq('round_id', id)
+  fail(resultsError)
+  const summaryOutcome = deriveRoundSummaryOutcome((results as RecordRow[]).map((result) => asString(result.outcome) as EqaOutcome))
+  if (summaryOutcome === 'not-evaluated') throw new HttpError(400, 'กรอก Outcome จากผู้จัด EQA ให้ครบทุก sample ก่อนยืนยันรับผลประเมิน')
+  fail((await admin.from('eqa_rounds').update({ summary_outcome: summaryOutcome, summary_note: clean(input.summaryNote), updated_at: new Date().toISOString() }).eq('id', id)).error)
   await advanceRoundStatus(admin, id, 'evaluated')
+  await invalidateRoundDocuments(id, false)
+  await writeAudit(actor, 'eqa.round.evaluation.confirm', 'eqa-round', id, { summaryOutcome, ...input })
+  return getEqaWorkspace(actor)
+}
+
+export async function updateRoundSummary(id: string, input: { summaryNote?: string | null }, actor: BmActor) {
+  assertOperator(actor); const admin = getAdminClient()
+  await syncRoundSummary(admin, id)
+  fail((await admin.from('eqa_rounds').update({ summary_note: clean(input.summaryNote), updated_at: new Date().toISOString() }).eq('id', id)).error)
   await invalidateRoundDocuments(id, false); await writeAudit(actor, 'eqa.round.summary.update', 'eqa-round', id, input); return getEqaWorkspace(actor)
 }
 export async function deleteRound(id: string, actor: BmActor) {
@@ -526,20 +583,20 @@ export async function deleteRound(id: string, actor: BmActor) {
   fail((await admin.from('eqa_rounds').delete().eq('id', id)).error); if (planItemId) await invalidateDocument('annual-summary', planItemId); await writeAudit(actor, 'eqa.round.delete', 'eqa-round', id, {}); return getEqaWorkspace(actor)
 }
 
-export async function createResult(input: { roundId: string; analyte: string; sampleCode?: string | null; submittedValue?: string | null; unit?: string | null; ctValue?: number | null; evaluationScore?: number | null; outcome: EqaOutcome; iqcAnalyteId?: string | null; assignedValue?: number | null }, actor: BmActor) {
-  assertOperator(actor); const { data, error } = await getAdminClient().from('eqa_results').insert({ round_id: input.roundId, analyte: input.analyte.trim(), sample_code: clean(input.sampleCode), submitted_value: clean(input.submittedValue), unit: clean(input.unit), ct_value: input.ctValue ?? null, evaluation_score: input.evaluationScore ?? null, outcome: input.outcome, iqc_analyte_id: input.iqcAnalyteId || null, assigned_value: input.assignedValue ?? null, created_by: actor.id }).select('id').single(); fail(error)
-  const id = asString((data as RecordRow).id); await invalidateRoundDocuments(input.roundId); await writeAudit(actor, 'eqa.result.create', 'eqa-result', id, input); return getEqaWorkspace(actor)
+export async function createResult(input: { roundId: string; analyte: string; sampleCode?: string | null; submittedValue?: string | null; unit?: string | null; ctValue?: number | null; evaluationScore?: number | null; outcome: EqaOutcome; iqcAnalyteId?: string | null; assignedValue?: string | null }, actor: BmActor) {
+  assertOperator(actor); const admin = getAdminClient(); const { data, error } = await admin.from('eqa_results').insert({ round_id: input.roundId, analyte: input.analyte.trim(), sample_code: clean(input.sampleCode), submitted_value: clean(input.submittedValue), unit: clean(input.unit), ct_value: input.ctValue ?? null, evaluation_score: input.evaluationScore ?? null, outcome: input.outcome, iqc_analyte_id: input.iqcAnalyteId || null, assigned_value: clean(input.assignedValue), created_by: actor.id }).select('id').single(); fail(error)
+  const id = asString((data as RecordRow).id); await syncRoundSummary(admin, input.roundId); await invalidateResultDocuments(input.roundId); await writeAudit(actor, 'eqa.result.create', 'eqa-result', id, input); return getEqaWorkspace(actor)
 }
-export async function updateResult(id: string, input: { analyte: string; sampleCode?: string | null; submittedValue?: string | null; unit?: string | null; ctValue?: number | null; evaluationScore?: number | null; outcome: EqaOutcome; iqcAnalyteId?: string | null; assignedValue?: number | null }, actor: BmActor) {
+export async function updateResult(id: string, input: { analyte: string; sampleCode?: string | null; submittedValue?: string | null; unit?: string | null; ctValue?: number | null; evaluationScore?: number | null; outcome: EqaOutcome; iqcAnalyteId?: string | null; assignedValue?: string | null }, actor: BmActor) {
   assertOperator(actor); const admin = getAdminClient(); const { data: current, error: currentError } = await admin.from('eqa_results').select('round_id').eq('id', id).maybeSingle(); fail(currentError); if (!current) throw new HttpError(404, 'EQA result not found')
-  fail((await admin.from('eqa_results').update({ analyte: input.analyte.trim(), sample_code: clean(input.sampleCode), submitted_value: clean(input.submittedValue), unit: clean(input.unit), ct_value: input.ctValue ?? null, evaluation_score: input.evaluationScore ?? null, outcome: input.outcome, iqc_analyte_id: input.iqcAnalyteId || null, assigned_value: input.assignedValue ?? null }).eq('id', id)).error)
-  await invalidateRoundDocuments(asString((current as RecordRow).round_id)); await writeAudit(actor, 'eqa.result.update', 'eqa-result', id, input); return getEqaWorkspace(actor)
+  fail((await admin.from('eqa_results').update({ analyte: input.analyte.trim(), sample_code: clean(input.sampleCode), submitted_value: clean(input.submittedValue), unit: clean(input.unit), ct_value: input.ctValue ?? null, evaluation_score: input.evaluationScore ?? null, outcome: input.outcome, iqc_analyte_id: input.iqcAnalyteId || null, assigned_value: clean(input.assignedValue) }).eq('id', id)).error)
+  const roundId = asString((current as RecordRow).round_id); await syncRoundSummary(admin, roundId); await invalidateResultDocuments(roundId); await writeAudit(actor, 'eqa.result.update', 'eqa-result', id, input); return getEqaWorkspace(actor)
 }
 export async function deleteResult(id: string, actor: BmActor) {
   assertOperator(actor); const admin = getAdminClient(); const { data, error } = await admin.from('eqa_results').select('round_id,analyte').eq('id', id).maybeSingle(); fail(error); if (!data) throw new HttpError(404, 'EQA result not found')
   const { count, error: correctiveActionError } = await admin.from('eqa_corrective_actions').select('id', { count: 'exact', head: true }).eq('result_id', id); fail(correctiveActionError)
   if (count) throw new HttpError(409, 'ลบผลไม่ได้ เพราะมี corrective action ผูกอยู่')
-  fail((await admin.from('eqa_results').delete().eq('id', id)).error); await invalidateRoundDocuments(asString((data as RecordRow).round_id)); await writeAudit(actor, 'eqa.result.delete', 'eqa-result', id, { analyte: asString((data as RecordRow).analyte) }); return getEqaWorkspace(actor)
+  const roundId = asString((data as RecordRow).round_id); fail((await admin.from('eqa_results').delete().eq('id', id)).error); await syncRoundSummary(admin, roundId); await invalidateResultDocuments(roundId); await writeAudit(actor, 'eqa.result.delete', 'eqa-result', id, { analyte: asString((data as RecordRow).analyte) }); return getEqaWorkspace(actor)
 }
 
 export async function createEqaCorrectiveAction(input: { roundId: string; resultId?: string | null; problem: string; rootCause?: string | null; actionTaken?: string | null; ownerId?: string | null; dueDate?: string | null }, actor: BmActor) {
@@ -653,9 +710,9 @@ export async function approveEqaDocument(type: EqaDocumentType, entityId: string
   assertOperator(actor); if (!REQUIRED_APPROVALS[type].includes(role)) throw new HttpError(400, 'Approval role is not required for this document')
   const workspace = await getEqaWorkspace(actor); const readiness = documentReadiness(workspace, type, entityId); if (readiness.length) throw new HttpError(409, readiness.join(' | '))
   if (role === 'analyst') {
-    const round = workspace.rounds.find((item) => item.id === entityId); if (!round || round.analystId !== actor.id) throw new HttpError(403, 'Only the assigned analyst can approve this receipt')
+    const round = workspace.rounds.find((item) => item.id === entityId); if (!round || (actor.role !== 'Admin' && round.analystId !== actor.id)) throw new HttpError(403, 'Only the assigned analyst or Admin can approve this receipt')
   } else {
-    const assignment = workspace.approverAssignments.find((item) => item.approvalRole === role); if (!assignment || assignment.userId !== actor.id) throw new HttpError(403, 'You are not assigned to this approval role')
+    const assignment = workspace.approverAssignments.find((item) => item.approvalRole === role); if (actor.role !== 'Admin' && (!assignment || assignment.userId !== actor.id)) throw new HttpError(403, 'You are not assigned to this approval role')
   }
   const state = documentState(workspace, type, entityId) ?? defaultDocumentState(type, entityId); const admin = getAdminClient()
   fail((await admin.from('eqa_document_states').upsert({ document_type: type, entity_id: entityId, revision: state.revision, status: 'draft', updated_at: new Date().toISOString() }, { onConflict: 'document_type,entity_id' })).error)

@@ -25,10 +25,10 @@ export function UserSelect({ users, value, onChange, className }: { users: EqaWo
   return <Select className={className} value={value} onChange={(event) => onChange(event.target.value)}><option value="">—</option>{users.map((user) => <option key={user.id} value={user.id}>{user.displayName}</option>)}</Select>
 }
 
-export function ApprovalPanel({ actor, data, type, entityId, state, approvals, readiness, analystId, visibleRoles, onNavigate, onOk, onErr }: {
-  actor: BmActor; data: EqaWorkspace; type: EqaDocumentType; entityId: string; state: EqaDocumentState; approvals: EqaDocumentApproval[]; readiness: EqaReadinessIssue[]; analystId?: string | null; visibleRoles?: EqaApprovalRole[]; onNavigate?: (target: EqaReadinessTarget) => void; onOk: Update; onErr: (text: string) => void
+export function ApprovalPanel({ actor, data, type, entityId, state, approvals, readiness, analystId, visibleRoles, lockedRoles, onNavigate, onOk, onErr }: {
+  actor: BmActor; data: EqaWorkspace; type: EqaDocumentType; entityId: string; state: EqaDocumentState; approvals: EqaDocumentApproval[]; readiness: EqaReadinessIssue[]; analystId?: string | null; visibleRoles?: EqaApprovalRole[]; lockedRoles?: EqaApprovalRole[]; onNavigate?: (target: EqaReadinessTarget) => void; onOk: Update; onErr: (text: string) => void
 }) {
-  const allRoles: EqaApprovalRole[] = type === 'round-receipt' ? ['analyst', 'technical-manager'] : APPROVAL_ROLES
+  const allRoles: EqaApprovalRole[] = type === 'round-receipt' ? ['analyst', 'technical-manager'] : type === 'annual-plan' ? ['technical-manager'] : type === 'annual-summary' ? ['technical-manager', 'section-head'] : APPROVAL_ROLES
   const roles = visibleRoles ? allRoles.filter((role) => visibleRoles.includes(role)) : allRoles
   const [busyRole, setBusyRole] = useState<EqaApprovalRole | null>(null)
   async function mutate(role: EqaApprovalRole, method: 'POST' | 'DELETE') {
@@ -39,8 +39,8 @@ export function ApprovalPanel({ actor, data, type, entityId, state, approvals, r
     } catch (error) { onErr(error instanceof Error ? error.message : 'ดำเนินการไม่สำเร็จ') } finally { setBusyRole(null) }
   }
   function canApprove(role: EqaApprovalRole) {
-    if (role === 'analyst') return analystId === actor.id
-    return data.approverAssignments.some((assignment) => assignment.approvalRole === role && assignment.userId === actor.id)
+    if (role === 'analyst') return actor.role === 'Admin' || analystId === actor.id
+    return actor.role === 'Admin' || data.approverAssignments.some((assignment) => assignment.approvalRole === role && assignment.userId === actor.id)
   }
   return (
     <div className="mt-3 rounded-md border border-[#dfe9ea] bg-[#f9fcfc] p-3">
@@ -62,11 +62,12 @@ export function ApprovalPanel({ actor, data, type, entityId, state, approvals, r
       <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {roles.map((role) => {
           const approval = approvals.find((item) => item.approvalRole === role)
+          const assignee = role === 'analyst' ? (analystId ? data.users.find((user) => user.id === analystId) : undefined) : data.approverAssignments.find((assignment) => assignment.approvalRole === role)
           return <div key={role} className="rounded border border-[#e1eaea] bg-white p-2 text-xs">
             <p className="font-bold text-[#315763]">{EQA_APPROVAL_ROLE_LABELS[role]}</p>
-            <p className="mt-1 min-h-8 text-[#789097]">{approval ? `${approval.approvedByName} · ${formatDateTime(approval.approvedAt)}` : 'ยังไม่ยืนยัน'}</p>
+            <p className="mt-1 min-h-8 text-[#789097]">{approval ? `${approval.approvedByName} · ${formatDateTime(approval.approvedAt)}` : assignee ? `รอ ${'userName' in assignee ? assignee.userName : assignee.displayName} ยืนยัน` : 'ยังไม่ได้กำหนดผู้อนุมัติ'}</p>
             {approval && (approval.approvedById === actor.id || actor.role === 'Admin') ? <Button variant="ghost" className="mt-1 min-h-7 px-2 py-1 text-xs" disabled={busyRole === role} onClick={() => mutate(role, 'DELETE')}>ถอน</Button> : null}
-            {!approval && canApprove(role) ? <Button className="mt-1 min-h-7 px-2 py-1 text-xs" disabled={Boolean(readiness.length) || busyRole === role} onClick={() => mutate(role, 'POST')}>ยืนยัน</Button> : null}
+            {!approval && canApprove(role) && !lockedRoles?.includes(role) ? <Button className="mt-1 min-h-7 px-2 py-1 text-xs" disabled={Boolean(readiness.length) || busyRole === role} onClick={() => mutate(role, 'POST')}>ยืนยัน</Button> : null}
           </div>
         })}
       </div>

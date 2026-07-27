@@ -109,7 +109,9 @@ export interface EqaResult {
   evaluationScore: number | null
   outcome: EqaOutcome
   iqcAnalyteId: string | null
-  assignedValue: number | null
+  // The provider can assign either a quantitative target or a qualitative
+  // result such as Positive / Negative.
+  assignedValue: string | null
 }
 
 export interface EqaRound {

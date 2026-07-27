@@ -12,7 +12,7 @@ const schema = z.object({
   evaluationScore: z.number().nullable().optional(),
   outcome: z.enum(['acceptable', 'warning', 'unacceptable', 'not-evaluated']),
   iqcAnalyteId: z.string().uuid().nullable().optional(),
-  assignedValue: z.number().finite().nullable().optional(),
+  assignedValue: z.string().trim().max(120).nullable().optional(),
 })
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {

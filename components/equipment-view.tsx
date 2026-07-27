@@ -517,6 +517,19 @@ function Registry({
   const links = selected
     ? workspace.links.filter((link) => link.equipmentId === selected.id)
     : [];
+  const linkedEntityIds = new Set(
+    links.filter((link) => link.module === linkModule).map((link) => link.entityId),
+  );
+  const linkOptions = (linkModule === "iqc"
+    ? workspace.iqcInstruments.map((item) => ({
+        id: item.id,
+        label: `${item.code} · ${item.name}`,
+      }))
+    : workspace.eqaSchemes.map((item) => ({
+        id: item.id,
+        label: `${item.code ? `${item.code} · ` : ""}${item.name}`,
+      }))
+  ).filter((item) => !linkedEntityIds.has(item.id));
   const technicians = selected
     ? workspace.technicians.filter(
         (technician) => technician.equipmentId === selected.id,
@@ -1038,16 +1051,7 @@ function Registry({
                   onChange={(e) => setLinkEntity(e.target.value)}
                 >
                   <option value="">เลือกรายการ</option>
-                  {(linkModule === "iqc"
-                    ? workspace.iqcInstruments.map((item) => ({
-                        id: item.id,
-                        label: `${item.code} · ${item.name}`,
-                      }))
-                    : workspace.eqaSchemes.map((item) => ({
-                        id: item.id,
-                        label: `${item.code ? `${item.code} · ` : ""}${item.name}`,
-                      }))
-                  ).map((item) => (
+                  {linkOptions.map((item) => (
                     <option key={item.id} value={item.id}>
                       {item.label}
                     </option>

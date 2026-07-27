@@ -7,7 +7,7 @@ const schema = z.object({
   providerId: z.string().uuid(),
   name: z.string().trim().min(1).max(160),
   code: z.string().trim().max(80).nullable().optional(),
-  analyteScope: z.string().trim().max(300).nullable().optional(),
+  analyteScope: z.string().trim().max(2000).nullable().optional(),
   roundsPerYear: z.number().int().positive().nullable().optional(),
 })
 

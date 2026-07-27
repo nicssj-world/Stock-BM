@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { annualPlanReadiness, annualSummaryIssues, annualSummaryReadiness, missingPlannedRounds, plannedRoundDueDate, plannedRoundLabel, roundProgress, roundReceiptIssues, roundReceiptReadiness } from '@/lib/eqa/rules'
+import { analyteScopeOptions, annualPlanReadiness, annualSummaryIssues, annualSummaryReadiness, deriveRoundSummaryOutcome, missingPlannedRounds, plannedRoundDueDate, plannedRoundLabel, roundProgress, roundReceiptIssues, roundReceiptReadiness } from '@/lib/eqa/rules'
 import type { EqaPlanItem, EqaRound } from '@/lib/eqa/types'
 
 const item: EqaPlanItem = {
@@ -28,6 +28,29 @@ describe('EQA report readiness', () => {
     const failed = { ...round, summaryOutcome: 'fail' as const }
     expect(annualSummaryReadiness(item, [failed, round], [])).toContain('C1: ผลไม่ผ่านแต่ยังไม่มี corrective action')
     expect(annualSummaryReadiness(item, [failed, round], [{ id: 'ca', roundId: 'round', status: 'closed' } as never])).toEqual([])
+  })
+})
+
+describe('deriveRoundSummaryOutcome', () => {
+  it('waits until every sample has been evaluated', () => {
+    expect(deriveRoundSummaryOutcome([])).toBe('not-evaluated')
+    expect(deriveRoundSummaryOutcome(['acceptable', 'not-evaluated'])).toBe('not-evaluated')
+  })
+
+  it('fails a round when any sample is unacceptable', () => {
+    expect(deriveRoundSummaryOutcome(['acceptable', 'unacceptable', 'warning'])).toBe('fail')
+  })
+
+  it('passes evaluated samples without an unacceptable outcome', () => {
+    expect(deriveRoundSummaryOutcome(['acceptable', 'warning'])).toBe('pass')
+  })
+})
+
+describe('analyteScopeOptions', () => {
+  it('turns each non-empty scope line into one unique selectable analyte', () => {
+    expect(analyteScopeOptions('HLA-B75 serogroup\nHLA-B*58:01 allele\n\nHLA-B*57:01 allele\nHLA-B*58:01 allele')).toEqual([
+      'HLA-B75 serogroup', 'HLA-B*58:01 allele', 'HLA-B*57:01 allele',
+    ])
   })
 })
 

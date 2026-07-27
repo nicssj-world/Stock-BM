@@ -11,9 +11,11 @@ const schema = z.object({
   unit: z.string().trim().max(40).nullable().optional(),
   ctValue: z.number().finite().nullable().optional(),
   evaluationScore: z.number().nullable().optional(),
-  outcome: z.enum(['acceptable', 'warning', 'unacceptable', 'not-evaluated']),
+  // Provider evaluation is not available when the laboratory first submits a
+  // result, so new samples begin as pending evaluation.
+  outcome: z.enum(['acceptable', 'warning', 'unacceptable', 'not-evaluated']).optional().default('not-evaluated'),
   iqcAnalyteId: z.string().uuid().nullable().optional(),
-  assignedValue: z.number().finite().nullable().optional(),
+  assignedValue: z.string().trim().max(120).nullable().optional(),
 })
 
 export async function POST(request: Request) {

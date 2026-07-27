@@ -105,7 +105,7 @@ export function StatusBadge({ tone, label }: { tone: StatusTone; label: string }
   } as const
   const { cls, Icon } = map[tone]
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold ${cls}`}>
+    <span className={`inline-flex whitespace-nowrap items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold ${cls}`}>
       <Icon className="size-3" aria-hidden="true" />
       {label}
     </span>

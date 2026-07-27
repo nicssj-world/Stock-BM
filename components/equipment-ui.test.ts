@@ -48,6 +48,12 @@ describe("equipment interface", () => {
     expect(view).toContain('"/api/equipment/workspace"');
   });
 
+  it("hides IQC and EQA items already linked to the selected equipment", () => {
+    expect(view).toContain("const linkedEntityIds = new Set(");
+    expect(view).toContain("links.filter((link) => link.module === linkModule)");
+    expect(view).toContain(".filter((item) => !linkedEntityIds.has(item.id))");
+  });
+
   it("plans by month instead of asking users for a specific due date", () => {
     expect(view).toContain('type="month"');
     expect(view).toContain("เดือนครบกำหนดครั้งถัดไป");
