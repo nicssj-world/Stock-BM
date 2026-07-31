@@ -4,7 +4,7 @@ import { createRun } from '@/lib/server/iqc'
 import { readJson, respond } from '@/lib/server/route'
 
 const schema = z.object({
-  instrumentId: z.string().uuid().nullable().optional(),
+  instrumentId: z.string().uuid(),
   runNo: z.number().int().nullable().optional(),
   runDatetime: z.string().nullable().optional(),
   note: z.string().trim().max(500).nullable().optional(),

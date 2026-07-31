@@ -213,7 +213,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     admin.from('bm_audit_logs').select('entity_id,actor_id,detail,created_at').eq('action', 'iqc.lot.lockAndClose').order('created_at', { ascending: false }),
     admin.from('bm_equipment_module_links').select('equipment_id,entity_id').eq('module', 'iqc').eq('entity_type', 'instrument'),
     admin.from('bm_equipment').select('id,code,name,model,status'),
-    admin.from('bm_stock_lots').select('id,item_id,lot_number,expiry_date,bm_stock_items!inner(item_code,name,is_active)').eq('bm_stock_items.is_active', true).order('created_at', { ascending: false }),
+    admin.from('bm_stock_lots').select('id,item_id,lot_number,expiry_date,bm_stock_items!inner(item_code,name,is_active,bm_stock_categories!inner(name))').eq('bm_stock_items.is_active', true).eq('bm_stock_items.bm_stock_categories.name', 'Reagent').order('created_at', { ascending: false }),
     admin.from('bm_stock_item_equipment_links').select('stock_item_id,equipment_id'),
   ])
   fail(analyteError)
@@ -1079,7 +1079,7 @@ export async function upsertControlPlan(input: {
 }
 
 export async function createRun(input: {
-  instrumentId?: string | null
+  instrumentId: string
   runNo?: number | null
   runDatetime?: string | null
   note?: string | null
@@ -1087,6 +1087,7 @@ export async function createRun(input: {
   values: { controlLotId: string; analyteId: string; numericValue?: number | null; qualitativeValue?: string | null }[]
 }, actor: BmActor) {
   if (!input.values.length) throw new HttpError(400, 'At least one result value is required')
+  if (!input.instrumentId) throw new HttpError(400, 'ต้องเลือกเครื่องมือก่อนบันทึก IQC run')
   const admin = getAdminClient()
   const consumableStockLots = await stockLotLabels((input.consumables ?? []).map((consumable) => consumable.stockLotId ?? ''))
 
@@ -1139,7 +1140,7 @@ export async function createRun(input: {
 
   // Insert the run
   const { data: runData, error: runError } = await admin.from('iqc_runs').insert({
-    instrument_id: input.instrumentId || null,
+    instrument_id: input.instrumentId,
     run_no: input.runNo ?? null,
     run_datetime: input.runDatetime || new Date().toISOString(),
     note: clean(input.note),

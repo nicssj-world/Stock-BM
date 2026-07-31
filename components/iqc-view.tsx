@@ -828,6 +828,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
       && (!selectedTestSetAnalyteIds || selectedTestSetAnalyteIds.has(analyte.id))),
     [activeAnalytes, instrumentId, plannedAnalyteIds, selectedTestSetAnalyteIds],
   )
+  const hasLogScaleResult = rows.some((row) => analyteById.get(row.analyteId)?.scale === 'log10')
 
   function addRow() {
     setRows((r) => [
@@ -860,10 +861,27 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
   function startTestSet(selectedSet: string) {
     const selectedSetIds = testSetAnalyteIds.get(selectedSet) ?? new Set<string>()
     const selectedAnalytes = activeAnalytes.filter((analyte) => selectedSetIds.has(analyte.id) && (!instrumentId || !plannedAnalyteIds.size || plannedAnalyteIds.has(analyte.id)))
+    const panelTokens = selectedSet.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length >= 3)
+    const panelLots = activeLots.filter((lot) => panelTokens.some((token) => lot.controlMaterialName.toLowerCase().includes(token)))
     const unmapped: string[] = []
     const added = selectedAnalytes.map((analyte) => {
       const token = `${analyte.code} ${analyte.name}`.toLowerCase()
-      const controlLot = activeLots.find((lot) => lot.level && token.includes(lot.level.toLowerCase()))
+      // A panel with one control lot (for example CD4 Low) uses that lot for
+      // every analyte in the panel. Multi-level panels such as HIV-VL match
+      // the analyte's level to the corresponding control lot instead.
+      const controlLot = panelLots.length === 1
+        ? panelLots[0]
+        : panelLots.find((lot) => {
+          // A combined material level such as "HPC/LPC" is one physical
+          // control kit, but must be usable for both HIV-VL (HPC) and
+          // HIV-VL (LPC) result rows.
+          const levels = (lot.level ?? '')
+            .toLowerCase()
+            .split(/[\\/|,;+]+/)
+            .map((level) => level.trim())
+            .filter(Boolean)
+          return levels.some((level) => token.includes(level))
+        })
       if (!controlLot) unmapped.push(analyte.code)
       return { id: seq.n++, controlLotId: controlLot?.id ?? '', analyteId: analyte.id, value: '' }
     })
@@ -895,7 +913,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
       const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/runs', {
         method: 'POST',
         body: JSON.stringify({
-          instrumentId: instrumentId || null,
+          instrumentId,
           runDatetime: new Date(runDatetime).toISOString(),
           note: note || null,
           consumables: consumables
@@ -953,7 +971,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
             <Input type="datetime-local" value={runDatetime} onChange={(e) => setRunDatetime(e.target.value)} required />
           </Field>
           <Field label="เครื่อง / Instrument">
-            <Select value={instrumentId} onChange={(e) => {
+            <Select value={instrumentId} required onChange={(e) => {
               setInstrumentId(e.target.value)
               setFillLot('')
               setTestSet('')
@@ -1025,7 +1043,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
           <div className="flex flex-wrap items-end justify-between gap-2">
             <h2 className="font-bold text-[#173d50]">2. กรอกผลตรวจ</h2>
             <div className="flex items-end gap-1.5">
-              <Select className="h-9 w-48" value={testSet} onChange={(e) => {
+              <Select className="h-9 w-48" value={testSet} disabled={!instrumentId} onChange={(e) => {
                 const selectedSet = e.target.value
                 setTestSet(selectedSet)
                 setFillLot('')
@@ -1035,7 +1053,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
                 <option value="">ทุก test / ไม่เลือกชุด</option>
                 {testSetOptions.map((option) => <option key={option.name} value={option.name}>{option.name} ({option.count} รายการ)</option>)}
               </Select>
-              {!testSet ? <Select className="h-9 w-56" value={fillLot} onChange={(e) => {
+              {!testSet ? <Select className="h-9 w-56" value={fillLot} disabled={!instrumentId} onChange={(e) => {
                 const controlLotId = e.target.value
                 setFillLot(controlLotId)
                 startLot(controlLotId)
@@ -1054,12 +1072,13 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
             </div>
           </div>
           {testSet ? <p className={`text-xs ${lotMappingWarning ? 'text-[#c02a37]' : 'text-[#176d65]'}`}>{lotMappingWarning || 'ระบบจับคู่ Control lot ตาม Level ของแต่ละ analyte ให้อัตโนมัติ'}</p> : null}
+          {hasLogScaleResult ? <p className="rounded-md border border-[#b9ded8] bg-[#f1faf8] px-3 py-2 text-xs text-[#176d65]">สำหรับ Viral load ให้กรอกค่า <strong>Copies/mL</strong> — ระบบคำนวณ log10 เพื่อใช้พล็อตกราฟและประเมิน Westgard ให้อัตโนมัติ</p> : null}
           <div className="space-y-2">
             {rows.map((row, i) => {
               const analyte = analyteById.get(row.analyteId)
               return (
                 <div key={row.id} className="grid grid-cols-[1.2fr_1.2fr_0.9fr_auto] items-center gap-1.5">
-                  <Select className="h-10" value={row.controlLotId} disabled={Boolean(testSet && row.controlLotId)} onChange={(e) => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, controlLotId: e.target.value } : x)))}>
+                  <Select className="h-10" value={row.controlLotId} disabled={!instrumentId || Boolean(testSet && row.controlLotId)} onChange={(e) => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, controlLotId: e.target.value } : x)))}>
                     {!row.controlLotId ? <option value="">ไม่พบ lot ที่ตรงกับ Level</option> : null}
                     {activeLots.map((l) => (
                       <option key={l.id} value={l.id}>
@@ -1068,7 +1087,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
                       </option>
                     ))}
                   </Select>
-                  <Select className="h-10" value={row.analyteId} onChange={(e) => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, analyteId: e.target.value } : x)))}>
+                  <Select className="h-10" value={row.analyteId} disabled={!instrumentId} onChange={(e) => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, analyteId: e.target.value } : x)))}>
                     {availableAnalytes.map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.code}
@@ -1076,7 +1095,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
                       </option>
                     ))}
                   </Select>
-                  <Input className="mono h-10 text-base font-bold tabular-nums" inputMode={analyte?.dataType === 'qualitative' ? 'text' : 'decimal'} type={analyte?.dataType === 'qualitative' ? 'text' : 'number'} step="any" placeholder={analyte?.dataType === 'qualitative' ? 'valid/pos…' : 'ค่า'} value={row.value} onChange={(e) => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} />
+                  <Input className="mono h-10 text-base font-bold tabular-nums" disabled={!instrumentId} inputMode={analyte?.dataType === 'qualitative' ? 'text' : 'decimal'} type={analyte?.dataType === 'qualitative' ? 'text' : 'number'} step="any" placeholder={analyte?.dataType === 'qualitative' ? 'valid/pos…' : analyte?.scale === 'log10' ? 'Copies/mL' : 'ค่า'} value={row.value} onChange={(e) => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} />
                   <button type="button" className="rounded p-1.5 text-[#c02a37] hover:bg-[#fff0f1]" aria-label="ลบแถว" onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}>
                     <Trash2 className="size-4" />
                   </button>
@@ -1086,7 +1105,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
             {!rows.length ? <p className="rounded-md border border-dashed border-[#cfdee0] px-3 py-6 text-center text-sm text-[#9aafb4]">เริ่มจากเลือก Control lot ด้านบน ระบบจะเติมรายการตรวจให้โดยอัตโนมัติ</p> : null}
           </div>
           <div className="flex justify-end">
-            <Button disabled={busy || !rows.length}>{busy ? 'กำลังบันทึก…' : 'บันทึก run'}</Button>
+            <Button disabled={busy || !instrumentId || !rows.length}>{busy ? 'กำลังบันทึก…' : 'บันทึก run'}</Button>
           </div>
         </Card>
       </form>
@@ -2063,6 +2082,10 @@ function AnalyteForm({ onSubmit, onUpdate, onToggle, onDelete, analytes }: { onS
   })
   const [editingId, setEditingId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const existingTestSets = useMemo(
+    () => [...new Set(analytes.flatMap((analyte) => parseTestSets(analyte.groupLabel)))].sort((a, b) => a.localeCompare(b)),
+    [analytes],
+  )
   function reset() {
     setEditingId(null)
     setForm({
@@ -2110,7 +2133,11 @@ function AnalyteForm({ onSubmit, onUpdate, onToggle, onDelete, analytes }: { onS
             <Input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} placeholder="%, cells/µL, IU/mL" />
           </Field>
           <Field label="ชุดทดสอบ / Test set">
-            <Input value={form.groupLabel} onChange={(e) => setForm({ ...form, groupLabel: e.target.value })} placeholder="HIV-VL | CD4 Panel" />
+            <Input list="iqc-existing-test-sets" value={form.groupLabel} onChange={(e) => setForm({ ...form, groupLabel: e.target.value })} placeholder="เลือกชุดที่มีอยู่ หรือพิมพ์ชื่อชุดใหม่" />
+            <datalist id="iqc-existing-test-sets">
+              {existingTestSets.map((testSet) => <option key={testSet} value={testSet} />)}
+            </datalist>
+            {existingTestSets.length ? <p className="mt-1 text-[11px] text-[#789097]">เลือกจากรายการได้ หรือคั่นด้วย | เมื่อต้องการใช้มากกว่า 1 ชุด</p> : null}
           </Field>
         </div>
         <label className="flex items-center gap-2 text-sm text-[#3f5c64]">
