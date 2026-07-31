@@ -31,7 +31,7 @@ import type {
 } from '@/lib/iqc/types'
 import { LAB_LOCK_MIN_POINTS } from '@/lib/iqc/types'
 import { cv, evaluateLatest, mean, sd, toStat, WESTGARD_RULES, type QcStatus, type WestgardRule } from '@/lib/iqc/westgard'
-import { normalizeTestSets } from '@/lib/iqc/test-sets'
+import { normalizeTestSets, parseTestSets } from '@/lib/iqc/test-sets'
 import { sigmaRating, sixSigma, teaPercent } from '@/lib/iqc/sixsigma'
 import { combinedRelative, divisorFor, expandedRelative, pooledRsd, relativeStandardUncertainty, standardUncertainty } from '@/lib/iqc/uncertainty'
 import type { BmActor } from '@/lib/bm/types'
@@ -55,6 +55,15 @@ function nullableString(value: unknown) {
 }
 function nullableNumber(value: unknown) {
   return value == null || value === '' ? null : Number(value)
+}
+function eqaNumericValue(value: unknown) {
+  const raw = asString(value).trim()
+  // Values such as "<20 Copies/mL" are censored rather than exact numbers,
+  // so they must not be made up into a numeric bias. Thousands separators are
+  // accepted because EQA results are commonly entered as "1,040".
+  if (!raw || /^[<>]/.test(raw)) return null
+  const parsed = Number(raw.replace(/,/g, '').replace(/\s*(copies\/?ml|iu\/?ml)\s*$/i, ''))
+  return Number.isFinite(parsed) ? parsed : null
 }
 function clean(value: string | null | undefined) {
   return value?.trim() || null
@@ -484,28 +493,38 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   })
 
   // ---- Six Sigma rows. Bias is the mean signed percentage bias from completed EQA rounds. ----
-  const eqaBiasByAnalyte = new Map<string, { values: number[]; dates: string[] }>()
+  const eqaBiasByTestSet = new Map<string, { values: number[]; dates: string[] }>()
   for (const row of (eqaBiasData ?? []) as RecordRow[]) {
     const round = row.eqa_rounds as RecordRow | null
     const status = asString(round?.status)
-    const assigned = nullableNumber(row.assigned_value)
-    const submitted = nullableNumber(row.submitted_value)
+    const assignedRaw = eqaNumericValue(row.assigned_value)
+    const submittedRaw = eqaNumericValue(row.submitted_value)
     const analyteId = nullableString(row.iqc_analyte_id)
-    if (!analyteId || !assigned || submitted == null || !Number.isFinite(assigned) || !Number.isFinite(submitted) || !['evaluated', 'closed'].includes(status)) continue
-    const entry = eqaBiasByAnalyte.get(analyteId) ?? { values: [], dates: [] }
-    entry.values.push(((submitted - assigned) / Math.abs(assigned)) * 100)
-    const date = nullableString(round?.submission_date)
-    if (date) entry.dates.push(date)
-    eqaBiasByAnalyte.set(analyteId, entry)
+    const linkedAnalyte = analyteId ? analyteMap.get(analyteId) : null
+    if (!linkedAnalyte || !assignedRaw || submittedRaw == null || !['evaluated', 'closed'].includes(status)) continue
+    // Viral-load EQA: the laboratory submits Copies/mL, while the provider's
+    // assigned value is already reported as log10. Convert only our submitted
+    // value so both sides of the bias calculation are on the same scale.
+    const assigned = assignedRaw
+    const submitted = toStat(submittedRaw, linkedAnalyte.scale)
+    for (const testSet of parseTestSets(linkedAnalyte.groupLabel)) {
+      const entry = eqaBiasByTestSet.get(testSet) ?? { values: [], dates: [] }
+      entry.values.push(((submitted - assigned) / Math.abs(assigned)) * 100)
+      const date = nullableString(round?.submission_date)
+      if (date) entry.dates.push(date)
+      eqaBiasByTestSet.set(testSet, entry)
+    }
   }
   const sixSigmaRows: IqcSixSigmaRow[] = []
   for (const chart of charts) {
     const tea = teaByAnalyte.get(chart.analyteId)
     if (!tea) continue
     const teaPct = chart.mean != null ? teaPercent(tea.teaValue, tea.teaMode, chart.mean) : null
-    const eqaBias = eqaBiasByAnalyte.get(chart.analyteId)
-    const biasPct = eqaBias?.values.length ? mean(eqaBias.values) : 0
-    const sigma = teaPct != null && chart.cv != null ? sixSigma(teaPct, biasPct, chart.cv) : null
+    const eqaBias = parseTestSets(chart.groupLabel).map((testSet) => eqaBiasByTestSet.get(testSet)).find(Boolean)
+    // Sigma is only meaningful with a verified EQA bias. Do not silently
+    // treat an unlinked/missing EQA result as zero bias.
+    const biasPct = eqaBias?.values.length ? mean(eqaBias.values) : null
+    const sigma = teaPct != null && chart.cv != null && biasPct != null ? sixSigma(teaPct, biasPct, chart.cv) : null
     sixSigmaRows.push({
       key: chart.key,
       analyteCode: chart.analyteCode,

@@ -50,8 +50,8 @@ describe('EQA clickable readiness navigation', () => {
     expect(roundsTab).toContain('onClick={() => saveResult()}')
   })
 
-  it('does not expose optional IQC/Six Sigma linking in the EQA result form', () => {
-    expect(roundsTab).not.toContain('<Field label="IQC analyte">')
+  it('allows an EQA result to be explicitly linked to the IQC analyte used for Six Sigma bias', () => {
+    expect(roundsTab).toContain('เชื่อมกับ IQC panel (ใช้คำนวณ Bias / Six Sigma)')
   })
 
   it('preserves the analyst confirmation when provider evaluation is recorded after submission', () => {

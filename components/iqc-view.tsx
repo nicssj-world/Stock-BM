@@ -1166,7 +1166,7 @@ function SixSigmaTab({ data }: { data: IqcWorkspace }) {
                 </td>
                 <td className="mono px-3 py-2 text-right tabular-nums">{row.meanValue?.toFixed(2) ?? '—'}</td>
                 <td className="mono px-3 py-2 text-right tabular-nums">{row.cv?.toFixed(1) ?? '—'}</td>
-                <td className="mono px-3 py-2 text-right tabular-nums">{row.biasSampleCount ? `${row.biasPct.toFixed(1)} (${row.biasSampleCount})` : '—'}</td>
+                <td className="mono px-3 py-2 text-right tabular-nums">{row.biasPct != null ? `${row.biasPct.toFixed(1)} (${row.biasSampleCount})` : '—'}</td>
                 <td className="mono px-3 py-2 text-right tabular-nums">
                   {row.teaValue}
                   {row.teaMode === 'percent' ? '%' : ''}
@@ -1997,6 +1997,7 @@ function TeaForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean
     sourceRef: '',
   })
   const [busy, setBusy] = useState(false)
+  const [showSavedTea, setShowSavedTea] = useState(false)
   const testSets = useMemo(() => [...new Set(data.analytes.filter((analyte) => analyte.isActive).flatMap((analyte) => parseTestSets(analyte.groupLabel)))].sort(), [data.analytes])
   const selectedAnalyteIds = form.testSet
     ? data.analytes.filter((analyte) => analyte.isActive && hasTestSet(analyte.groupLabel, form.testSet)).map((analyte) => analyte.id)
@@ -2066,6 +2067,41 @@ function TeaForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean
           <Button disabled={busy}>บันทึก TEa</Button>
         </div>
       </form>
+      {data.teaSpecs.length ? (
+        <div className="rounded-md border border-[#e2ecee]">
+          <button type="button" onClick={() => setShowSavedTea((value) => !value)} className="flex w-full items-center justify-between bg-[#f8fbfb] px-3 py-2 text-left text-xs font-bold text-[#315763]">
+            <span>TEa ที่ตั้งค่าแล้ว ({data.teaSpecs.length})</span>
+            <span className="text-[#0b7f76]">{showSavedTea ? 'ซ่อน' : 'แสดง'}</span>
+          </button>
+          {showSavedTea ? <div className="overflow-x-auto border-t border-[#e2ecee]">
+          <table className="w-full min-w-[640px] text-left text-xs">
+            <thead className="border-b border-[#edf2f2] text-[#789097]">
+              <tr>
+                <th className="px-3 py-2 font-semibold">ชุดทดสอบ</th>
+                <th className="px-3 py-2 font-semibold">Analyte</th>
+                <th className="px-3 py-2 font-semibold">TEa</th>
+                <th className="px-3 py-2 font-semibold">Source ref</th>
+                <th className="px-3 py-2 font-semibold">สถานะ</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#edf2f2] text-[#3f5c64]">
+              {data.teaSpecs.map((spec) => {
+                const analyte = data.analytes.find((item) => item.id === spec.analyteId)
+                return (
+                  <tr key={spec.id}>
+                    <td className="px-3 py-2 text-[#789097]">{analyte?.groupLabel ?? '—'}</td>
+                    <td className="px-3 py-2 font-semibold">{spec.analyteCode}</td>
+                    <td className="px-3 py-2 mono">{spec.teaValue} {spec.teaMode === 'percent' ? '%' : ''}{spec.teaUnit ? ` ${spec.teaUnit}` : ''}</td>
+                    <td className="px-3 py-2 text-[#789097]">{spec.sourceRef ?? '—'}</td>
+                    <td className="px-3 py-2"><span className={spec.isActive ? 'text-[#187746]' : 'text-[#789097]'}>{spec.isActive ? 'ใช้งาน' : 'ปิด'}</span></td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+          </div> : null}
+        </div>
+      ) : <p className="text-xs text-[#789097]">ยังไม่มี TEa ที่บันทึกไว้</p>}
     </Card>
   )
 }

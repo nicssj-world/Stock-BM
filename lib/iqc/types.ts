@@ -233,7 +233,7 @@ export interface IqcSixSigmaRow {
   lotNumber: string
   meanValue: number | null
   cv: number | null
-  biasPct: number
+  biasPct: number | null
   biasSampleCount: number
   biasPeriod: string | null
   teaValue: number
