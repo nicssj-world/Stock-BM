@@ -199,7 +199,7 @@ export interface EqaWorkspace {
   correctiveActions: EqaCorrectiveAction[]
   approverAssignments: EqaApproverAssignment[]
   users: { id: string; displayName: string }[]
-  iqcAnalytes: { id: string; code: string; name: string; groupLabel: string | null; scale: 'linear' | 'log10' }[]
+  iqcAnalytes: { id: string; code: string; name: string; groupLabel: string | null; scale: 'linear' | 'log10'; unit: string | null }[]
   summary: {
     schemeCount: number
     overdue: number

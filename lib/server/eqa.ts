@@ -126,7 +126,7 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
     admin.from('eqa_rounds').select('*').order('result_due_date', { ascending: true, nullsFirst: false }),
     admin.from('eqa_results').select('*').order('created_at'),
     admin.from('eqa_corrective_actions').select('*').order('created_at', { ascending: false }).limit(500),
-    admin.from('iqc_analytes').select('id,code,name,group_label,scale').eq('is_active', true).order('code'),
+    admin.from('iqc_analytes').select('id,code,name,group_label,scale,unit').eq('is_active', true).order('code'),
     admin.from('bm_equipment_module_links').select('equipment_id,entity_id').eq('module', 'eqa').eq('entity_type', 'scheme'),
     admin.from('bm_equipment').select('id,code,name,status'),
     admin.from('nipt_users').select('id,display_name,is_active').order('display_name'),
@@ -303,7 +303,7 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
 
   return {
     providers, schemes, annualPlans, rounds, annualSummaries, correctiveActions, approverAssignments, users,
-    iqcAnalytes: (iqcAnalyteData as RecordRow[]).map((row) => ({ id: asString(row.id), code: asString(row.code), name: asString(row.name), groupLabel: nullableString(row.group_label), scale: asString(row.scale) === 'log10' ? 'log10' : 'linear' })),
+    iqcAnalytes: (iqcAnalyteData as RecordRow[]).map((row) => ({ id: asString(row.id), code: asString(row.code), name: asString(row.name), groupLabel: nullableString(row.group_label), scale: asString(row.scale) === 'log10' ? 'log10' : 'linear', unit: nullableString(row.unit) })),
     summary: {
       schemeCount: schemes.filter((scheme) => scheme.isActive).length,
       overdue: rounds.filter((round) => round.reminder === 'overdue').length,

@@ -1,4 +1,5 @@
 import type { EqaPlanItem, EqaRound, EqaRoundStatus, EqaCorrectiveAction, EqaOutcome, EqaRoundSummaryOutcome } from '@/lib/eqa/types'
+import { parseTestSets } from '@/lib/iqc/test-sets'
 
 // The real-world sequence a round's status moves through. Shared between the
 // server (which auto-advances a round to the next status as the matching
@@ -21,6 +22,20 @@ export function deriveRoundSummaryOutcome(outcomes: EqaOutcome[]): EqaRoundSumma
 // non-empty line is one selectable analyte when recording a sample result.
 export function analyteScopeOptions(scope: string | null | undefined) {
   return [...new Set((scope ?? '').split(/\r?\n/).map((item) => item.trim()).filter(Boolean))]
+}
+
+// An EQA scheme can name an analyte directly (for example, HCV-VL), while IQC
+// may store its levels under that same panel label. Only supply a default when
+// every matching IQC analyte agrees on one unit; different units must be chosen
+// deliberately rather than guessed.
+export function analyteDefaultUnit(analyte: string, iqcAnalytes: readonly { code: string; name: string; groupLabel: string | null; unit: string | null }[]) {
+  const normalized = analyte.trim().toLocaleLowerCase()
+  if (!normalized) return ''
+  const units = new Set(iqcAnalytes.flatMap((iqcAnalyte) => {
+    const labels = [iqcAnalyte.code, iqcAnalyte.name, ...parseTestSets(iqcAnalyte.groupLabel)]
+    return labels.some((label) => label.trim().toLocaleLowerCase() === normalized) && iqcAnalyte.unit?.trim() ? [iqcAnalyte.unit.trim()] : []
+  }))
+  return units.size === 1 ? [...units][0] : ''
 }
 
 export function plannedRoundLabel(sequence: number, planYear: number) {

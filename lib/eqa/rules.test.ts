@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analyteScopeOptions, annualPlanReadiness, annualSummaryIssues, annualSummaryReadiness, deriveRoundSummaryOutcome, displayRoundLabel, missingPlannedRounds, plannedRoundDueDate, plannedRoundLabel, roundProgress, roundReceiptIssues, roundReceiptReadiness } from '@/lib/eqa/rules'
+import { analyteDefaultUnit, analyteScopeOptions, annualPlanReadiness, annualSummaryIssues, annualSummaryReadiness, deriveRoundSummaryOutcome, displayRoundLabel, missingPlannedRounds, plannedRoundDueDate, plannedRoundLabel, roundProgress, roundReceiptIssues, roundReceiptReadiness } from '@/lib/eqa/rules'
 import type { EqaPlanItem, EqaRound } from '@/lib/eqa/types'
 
 const item: EqaPlanItem = {
@@ -126,6 +126,21 @@ describe('displayRoundLabel', () => {
 
   it('preserves a distinct manually-entered round label', () => {
     expect(displayRoundLabel({ roundLabel: 'COE#143', planItemName: 'COE#142', sequenceNo: 1, planYear: 2026 })).toBe('COE#143')
+  })
+})
+
+describe('analyteDefaultUnit', () => {
+  const iqcAnalytes = [
+    { code: 'HCV-VL (HPC)', name: 'HCV viral load high positive control', groupLabel: 'HCV-VL', unit: 'IU/mL' },
+    { code: 'HCV-VL (LPC)', name: 'HCV viral load low positive control', groupLabel: 'HCV-VL', unit: 'IU/mL' },
+  ]
+
+  it('uses the shared IQC panel unit for a selected EQA analyte', () => {
+    expect(analyteDefaultUnit('HCV-VL', iqcAnalytes)).toBe('IU/mL')
+  })
+
+  it('does not guess when matching IQC analytes have conflicting units', () => {
+    expect(analyteDefaultUnit('HCV-VL', [...iqcAnalytes, { code: 'HCV-VL (Normal)', name: 'HCV viral load normal control', groupLabel: 'HCV-VL', unit: 'Copies/mL' }])).toBe('')
   })
 })
 
