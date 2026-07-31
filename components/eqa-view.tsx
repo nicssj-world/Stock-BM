@@ -174,7 +174,22 @@ function SummaryReportCard({ summary, data, actor, onNavigate, onOk, onErr }: { 
 }
 
 function ManageTab({ data, actor, onOk, onErr }: { data: EqaWorkspace; actor: BmActor; onOk: Update; onErr: (text: string) => void }) {
-  return <div className="grid gap-4 lg:grid-cols-2"><ProviderManager data={data} onOk={onOk} onErr={onErr} /><SchemeManager data={data} onOk={onOk} onErr={onErr} /><RoundManager data={data} onOk={onOk} onErr={onErr} /><ApproverManager data={data} actor={actor} onOk={onOk} onErr={onErr} /></div>
+  return <div className="grid gap-4 lg:grid-cols-2">
+    <SettingsDisclosure title="Provider"><ProviderManager data={data} onOk={onOk} onErr={onErr} /></SettingsDisclosure>
+    <SettingsDisclosure title="Scheme และเครื่องมือ"><SchemeManager data={data} onOk={onOk} onErr={onErr} /></SettingsDisclosure>
+    <SettingsDisclosure title="สร้าง/จัดการ Round"><RoundManager data={data} onOk={onOk} onErr={onErr} /></SettingsDisclosure>
+    <SettingsDisclosure title="ผู้อนุมัติ"><ApproverManager data={data} actor={actor} onOk={onOk} onErr={onErr} /></SettingsDisclosure>
+  </div>
+}
+
+function SettingsDisclosure({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return <section>
+    <button type="button" className="flex w-full items-center justify-between rounded-lg border border-[#d6e2e3] bg-white px-4 py-3 text-left font-bold text-[#173d50] hover:bg-[#f7fbfb]" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+      {title}<ChevronDown className={`size-4 text-[#58747d] transition-transform ${open ? 'rotate-180' : ''}`} />
+    </button>
+    {open ? <div className="mt-2">{children}</div> : null}
+  </section>
 }
 
 function ProviderManager({ data, onOk, onErr }: { data: EqaWorkspace; onOk: Update; onErr: (text: string) => void }) {

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 const overview = readFileSync(join(process.cwd(), 'components/iqc-view.tsx'), 'utf8')
 const chart = readFileSync(join(process.cwd(), 'components/lj-chart.tsx'), 'utf8')
+const service = readFileSync(join(process.cwd(), 'lib/server/iqc.ts'), 'utf8')
 
 describe('IQC LAB Mean display', () => {
   it('shows assigned and LAB statistics separately in the chart overview', () => {
@@ -25,5 +26,12 @@ describe('IQC LAB Mean display', () => {
     expect(chart).toContain('Assigned Mean / SD')
     expect(chart).toContain('LAB Mean / SD')
     expect(chart).toContain('chart.labLockedAt')
+  })
+
+  it('only exposes LAB statistics after the analyte has been locked', () => {
+    expect(service).toContain('function hasLockedLabStats')
+    expect(service).toContain("spec.activeLimit === 'lab' && hasLockedLabStats(spec)")
+    expect(service).toContain("activeLimit: spec?.activeLimit === 'lab' && labStatisticsLocked ? 'lab' : 'assigned'")
+    expect(service).toContain('labMean: labStatisticsLocked ? spec?.labMean ?? null : null')
   })
 })

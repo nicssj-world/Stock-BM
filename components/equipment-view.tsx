@@ -451,7 +451,7 @@ function Registry({
     );
   }
   async function addLink() {
-    if (!selected || !linkEntity) return;
+    if (!selected || (linkModule === "eqa" && !linkEntity)) return;
     const ok = await mutate(
       "/api/equipment/links",
       {
@@ -459,7 +459,7 @@ function Registry({
         body: JSON.stringify({
           equipmentId: selected.id,
           module: linkModule,
-          entityId: linkEntity,
+          ...(linkModule === "eqa" ? { entityId: linkEntity } : {}),
         }),
       },
       "เชื่อมโมดูลแล้ว",
@@ -517,6 +517,7 @@ function Registry({
   const links = selected
     ? workspace.links.filter((link) => link.equipmentId === selected.id)
     : [];
+  const hasIqcLink = links.some((link) => link.module === "iqc");
   const linkedEntityIds = new Set(
     links.filter((link) => link.module === linkModule).map((link) => link.entityId),
   );
@@ -1046,22 +1047,25 @@ function Registry({
                   <option value="iqc">IQC</option>
                   <option value="eqa">EQA</option>
                 </Select>
-                <Select
-                  value={linkEntity}
-                  onChange={(e) => setLinkEntity(e.target.value)}
-                >
-                  <option value="">เลือกรายการ</option>
-                  {linkOptions.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.label}
-                    </option>
-                  ))}
-                </Select>
+                {linkModule === "iqc" ? (
+                  <div className="flex items-center rounded-md border border-[#d5e4e5] bg-[#f4f9f8] px-3 text-xs text-[#41656d]">
+                    {hasIqcLink ? "เปิดใช้กับ IQC แล้ว" : "ใช้เครื่องมือนี้ใน IQC"}
+                  </div>
+                ) : (
+                  <Select value={linkEntity} onChange={(e) => setLinkEntity(e.target.value)}>
+                    <option value="">เลือกรายการ</option>
+                    {linkOptions.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </Select>
+                )}
                 <Button
-                  disabled={!linkEntity || busy}
+                  disabled={(linkModule === "eqa" && !linkEntity) || (linkModule === "iqc" && hasIqcLink) || busy}
                   onClick={() => void addLink()}
                 >
-                  <Plus className="size-4" /> เชื่อม
+                  <Plus className="size-4" /> {linkModule === "iqc" ? "เปิดใช้ IQC" : "เชื่อม"}
                 </Button>
               </div>
             ) : null}

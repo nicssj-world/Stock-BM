@@ -149,9 +149,13 @@ function mapSpec(row: RecordRow): IqcSpec {
   }
 }
 
+function hasLockedLabStats(spec: IqcSpec | undefined) {
+  return Boolean(spec?.labLockedAt && spec.labMean != null && spec.labSd != null)
+}
+
 function activeStats(spec: IqcSpec | undefined): { meanValue: number | null; sdValue: number | null } {
   if (!spec) return { meanValue: null, sdValue: null }
-  if (spec.activeLimit === 'lab') return { meanValue: spec.labMean, sdValue: spec.labSd }
+  if (spec.activeLimit === 'lab' && hasLockedLabStats(spec)) return { meanValue: spec.labMean, sdValue: spec.labSd }
   return { meanValue: spec.assignedMean, sdValue: spec.assignedSd }
 }
 
@@ -193,7 +197,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     admin.from('nipt_users').select('id,display_name').order('display_name'),
     admin.from('bm_audit_logs').select('entity_id,actor_id,detail,created_at').eq('action', 'iqc.lot.lockAndClose').order('created_at', { ascending: false }),
     admin.from('bm_equipment_module_links').select('equipment_id,entity_id').eq('module', 'iqc').eq('entity_type', 'instrument'),
-    admin.from('bm_equipment').select('id,code,name,status'),
+    admin.from('bm_equipment').select('id,code,name,model,status'),
   ])
   fail(analyteError)
   fail(instrumentError)
@@ -214,10 +218,10 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   fail(equipmentError)
 
   const analytes = ((analyteData ?? []) as RecordRow[]).map(mapAnalyte)
-  const instruments = ((instrumentData ?? []) as RecordRow[]).map(mapInstrument)
+  const allInstruments = ((instrumentData ?? []) as RecordRow[]).map(mapInstrument)
   const equipmentById = new Map(((equipmentData ?? []) as RecordRow[]).map((row) => [asString(row.id), row]))
   const equipmentIdByInstrument = new Map(((equipmentLinkData ?? []) as RecordRow[]).map((row) => [asString(row.entity_id), asString(row.equipment_id)]))
-  for (const instrument of instruments) {
+  for (const instrument of allInstruments) {
     const equipmentId = equipmentIdByInstrument.get(instrument.id)
     const equipment = equipmentId ? equipmentById.get(equipmentId) : undefined
     if (!equipmentId || !equipment) continue
@@ -225,7 +229,14 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     instrument.equipmentCode = asString(equipment.code)
     instrument.equipmentName = asString(equipment.name)
     instrument.equipmentStatus = asString(equipment.status) as IqcInstrument['equipmentStatus']
+    // Equipment is the single source of truth for the label shown in IQC.
+    instrument.code = instrument.equipmentCode
+    instrument.name = instrument.equipmentName
+    instrument.model = nullableString(equipment.model)
   }
+  // Legacy IQC instruments remain available for historical run lookups, but
+  // new runs and control plans must use a registered, linked equipment item.
+  const instruments = allInstruments.filter((instrument) => Boolean(instrument.equipmentId))
   const controlMaterials = ((materialData ?? []) as RecordRow[]).map(mapMaterial)
   const materialMap = new Map(controlMaterials.map((m) => [m.id, m]))
   const lotRows = (lotData ?? []) as RecordRow[]
@@ -266,7 +277,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   }
   const controlPlans: IqcControlPlan[] = ((planData ?? []) as RecordRow[]).map((row) => {
     const analyte = analyteMap.get(asString(row.analyte_id))
-    const instrument = instruments.find((item) => item.id === asString(row.instrument_id))
+    const instrument = allInstruments.find((item) => item.id === asString(row.instrument_id))
     return {
       id: asString(row.id),
       analyteId: asString(row.analyte_id),
@@ -339,7 +350,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
 
   const runRows = (runData ?? []) as RecordRow[]
   const runDatetime = new Map(runRows.map((row) => [asString(row.id), asString(row.run_datetime)]))
-  const instrumentMap = new Map(instruments.map((i) => [i.id, i]))
+  const instrumentMap = new Map(allInstruments.map((i) => [i.id, i]))
   const consumableRows = (consumableData ?? []) as RecordRow[]
   const consumablesByRun = new Map<string, RecordRow[]>()
   for (const row of consumableRows) {
@@ -366,6 +377,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     const lot = lotMap.get(controlLotId)
     if (!analyte || !lot) continue
     const spec = specByKey.get(key)
+    const labStatisticsLocked = hasLockedLabStats(spec)
     const { meanValue, sdValue } = activeStats(spec)
 
     const ordered = rows
@@ -419,16 +431,16 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
       level: lot.level,
       controlMaterialName: lot.controlMaterialName,
       lotNumber: lot.lotNumber,
-      activeLimit: spec?.activeLimit ?? 'assigned',
+      activeLimit: spec?.activeLimit === 'lab' && labStatisticsLocked ? 'lab' : 'assigned',
       mean: meanValue,
       sd: sdValue,
       cv: meanValue && sdValue ? (sdValue / Math.abs(meanValue)) * 100 : null,
       n: usable.length,
       assignedMean: spec?.assignedMean ?? null,
       assignedSd: spec?.assignedSd ?? null,
-      labMean: spec?.labMean ?? null,
-      labSd: spec?.labSd ?? null,
-      labN: spec?.labN ?? null,
+      labMean: labStatisticsLocked ? spec?.labMean ?? null : null,
+      labSd: labStatisticsLocked ? spec?.labSd ?? null : null,
+      labN: labStatisticsLocked ? spec?.labN ?? null : null,
       labLockedAt: spec?.labLockedAt ?? null,
       lockEligible,
       status: latest?.status ?? 'accepted',
@@ -990,7 +1002,8 @@ export async function saveUncertaintyBudget(input: {
 // ---------- Run entry + evaluation ----------
 
 export async function upsertControlPlan(input: {
-  analyteId: string
+  analyteId?: string
+  analyteIds?: string[]
   instrumentId: string
   requiredLevels: string[]
   frequency: 'daily' | 'per-run'
@@ -998,13 +1011,15 @@ export async function upsertControlPlan(input: {
   isActive?: boolean
 }, actor: BmActor) {
   assertAdmin(actor)
+  const analyteIds = [...new Set([...(input.analyteIds ?? []), input.analyteId ?? ''].filter(Boolean))]
+  if (!analyteIds.length) throw new HttpError(400, 'เลือก Analyte หรือชุดทดสอบอย่างน้อย 1 รายการ')
   const requiredLevels = [...new Set(input.requiredLevels.map((level) => level.trim()).filter(Boolean))]
   if (!requiredLevels.length) throw new HttpError(400, 'Control plan ต้องมี Control level อย่างน้อย 1 ระดับ')
   const westgardRules = [...new Set(input.westgardRules)].filter((rule): rule is WestgardRule => (WESTGARD_RULES as readonly string[]).includes(rule))
   if (!westgardRules.length) throw new HttpError(400, 'เลือก Westgard rule อย่างน้อย 1 ข้อ')
   const admin = getAdminClient()
-  const { data, error } = await admin.from('iqc_control_plans').upsert({
-    analyte_id: input.analyteId,
+  const { data, error } = await admin.from('iqc_control_plans').upsert(analyteIds.map((analyteId) => ({
+    analyte_id: analyteId,
     instrument_id: input.instrumentId,
     required_levels: requiredLevels,
     frequency: input.frequency,
@@ -1012,15 +1027,15 @@ export async function upsertControlPlan(input: {
     is_active: input.isActive ?? true,
     created_by: actor.id,
     updated_at: new Date().toISOString(),
-  }, { onConflict: 'analyte_id,instrument_id' }).select('id').single()
+  })), { onConflict: 'analyte_id,instrument_id' }).select('id')
   fail(error)
-  const { data: resultRows, error: resultError } = await admin.from('iqc_result_values').select('control_lot_id').eq('analyte_id', input.analyteId)
+  const { data: resultRows, error: resultError } = await admin.from('iqc_result_values').select('control_lot_id,analyte_id').in('analyte_id', analyteIds)
   fail(resultError)
-  for (const lotId of new Set(((resultRows ?? []) as RecordRow[]).map((row) => asString(row.control_lot_id)))) {
-    await recalculateChartStatuses(lotId, input.analyteId)
+  for (const row of resultRows ?? []) {
+    await recalculateChartStatuses(asString((row as RecordRow).control_lot_id), asString((row as RecordRow).analyte_id))
   }
-  const id = asString((data as RecordRow).id)
-  await writeAudit(actor, 'iqc.controlPlan.upsert', 'iqc-control-plan', id, { ...input, requiredLevels, westgardRules })
+  const id = asString((data as RecordRow[] | null)?.[0]?.id)
+  await writeAudit(actor, 'iqc.controlPlan.upsert', 'iqc-control-plan', id, { ...input, analyteIds, requiredLevels, westgardRules })
   return getIqcWorkspace(actor)
 }
 

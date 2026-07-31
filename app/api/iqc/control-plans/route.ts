@@ -4,7 +4,7 @@ import { upsertControlPlan } from '@/lib/server/iqc'
 import { readJson, respond } from '@/lib/server/route'
 
 const schema = z.object({
-  analyteId: z.string().uuid(),
+  analyteIds: z.array(z.string().uuid()).min(1),
   instrumentId: z.string().uuid(),
   requiredLevels: z.array(z.string().trim().min(1).max(80)).min(1),
   frequency: z.enum(['daily', 'per-run']),

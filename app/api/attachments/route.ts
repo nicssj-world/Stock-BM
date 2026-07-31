@@ -6,6 +6,7 @@ import {
 } from "@/lib/server/attachments";
 import { HttpError } from "@/lib/server/errors";
 import { respond } from "@/lib/server/route";
+import { getAdminClient } from "@/lib/supabase/admin";
 
 const MODULES: AttachmentModule[] = [
   "iqc",
@@ -17,6 +18,29 @@ const MODULES: AttachmentModule[] = [
   "equipment",
 ];
 const MAX_BYTES = 15 * 1024 * 1024;
+const EQA_CERTIFICATE_READY_STATUSES = new Set(["submitted", "evaluated", "closed"]);
+
+async function assertEqaAttachmentAllowed(
+  module: AttachmentModule,
+  entityType: string,
+  entityId: string | null,
+  kind: string,
+) {
+  if (module !== "eqa") return;
+  if (entityType === "eqa-round-receipt" && kind === "eqa-receipt")
+    throw new HttpError(400, "ไม่รองรับการแนบเอกสารรับตัวอย่าง");
+  if (entityType !== "eqa-round" || kind !== "eqa-certificate") return;
+  if (!entityId) throw new HttpError(400, "entityId is required");
+  const { data, error } = await getAdminClient()
+    .from("eqa_rounds")
+    .select("status")
+    .eq("id", entityId)
+    .maybeSingle();
+  if (error) throw new HttpError(400, error.message || "ตรวจสอบสถานะ EQA ไม่สำเร็จ");
+  if (!data) throw new HttpError(404, "ไม่พบ EQA round");
+  if (!EQA_CERTIFICATE_READY_STATUSES.has(String((data as { status?: unknown }).status)))
+    throw new HttpError(409, "แนบ Certificate / รายงานผลได้หลังส่งผลแล้วเท่านั้น");
+}
 
 function asModule(value: string): AttachmentModule {
   if (!MODULES.includes(value as AttachmentModule))
@@ -56,6 +80,7 @@ export async function POST(request: Request) {
     if (!(file instanceof File)) throw new HttpError(400, "file is required");
     if (!entityType || !kind)
       throw new HttpError(400, "entityType and kind are required");
+    await assertEqaAttachmentAllowed(mod, entityType, entityId, kind);
     if (mod === "equipment" && entityType === "equipment" && actor.role !== "Admin")
       throw new HttpError(403, "Admin permission required");
     if (mod === "equipment" && entityType === "equipment" && !["image/jpeg", "image/png", "image/webp"].includes(file.type))

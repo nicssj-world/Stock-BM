@@ -841,18 +841,57 @@ export async function reviewEquipmentRecord(
 }
 
 export async function createEquipmentLink(
-  input: { equipmentId: string; module: "iqc" | "eqa"; entityId: string },
+  input: { equipmentId: string; module: "iqc" | "eqa"; entityId?: string },
   actor: BmActor,
 ) {
   assertAdmin(actor);
   await assertEquipmentAndPlan(input.equipmentId);
   const admin = getAdminClient();
+  let entityId = input.entityId;
+
+  if (input.module === "iqc" && !entityId) {
+    const { data: existingLink, error: existingLinkError } = await admin
+      .from("bm_equipment_module_links")
+      .select("id")
+      .eq("equipment_id", input.equipmentId)
+      .eq("module", "iqc")
+      .maybeSingle();
+    fail(existingLinkError);
+    if (existingLink) return getEquipmentWorkspace(actor);
+    const { data: equipment, error: equipmentError } = await admin
+      .from("bm_equipment")
+      .select("id,code,name,model")
+      .eq("id", input.equipmentId)
+      .single();
+    fail(equipmentError);
+    const equipmentRow = equipment as RecordRow;
+    const { data: existingInstrument, error: instrumentError } = await admin
+      .from("iqc_instruments")
+      .select("id")
+      .eq("code", asString(equipmentRow.code))
+      .maybeSingle();
+    fail(instrumentError);
+    if (existingInstrument) {
+      entityId = asString((existingInstrument as RecordRow).id);
+    } else {
+      const { data: createdInstrument, error: createError } = await admin
+        .from("iqc_instruments")
+        .insert({
+          code: asString(equipmentRow.code),
+          name: asString(equipmentRow.name),
+          model: clean(equipmentRow.model),
+          created_by: actor.id,
+        })
+        .select("id")
+        .single();
+      fail(createError);
+      entityId = asString((createdInstrument as RecordRow).id);
+    }
+  }
+
+  if (!entityId) throw new HttpError(400, "กรุณาเลือกรายการปลายทาง");
   const table = input.module === "iqc" ? "iqc_instruments" : "eqa_schemes";
-  const { data: target, error: targetError } = await admin
-    .from(table)
-    .select("id")
-    .eq("id", input.entityId)
-    .maybeSingle();
+  const { data: target, error: targetError } = await admin.from(table).select("id").eq("id", entityId).maybeSingle();
   fail(targetError);
   if (!target) throw new HttpError(404, "ไม่พบรายการปลายทาง");
   const { data, error } = await admin
@@ -861,7 +900,7 @@ export async function createEquipmentLink(
       equipment_id: input.equipmentId,
       module: input.module,
       entity_type: input.module === "iqc" ? "instrument" : "scheme",
-      entity_id: input.entityId,
+      entity_id: entityId,
       created_by: actor.id,
     })
     .select("id")
@@ -872,7 +911,7 @@ export async function createEquipmentLink(
     "equipment.link.create",
     "equipment-link",
     asString((data as RecordRow).id),
-    input,
+    { ...input, entityId },
   );
   return getEquipmentWorkspace(actor);
 }

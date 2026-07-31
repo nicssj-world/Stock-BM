@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { CheckCircle2, Pencil, Printer, Trash2, X } from 'lucide-react'
+import { CheckCircle2, ChevronRight, Pencil, Printer, Trash2, X } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { EqaResult, EqaRound, EqaWorkspace } from '@/lib/eqa/types'
 import { analyteScopeOptions, roundProgress, roundReceiptIssues, roundStatusIndex, type EqaReadinessTarget } from '@/lib/eqa/rules'
@@ -137,7 +137,7 @@ function RoundProgressStrip({ round, onNavigate, lockedSteps }: { round: EqaRoun
   const steps = roundProgress(round)
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
-      {steps.map((step) => step.done ? (
+      {steps.map((step, index) => <div key={step.key} className="flex items-center gap-1.5">{step.done ? (
         <span key={step.key} className="inline-flex items-center gap-1 rounded-full border border-[#bfe3d8] bg-[#eefaf5] px-2 py-0.5 text-[11px] font-semibold text-[#2f7d44]">
           <CheckCircle2 className="size-3" /> {step.label}
         </span>
@@ -147,7 +147,7 @@ function RoundProgressStrip({ round, onNavigate, lockedSteps }: { round: EqaRoun
         </button>
       ) : (
         <span key={step.key} className="rounded-full border border-[#eed4a6] bg-[#fff9ed] px-2 py-0.5 text-[11px] font-semibold text-[#a9700f]">{step.label}</span>
-      ))}
+      )}{index < steps.length - 1 ? <ChevronRight className="size-4 shrink-0 text-[#8ba0a5]" aria-hidden="true" /> : null}</div>)}
     </div>
   )
 }
@@ -205,6 +205,7 @@ function RoundCard({ round, data, actor, focus, onNavigate, onOk, onErr, forceCo
   const canAddResults = statusIndex <= roundStatusIndex('submitted')
   const showSummary = statusIndex >= 2 || round.summaryOutcome !== 'not-evaluated' || Boolean(round.summaryNote)
   const showApproval = statusIndex >= 1 || round.approvals.length > 0
+  const canAttachCertificate = statusIndex >= roundStatusIndex('submitted')
   const technicalManagerReady = statusIndex >= 3 || round.approvals.some((approval) => approval.approvalRole === 'technical-manager')
   const analystConfirmed = round.approvals.some((approval) => approval.approvalRole === 'analyst')
   const lockedSteps = useMemo(() => new Set<string>([...(showResults ? [] : ['results']), ...(showSummary ? [] : ['summary'])]), [showResults, showSummary])
@@ -218,7 +219,7 @@ function RoundCard({ round, data, actor, focus, onNavigate, onOk, onErr, forceCo
     </div> : <StepLocked text="กรอกและบันทึกแบบรับตัวอย่างก่อน จึงจะบันทึกผลได้" />}
     {showSummary ? <div id={`eqa-round-${round.id}-summary`} className="mt-3 grid gap-2 md:grid-cols-[200px_1fr_auto]"><Field label="สรุปผลรอบ (คำนวณจาก Outcome)"><Input value={round.summaryOutcome === 'pass' ? 'ผ่านเกณฑ์' : round.summaryOutcome === 'fail' ? 'ไม่ผ่านเกณฑ์' : 'ยังไม่ประเมิน'} readOnly /></Field><Field label="หมายเหตุ/การปรับปรุงแก้ไข"><Textarea rows={2} value={summaryNote} onChange={(event) => setSummaryNote(event.target.value)} /></Field><div className="flex items-end gap-2">{round.status === 'submitted' ? <Button className="self-end" disabled={confirmingEvaluation} onClick={confirmEvaluation}>ยืนยันรับผลประเมิน</Button> : <><Button className="self-end" onClick={saveSummary}>บันทึกหมายเหตุ</Button><SavedFlash show={summarySaved} /></>}</div></div> : showResults ? <StepLocked text="ให้ผู้ทำการตรวจวิเคราะห์ยืนยันแบบรับตัวอย่างก่อน จึงจะสรุปผลได้" /> : null}
     {showApproval ? <>
-    <div className="mt-3 grid gap-2 sm:grid-cols-2"><AttachmentList module="eqa" entityType="eqa-round-receipt" entityId={round.id} kind="eqa-receipt" canDelete={actor.role === 'Admin'} label="เอกสารรับตัวอย่างเดิม" /><AttachmentList module="eqa" entityType="eqa-round" entityId={round.id} kind="eqa-certificate" canDelete={actor.role === 'Admin'} label="Certificate / รายงานผล" /></div>
+    {canAttachCertificate ? <div className="mt-3"><AttachmentList module="eqa" entityType="eqa-round" entityId={round.id} kind="eqa-certificate" canDelete={actor.role === 'Admin'} label="Certificate / รายงานผล" /></div> : null}
     <ApprovalPanel actor={actor} data={data} type="round-receipt" entityId={round.id} state={round.documentState} approvals={round.approvals} readiness={roundReceiptIssues(round)} analystId={round.analystId} lockedRoles={analystConfirmed ? ['analyst'] : undefined} onNavigate={onNavigate} onOk={onOk} onErr={onErr} />
     {!technicalManagerReady ? <StepLocked text="การยืนยันของผู้จัดการวิชาการจะแสดงหลังบันทึกสรุปผลรอบ" /> : null}
     </> : null}

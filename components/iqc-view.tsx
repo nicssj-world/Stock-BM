@@ -24,12 +24,19 @@ function nowForDatetimeLocalInput() {
 
 export function IqcView({ initialData }: { actor: BmActor; initialData: IqcWorkspace }) {
   const [data, setData] = useState(initialData)
-  const [tab, setTab] = useState<Tab>('charts')
+  const [tab, setTab] = useState<Tab>('enter')
   const [notice, setNotice] = useState<NoticeState>(null)
   const [focusedCorrectiveActionId, setFocusedCorrectiveActionId] = useState<string | null>(null)
   const canManageIqc = true
 
-  const tabs = [{ key: 'charts' as const, label: 'ภาพรวม / Charts', icon: LineChart }, { key: 'enter' as const, label: 'บันทึกผล / Enter run', icon: PlusCircle }, { key: 'sixsigma' as const, label: 'Six Sigma', icon: Gauge }, { key: 'uncertainty' as const, label: 'Uncertainty', icon: Sigma }, { key: 'corrective' as const, label: 'Corrective action', icon: Wrench }, ...(canManageIqc ? [{ key: 'manage' as const, label: 'จัดการ / Manage', icon: Settings }] : [])]
+  const tabs = [
+    { key: 'enter' as const, label: '1. บันทึกผล IQC', icon: PlusCircle },
+    { key: 'charts' as const, label: '2. ตรวจสอบผล', icon: LineChart },
+    { key: 'corrective' as const, label: '3. จัดการผลผิดปกติ', icon: Wrench },
+    ...(canManageIqc ? [{ key: 'manage' as const, label: '4. ตั้งค่าล็อตและเกณฑ์', icon: Settings }] : []),
+    { key: 'sixsigma' as const, label: 'วิเคราะห์ Six Sigma', icon: Gauge },
+    { key: 'uncertainty' as const, label: 'Uncertainty', icon: Sigma },
+  ]
 
   function ok(text: string, next: IqcWorkspace) {
     setData(next)
@@ -79,7 +86,8 @@ export function IqcView({ initialData }: { actor: BmActor; initialData: IqcWorks
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
 
       {panels.length > 1 ? (
-        <div className="inline-flex flex-wrap gap-1 rounded-lg border border-[#0b7f76]/25 bg-[#f1faf9] p-1" role="tablist" aria-label="เลือก panel">
+        <div className="flex w-full" role="tablist" aria-label="เลือก panel">
+          <div className="inline-flex flex-wrap gap-1 rounded-lg border border-[#0b7f76]/25 bg-[#f1faf9] p-1">
           {['all', ...panels].map((p) => {
             const on = panel === p
             return (
@@ -88,17 +96,20 @@ export function IqcView({ initialData }: { actor: BmActor; initialData: IqcWorks
               </button>
             )
           })}
+          </div>
         </div>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <Tabs tabs={tabs} active={tab} onChange={setTab} />
+
+      {tab !== 'enter' ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Charts" value={scoped.summary.chartCount} />
         <StatCard label="In-control" value={scoped.summary.inControl} tone="accepted" />
         <StatCard label="Warning" value={scoped.summary.warning} tone="warning" />
         <StatCard label="Rejected" value={scoped.summary.rejected} tone="rejected" hint={`${data.summary.openCorrectiveActions} corrective action ค้าง`} />
-      </div>
+      </div> : null}
 
-      {visibleAlerts.length ? (
+      {tab !== 'enter' && visibleAlerts.length ? (
         <Card className="p-3">
           <div className="flex flex-wrap gap-2">
             {visibleAlerts.map((alert) => (
@@ -109,8 +120,6 @@ export function IqcView({ initialData }: { actor: BmActor; initialData: IqcWorks
           </div>
         </Card>
       ) : null}
-
-      <Tabs tabs={tabs} active={tab} onChange={setTab} />
 
       {tab === 'charts' ? <ChartsOverviewTab data={scoped} isAdmin={canManageIqc} onOk={ok} onErr={err} onOpenCorrectiveAction={openCorrectiveAction} /> : null}
       {tab === 'enter' ? <EnterTab data={scoped} onOk={ok} onErr={err} onDone={() => setTab('charts')} /> : null}
@@ -244,7 +253,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
       .map((lot) => lot.id),
   )
   const visibleLotCharts = data.charts.filter((chart) => lotsById.get(chart.controlLotId)?.isActive === (lotVisibility === 'active'))
-  const attentionKeys = new Set(visibleLotCharts.filter((chart) => chart.status !== 'accepted' || !chart.labLockedAt || expiringLotIds.has(chart.controlLotId)).map((chart) => chart.key))
+  const attentionKeys = new Set(visibleLotCharts.filter((chart) => chart.status !== 'accepted' || expiringLotIds.has(chart.controlLotId)).map((chart) => chart.key))
   const rejectedCount = visibleLotCharts.filter((chart) => chart.status === 'rejected').length
   const warningCount = visibleLotCharts.filter((chart) => chart.status === 'warning').length
   const unlockedCount = visibleLotCharts.filter((chart) => !chart.labLockedAt).length
@@ -290,7 +299,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
               <ListFilter className="size-4" /> Needs attention
             </div>
             <div className="mono mt-2 text-2xl font-bold text-[#173d50]">{attentionKeys.size}</div>
-            <p className="mt-1 text-xs text-[#789097]">warning, rejected, expiring, unlocked</p>
+            <p className="mt-1 text-xs text-[#789097]">warning, rejected หรือใกล้หมดอายุ</p>
           </button>
           <button
             type="button"
@@ -779,12 +788,39 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
   const [consumables, setConsumables] = useState<ConsumableRow[]>([])
   const [rows, setRows] = useState<ValueRow[]>([])
   const [fillLot, setFillLot] = useState('')
+  const [testSet, setTestSet] = useState('')
   const [busy, setBusy] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const seq = useMemo(() => ({ n: 1 }), [])
 
   const analyteById = useMemo(() => new Map(data.analytes.map((a) => [a.id, a])), [data.analytes])
   const selectedInstrument = data.instruments.find((instrument) => instrument.id === instrumentId)
+  const selectedControlPlans = useMemo(
+    () => data.controlPlans.filter((plan) => plan.isActive && plan.instrumentId === instrumentId),
+    [data.controlPlans, instrumentId],
+  )
+  const plannedAnalyteIds = useMemo(() => new Set(selectedControlPlans.map((plan) => plan.analyteId)), [selectedControlPlans])
+  const testSetAnalyteIds = useMemo(() => {
+    const groups = new Map<string, Set<string>>()
+    for (const analyte of activeAnalytes) {
+      if (!analyte.groupLabel) continue
+      groups.set(analyte.groupLabel, new Set([...(groups.get(analyte.groupLabel) ?? []), analyte.id]))
+    }
+    return groups
+  }, [activeAnalytes])
+  const selectedTestSetAnalyteIds = testSet ? testSetAnalyteIds.get(testSet) : undefined
+  const testSetOptions = useMemo(
+    () => [...testSetAnalyteIds.entries()]
+      .filter(([, analyteIds]) => !instrumentId || !plannedAnalyteIds.size || [...analyteIds].some((id) => plannedAnalyteIds.has(id)))
+      .map(([name, analyteIds]) => ({ name, count: analyteIds.size })),
+    [instrumentId, plannedAnalyteIds, testSetAnalyteIds],
+  )
+  const availableAnalytes = useMemo(
+    () => activeAnalytes.filter((analyte) =>
+      (!instrumentId || !plannedAnalyteIds.size || plannedAnalyteIds.has(analyte.id))
+      && (!selectedTestSetAnalyteIds || selectedTestSetAnalyteIds.has(analyte.id))),
+    [activeAnalytes, instrumentId, plannedAnalyteIds, selectedTestSetAnalyteIds],
+  )
 
   function addRow() {
     setRows((r) => [
@@ -792,21 +828,27 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
       {
         id: seq.n++,
         controlLotId: activeLots[0]?.id ?? '',
-        analyteId: activeAnalytes[0]?.id ?? '',
+        analyteId: availableAnalytes[0]?.id ?? '',
         value: '',
       },
     ])
   }
-  function fillFromLot() {
-    if (!fillLot) return
-    const specs = data.specs.filter((s) => s.controlLotId === fillLot)
-    const added = (specs.length ? specs.map((s) => s.analyteId) : activeAnalytes.map((a) => a.id)).map((analyteId) => ({
+  function startLot(controlLotId: string, selectedSet = testSet) {
+    if (!controlLotId) {
+      setRows([])
+      return
+    }
+    const specs = data.specs.filter((s) => s.controlLotId === controlLotId)
+    const selectedSetIds = selectedSet ? testSetAnalyteIds.get(selectedSet) : undefined
+    const eligibleAnalyteIds = (specs.length ? specs.map((s) => s.analyteId) : activeAnalytes.map((a) => a.id))
+      .filter((analyteId) => (!instrumentId || !plannedAnalyteIds.size || plannedAnalyteIds.has(analyteId)) && (!selectedSetIds || selectedSetIds.has(analyteId)))
+    const added = eligibleAnalyteIds.map((analyteId) => ({
       id: seq.n++,
-      controlLotId: fillLot,
+      controlLotId,
       analyteId,
       value: '',
     }))
-    setRows((r) => [...r, ...added])
+    setRows(added)
   }
 
   async function submit(event: React.FormEvent) {
@@ -862,6 +904,21 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
 
   return (
     <div className="space-y-4">
+      <Card className="border-[#b9ded8] bg-[#f1faf8] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-[#173d50]">บันทึก IQC ประจำวัน</h2>
+            <p className="mt-1 text-sm text-[#58747d]">เลือก Control lot เพียงครั้งเดียว ระบบจะเตรียมรายการตรวจทั้งหมดของล็อตนั้นให้กรอก</p>
+          </div>
+          <div className="flex items-center gap-2 text-xs font-semibold text-[#0b7f76]">
+            <span className="rounded-full bg-white px-2.5 py-1">1 เลือกลอต</span>
+            <span>→</span>
+            <span className="rounded-full bg-white px-2.5 py-1">2 กรอกผล</span>
+            <span>→</span>
+            <span className="rounded-full bg-white px-2.5 py-1">3 ตรวจสอบผล</span>
+          </div>
+        </div>
+      </Card>
       <div className="flex justify-end">
         <Button type="button" variant="ghost" onClick={() => setShowImport((v) => !v)}>
           {showImport ? 'ซ่อนการนำเข้า' : 'นำเข้าจากตาราง / Paste import'}
@@ -875,7 +932,12 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
             <Input type="datetime-local" value={runDatetime} onChange={(e) => setRunDatetime(e.target.value)} required />
           </Field>
           <Field label="เครื่อง / Instrument">
-            <Select value={instrumentId} onChange={(e) => setInstrumentId(e.target.value)}>
+            <Select value={instrumentId} onChange={(e) => {
+              setInstrumentId(e.target.value)
+              setFillLot('')
+              setTestSet('')
+              setRows([])
+            }}>
               <option value="">— ไม่ระบุ —</option>
               {data.instruments
                 .filter((i) => i.isActive)
@@ -887,6 +949,11 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
                 ))}
             </Select>
           </Field>
+          {instrumentId ? <div className={`rounded-lg border px-3 py-2 text-xs ${selectedControlPlans.length ? 'border-[#b9ded8] bg-[#f1faf8] text-[#176d65]' : 'border-[#eed4a6] bg-[#fff9ed] text-[#8b5a08]'}`}>
+            {selectedControlPlans.length
+              ? <>Test ที่กำหนดสำหรับเครื่องนี้: <span className="font-bold">{selectedControlPlans.map((plan) => plan.analyteCode).join(', ')}</span></>
+              : 'ยังไม่ได้กำหนด test สำหรับเครื่องนี้ — ไปที่ ตั้งค่าล็อตและเกณฑ์ > Control plan'}
+          </div> : null}
           {selectedInstrument?.equipmentId ? (
             <div className={`rounded-lg border px-3 py-2 text-xs ${selectedInstrument.equipmentStatus === 'maintenance' || selectedInstrument.equipmentStatus === 'out_of_service' ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-[#dbe8e8] bg-[#f4f9f8] text-[#41656d]'}`}>
               {selectedInstrument.equipmentStatus === 'maintenance' || selectedInstrument.equipmentStatus === 'out_of_service' ? 'คำเตือน: เครื่องมืออยู่ระหว่างซ่อมหรือหยุดใช้ · ' : ''}
@@ -928,10 +995,22 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
 
         <Card className="space-y-3 p-4">
           <div className="flex flex-wrap items-end justify-between gap-2">
-            <h2 className="font-bold text-[#173d50]">ค่าผล / Results</h2>
+            <h2 className="font-bold text-[#173d50]">2. กรอกผลตรวจ</h2>
             <div className="flex items-end gap-1.5">
-              <Select className="h-9 w-44" value={fillLot} onChange={(e) => setFillLot(e.target.value)}>
-                <option value="">เติมจาก control lot…</option>
+              <Select className="h-9 w-48" value={testSet} onChange={(e) => {
+                const selectedSet = e.target.value
+                setTestSet(selectedSet)
+                if (fillLot) startLot(fillLot, selectedSet)
+              }}>
+                <option value="">ทุก test / ไม่เลือกชุด</option>
+                {testSetOptions.map((option) => <option key={option.name} value={option.name}>{option.name} ({option.count} รายการ)</option>)}
+              </Select>
+              <Select className="h-9 w-56" value={fillLot} onChange={(e) => {
+                const controlLotId = e.target.value
+                setFillLot(controlLotId)
+                startLot(controlLotId)
+              }}>
+                <option value="">1. เลือก Control lot…</option>
                 {activeLots.map((l) => (
                   <option key={l.id} value={l.id}>
                     {l.controlMaterialName}
@@ -939,11 +1018,8 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
                   </option>
                 ))}
               </Select>
-              <Button type="button" variant="secondary" className="h-9" onClick={fillFromLot}>
-                เติมแถว
-              </Button>
               <Button type="button" variant="ghost" className="h-9" onClick={addRow}>
-                + แถว
+                + เพิ่มรายการ
               </Button>
             </div>
           </div>
@@ -961,7 +1037,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
                     ))}
                   </Select>
                   <Select className="h-10" value={row.analyteId} onChange={(e) => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, analyteId: e.target.value } : x)))}>
-                    {activeAnalytes.map((a) => (
+                    {availableAnalytes.map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.code}
                         {a.unit ? ` (${a.unit})` : ''}
@@ -975,7 +1051,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
                 </div>
               )
             })}
-            {!rows.length ? <p className="rounded-md border border-dashed border-[#cfdee0] px-3 py-6 text-center text-sm text-[#9aafb4]">เลือก control lot แล้วกด &ldquo;เติมแถว&rdquo; หรือ &ldquo;+ แถว&rdquo;</p> : null}
+            {!rows.length ? <p className="rounded-md border border-dashed border-[#cfdee0] px-3 py-6 text-center text-sm text-[#9aafb4]">เริ่มจากเลือก Control lot ด้านบน ระบบจะเติมรายการตรวจให้โดยอัตโนมัติ</p> : null}
           </div>
           <div className="flex justify-end">
             <Button disabled={busy || !rows.length}>{busy ? 'กำลังบันทึก…' : 'บันทึก run'}</Button>
@@ -1691,26 +1767,55 @@ function ManageTab({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: string
   const remove = (url: string, okText: string) => request(url, null, okText, 'DELETE')
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <AnalyteForm onSubmit={(b) => post('/api/iqc/analytes', b, 'เพิ่ม analyte แล้ว')} onUpdate={(id, b) => post(`/api/iqc/analytes/${id}`, b, 'แก้ไข analyte แล้ว', 'PATCH')} onToggle={(id, a) => post(`/api/iqc/analytes/${id}`, { isActive: a }, a ? 'เปิดใช้ analyte แล้ว' : 'ปิด analyte แล้ว', 'PATCH')} onDelete={(id) => remove(`/api/iqc/analytes/${id}`, 'ลบ analyte แล้ว')} analytes={data.analytes} />
-      <InstrumentForm onSubmit={(b) => post('/api/iqc/instruments', b, 'เพิ่ม instrument แล้ว')} onUpdate={(id, b) => post(`/api/iqc/instruments/${id}`, b, 'แก้ไข instrument แล้ว', 'PATCH')} onToggle={(id, a) => post(`/api/iqc/instruments/${id}`, { isActive: a }, a ? 'เปิดใช้ instrument แล้ว' : 'ปิด instrument แล้ว', 'PATCH')} onDelete={(id) => remove(`/api/iqc/instruments/${id}`, 'ลบ instrument แล้ว')} instruments={data.instruments} />
-      <MaterialForm onSubmit={(b) => post('/api/iqc/materials', b, 'เพิ่ม control material แล้ว')} onUpdate={(id, b) => post(`/api/iqc/materials/${id}`, b, 'แก้ไข control material แล้ว', 'PATCH')} onToggle={(id, a) => post(`/api/iqc/materials/${id}`, { isActive: a }, a ? 'เปิดใช้ material แล้ว' : 'ปิด material แล้ว', 'PATCH')} onDelete={(id) => remove(`/api/iqc/materials/${id}`, 'ลบ control material แล้ว')} materials={data.controlMaterials} />
-      <LotForm onSubmit={(b) => post('/api/iqc/lots', b, 'เพิ่ม control lot แล้ว')} onUpdate={(id, b) => post(`/api/iqc/lots/${id}`, b, 'แก้ไข control lot แล้ว', 'PATCH')} onToggle={(id, isActive) => post(`/api/iqc/lots/${id}`, { isActive }, isActive ? 'เปิดใช้ lot แล้ว' : 'ปิด lot แล้ว', 'PATCH')} onDelete={(id) => remove(`/api/iqc/lots/${id}`, 'ลบ control lot แล้ว')} data={data} />
-      <SpecForm onSubmit={(b) => post('/api/iqc/specs', b, 'บันทึก spec แล้ว')} data={data} />
-      <TeaForm onSubmit={(b) => post('/api/iqc/tea', b, 'บันทึก TEa แล้ว')} data={data} />
-      <ControlPlanForm onSubmit={(b) => post('/api/iqc/control-plans', b, 'บันทึก Control plan แล้ว')} data={data} />
+      <SettingsDisclosure title="Analyte / ชุดทดสอบ"><AnalyteForm onSubmit={(b) => post('/api/iqc/analytes', b, 'เพิ่ม analyte แล้ว')} onUpdate={(id, b) => post(`/api/iqc/analytes/${id}`, b, 'แก้ไข analyte แล้ว', 'PATCH')} onToggle={(id, a) => post(`/api/iqc/analytes/${id}`, { isActive: a }, a ? 'เปิดใช้ analyte แล้ว' : 'ปิด analyte แล้ว', 'PATCH')} onDelete={(id) => remove(`/api/iqc/analytes/${id}`, 'ลบ analyte แล้ว')} analytes={data.analytes} /></SettingsDisclosure>
+      <SettingsDisclosure title="เครื่องมือ IQC"><Card className="space-y-2 p-4">
+        <h2 className="font-bold text-[#173d50]">เครื่องมือ IQC</h2>
+        <p className="text-sm text-[#58747d]">เลือกเครื่องจากทะเบียน Equipment เท่านั้น เพื่อใช้ข้อมูลเครื่องและสถานะเดียวกันทั้งระบบ</p>
+        <Link className="inline-flex text-sm font-bold text-[#0b7f76] underline" href="/equipment?view=registry">ไปที่ทะเบียน Equipment เพื่อเปิดใช้กับ IQC</Link>
+        <div className="divide-y divide-[#eef3f3] rounded-md border border-[#e3ebec] text-xs">
+          {data.instruments.map((instrument) => {
+            const tests = data.controlPlans.filter((plan) => plan.isActive && plan.instrumentId === instrument.id)
+            return <div key={instrument.id} className="p-2.5">
+              <p className="font-bold text-[#315763]">{instrument.code} · {instrument.name}</p>
+              <p className="mt-1 text-[#58747d]">Test: {tests.length ? tests.map((plan) => plan.analyteCode).join(', ') : 'ยังไม่ได้กำหนด'}</p>
+            </div>
+          })}
+          {!data.instruments.length ? <p className="p-2.5 text-[#789097]">ยังไม่มีเครื่องที่เปิดใช้กับ IQC</p> : null}
+        </div>
+      </Card></SettingsDisclosure>
+      <SettingsDisclosure title="Control material"><MaterialForm onSubmit={(b) => post('/api/iqc/materials', b, 'เพิ่ม control material แล้ว')} onUpdate={(id, b) => post(`/api/iqc/materials/${id}`, b, 'แก้ไข control material แล้ว', 'PATCH')} onToggle={(id, a) => post(`/api/iqc/materials/${id}`, { isActive: a }, a ? 'เปิดใช้ material แล้ว' : 'ปิด material แล้ว', 'PATCH')} onDelete={(id) => remove(`/api/iqc/materials/${id}`, 'ลบ control material แล้ว')} materials={data.controlMaterials} /></SettingsDisclosure>
+      <SettingsDisclosure title="Control lot"><LotForm onSubmit={(b) => post('/api/iqc/lots', b, 'เพิ่ม control lot แล้ว')} onUpdate={(id, b) => post(`/api/iqc/lots/${id}`, b, 'แก้ไข control lot แล้ว', 'PATCH')} onToggle={(id, isActive) => post(`/api/iqc/lots/${id}`, { isActive }, isActive ? 'เปิดใช้ lot แล้ว' : 'ปิด lot แล้ว', 'PATCH')} onDelete={(id) => remove(`/api/iqc/lots/${id}`, 'ลบ control lot แล้ว')} data={data} /></SettingsDisclosure>
+      <SettingsDisclosure title="Assigned spec"><SpecForm onSubmit={(b) => post('/api/iqc/specs', b, 'บันทึก spec แล้ว')} data={data} /></SettingsDisclosure>
+      <SettingsDisclosure title="TEa / Six Sigma"><TeaForm onSubmit={(b) => post('/api/iqc/tea', b, 'บันทึก TEa แล้ว')} data={data} /></SettingsDisclosure>
+      <SettingsDisclosure title="Control plan" className="lg:col-span-2"><ControlPlanForm onSubmit={(b) => post('/api/iqc/control-plans', b, 'บันทึก Control plan แล้ว')} data={data} /></SettingsDisclosure>
     </div>
   )
+}
+
+function SettingsDisclosure({ title, children, className = '' }: { title: string; children: React.ReactNode; className?: string }) {
+  const [open, setOpen] = useState(false)
+  return <section className={className}>
+    <button type="button" className="flex w-full items-center justify-between rounded-lg border border-[#d6e2e3] bg-white px-4 py-3 text-left font-bold text-[#173d50] hover:bg-[#f7fbfb]" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+      {title}<ChevronDown className={`size-4 text-[#58747d] transition-transform ${open ? 'rotate-180' : ''}`} />
+    </button>
+    {open ? <div className="mt-2">{children}</div> : null}
+  </section>
 }
 
 const CONTROL_PLAN_RULES = ['1-2s', '1-3s', '2-2s', 'R-4s', '4-1s', '10x']
 
 function ControlPlanForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean>; data: IqcWorkspace }) {
   const [analyteId, setAnalyteId] = useState('')
+  const [testSet, setTestSet] = useState('')
   const [instrumentId, setInstrumentId] = useState('')
   const [levels, setLevels] = useState('')
   const [frequency, setFrequency] = useState('daily')
   const [rules, setRules] = useState<string[]>(CONTROL_PLAN_RULES)
   const [busy, setBusy] = useState(false)
+  const testSets = useMemo(() => [...new Set(data.analytes.filter((analyte) => analyte.isActive && analyte.groupLabel).map((analyte) => analyte.groupLabel!))].sort(), [data.analytes])
+  const selectedAnalyteIds = testSet
+    ? data.analytes.filter((analyte) => analyte.isActive && analyte.groupLabel === testSet).map((analyte) => analyte.id)
+    : analyteId ? [analyteId] : []
   const toggleRule = (rule: string) => setRules((current) => (current.includes(rule) ? current.filter((item) => item !== rule) : [...current, rule]))
   return (
     <Card className="space-y-3 p-4 lg:col-span-2">
@@ -1726,11 +1831,11 @@ function ControlPlanForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise
             .split(',')
             .map((item) => item.trim())
             .filter(Boolean)
-          if (!analyteId || !instrumentId || !requiredLevels.length || !rules.length) return
+          if (!selectedAnalyteIds.length || !instrumentId || !requiredLevels.length || !rules.length) return
           setBusy(true)
           if (
             await onSubmit({
-              analyteId,
+              analyteIds: selectedAnalyteIds,
               instrumentId,
               requiredLevels,
               frequency,
@@ -1738,14 +1843,21 @@ function ControlPlanForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise
             })
           ) {
             setAnalyteId('')
+            setTestSet('')
             setInstrumentId('')
             setLevels('')
           }
           setBusy(false)
         }}
       >
+        <Field label="ชุดทดสอบ / Test set">
+          <Select value={testSet} onChange={(event) => { setTestSet(event.target.value); setAnalyteId('') }}>
+            <option value="">— เลือกทีละ test —</option>
+            {testSets.map((name) => <option key={name} value={name}>{name} ({data.analytes.filter((analyte) => analyte.isActive && analyte.groupLabel === name).length} รายการ)</option>)}
+          </Select>
+        </Field>
         <Field label="Analyte">
-          <Select value={analyteId} onChange={(event) => setAnalyteId(event.target.value)} required>
+          <Select value={analyteId} onChange={(event) => { setAnalyteId(event.target.value); setTestSet('') }} required={!testSet} disabled={Boolean(testSet)}>
             <option value="">—</option>
             {data.analytes
               .filter((item) => item.isActive)
@@ -1784,6 +1896,7 @@ function ControlPlanForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise
             </label>
           ))}
         </div>
+        {testSet ? <p className="md:col-span-4 text-xs text-[#176d65]">จะกำหนด Control plan ให้ครบ {selectedAnalyteIds.length} รายการในชุด {testSet}</p> : null}
         <div className="md:col-span-4">
           <Button disabled={busy}>{busy ? 'กำลังบันทึก…' : 'บันทึก Control plan'}</Button>
         </div>
@@ -1934,8 +2047,8 @@ function AnalyteForm({ onSubmit, onUpdate, onToggle, onDelete, analytes }: { onS
           <Field label="Unit">
             <Input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} placeholder="%, cells/µL, IU/mL" />
           </Field>
-          <Field label="Group">
-            <Input value={form.groupLabel} onChange={(e) => setForm({ ...form, groupLabel: e.target.value })} placeholder="CD4 Panel" />
+          <Field label="ชุดทดสอบ / Test set">
+            <Input value={form.groupLabel} onChange={(e) => setForm({ ...form, groupLabel: e.target.value })} placeholder="HIV-VL, CD4 Panel" />
           </Field>
         </div>
         <label className="flex items-center gap-2 text-sm text-[#3f5c64]">
