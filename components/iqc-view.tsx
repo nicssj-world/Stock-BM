@@ -6,6 +6,7 @@ import { AlertTriangle, CalendarClock, Calculator, ChevronDown, ClipboardList, E
 import type { BmActor } from '@/lib/bm/types'
 import type { IqcCorrectiveAction, IqcUncertaintyBudget, IqcWorkspace } from '@/lib/iqc/types'
 import { findCorrectiveActionForPoint, runsWithoutCorrectiveActions } from '@/lib/iqc/corrective-actions'
+import { hasTestSet, parseTestSets } from '@/lib/iqc/test-sets'
 import { formatDate, formatDateTime } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
 import { LjChart } from '@/components/lj-chart'
@@ -53,12 +54,12 @@ export function IqcView({ initialData }: { actor: BmActor; initialData: IqcWorks
   const [panel, setPanel] = useState<string>('all')
   const panels = useMemo(() => {
     const set = new Set<string>()
-    data.charts.forEach((c) => c.groupLabel && set.add(c.groupLabel))
-    data.analytes.forEach((a) => a.groupLabel && set.add(a.groupLabel))
+    data.charts.forEach((c) => parseTestSets(c.groupLabel).forEach((name) => set.add(name)))
+    data.analytes.forEach((a) => parseTestSets(a.groupLabel).forEach((name) => set.add(name)))
     return [...set].sort()
   }, [data])
   const scoped = useMemo(() => {
-    const keep = (g: string | null) => panel === 'all' || g === panel
+    const keep = (g: string | null) => panel === 'all' || hasTestSet(g, panel)
     const charts = data.charts.filter((c) => keep(c.groupLabel))
     return {
       ...data,
@@ -777,7 +778,7 @@ type ValueRow = {
   analyteId: string
   value: string
 }
-type ConsumableRow = { id: number; kind: string; lotNumber: string }
+type ConsumableRow = { id: number; kind: string; lotNumber: string; stockLotId: string }
 
 function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void; onDone: () => void }) {
   const activeAnalytes = useMemo(() => data.analytes.filter((a) => a.isActive), [data.analytes])
@@ -789,12 +790,17 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
   const [rows, setRows] = useState<ValueRow[]>([])
   const [fillLot, setFillLot] = useState('')
   const [testSet, setTestSet] = useState('')
+  const [lotMappingWarning, setLotMappingWarning] = useState('')
   const [busy, setBusy] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const seq = useMemo(() => ({ n: 1 }), [])
 
   const analyteById = useMemo(() => new Map(data.analytes.map((a) => [a.id, a])), [data.analytes])
   const selectedInstrument = data.instruments.find((instrument) => instrument.id === instrumentId)
+  const availableStockLots = useMemo(
+    () => selectedInstrument?.equipmentId ? data.stockLots.filter((lot) => lot.equipmentIds.includes(selectedInstrument.equipmentId!)) : data.stockLots,
+    [data.stockLots, selectedInstrument?.equipmentId],
+  )
   const selectedControlPlans = useMemo(
     () => data.controlPlans.filter((plan) => plan.isActive && plan.instrumentId === instrumentId),
     [data.controlPlans, instrumentId],
@@ -803,8 +809,9 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
   const testSetAnalyteIds = useMemo(() => {
     const groups = new Map<string, Set<string>>()
     for (const analyte of activeAnalytes) {
-      if (!analyte.groupLabel) continue
-      groups.set(analyte.groupLabel, new Set([...(groups.get(analyte.groupLabel) ?? []), analyte.id]))
+      for (const testSet of parseTestSets(analyte.groupLabel)) {
+        groups.set(testSet, new Set([...(groups.get(testSet) ?? []), analyte.id]))
+      }
     }
     return groups
   }, [activeAnalytes])
@@ -850,6 +857,19 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
     }))
     setRows(added)
   }
+  function startTestSet(selectedSet: string) {
+    const selectedSetIds = testSetAnalyteIds.get(selectedSet) ?? new Set<string>()
+    const selectedAnalytes = activeAnalytes.filter((analyte) => selectedSetIds.has(analyte.id) && (!instrumentId || !plannedAnalyteIds.size || plannedAnalyteIds.has(analyte.id)))
+    const unmapped: string[] = []
+    const added = selectedAnalytes.map((analyte) => {
+      const token = `${analyte.code} ${analyte.name}`.toLowerCase()
+      const controlLot = activeLots.find((lot) => lot.level && token.includes(lot.level.toLowerCase()))
+      if (!controlLot) unmapped.push(analyte.code)
+      return { id: seq.n++, controlLotId: controlLot?.id ?? '', analyteId: analyte.id, value: '' }
+    })
+    setRows(added)
+    setLotMappingWarning(unmapped.length ? `ยังไม่พบ Control lot ที่มี Level ตรงกับ: ${unmapped.join(', ')}` : '')
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -883,6 +903,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
             .map((c) => ({
               kind: c.kind,
               lotNumber: c.lotNumber.trim(),
+              stockLotId: c.stockLotId || null,
               appliesScope: c.kind === 'trucount-tube' ? 'absolute-only' : 'all',
             })),
           values,
@@ -965,13 +986,13 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
           <div>
             <div className="mb-1 flex items-center justify-between">
               <span className="text-xs font-semibold text-[#58747d]">Consumable lots</span>
-              <Button type="button" variant="ghost" className="min-h-7 px-2 py-1 text-xs" onClick={() => setConsumables((c) => [...c, { id: seq.n++, kind: 'staining-reagent', lotNumber: '' }])}>
+              <Button type="button" variant="ghost" className="min-h-7 px-2 py-1 text-xs" onClick={() => setConsumables((c) => [...c, { id: seq.n++, kind: 'staining-reagent', lotNumber: '', stockLotId: '' }])}>
                 + เพิ่ม
               </Button>
             </div>
             <div className="space-y-2">
               {consumables.map((c, i) => (
-                <div key={c.id} className="flex gap-1.5">
+                <div key={c.id} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,0.8fr)_auto] gap-1.5">
                   <Select className="h-9" value={c.kind} onChange={(e) => setConsumables((rows) => rows.map((x, j) => (j === i ? { ...x, kind: e.target.value } : x)))}>
                     <option value="staining-reagent">Staining reagent</option>
                     <option value="trucount-tube">Trucount tube</option>
@@ -979,7 +1000,14 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
                     <option value="reagent">Reagent</option>
                     <option value="other">Other</option>
                   </Select>
-                  <Input className="h-9" placeholder="Lot no." value={c.lotNumber} onChange={(e) => setConsumables((rows) => rows.map((x, j) => (j === i ? { ...x, lotNumber: e.target.value } : x)))} />
+                  <Select className="h-9" value={c.stockLotId} onChange={(e) => {
+                    const stockLot = data.stockLots.find((lot) => lot.id === e.target.value)
+                    setConsumables((rows) => rows.map((x, j) => (j === i ? { ...x, stockLotId: e.target.value, lotNumber: stockLot?.lotNumber ?? x.lotNumber } : x)))
+                  }}>
+                    <option value="">พิมพ์ lot เอง</option>
+                    {availableStockLots.map((lot) => <option key={lot.id} value={lot.id}>{lot.itemCode} · {lot.itemName} · LOT {lot.lotNumber}</option>)}
+                  </Select>
+                  <Input className="h-9" placeholder="Lot no." value={c.lotNumber} readOnly={Boolean(c.stockLotId)} onChange={(e) => setConsumables((rows) => rows.map((x, j) => (j === i ? { ...x, lotNumber: e.target.value } : x)))} />
                   <button type="button" className="rounded p-1.5 text-[#c02a37] hover:bg-[#fff0f1]" aria-label="ลบ" onClick={() => setConsumables((rows) => rows.filter((_, j) => j !== i))}>
                     <Trash2 className="size-4" />
                   </button>
@@ -1000,12 +1028,14 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
               <Select className="h-9 w-48" value={testSet} onChange={(e) => {
                 const selectedSet = e.target.value
                 setTestSet(selectedSet)
-                if (fillLot) startLot(fillLot, selectedSet)
+                setFillLot('')
+                if (selectedSet) startTestSet(selectedSet)
+                else setRows([])
               }}>
                 <option value="">ทุก test / ไม่เลือกชุด</option>
                 {testSetOptions.map((option) => <option key={option.name} value={option.name}>{option.name} ({option.count} รายการ)</option>)}
               </Select>
-              <Select className="h-9 w-56" value={fillLot} onChange={(e) => {
+              {!testSet ? <Select className="h-9 w-56" value={fillLot} onChange={(e) => {
                 const controlLotId = e.target.value
                 setFillLot(controlLotId)
                 startLot(controlLotId)
@@ -1017,18 +1047,20 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
                     {l.level ? ` ${l.level}` : ''} · {l.lotNumber}
                   </option>
                 ))}
-              </Select>
+              </Select> : null}
               <Button type="button" variant="ghost" className="h-9" onClick={addRow}>
                 + เพิ่มรายการ
               </Button>
             </div>
           </div>
+          {testSet ? <p className={`text-xs ${lotMappingWarning ? 'text-[#c02a37]' : 'text-[#176d65]'}`}>{lotMappingWarning || 'ระบบจับคู่ Control lot ตาม Level ของแต่ละ analyte ให้อัตโนมัติ'}</p> : null}
           <div className="space-y-2">
             {rows.map((row, i) => {
               const analyte = analyteById.get(row.analyteId)
               return (
                 <div key={row.id} className="grid grid-cols-[1.2fr_1.2fr_0.9fr_auto] items-center gap-1.5">
-                  <Select className="h-10" value={row.controlLotId} onChange={(e) => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, controlLotId: e.target.value } : x)))}>
+                  <Select className="h-10" value={row.controlLotId} disabled={Boolean(testSet && row.controlLotId)} onChange={(e) => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, controlLotId: e.target.value } : x)))}>
+                    {!row.controlLotId ? <option value="">ไม่พบ lot ที่ตรงกับ Level</option> : null}
                     {activeLots.map((l) => (
                       <option key={l.id} value={l.id}>
                         {l.controlMaterialName}
@@ -1808,15 +1840,21 @@ function ControlPlanForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise
   const [analyteId, setAnalyteId] = useState('')
   const [testSet, setTestSet] = useState('')
   const [instrumentId, setInstrumentId] = useState('')
-  const [levels, setLevels] = useState('')
+  const [enforceLevels, setEnforceLevels] = useState(true)
+  const [selectedLevels, setSelectedLevels] = useState<string[]>([])
   const [frequency, setFrequency] = useState('daily')
   const [rules, setRules] = useState<string[]>(CONTROL_PLAN_RULES)
   const [busy, setBusy] = useState(false)
-  const testSets = useMemo(() => [...new Set(data.analytes.filter((analyte) => analyte.isActive && analyte.groupLabel).map((analyte) => analyte.groupLabel!))].sort(), [data.analytes])
+  const testSets = useMemo(() => [...new Set(data.analytes.filter((analyte) => analyte.isActive).flatMap((analyte) => parseTestSets(analyte.groupLabel)))].sort(), [data.analytes])
   const selectedAnalyteIds = testSet
-    ? data.analytes.filter((analyte) => analyte.isActive && analyte.groupLabel === testSet).map((analyte) => analyte.id)
+    ? data.analytes.filter((analyte) => analyte.isActive && hasTestSet(analyte.groupLabel, testSet)).map((analyte) => analyte.id)
     : analyteId ? [analyteId] : []
+  const availableLevels = useMemo(() => [...new Set(data.controlLots.filter((lot) => lot.isActive && lot.level).map((lot) => lot.level!))].sort(), [data.controlLots])
+  useEffect(() => {
+    setSelectedLevels(availableLevels)
+  }, [availableLevels.join('|')])
   const toggleRule = (rule: string) => setRules((current) => (current.includes(rule) ? current.filter((item) => item !== rule) : [...current, rule]))
+  const toggleLevel = (level: string) => setSelectedLevels((current) => current.includes(level) ? current.filter((item) => item !== level) : [...current, level])
   return (
     <Card className="space-y-3 p-4 lg:col-span-2">
       <div>
@@ -1827,33 +1865,34 @@ function ControlPlanForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise
         className="grid gap-2 md:grid-cols-4"
         onSubmit={async (event) => {
           event.preventDefault()
-          const requiredLevels = levels
-            .split(',')
-            .map((item) => item.trim())
-            .filter(Boolean)
-          if (!selectedAnalyteIds.length || !instrumentId || !requiredLevels.length || !rules.length) return
+          const requiredLevels = enforceLevels ? selectedLevels : []
+          if (!selectedAnalyteIds.length || !instrumentId || !rules.length) return
           setBusy(true)
-          if (
-            await onSubmit({
+          try {
+            if (
+              await onSubmit({
               analyteIds: selectedAnalyteIds,
               instrumentId,
               requiredLevels,
               frequency,
               westgardRules: rules,
-            })
-          ) {
-            setAnalyteId('')
-            setTestSet('')
-            setInstrumentId('')
-            setLevels('')
+              })
+            ) {
+              setAnalyteId('')
+              setTestSet('')
+              setInstrumentId('')
+              setEnforceLevels(true)
+              setSelectedLevels(availableLevels)
+            }
+          } finally {
+            setBusy(false)
           }
-          setBusy(false)
         }}
       >
         <Field label="ชุดทดสอบ / Test set">
           <Select value={testSet} onChange={(event) => { setTestSet(event.target.value); setAnalyteId('') }}>
             <option value="">— เลือกทีละ test —</option>
-            {testSets.map((name) => <option key={name} value={name}>{name} ({data.analytes.filter((analyte) => analyte.isActive && analyte.groupLabel === name).length} รายการ)</option>)}
+            {testSets.map((name) => <option key={name} value={name}>{name} ({data.analytes.filter((analyte) => analyte.isActive && hasTestSet(analyte.groupLabel, name)).length} รายการ)</option>)}
           </Select>
         </Field>
         <Field label="Analyte">
@@ -1880,9 +1919,19 @@ function ControlPlanForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise
               ))}
           </Select>
         </Field>
-        <Field label="Required levels">
-          <Input value={levels} onChange={(event) => setLevels(event.target.value)} placeholder="Low, Normal, High" required />
-        </Field>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-[#58747d]">Required levels</label>
+          <label className="flex min-h-10 items-center gap-2 rounded-md border border-[#d6e2e3] bg-white px-3 text-sm text-[#315763]">
+            <input type="checkbox" checked={enforceLevels} onChange={(event) => setEnforceLevels(event.target.checked)} />
+            บังคับระดับ Control
+          </label>
+          {enforceLevels ? (
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-[#58747d]">
+              {availableLevels.map((level) => <label key={level} className="flex items-center gap-1"><input type="checkbox" checked={selectedLevels.includes(level)} onChange={() => toggleLevel(level)} /> {level}</label>)}
+              {!availableLevels.length ? <span>ยังไม่มีระดับ Control ที่ใช้งานอยู่</span> : null}
+            </div>
+          ) : <p className="text-xs text-[#789097]">ไม่บังคับระดับ ระบบจะไม่เตือนหรือขวางการบันทึก run เพราะระดับ Control ไม่ครบ</p>}
+        </div>
         <Field label="Frequency">
           <Select value={frequency} onChange={(event) => setFrequency(event.target.value)}>
             <option value="daily">อย่างน้อยวันละครั้ง</option>
@@ -1909,7 +1958,7 @@ function ControlPlanForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise
                 {plan.analyteCode} · {plan.instrumentName}
               </span>
               <span>
-                {plan.frequency} · {plan.requiredLevels.join(', ')} · {plan.westgardRules.join(', ')}
+                {plan.frequency} · {plan.requiredLevels.length ? plan.requiredLevels.join(', ') : 'ไม่บังคับระดับ'} · {plan.westgardRules.join(', ')}
               </span>
             </div>
           ))}
@@ -1922,12 +1971,17 @@ function ControlPlanForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise
 function TeaForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean>; data: IqcWorkspace }) {
   const [form, setForm] = useState({
     analyteId: '',
+    testSet: '',
     teaValue: '',
     teaMode: 'absolute',
     teaUnit: '',
     sourceRef: '',
   })
   const [busy, setBusy] = useState(false)
+  const testSets = useMemo(() => [...new Set(data.analytes.filter((analyte) => analyte.isActive).flatMap((analyte) => parseTestSets(analyte.groupLabel)))].sort(), [data.analytes])
+  const selectedAnalyteIds = form.testSet
+    ? data.analytes.filter((analyte) => analyte.isActive && hasTestSet(analyte.groupLabel, form.testSet)).map((analyte) => analyte.id)
+    : form.analyteId ? [form.analyteId] : []
   return (
     <Card className="space-y-3 p-4 lg:col-span-2">
       <h2 className="font-bold text-[#173d50]">Allowable Total Error (TEa) — สำหรับ Six Sigma</h2>
@@ -1936,10 +1990,10 @@ function TeaForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean
         className="grid gap-2 md:grid-cols-5"
         onSubmit={async (e) => {
           e.preventDefault()
-          if (!form.analyteId || !form.teaValue) return
+          if (!selectedAnalyteIds.length || !form.teaValue) return
           setBusy(true)
           const body = {
-            analyteId: form.analyteId,
+            analyteIds: selectedAnalyteIds,
             teaValue: Number(form.teaValue),
             teaMode: form.teaMode,
             teaUnit: form.teaUnit || null,
@@ -1948,6 +2002,7 @@ function TeaForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean
           if (await onSubmit(body))
             setForm({
               analyteId: '',
+              testSet: '',
               teaValue: '',
               teaMode: 'absolute',
               teaUnit: '',
@@ -1956,8 +2011,14 @@ function TeaForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean
           setBusy(false)
         }}
       >
+        <Field label="ชุดทดสอบ / Test set">
+          <Select value={form.testSet} onChange={(e) => setForm({ ...form, testSet: e.target.value, analyteId: '' })}>
+            <option value="">— เลือกทีละ test —</option>
+            {testSets.map((name) => <option key={name} value={name}>{name} ({data.analytes.filter((analyte) => analyte.isActive && hasTestSet(analyte.groupLabel, name)).length} รายการ)</option>)}
+          </Select>
+        </Field>
         <Field label="Analyte">
-          <Select value={form.analyteId} onChange={(e) => setForm({ ...form, analyteId: e.target.value })} required>
+          <Select value={form.analyteId} onChange={(e) => setForm({ ...form, analyteId: e.target.value, testSet: '' })} required={!form.testSet} disabled={Boolean(form.testSet)}>
             <option value="">—</option>
             {data.analytes.map((a) => (
               <option key={a.id} value={a.id}>
@@ -1981,6 +2042,7 @@ function TeaForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolean
         <Field label="Source ref">
           <Input value={form.sourceRef} onChange={(e) => setForm({ ...form, sourceRef: e.target.value })} />
         </Field>
+        {form.testSet ? <p className="md:col-span-5 text-xs text-[#176d65]">จะกำหนด TEa ให้ครบ {selectedAnalyteIds.length} รายการในชุด {form.testSet}</p> : null}
         <div className="md:col-span-5">
           <Button disabled={busy}>บันทึก TEa</Button>
         </div>
@@ -2048,7 +2110,7 @@ function AnalyteForm({ onSubmit, onUpdate, onToggle, onDelete, analytes }: { onS
             <Input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} placeholder="%, cells/µL, IU/mL" />
           </Field>
           <Field label="ชุดทดสอบ / Test set">
-            <Input value={form.groupLabel} onChange={(e) => setForm({ ...form, groupLabel: e.target.value })} placeholder="HIV-VL, CD4 Panel" />
+            <Input value={form.groupLabel} onChange={(e) => setForm({ ...form, groupLabel: e.target.value })} placeholder="HIV-VL | CD4 Panel" />
           </Field>
         </div>
         <label className="flex items-center gap-2 text-sm text-[#3f5c64]">
@@ -2223,12 +2285,16 @@ function LotForm({ onSubmit, onUpdate, onToggle, onDelete, data }: { onSubmit: (
     controlMaterialId: '',
     lotNumber: '',
     expiryDate: '',
+    stockLotId: '',
   })
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [equipmentId, setEquipmentId] = useState('')
   const [busy, setBusy] = useState(false)
+  const visibleStockLots = equipmentId ? data.stockLots.filter((lot) => lot.equipmentIds.includes(equipmentId)) : data.stockLots
   function reset() {
     setEditingId(null)
-    setForm({ controlMaterialId: '', lotNumber: '', expiryDate: '' })
+    setEquipmentId('')
+    setForm({ controlMaterialId: '', lotNumber: '', expiryDate: '', stockLotId: '' })
   }
   return (
     <Card className="space-y-3 p-4">
@@ -2265,10 +2331,25 @@ function LotForm({ onSubmit, onUpdate, onToggle, onDelete, data }: { onSubmit: (
           </Select>
         </Field>
         <Field label="Lot no.">
-          <Input value={form.lotNumber} onChange={(e) => setForm({ ...form, lotNumber: e.target.value })} required />
+          <Input value={form.lotNumber} onChange={(e) => setForm({ ...form, lotNumber: e.target.value })} readOnly={Boolean(form.stockLotId)} required />
         </Field>
         <Field label="Expiry">
-          <Input type="date" value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })} />
+          <Input type="date" value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })} readOnly={Boolean(form.stockLotId)} />
+        </Field>
+        <Field label="เครื่องมือ (กรองน้ำยา)">
+          <Select value={equipmentId} onChange={(e) => setEquipmentId(e.target.value)}>
+            <option value="">ทุกเครื่องมือ</option>
+            {data.instruments.filter((instrument) => instrument.isActive && instrument.equipmentId).map((instrument) => <option key={instrument.id} value={instrument.equipmentId!}>{instrument.code} · {instrument.name}</option>)}
+          </Select>
+        </Field>
+        <Field label="Link lot ในคลัง">
+          <Select value={form.stockLotId} onChange={(e) => {
+            const stockLot = data.stockLots.find((lot) => lot.id === e.target.value)
+            setForm({ ...form, stockLotId: e.target.value, lotNumber: stockLot?.lotNumber ?? form.lotNumber, expiryDate: stockLot?.expiryDate ?? form.expiryDate })
+          }}>
+            <option value="">ไม่เชื่อม / กรอกเอง</option>
+            {visibleStockLots.map((lot) => <option key={lot.id} value={lot.id}>{lot.itemCode} · {lot.itemName} · LOT {lot.lotNumber}</option>)}
+          </Select>
         </Field>
         <div className="col-span-3 flex flex-wrap gap-2">
           <Button disabled={busy}>{editingId ? 'บันทึกการแก้ไข' : 'เพิ่ม lot'}</Button>
@@ -2290,6 +2371,7 @@ function LotForm({ onSubmit, onUpdate, onToggle, onDelete, data }: { onSubmit: (
             controlMaterialId: item.controlMaterialId,
             lotNumber: item.lotNumber,
             expiryDate: item.expiryDate ?? '',
+            stockLotId: item.stockLotId ?? '',
           })
         }}
         onDelete={(id) => onDelete(id)}

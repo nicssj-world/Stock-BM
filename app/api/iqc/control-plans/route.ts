@@ -6,7 +6,7 @@ import { readJson, respond } from '@/lib/server/route'
 const schema = z.object({
   analyteIds: z.array(z.string().uuid()).min(1),
   instrumentId: z.string().uuid(),
-  requiredLevels: z.array(z.string().trim().min(1).max(80)).min(1),
+  requiredLevels: z.array(z.string().trim().min(1).max(80)).default([]),
   frequency: z.enum(['daily', 'per-run']),
   westgardRules: z.array(z.enum(['1-2s', '1-3s', '2-2s', 'R-4s', '4-1s', '10x'])).min(1),
   isActive: z.boolean().optional(),

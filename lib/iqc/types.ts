@@ -53,6 +53,15 @@ export interface IqcControlLot {
   lockOverrideReason: string | null
 }
 
+export interface IqcStockLotOption {
+  id: string
+  itemCode: string
+  itemName: string
+  lotNumber: string
+  expiryDate: string | null
+  equipmentIds: string[]
+}
+
 export interface IqcSpec {
   id: string
   controlLotId: string
@@ -278,6 +287,7 @@ export interface IqcWorkspace {
   instruments: IqcInstrument[]
   controlMaterials: IqcControlMaterial[]
   controlLots: IqcControlLot[]
+  stockLots: IqcStockLotOption[]
   specs: IqcSpec[]
   teaSpecs: IqcTeaSpec[]
   controlPlans: IqcControlPlan[]

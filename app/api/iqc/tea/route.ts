@@ -4,7 +4,7 @@ import { createTeaSpec } from '@/lib/server/iqc'
 import { readJson, respond } from '@/lib/server/route'
 
 const schema = z.object({
-  analyteId: z.string().uuid(),
+  analyteIds: z.array(z.string().uuid()).min(1),
   teaValue: z.number().positive(),
   teaMode: z.enum(['absolute', 'percent']),
   teaUnit: z.string().trim().max(40).nullable().optional(),

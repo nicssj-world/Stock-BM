@@ -20,6 +20,7 @@ import type {
   IqcRun,
   IqcSixSigmaRow,
   IqcSpec,
+  IqcStockLotOption,
   IqcTeaSpec,
   IqcUncertaintyBudget,
   IqcUncertaintyComponent,
@@ -30,6 +31,7 @@ import type {
 } from '@/lib/iqc/types'
 import { LAB_LOCK_MIN_POINTS } from '@/lib/iqc/types'
 import { cv, evaluateLatest, mean, sd, toStat, WESTGARD_RULES, type QcStatus, type WestgardRule } from '@/lib/iqc/westgard'
+import { normalizeTestSets } from '@/lib/iqc/test-sets'
 import { sigmaRating, sixSigma, teaPercent } from '@/lib/iqc/sixsigma'
 import { combinedRelative, divisorFor, expandedRelative, pooledRsd, relativeStandardUncertainty, standardUncertainty } from '@/lib/iqc/uncertainty'
 import type { BmActor } from '@/lib/bm/types'
@@ -40,6 +42,7 @@ import { HttpError } from '@/lib/server/errors'
 import { getAdminClient } from '@/lib/supabase/admin'
 
 type RecordRow = Record<string, unknown>
+const NO_REQUIRED_LEVEL = '__no_required_level__'
 
 function fail(error: { message: string } | null, message = 'IQC database operation failed') {
   if (error) throw new HttpError(400, error.message || message)
@@ -153,6 +156,16 @@ function hasLockedLabStats(spec: IqcSpec | undefined) {
   return Boolean(spec?.labLockedAt && spec.labMean != null && spec.labSd != null)
 }
 
+async function stockLotLabels(stockLotIds: string[]) {
+  const ids = [...new Set(stockLotIds.filter(Boolean))]
+  if (!ids.length) return new Map<string, { lotNumber: string; expiryDate: string | null }>()
+  const { data, error } = await getAdminClient().from('bm_stock_lots').select('id,lot_number,expiry_date').in('id', ids)
+  fail(error)
+  const rows = (data ?? []) as RecordRow[]
+  if (rows.length !== ids.length) throw new HttpError(400, 'ไม่พบ lot ที่เลือกในคลัง')
+  return new Map(rows.map((row) => [asString(row.id), { lotNumber: asString(row.lot_number), expiryDate: nullableString(row.expiry_date) }]))
+}
+
 function activeStats(spec: IqcSpec | undefined): { meanValue: number | null; sdValue: number | null } {
   if (!spec) return { meanValue: null, sdValue: null }
   if (spec.activeLimit === 'lab' && hasLockedLabStats(spec)) return { meanValue: spec.labMean, sdValue: spec.labSd }
@@ -180,6 +193,8 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     { data: lockAuditData, error: lockAuditError },
     { data: equipmentLinkData, error: equipmentLinkError },
     { data: equipmentData, error: equipmentError },
+    { data: stockLotData, error: stockLotError },
+    { data: stockItemEquipmentLinkData, error: stockItemEquipmentLinkError },
   ] = await Promise.all([
     admin.from('iqc_analytes').select('*').order('group_label', { nullsFirst: true }).order('code'),
     admin.from('iqc_instruments').select('*').order('code'),
@@ -198,6 +213,8 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     admin.from('bm_audit_logs').select('entity_id,actor_id,detail,created_at').eq('action', 'iqc.lot.lockAndClose').order('created_at', { ascending: false }),
     admin.from('bm_equipment_module_links').select('equipment_id,entity_id').eq('module', 'iqc').eq('entity_type', 'instrument'),
     admin.from('bm_equipment').select('id,code,name,model,status'),
+    admin.from('bm_stock_lots').select('id,item_id,lot_number,expiry_date,bm_stock_items!inner(item_code,name,is_active)').eq('bm_stock_items.is_active', true).order('created_at', { ascending: false }),
+    admin.from('bm_stock_item_equipment_links').select('stock_item_id,equipment_id'),
   ])
   fail(analyteError)
   fail(instrumentError)
@@ -216,6 +233,8 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   fail(lockAuditError)
   fail(equipmentLinkError)
   fail(equipmentError)
+  fail(stockLotError)
+  fail(stockItemEquipmentLinkError)
 
   const analytes = ((analyteData ?? []) as RecordRow[]).map(mapAnalyte)
   const allInstruments = ((instrumentData ?? []) as RecordRow[]).map(mapInstrument)
@@ -238,6 +257,16 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   // new runs and control plans must use a registered, linked equipment item.
   const instruments = allInstruments.filter((instrument) => Boolean(instrument.equipmentId))
   const controlMaterials = ((materialData ?? []) as RecordRow[]).map(mapMaterial)
+  const equipmentIdsByStockItem = new Map<string, string[]>()
+  for (const row of (stockItemEquipmentLinkData ?? []) as RecordRow[]) {
+    const stockItemId = asString(row.stock_item_id)
+    const equipmentId = asString(row.equipment_id)
+    if (stockItemId && equipmentId) equipmentIdsByStockItem.set(stockItemId, [...(equipmentIdsByStockItem.get(stockItemId) ?? []), equipmentId])
+  }
+  const stockLots: IqcStockLotOption[] = ((stockLotData ?? []) as RecordRow[]).map((row) => {
+    const item = row.bm_stock_items as RecordRow | null
+    return { id: asString(row.id), itemCode: asString(item?.item_code), itemName: asString(item?.name), lotNumber: asString(row.lot_number), expiryDate: nullableString(row.expiry_date), equipmentIds: equipmentIdsByStockItem.get(asString(row.item_id)) ?? [] }
+  })
   const materialMap = new Map(controlMaterials.map((m) => [m.id, m]))
   const lotRows = (lotData ?? []) as RecordRow[]
   const lockAuditByLotId = new Map<string, RecordRow>()
@@ -285,7 +314,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
       analyteName: analyte?.name ?? '-',
       instrumentId: asString(row.instrument_id),
       instrumentName: instrument?.name ?? '-',
-      requiredLevels: Array.isArray(row.required_levels) ? (row.required_levels as string[]) : [],
+      requiredLevels: Array.isArray(row.required_levels) ? (row.required_levels as string[]).filter((level) => level !== NO_REQUIRED_LEVEL) : [],
       frequency: asString(row.frequency) === 'per-run' ? 'per-run' : 'daily',
       westgardRules: parseWestgardRules(row.westgard_rules),
       isActive: Boolean(row.is_active),
@@ -595,6 +624,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     instruments,
     controlMaterials,
     controlLots,
+    stockLots,
     specs,
     teaSpecs,
     controlPlans,
@@ -634,7 +664,7 @@ export async function createAnalyte(input: {
     scale: input.scale,
     is_absolute: Boolean(input.isAbsolute),
     unit: clean(input.unit),
-    group_label: clean(input.groupLabel),
+    group_label: normalizeTestSets(input.groupLabel),
     created_by: actor.id,
   }).select('id').single()
   fail(error)
@@ -660,7 +690,7 @@ export async function updateAnalyte(id: string, input: {
   if (input.scale !== undefined) payload.scale = input.scale
   if (input.isAbsolute !== undefined) payload.is_absolute = Boolean(input.isAbsolute)
   if (input.unit !== undefined) payload.unit = clean(input.unit)
-  if (input.groupLabel !== undefined) payload.group_label = clean(input.groupLabel)
+  if (input.groupLabel !== undefined) payload.group_label = normalizeTestSets(input.groupLabel)
   if (input.isActive !== undefined) payload.is_active = input.isActive
   const { error } = await getAdminClient().from('iqc_analytes').update(payload).eq('id', id)
   fail(error)
@@ -740,10 +770,11 @@ export async function createControlLot(input: {
   stockLotId?: string | null
 }, actor: BmActor) {
   assertAdmin(actor)
+  const stockLot = input.stockLotId ? (await stockLotLabels([input.stockLotId])).get(input.stockLotId) : undefined
   const { data, error } = await getAdminClient().from('iqc_control_lots').insert({
     control_material_id: input.controlMaterialId,
-    lot_number: input.lotNumber.trim(),
-    expiry_date: input.expiryDate || null,
+    lot_number: stockLot?.lotNumber ?? input.lotNumber.trim(),
+    expiry_date: stockLot?.expiryDate ?? (input.expiryDate || null),
     stock_lot_id: input.stockLotId || null,
     created_by: actor.id,
   }).select('id').single()
@@ -755,10 +786,13 @@ export async function createControlLot(input: {
 export async function updateControlLot(id: string, input: { controlMaterialId?: string; lotNumber?: string; expiryDate?: string | null; stockLotId?: string | null; isActive?: boolean }, actor: BmActor) {
   assertAdmin(actor)
   const payload: Record<string, unknown> = {}
+  const stockLot = input.stockLotId ? (await stockLotLabels([input.stockLotId])).get(input.stockLotId) : undefined
   if (input.controlMaterialId !== undefined) payload.control_material_id = input.controlMaterialId
-  if (input.lotNumber !== undefined) payload.lot_number = input.lotNumber.trim()
-  if (input.expiryDate !== undefined) payload.expiry_date = input.expiryDate || null
+  if (input.lotNumber !== undefined) payload.lot_number = stockLot?.lotNumber ?? input.lotNumber.trim()
+  if (input.expiryDate !== undefined) payload.expiry_date = stockLot?.expiryDate ?? (input.expiryDate || null)
   if (input.stockLotId !== undefined) payload.stock_lot_id = input.stockLotId || null
+  if (stockLot && input.lotNumber === undefined) payload.lot_number = stockLot.lotNumber
+  if (stockLot && input.expiryDate === undefined) payload.expiry_date = stockLot.expiryDate
   if (input.isActive !== undefined) payload.is_active = input.isActive
   const { error } = await getAdminClient().from('iqc_control_lots').update(payload).eq('id', id)
   fail(error)
@@ -867,31 +901,31 @@ export async function upsertSpec(input: {
 }
 
 export async function createTeaSpec(input: {
-  analyteId: string
+  analyteIds: string[]
   teaValue: number
   teaMode: TeaMode
   teaUnit?: string | null
   sourceRef?: string | null
 }, actor: BmActor) {
   assertAdmin(actor)
-  // Deactivate any prior active TEa for this analyte so only one is current.
+  const analyteIds = [...new Set(input.analyteIds)]
   const admin = getAdminClient()
   const { error: deactivateError } = await admin
     .from('iqc_tea_specs')
     .update({ is_active: false, updated_at: new Date().toISOString() })
-    .eq('analyte_id', input.analyteId)
+    .in('analyte_id', analyteIds)
     .eq('is_active', true)
   fail(deactivateError)
-  const { data, error } = await admin.from('iqc_tea_specs').insert({
-    analyte_id: input.analyteId,
+  const { data, error } = await admin.from('iqc_tea_specs').insert(analyteIds.map((analyteId) => ({
+    analyte_id: analyteId,
     tea_value: input.teaValue,
     tea_mode: input.teaMode,
     tea_unit: clean(input.teaUnit),
     source_ref: clean(input.sourceRef),
     created_by: actor.id,
-  }).select('id').single()
+  }))).select('id')
   fail(error)
-  await writeAudit(actor, 'iqc.tea.create', 'iqc-tea-spec', asString((data as RecordRow).id), input)
+  await writeAudit(actor, 'iqc.tea.create', 'iqc-tea-spec', asString((data as RecordRow[] | null)?.[0]?.id), { ...input, analyteIds })
   return getIqcWorkspace(actor)
 }
 
@@ -1005,7 +1039,7 @@ export async function upsertControlPlan(input: {
   analyteId?: string
   analyteIds?: string[]
   instrumentId: string
-  requiredLevels: string[]
+  requiredLevels?: string[]
   frequency: 'daily' | 'per-run'
   westgardRules: WestgardRule[]
   isActive?: boolean
@@ -1013,15 +1047,14 @@ export async function upsertControlPlan(input: {
   assertAdmin(actor)
   const analyteIds = [...new Set([...(input.analyteIds ?? []), input.analyteId ?? ''].filter(Boolean))]
   if (!analyteIds.length) throw new HttpError(400, 'เลือก Analyte หรือชุดทดสอบอย่างน้อย 1 รายการ')
-  const requiredLevels = [...new Set(input.requiredLevels.map((level) => level.trim()).filter(Boolean))]
-  if (!requiredLevels.length) throw new HttpError(400, 'Control plan ต้องมี Control level อย่างน้อย 1 ระดับ')
+  const requiredLevels = [...new Set((input.requiredLevels ?? []).map((level) => level.trim()).filter(Boolean))]
   const westgardRules = [...new Set(input.westgardRules)].filter((rule): rule is WestgardRule => (WESTGARD_RULES as readonly string[]).includes(rule))
   if (!westgardRules.length) throw new HttpError(400, 'เลือก Westgard rule อย่างน้อย 1 ข้อ')
   const admin = getAdminClient()
   const { data, error } = await admin.from('iqc_control_plans').upsert(analyteIds.map((analyteId) => ({
     analyte_id: analyteId,
     instrument_id: input.instrumentId,
-    required_levels: requiredLevels,
+    required_levels: requiredLevels.length ? requiredLevels : [NO_REQUIRED_LEVEL],
     frequency: input.frequency,
     westgard_rules: westgardRules,
     is_active: input.isActive ?? true,
@@ -1031,8 +1064,14 @@ export async function upsertControlPlan(input: {
   fail(error)
   const { data: resultRows, error: resultError } = await admin.from('iqc_result_values').select('control_lot_id,analyte_id').in('analyte_id', analyteIds)
   fail(resultError)
+  const affectedCharts = new Map<string, { controlLotId: string; analyteId: string }>()
   for (const row of resultRows ?? []) {
-    await recalculateChartStatuses(asString((row as RecordRow).control_lot_id), asString((row as RecordRow).analyte_id))
+    const controlLotId = asString((row as RecordRow).control_lot_id)
+    const analyteId = asString((row as RecordRow).analyte_id)
+    affectedCharts.set(`${controlLotId}:${analyteId}`, { controlLotId, analyteId })
+  }
+  for (const { controlLotId, analyteId } of affectedCharts.values()) {
+    await recalculateChartStatuses(controlLotId, analyteId)
   }
   const id = asString((data as RecordRow[] | null)?.[0]?.id)
   await writeAudit(actor, 'iqc.controlPlan.upsert', 'iqc-control-plan', id, { ...input, analyteIds, requiredLevels, westgardRules })
@@ -1049,6 +1088,7 @@ export async function createRun(input: {
 }, actor: BmActor) {
   if (!input.values.length) throw new HttpError(400, 'At least one result value is required')
   const admin = getAdminClient()
+  const consumableStockLots = await stockLotLabels((input.consumables ?? []).map((consumable) => consumable.stockLotId ?? ''))
 
   const analyteIds = [...new Set(input.values.map((v) => v.analyteId))]
   const lotIds = [...new Set(input.values.map((v) => v.controlLotId))]
@@ -1077,7 +1117,7 @@ export async function createRun(input: {
   const lotLevelById = new Map(((lotRows ?? []) as RecordRow[]).map((row) => [asString(row.id), materialLevelById.get(asString(row.control_material_id)) ?? null]))
   const plans: IqcControlPlan[] = ((planRows ?? []) as RecordRow[]).map((row) => ({
     id: asString(row.id), analyteId: asString(row.analyte_id), analyteCode: '', analyteName: '', instrumentId: asString(row.instrument_id), instrumentName: '',
-    requiredLevels: Array.isArray(row.required_levels) ? (row.required_levels as string[]) : [], frequency: asString(row.frequency) === 'per-run' ? 'per-run' : 'daily',
+    requiredLevels: Array.isArray(row.required_levels) ? (row.required_levels as string[]).filter((level) => level !== NO_REQUIRED_LEVEL) : [], frequency: asString(row.frequency) === 'per-run' ? 'per-run' : 'daily',
     westgardRules: parseWestgardRules(row.westgard_rules), isActive: Boolean(row.is_active),
   }))
   for (const plan of plans.filter((item) => item.frequency === 'per-run')) {
@@ -1114,7 +1154,7 @@ export async function createRun(input: {
       input.consumables.map((c) => ({
         run_id: runId,
         kind: c.kind,
-        lot_number: c.lotNumber.trim(),
+        lot_number: consumableStockLots.get(c.stockLotId ?? '')?.lotNumber ?? c.lotNumber.trim(),
         stock_lot_id: c.stockLotId || null,
         applies_scope: c.appliesScope ?? 'all',
         bead_count_per_tube: c.beadCountPerTube ?? null,
@@ -1488,7 +1528,13 @@ async function recalculateChartStatuses(controlLotId: string, analyteId: string)
       z = point.z
       violated = point.violatedRules
       status = point.status
-      if (status !== 'rejected') acceptedSeries.push(stat)
+      if (status !== 'rejected') {
+        acceptedSeries.push(stat)
+      } else {
+        // A rejected run is not part of a valid consecutive trend. Keeping the
+        // prior accepted series would let 4-1s/10x span across a failed run.
+        acceptedSeries.length = 0
+      }
     } else if (row.stat_value != null) {
       acceptedSeries.push(Number(row.stat_value))
     }
