@@ -24,7 +24,7 @@ import type {
   EqaWorkspace,
 } from '@/lib/eqa/types'
 import { EQA_DUE_SOON_DAYS } from '@/lib/eqa/types'
-import { ROUND_STATUS_ORDER, annualPlanReadiness, annualSummaryReadiness, deriveRoundSummaryOutcome, displayRoundLabel, missingPlannedRounds, roundReceiptReadiness } from '@/lib/eqa/rules'
+import { ROUND_STATUS_ORDER, annualPlanReadiness, annualSummaryReadiness, deriveRoundSummaryOutcome, displayRoundLabel, plannedRoundDueDate, plannedRoundLabel, roundReceiptReadiness } from '@/lib/eqa/rules'
 import type { BmActor } from '@/lib/bm/types'
 import { daysUntil, todayBangkok } from '@/lib/bm/rules'
 import { writeAudit } from '@/lib/server/audit'
@@ -478,31 +478,41 @@ export async function generateRoundsFromPlanItem(planItemId: string, actor: BmAc
   const expectedRounds = nullableNumber(item.expected_rounds)
   if (expectedRounds != null && occurrences.length !== expectedRounds) throw new HttpError(400, 'จำนวนเดือนในแผนยังไม่ตรงกับจำนวนครั้ง/ปี — แก้แผนก่อน')
 
-  const { data: existingRoundRows, error: existingError } = await admin.from('eqa_rounds').select('id,sequence_no,result_due_date,sample_received_date,created_at').eq('plan_item_id', planItemId)
+  const { data: existingRoundRows, error: existingError } = await admin.from('eqa_rounds').select('id,sequence_no,result_due_date,sample_received_date,submission_date,created_at').eq('plan_item_id', planItemId)
   fail(existingError)
   const existingRounds = (existingRoundRows ?? []) as RecordRow[]
 
-  // Adopt hand-created rounds (sequence_no is null) into the sequence first,
-  // ordered by their real-world timeline, so generation never duplicates a
-  // round someone already created by hand -- it just fills in the rest.
+  // Adopt manually-created rounds into the occurrence for their real-world
+  // month. Counting them from one incorrectly turns a July round into round
+  // one when the plan has January, March, May, July, ... occurrences.
+  const planned = occurrences
+    .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0) || Number(a.planned_month) - Number(b.planned_month))
+    .map((occurrence, index) => ({ sequence: index + 1, plannedMonth: Number(occurrence.planned_month) }))
   const alreadySequenced = existingRounds.filter((round) => round.sequence_no != null)
+  const usedSequences = new Set(alreadySequenced.map((round) => Number(round.sequence_no)))
   const toAdopt = existingRounds.filter((round) => round.sequence_no == null).sort((a, b) => {
-    const dueA = nullableString(a.result_due_date); const dueB = nullableString(b.result_due_date)
-    if (dueA && dueB) return dueA.localeCompare(dueB)
-    if (dueA) return -1
-    if (dueB) return 1
-    const receivedA = nullableString(a.sample_received_date); const receivedB = nullableString(b.sample_received_date)
-    if (receivedA && receivedB) return receivedA.localeCompare(receivedB)
+    const dateA = nullableString(a.sample_received_date) ?? nullableString(a.submission_date) ?? nullableString(a.result_due_date)
+    const dateB = nullableString(b.sample_received_date) ?? nullableString(b.submission_date) ?? nullableString(b.result_due_date)
+    if (dateA && dateB) return dateA.localeCompare(dateB)
+    if (dateA) return -1
+    if (dateB) return 1
     return asString(a.created_at).localeCompare(asString(b.created_at))
   })
-  let nextSequence = alreadySequenced.length + 1
   for (const round of toAdopt) {
-    fail((await admin.from('eqa_rounds').update({ sequence_no: nextSequence }).eq('id', asString(round.id))).error)
-    nextSequence += 1
+    const eventDate = nullableString(round.sample_received_date) ?? nullableString(round.submission_date) ?? nullableString(round.result_due_date)
+    const eventMonth = eventDate?.startsWith(`${planYear}-`) ? Number(eventDate.slice(5, 7)) : null
+    const sequence = planned.find((occurrence) => occurrence.plannedMonth === eventMonth && !usedSequences.has(occurrence.sequence))?.sequence
+      ?? planned.find((occurrence) => !usedSequences.has(occurrence.sequence))?.sequence
+    if (sequence == null) break
+    fail((await admin.from('eqa_rounds').update({ sequence_no: sequence }).eq('id', asString(round.id))).error)
+    usedSequences.add(sequence)
   }
 
-  const totalExisting = alreadySequenced.length + toAdopt.length
-  const missing = missingPlannedRounds({ occurrences: occurrences.map((row) => ({ id: '', planItemId, plannedMonth: Number(row.planned_month), responsibleUserId: null, responsibleName: null, responsibleCode: '', sortOrder: Number(row.sort_order ?? 0) })) }, totalExisting, planYear)
+  const missing = planned.filter((occurrence) => !usedSequences.has(occurrence.sequence)).map((occurrence) => ({
+    ...occurrence,
+    roundLabel: plannedRoundLabel(occurrence.sequence, planYear),
+    resultDueDate: plannedRoundDueDate(planYear, occurrence.plannedMonth),
+  }))
   if (!missing.length) throw new HttpError(409, 'มี round ครบตามแผนแล้ว')
 
   const rows = missing.map((round) => ({

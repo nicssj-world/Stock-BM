@@ -17,4 +17,11 @@ describe('EQA round generation from the annual plan', () => {
   it('posts to the plan-item rounds endpoint', () => {
     expect(button).toContain('/api/eqa/plan-items/${item.id}/rounds')
   })
+
+  it('matches manually-created rounds to their planned month before generating the remaining rounds', () => {
+    const server = fs.readFileSync(new URL('../lib/server/eqa.ts', import.meta.url), 'utf8')
+    expect(server).toContain("nullableString(round.sample_received_date) ?? nullableString(round.submission_date)")
+    expect(server).toContain('occurrence.plannedMonth === eventMonth')
+    expect(server).toContain('planned.filter((occurrence) => !usedSequences.has(occurrence.sequence))')
+  })
 })
