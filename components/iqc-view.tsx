@@ -1072,10 +1072,11 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
             </div>
           </div>
           {testSet ? <p className={`text-xs ${lotMappingWarning ? 'text-[#c02a37]' : 'text-[#176d65]'}`}>{lotMappingWarning || 'ระบบจับคู่ Control lot ตาม Level ของแต่ละ analyte ให้อัตโนมัติ'}</p> : null}
-          {hasLogScaleResult ? <p className="rounded-md border border-[#b9ded8] bg-[#f1faf8] px-3 py-2 text-xs text-[#176d65]">สำหรับ Viral load ให้กรอกค่า <strong>Copies/mL</strong> — ระบบคำนวณ log10 เพื่อใช้พล็อตกราฟและประเมิน Westgard ให้อัตโนมัติ</p> : null}
+          {hasLogScaleResult ? <p className="rounded-md border border-[#b9ded8] bg-[#f1faf8] px-3 py-2 text-xs text-[#176d65]">สำหรับ Viral load ให้กรอกค่า <strong>Copies/mL หรือ IU/mL</strong> ตาม unit ของ analyte — ระบบคำนวณ log10 เพื่อใช้พล็อตกราฟและประเมิน Westgard ให้อัตโนมัติ</p> : null}
           <div className="space-y-2">
             {rows.map((row, i) => {
               const analyte = analyteById.get(row.analyteId)
+              const isBelowLodNormal = /(?:HIV|HBV|HCV)-VL\s*\(Normal\)$/i.test(analyte?.code ?? '')
               return (
                 <div key={row.id} className="grid grid-cols-[1.2fr_1.2fr_0.9fr_auto] items-center gap-1.5">
                   <Select className="h-10" value={row.controlLotId} disabled={!instrumentId || Boolean(testSet && row.controlLotId)} onChange={(e) => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, controlLotId: e.target.value } : x)))}>
@@ -1095,7 +1096,11 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
                       </option>
                     ))}
                   </Select>
-                  <Input className="mono h-10 text-base font-bold tabular-nums" disabled={!instrumentId} inputMode={analyte?.dataType === 'qualitative' ? 'text' : 'decimal'} type={analyte?.dataType === 'qualitative' ? 'text' : 'number'} step="any" placeholder={analyte?.dataType === 'qualitative' ? 'valid/pos…' : analyte?.scale === 'log10' ? 'Copies/mL' : 'ค่า'} value={row.value} onChange={(e) => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} />
+                  {isBelowLodNormal ? <Select className="h-10 text-sm" disabled={!instrumentId} value={row.value} onChange={(e) => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}>
+                    <option value="">เลือกผล Normal…</option>
+                    <option value="Not detected">ต่ำกว่า LOD / Not detected</option>
+                    <option value="Detected / ≥ LOD">Detected / ≥ LOD</option>
+                  </Select> : <Input className="mono h-10 text-base font-bold tabular-nums" disabled={!instrumentId} inputMode={analyte?.dataType === 'qualitative' ? 'text' : 'decimal'} type={analyte?.dataType === 'qualitative' ? 'text' : 'number'} step="any" placeholder={analyte?.dataType === 'qualitative' ? 'valid/pos…' : analyte?.scale === 'log10' ? (/^(?:HBV|HCV)-VL/i.test(analyte?.code ?? '') ? 'IU/mL' : analyte.unit ?? 'Copies/mL') : 'ค่า'} value={row.value} onChange={(e) => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} />}
                   <button type="button" className="rounded p-1.5 text-[#c02a37] hover:bg-[#fff0f1]" aria-label="ลบแถว" onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}>
                     <Trash2 className="size-4" />
                   </button>

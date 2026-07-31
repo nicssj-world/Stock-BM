@@ -37,7 +37,7 @@ function SavedFlash({ show }: { show: boolean }) {
 function copiesToLog10(value: string | null) {
   const raw = (value ?? '').trim()
   if (!raw || /^[<>]/.test(raw)) return null
-  const copies = Number(raw.replace(/,/g, '').replace(/\s*copies\/?ml\s*$/i, ''))
+  const copies = Number(raw.replace(/,/g, '').replace(/\s*(?:copies|iu)\/?ml\s*$/i, ''))
   return Number.isFinite(copies) && copies > 0 ? Math.log10(copies) : null
 }
 

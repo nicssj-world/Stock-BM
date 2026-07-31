@@ -68,6 +68,21 @@ function eqaNumericValue(value: unknown) {
 function clean(value: string | null | undefined) {
   return value?.trim() || null
 }
+function isBelowLodNormal(analyte: IqcAnalyte | undefined) {
+  return analyte?.dataType === 'qualitative' && /(?:HIV|HBV|HCV)-VL\s*\(Normal\)$/i.test(analyte.code)
+}
+function belowLodLimit(analyte: IqcAnalyte | undefined) {
+  if (!analyte) return null
+  if (/^HBV-VL\s*\(Normal\)$/i.test(analyte.code)) return 10
+  if (/^HCV-VL\s*\(Normal\)$/i.test(analyte.code)) return 15
+  return null
+}
+function isBelowLodResult(value: string | null | undefined, limit: number | null) {
+  const actual = value?.trim() ?? ''
+  if (/^(?:not\s*detected|negative|<\s*LOD)$/i.test(actual)) return true
+  const match = actual.match(/^<\s*(\d+(?:\.\d+)?)\s*(?:copies\/?ml|iu\/?ml)?$/i)
+  return Boolean(match && (limit == null || Number(match[1]) === limit))
+}
 function assertAdmin(actor: BmActor) {
   // Staff and Admin intentionally share full IQC access. Assistant remains HPV-only,
   // and must be blocked here too so direct API calls cannot bypass the page/nav guard.
@@ -414,6 +429,9 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     const analyte = analyteMap.get(analyteId)
     const lot = lotMap.get(controlLotId)
     if (!analyte || !lot) continue
+    // Negative / below-LOD viral-load controls are qualitative checks, not
+    // Levey-Jennings data points.
+    if (analyte.dataType === 'qualitative') continue
     const spec = specByKey.get(key)
     const labStatisticsLocked = hasLockedLabStats(spec)
     const { meanValue, sdValue } = activeStats(spec)
@@ -518,7 +536,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   const sixSigmaRows: IqcSixSigmaRow[] = []
   for (const chart of charts) {
     const tea = teaByAnalyte.get(chart.analyteId)
-    if (!tea) continue
+    if (!tea || chart.dataType === 'qualitative') continue
     const teaPct = chart.mean != null ? teaPercent(tea.teaValue, tea.teaMode, chart.mean) : null
     const eqaBias = parseTestSets(chart.groupLabel).map((testSet) => eqaBiasByTestSet.get(testSet)).find(Boolean)
     // Sigma is only meaningful with a verified EQA bias. Do not silently
@@ -1191,7 +1209,10 @@ export async function createRun(input: {
       const spec = specByKey.get(key)
       if (analyte?.dataType === 'qualitative') {
         const expected = spec?.expectedQualitative
-        const status: QcStatus = expected && value.qualitativeValue && expected.trim().toLowerCase() !== value.qualitativeValue.trim().toLowerCase() ? 'rejected' : 'accepted'
+        const actual = clean(value.qualitativeValue)
+        const status: QcStatus = isBelowLodNormal(analyte)
+          ? (isBelowLodResult(actual, belowLodLimit(analyte)) ? 'accepted' : 'rejected')
+          : expected && actual && expected.trim().toLowerCase() !== actual.toLowerCase() ? 'rejected' : 'accepted'
         return {
           run_id: runId,
           control_lot_id: value.controlLotId,
