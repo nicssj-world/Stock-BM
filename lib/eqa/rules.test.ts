@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analyteScopeOptions, annualPlanReadiness, annualSummaryIssues, annualSummaryReadiness, deriveRoundSummaryOutcome, missingPlannedRounds, plannedRoundDueDate, plannedRoundLabel, roundProgress, roundReceiptIssues, roundReceiptReadiness } from '@/lib/eqa/rules'
+import { analyteScopeOptions, annualPlanReadiness, annualSummaryIssues, annualSummaryReadiness, deriveRoundSummaryOutcome, displayRoundLabel, missingPlannedRounds, plannedRoundDueDate, plannedRoundLabel, roundProgress, roundReceiptIssues, roundReceiptReadiness } from '@/lib/eqa/rules'
 import type { EqaPlanItem, EqaRound } from '@/lib/eqa/types'
 
 const item: EqaPlanItem = {
@@ -116,6 +116,16 @@ describe('plannedRoundLabel / plannedRoundDueDate', () => {
     expect(plannedRoundDueDate(2026, 1)).toBe('2026-01-31')
     expect(plannedRoundDueDate(2026, 2)).toBe('2026-02-28')
     expect(plannedRoundDueDate(2026, 12)).toBe('2026-12-31')
+  })
+})
+
+describe('displayRoundLabel', () => {
+  it('uses the planned sequence when a provider code duplicates the plan-item name', () => {
+    expect(displayRoundLabel({ roundLabel: 'COE#143', planItemName: 'COE#143', sequenceNo: 1, planYear: 2026 })).toBe('ครั้งที่ 1/2569')
+  })
+
+  it('preserves a distinct manually-entered round label', () => {
+    expect(displayRoundLabel({ roundLabel: 'COE#143', planItemName: 'COE#142', sequenceNo: 1, planYear: 2026 })).toBe('COE#143')
   })
 })
 

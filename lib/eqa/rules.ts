@@ -27,6 +27,17 @@ export function plannedRoundLabel(sequence: number, planYear: number) {
   return `ครั้งที่ ${sequence}/${planYear + 543}`
 }
 
+// Provider sample-set codes are sometimes used as a manually-created round
+// label (for example, COE#143). When that is also the plan-item name, showing
+// both values in the round header is redundant. The materialised sequence is
+// the unambiguous label users need to distinguish each planned occurrence.
+export function displayRoundLabel(round: { roundLabel: string; planItemName: string | null; planYear: number | null; sequenceNo: number | null }) {
+  if (round.sequenceNo != null && round.planYear != null && round.planItemName?.trim() === round.roundLabel.trim()) {
+    return plannedRoundLabel(round.sequenceNo, round.planYear)
+  }
+  return round.roundLabel
+}
+
 export function plannedRoundDueDate(planYear: number, plannedMonth: number) {
   return new Date(Date.UTC(planYear, plannedMonth, 0)).toISOString().slice(0, 10)
 }

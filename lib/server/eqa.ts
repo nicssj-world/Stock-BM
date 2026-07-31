@@ -24,7 +24,7 @@ import type {
   EqaWorkspace,
 } from '@/lib/eqa/types'
 import { EQA_DUE_SOON_DAYS } from '@/lib/eqa/types'
-import { ROUND_STATUS_ORDER, annualPlanReadiness, annualSummaryReadiness, deriveRoundSummaryOutcome, missingPlannedRounds, roundReceiptReadiness } from '@/lib/eqa/rules'
+import { ROUND_STATUS_ORDER, annualPlanReadiness, annualSummaryReadiness, deriveRoundSummaryOutcome, displayRoundLabel, missingPlannedRounds, roundReceiptReadiness } from '@/lib/eqa/rules'
 import type { BmActor } from '@/lib/bm/types'
 import { daysUntil, todayBangkok } from '@/lib/bm/rules'
 import { writeAudit } from '@/lib/server/audit'
@@ -229,11 +229,13 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
       else if (dueInDays <= EQA_DUE_SOON_DAYS) reminder = 'due-soon'
     }
     const id = asString(row.id)
+    const sequenceNo = nullableNumber(row.sequence_no)
+    const planYear = planItem ? planYearById.get(planItem.planId) ?? null : null
     const state = stateFor('round-receipt', id)
     const round: EqaRound = {
       id, schemeId: asString(row.scheme_id), schemeName: scheme?.name ?? '-', providerName: planItem?.providerName ?? scheme?.providerName ?? '-', equipment: scheme?.equipment ?? [],
-      planItemId: nullableString(row.plan_item_id), planYear: planItem ? planYearById.get(planItem.planId) ?? null : null, planItemName: planItem?.sampleSetName ?? null,
-      roundLabel: asString(row.round_label), externalSentDate: nullableString(row.external_sent_date), sampleReceivedDate: nullableString(row.sample_received_date), resultDueDate: due,
+      planItemId: nullableString(row.plan_item_id), planYear, planItemName: planItem?.sampleSetName ?? null,
+      roundLabel: displayRoundLabel({ roundLabel: asString(row.round_label), planItemName: planItem?.sampleSetName ?? null, planYear, sequenceNo }), externalSentDate: nullableString(row.external_sent_date), sampleReceivedDate: nullableString(row.sample_received_date), resultDueDate: due,
       submissionDate: nullableString(row.submission_date), status, note: nullableString(row.note), packageCondition: nullableString(row.package_condition) as EqaCondition | null,
       packageNote: nullableString(row.package_note), receivedTemperature: nullableString(row.received_temperature) as EqaTemperatureCondition | null,
       receivedTemperatureNote: nullableString(row.received_temperature_note), sampleCondition: nullableString(row.sample_condition) as EqaCondition | null,
@@ -426,8 +428,25 @@ export async function createPlanItem(input: EqaPlanItemInput, actor: BmActor) {
   await writeAudit(actor, 'eqa.planItem.create', 'eqa-plan-item', id, { ...input }); return getEqaWorkspace(actor)
 }
 export async function updatePlanItem(id: string, input: EqaPlanItemInput, actor: BmActor) {
-  assertAdmin(actor); fail((await getAdminClient().from('eqa_plan_items').update(planItemPayload(input)).eq('id', id)).error); await replacePlanOccurrences(id, input.occurrences, actor)
-  await invalidateDocument('annual-plan', input.planId); await invalidateDocument('annual-summary', id); await writeAudit(actor, 'eqa.planItem.update', 'eqa-plan-item', id, { ...input }); return getEqaWorkspace(actor)
+  assertAdmin(actor)
+  const admin = getAdminClient()
+  // A round stores its scheme for efficient filtering and to determine the
+  // analyte/equipment shown while recording its results. Keep that denormalized
+  // value in step with its annual-plan item when the plan is corrected.
+  const { data: linkedRounds, error: linkedRoundsError } = await admin.from('eqa_rounds').select('id').eq('plan_item_id', id)
+  fail(linkedRoundsError)
+  fail((await admin.from('eqa_plan_items').update(planItemPayload(input)).eq('id', id)).error)
+  await replacePlanOccurrences(id, input.occurrences, actor)
+  fail((await admin.from('eqa_rounds').update({ scheme_id: input.schemeId, updated_at: new Date().toISOString() }).eq('plan_item_id', id)).error)
+
+  // The linked result rows remain intact (they are the recorded observations),
+  // but their parent round now reflects the updated plan. Its receipt approval
+  // must be re-confirmed if a plan detail changed.
+  for (const round of (linkedRounds ?? []) as RecordRow[]) await invalidateDocument('round-receipt', asString(round.id))
+  await invalidateDocument('annual-plan', input.planId)
+  await invalidateDocument('annual-summary', id)
+  await writeAudit(actor, 'eqa.planItem.update', 'eqa-plan-item', id, { ...input })
+  return getEqaWorkspace(actor)
 }
 export async function deletePlanItem(id: string, actor: BmActor) {
   assertAdmin(actor); const admin = getAdminClient(); const { data, error } = await admin.from('eqa_plan_items').select('plan_id').eq('id', id).maybeSingle(); fail(error); if (!data) throw new HttpError(404, 'Plan item not found')
