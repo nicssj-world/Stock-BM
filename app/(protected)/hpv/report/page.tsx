@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { requirePageActor } from '@/lib/server/auth'
 import { getHpvWorkspace } from '@/lib/server/hpv'
+import { PrintButton } from '@/components/print-button'
 
 function formatNow() {
   return new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Bangkok' }).format(new Date())
@@ -26,7 +27,7 @@ export default async function HpvSummaryReportPage() {
     <main className="report-page">
       <div className="toolbar print-hidden">
         <Link href="/hpv" className="back-link">กลับ HPV Genotype</Link>
-        <button id="print-report" type="button">Print / Save PDF</button>
+        <PrintButton />
       </div>
 
       <section className="sheet">
@@ -91,7 +92,6 @@ export default async function HpvSummaryReportPage() {
         <p className="footer-note">เอกสารนี้เป็นสมบัติของกลุ่มงานเทคนิคการแพทย์ โรงพยาบาลชลบุรี ห้ามนำออกไปใช้ภายนอกหรือทำซ้ำโดยไม่ได้รับอนุญาต</p>
       </section>
 
-      <script dangerouslySetInnerHTML={{ __html: "document.getElementById('print-report')?.addEventListener('click',()=>window.print())" }} />
       <style>{`
         @page { size: A4 landscape; margin: 12mm; }
         body { background: #e9eef0; }

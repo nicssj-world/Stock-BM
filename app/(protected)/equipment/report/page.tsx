@@ -7,6 +7,7 @@ import {
   equipmentStatusLabel,
 } from "@/lib/equipment/rules";
 import { formatDate, formatDateTime } from "@/lib/bm/rules";
+import { PrintButton } from "@/components/print-button";
 
 export default async function EquipmentReportPage({
   searchParams,
@@ -103,9 +104,7 @@ export default async function EquipmentReportPage({
           />
           <button type="submit">กรอง</button>
         </form>
-        <button id="print-report" type="button">
-          Print / Save PDF
-        </button>
+        <PrintButton />
       </div>
       <section className="sheet">
         <header className="report-head">
@@ -234,12 +233,6 @@ export default async function EquipmentReportPage({
           ไม่รวมในรายงานทางการ
         </footer>
       </section>
-      <script
-        dangerouslySetInnerHTML={{
-          __html:
-            "document.getElementById('print-report')?.addEventListener('click',()=>window.print())",
-        }}
-      />
       <style>{`
     @page { size: A4 portrait; margin: 10mm; }
     body { background:#e9eef0; font-family:'Noto Sans Thai',sans-serif; color:#173d50; }

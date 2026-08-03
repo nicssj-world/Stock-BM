@@ -48,6 +48,7 @@ import type {
   EquipmentWorkspace,
 } from "@/lib/equipment/types";
 import { AttachmentList } from "@/components/attachments";
+import { FacsMaintenance } from "@/components/facs-maintenance";
 import {
   api,
   Button,
@@ -790,7 +791,33 @@ function Registry({
                 </div>
               </div>
             </div>
-              <div id="selected-equipment-details">
+            {selected.photos.length ? (
+              <div className="grid grid-cols-2 gap-3 border-b border-[#edf2f2] p-4 sm:grid-cols-3">
+                {selected.photos.map((photo) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={photo.id}
+                    src={`/api/attachments/${photo.id}`}
+                    alt={`รูป ${selected.name}`}
+                    className="aspect-[4/3] w-full rounded-xl border border-[#d9e5e5] bg-white object-cover"
+                  />
+                ))}
+              </div>
+            ) : null}
+            <div className="border-b border-[#edf2f2] p-4">
+              <AttachmentList
+                module="equipment"
+                entityType="equipment"
+                entityId={selected.id}
+                kind="equipment-photo"
+                canDelete={actor.role === "Admin"}
+                canUpload={actor.role === "Admin"}
+                accept="image/jpeg,image/png,image/webp"
+                label="รูปเครื่องมือ"
+                onChanged={onAttachmentsChanged}
+              />
+            </div>
+            <div id="selected-equipment-details">
                 <div className="grid gap-3 p-4 sm:grid-cols-3">
                   <Info label="Serial No." value={selected.serialNumber} />
                   <Info label="Asset No." value={selected.assetNumber} />
@@ -850,31 +877,8 @@ function Registry({
                 </div>
               </div>
           </Card>
+          {selected.code.toUpperCase() === "FACSLYRIC" || selected.name.toLowerCase().includes("facslyric") ? <FacsMaintenance actor={actor} /> : null}
           <section aria-label="รายละเอียดเครื่องมือเพิ่มเติม" className="space-y-4">
-              {selected.photos.length ? (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  {selected.photos.map((photo) => (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      key={photo.id}
-                      src={`/api/attachments/${photo.id}`}
-                      alt={`รูป ${selected.name}`}
-                      className="aspect-[4/3] w-full rounded-xl border border-[#d9e5e5] bg-white object-cover"
-                    />
-                  ))}
-                </div>
-              ) : null}
-              <AttachmentList
-                module="equipment"
-                entityType="equipment"
-                entityId={selected.id}
-                kind="equipment-photo"
-                canDelete={actor.role === "Admin"}
-                canUpload={actor.role === "Admin"}
-                accept="image/jpeg,image/png,image/webp"
-                label="รูปเครื่องมือ"
-                onChanged={onAttachmentsChanged}
-              />
               <Card className="overflow-hidden">
             <div className="flex items-center gap-3 border-b border-[#e1eaeb] bg-[#f7fbfb] px-4 py-3">
               <span className="grid size-9 place-items-center rounded-lg bg-[#e7f7f4] text-[#0b7f76]">

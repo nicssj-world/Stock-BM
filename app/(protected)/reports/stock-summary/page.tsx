@@ -4,6 +4,7 @@ import type { StockItem } from '@/lib/bm/types'
 import { filterStockWorkspaceByEquipment } from '@/lib/bm/stock-equipment-filter'
 import { requireFullPageActor } from '@/lib/server/auth'
 import { getStockWorkspace } from '@/lib/server/stock'
+import { PrintButton } from '@/components/print-button'
 
 type RiskTone = 'danger' | 'warning' | 'low'
 
@@ -53,7 +54,7 @@ export default async function StockSummaryReportPage({ searchParams }: { searchP
           </select>
           <button type="submit">กรอง</button>
         </form>
-        <button id="print-stock-report" type="button">Print / Save PDF</button>
+        <PrintButton id="print-stock-report" />
       </div>
 
       <section className="stock-report-sheet">
@@ -110,7 +111,6 @@ export default async function StockSummaryReportPage({ searchParams }: { searchP
         <footer className="stock-report-footer">เอกสารนี้สร้างจากข้อมูลคลัง ณ เวลาที่ระบุ · ใช้สำหรับทบทวนสถานะและติดตามความเสี่ยงของ stock</footer>
       </section>
 
-      <script dangerouslySetInnerHTML={{ __html: "document.getElementById('print-stock-report')?.addEventListener('click',()=>window.print())" }} />
       <style>{`
         @page { size: A4 landscape; margin: 10mm; }
         body { background: #e9eef0; }

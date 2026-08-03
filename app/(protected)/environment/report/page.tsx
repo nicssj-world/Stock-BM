@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { requireFullPageActor } from '@/lib/server/auth'
 import { getEnvironmentWorkspace } from '@/lib/server/environment'
 import type { EnvPeriodIndex, EnvReading, EnvUnit } from '@/lib/env/types'
+import { PrintButton } from '@/components/print-button'
 
 function currentYearMonth() {
   const now = new Date()
@@ -134,7 +135,7 @@ export default async function EnvMonthlyReportPage({ searchParams }: { searchPar
     <main className="report-page">
       <div className="toolbar print-hidden">
         <Link href="/environment" className="back-link">กลับ Temperature</Link>
-        <button id="print-report" type="button">Print / Save PDF</button>
+        <PrintButton />
       </div>
 
       {!unit ? (
@@ -265,7 +266,6 @@ export default async function EnvMonthlyReportPage({ searchParams }: { searchPar
         </section>
       ) : null}
 
-      <script dangerouslySetInnerHTML={{ __html: "document.getElementById('print-report')?.addEventListener('click',()=>window.print())" }} />
       <style>{`
         @page { size: A4 landscape; margin: 8mm; }
         body { background: #e9eef0; }

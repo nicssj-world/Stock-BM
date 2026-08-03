@@ -69,6 +69,20 @@ npm run build
 
 การแจ้งเตือนกำหนดส่งผลจะคำนวณเฉพาะ round ที่ยังเปิดอยู่ (`scheduled` และ `received`) ส่วนรายงานสรุปรายปีจะพร้อมอนุมัติเมื่อ round มีสถานะ `evaluated` หรือ `closed` พร้อมผลการประเมินและ corrective action ที่ปิดครบในกรณีผลไม่ผ่าน
 
+## EQA: รหัสย่อผู้รับผิดชอบ
+
+ในแผน EQA ช่อง “เดือน/ผู้รับผิดชอบ” ใช้รหัสย่อ (Initial) ที่เติมอัตโนมัติเมื่อเลือกผู้ใช้ แต่ยังแก้ไขในรายการแผนได้ หากต้องใช้รหัสเฉพาะของงานนั้น
+
+| ชื่อผู้ใช้ | รหัสย่อ |
+| --- | --- |
+| Siriwat J | `SJ` |
+| Siritorn C | `SC` |
+| Somrat M | `SM` |
+| Umaporn R | `UR` |
+| Worrawut W | `WW` |
+
+ตารางจับคู่นี้อยู่ใน `lib/bm/responsible-codes.ts` และใช้ร่วมกันทั้ง EQA กับ Equipment; รหัสที่เลือกใช้จริงจะถูกบันทึกกับแต่ละรายการกำหนดการของแผน (`eqa_plan_occurrences.responsible_code`) ไม่ได้เก็บเป็นฟิลด์กลางในโปรไฟล์ผู้ใช้
+
 โค้ดที่เกี่ยวข้องอยู่ที่ `lib/eqa/types.ts`, `lib/eqa/rules.ts`, `lib/server/eqa.ts` และ `components/eqa-view.tsx`
 
 ## Protected Routes

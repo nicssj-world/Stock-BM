@@ -10,6 +10,7 @@ import type {
 } from '@/lib/eqa/types'
 import { EQA_APPROVAL_ROLE_LABELS } from '@/lib/eqa/types'
 import { annualSummaryIssues, type EqaReadinessTarget } from '@/lib/eqa/rules'
+import { responsibleCodeForDisplayName } from '@/lib/bm/responsible-codes'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
 import { GeneratePlannedRoundsButton } from '@/components/eqa/planned-rounds'
 import { RoundsTab } from '@/components/eqa/rounds-tab'
@@ -113,12 +114,8 @@ function DeletePlanItemButton({ item, onOk, onErr }: { item: EqaPlanItem; onOk: 
 // and "Siriwat J" both resolve -- the abbreviation is derived from the
 // person, not typed in by hand, so a name mismatch should just skip the
 // autofill rather than throw.
-const RESPONSIBLE_CODE_BY_NAME: Record<string, string> = {
-  'Siriwat J': 'SJ', 'Siritorn C': 'SC', 'Somrat M': 'SM', 'Umaporn R': 'UR', 'Worrawut W': 'WW',
-}
 function responsibleCodeForUser(users: EqaWorkspace['users'], userId: string): string | undefined {
-  const name = users.find((user) => user.id === userId)?.displayName.trim().replace(/\.$/, '')
-  return name ? RESPONSIBLE_CODE_BY_NAME[name] : undefined
+  return responsibleCodeForDisplayName(users.find((user) => user.id === userId)?.displayName)
 }
 
 function PlanItemForm({ plan, editing, data, onCancel, onOk, onErr }: { plan: EqaAnnualPlan; editing: EqaPlanItem | null; data: EqaWorkspace; onCancel: () => void; onOk: Update; onErr: (text: string) => void }) {
