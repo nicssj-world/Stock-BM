@@ -39,6 +39,14 @@ function todayKey() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 
+function nextHpvBoxCode(boxes: { boxCode: string }[]) {
+  const yearSuffix = String(new Date().getFullYear()).slice(-2)
+  const pattern = new RegExp(`^HPV-BOX(\\d+)-${yearSuffix}$`, 'i')
+  const nums = boxes.map((box) => pattern.exec(box.boxCode.trim())?.[1]).filter((v): v is string => Boolean(v)).map(Number)
+  const next = (nums.length ? Math.max(...nums) : 0) + 1
+  return `HPV-BOX${next}-${yearSuffix}`
+}
+
 function boxTypeLabel(type: HpvBoxType) {
   return type === 'self_collected' ? 'Self-collected' : 'Clinician-collected'
 }
@@ -1036,13 +1044,20 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
   const [selectedPosition, setSelectedPosition] = useState<number | null>(null)
   const [barcode, setBarcode] = useState('')
   const [busy, setBusy] = useState(false)
-  const [boxForm, setBoxForm] = useState({ boxCode: `HPV-${todayKey().replaceAll('-', '')}-01` })
+  const [boxForm, setBoxForm] = useState({ boxCode: nextHpvBoxCode(data.boxes) })
   const [specimenType, setSpecimenType] = useState<HpvSpecimenType>('self_collected')
   const { openBoxes, viewBox: selectedBox, intakeBox: scanBox } = resolveHpvStorageBoxes(data.boxes, viewBoxId, intakeBoxId)
   const effectiveBoxId = selectedBox?.id ?? ''
   const [searchBarcode, setSearchBarcode] = useState('')
+  const [searchHintOpen, setSearchHintOpen] = useState(false)
   const [searchDestination, setSearchDestination] = useState('Co-testing')
   const [searchCustomDestination, setSearchCustomDestination] = useState('')
+  const allBoxSamples = useMemo(() => data.boxes.flatMap((box) => box.samples.map((sample) => ({ box, sample }))), [data.boxes])
+  const searchHints = useMemo(() => {
+    const term = searchBarcode.trim().toLowerCase()
+    if (!term) return []
+    return allBoxSamples.filter(({ box, sample }) => sample.barcode.toLowerCase().includes(term) || box.boxCode.toLowerCase().includes(term)).slice(0, 6)
+  }, [allBoxSamples, searchBarcode])
   const searchResult = (() => {
     const code = searchBarcode.trim()
     if (!code) return null
@@ -1102,8 +1117,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
       const createdBox = result.workspace.boxes.find((box) => box.boxCode === boxForm.boxCode.trim())
       if (createdBox) { setViewBoxId(createdBox.id); setIntakeBoxId(createdBox.id) }
       setSelectedPosition(null)
-      const nextSuffix = String(data.boxes.length + 2).padStart(2, '0')
-      setBoxForm((current) => ({ ...current, boxCode: `HPV-${todayKey().replaceAll('-', '')}-${nextSuffix}` }))
+      setBoxForm((current) => ({ ...current, boxCode: nextHpvBoxCode(result.workspace.boxes) }))
     } catch (error) {
       onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'เปิดกล่องไม่สำเร็จ' })
     } finally {
@@ -1280,7 +1294,32 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
         </Card>
         <Card className="p-4 space-y-3">
           <h2 className="font-bold text-[#173d50]">ค้นหา Sample</h2>
-          <div className="relative"><Search className="absolute top-3 left-3 size-4 text-[#88a1a7]" /><Input value={searchBarcode} onChange={(e) => setSearchBarcode(e.target.value)} className="pl-9" placeholder="Sample barcode" /></div>
+          <div className="relative">
+            <Search className="absolute top-3 left-3 size-4 text-[#88a1a7]" />
+            <Input
+              value={searchBarcode}
+              onChange={(e) => { setSearchBarcode(e.target.value); setSearchHintOpen(true) }}
+              onFocus={() => setSearchHintOpen(true)}
+              onBlur={() => setTimeout(() => setSearchHintOpen(false), 150)}
+              className="pl-9"
+              placeholder="Sample barcode หรือ box code"
+            />
+            {searchHintOpen && searchHints.length > 0 ? (
+              <div className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-md border border-[#d6e2e3] bg-white shadow-lg">
+                {searchHints.map(({ box, sample }) => (
+                  <button
+                    key={sample.id}
+                    type="button"
+                    onMouseDown={(e) => { e.preventDefault(); setSearchBarcode(sample.barcode); setSearchHintOpen(false) }}
+                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition hover:bg-[#f6fbfa]"
+                  >
+                    <span className="mono text-sm font-bold text-[#315763]">{sample.barcode}</span>
+                    <span className="truncate text-xs text-[#8ba0a5]">{box.boxCode} · {sample.status}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
           {searchBarcode.trim() && searchResult === 'not_found' ? (
             <p className="text-xs text-red-500">ไม่พบ barcode นี้ในระบบ</p>
           ) : searchBarcode.trim() && searchResult && searchResult !== 'not_found' ? (
