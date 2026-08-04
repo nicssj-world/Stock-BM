@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addTwoMonths, formatHpvBoxPosition, getHpvDestructionState, isHpvBoxFull, isHpvSpecimenType, nextHpvBoxPosition, resolveHpvStorageBoxes, specimenTypeLabel, summarizeHpvSites } from '@/lib/hpv/rules'
+import { addTwoMonths, filterHpvCheckoutSamples, formatHpvBoxPosition, hpvCheckoutPurpose, hpvCheckoutYear, getHpvDestructionState, isHpvBoxFull, isHpvSpecimenType, nextHpvBoxPosition, resolveHpvStorageBoxes, specimenTypeLabel, summarizeHpvSites } from '@/lib/hpv/rules'
 
 describe('HPV storage rules', () => {
   it('keeps a closed/full box viewable while intake moves to another open box', () => {
@@ -86,5 +86,70 @@ describe('HPV site summary rules', () => {
     expect(summaries.a.received).toBe(10)
     expect(summaries.a.receivedSelfSupplied).toBe(6)
     expect(summaries.a.outstanding).toBe(11)
+  })
+})
+
+describe('HPV checkout hand-over filter', () => {
+  const rows = [
+    { barcode: '2620470165188', deliveryStatus: 'pending' as const, box: { boxCode: 'HPV-BOX1-26' }, checkoutDestination: 'Co-testing', checkedOutByName: 'สมชาย' },
+    { barcode: '2620470165199', deliveryStatus: 'delivered' as const, box: null, checkoutDestination: 'HPV-OHR', checkedOutByName: 'สมหญิง' },
+    { barcode: '2620470165200', deliveryStatus: 'delivered' as const, box: { boxCode: 'HPV-BOX2-26' }, checkoutDestination: 'Co-testing', checkedOutByName: 'สมชาย' },
+  ]
+
+  it('defaults the Checkout worklist to samples still awaiting hand-over', () => {
+    expect(filterHpvCheckoutSamples(rows, 'pending', '').map((row) => row.barcode)).toEqual(['2620470165188'])
+  })
+
+  it('lets delivered samples be reviewed again through the status filter', () => {
+    expect(filterHpvCheckoutSamples(rows, 'delivered', '')).toHaveLength(2)
+    expect(filterHpvCheckoutSamples(rows, 'all', '')).toHaveLength(3)
+  })
+
+  it('applies the search term on top of the status filter', () => {
+    expect(filterHpvCheckoutSamples(rows, 'delivered', 'HPV-BOX2').map((row) => row.barcode)).toEqual(['2620470165200'])
+    expect(filterHpvCheckoutSamples(rows, 'pending', 'HPV-OHR')).toEqual([])
+    expect(filterHpvCheckoutSamples(rows, 'all', 'สมชาย')).toHaveLength(2)
+  })
+
+  it('ignores rows with no box when matching a box code', () => {
+    expect(filterHpvCheckoutSamples(rows, 'all', 'hpv-box').map((row) => row.barcode)).toEqual(['2620470165188', '2620470165200'])
+  })
+})
+
+describe('HPV checkout purpose ticks', () => {
+  it('ticks the matching purpose column on the hand-over slip', () => {
+    expect(hpvCheckoutPurpose('Co-testing')).toEqual({ coTesting: true, hpvOhr: false, other: null })
+    expect(hpvCheckoutPurpose('HPV-OHR')).toEqual({ coTesting: false, hpvOhr: true, other: null })
+    expect(hpvCheckoutPurpose('hpv-ohr ')).toEqual({ coTesting: false, hpvOhr: true, other: null })
+  })
+
+  it('defaults a missing purpose to Co-testing and keeps free text in the other column', () => {
+    expect(hpvCheckoutPurpose(null).coTesting).toBe(true)
+    expect(hpvCheckoutPurpose('ส่งตรวจซ้ำ')).toEqual({ coTesting: false, hpvOhr: false, other: 'ส่งตรวจซ้ำ' })
+  })
+})
+
+describe('HPV checkout year filter', () => {
+  const rows = [
+    { barcode: 'A', deliveryStatus: 'pending' as const, checkedOutAt: '2026-01-15T03:00:00.000Z' },
+    { barcode: 'B', deliveryStatus: 'delivered' as const, checkedOutAt: '2025-12-31T20:00:00.000Z' },
+    { barcode: 'C', deliveryStatus: 'delivered' as const, checkedOutAt: '2025-06-01T03:00:00.000Z' },
+  ]
+
+  it('reads the checkout year from the Bangkok-local date, not UTC', () => {
+    // 2025-12-31T20:00:00Z is already 2026-01-01 03:00 in Bangkok (+7).
+    expect(hpvCheckoutYear(rows[1].checkedOutAt)).toBe('2026')
+    expect(hpvCheckoutYear(null)).toBeNull()
+  })
+
+  it('filters checked-out samples down to the selected year', () => {
+    expect(filterHpvCheckoutSamples(rows, 'all', '', '2026').map((row) => row.barcode)).toEqual(['A', 'B'])
+    expect(filterHpvCheckoutSamples(rows, 'all', '', '2025').map((row) => row.barcode)).toEqual(['C'])
+    expect(filterHpvCheckoutSamples(rows, 'all', '', 'all')).toHaveLength(3)
+  })
+
+  it('combines the year filter with status and search', () => {
+    expect(filterHpvCheckoutSamples(rows, 'delivered', '', '2026').map((row) => row.barcode)).toEqual(['B'])
+    expect(filterHpvCheckoutSamples(rows, 'all', 'A', '2026').map((row) => row.barcode)).toEqual(['A'])
   })
 })

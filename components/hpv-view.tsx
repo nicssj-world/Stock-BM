@@ -16,6 +16,7 @@ import {
   Loader2,
   PackageMinus,
   Pencil,
+  PenLine,
   Plus,
   QrCode,
   RotateCcw,
@@ -27,10 +28,11 @@ import {
 } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { HpvBoxType, HpvKitDistribution, HpvSample, HpvSiteReceipt, HpvSpecimenType, HpvStorageBox, HpvWorkspace } from '@/lib/hpv/types'
-import { formatHpvBoxPosition, getHpvDestructionState, HPV_BOX_CAPACITY, resolveHpvStorageBoxes, specimenTypeLabel } from '@/lib/hpv/rules'
+import { filterHpvCheckoutSamples, formatHpvBoxPosition, getHpvDestructionState, HPV_BOX_CAPACITY, HPV_CHECKOUT_YEAR_ALL, hpvCheckoutYear, resolveHpvStorageBoxes, specimenTypeLabel, type HpvCheckoutStatusFilter } from '@/lib/hpv/rules'
 import { bangkokDateKey, daysUntil, formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
 import { Pagination, usePagination } from '@/components/pagination'
+import { HpvDeliveryDialog, type DeliverySample } from '@/components/hpv-delivery-dialog'
 
 type Tab = 'distribution' | 'returns' | 'receipts' | 'storage' | 'checkout' | 'summary'
 
@@ -159,7 +161,7 @@ export function HpvView({ actor, initialData }: { actor: BmActor; initialData: H
       {tab === 'returns' ? <ReturnsTab data={data} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
       {tab === 'receipts' ? <ReceiptsTab actor={actor} data={data} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
       {tab === 'storage' ? <StorageTab data={data} today={today} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
-      {tab === 'checkout' ? <CheckoutTab data={data} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
+      {tab === 'checkout' ? <CheckoutTab actor={actor} data={data} onWorkspace={onWorkspace} onNotice={setNotice} /> : null}
       {tab === 'summary' ? <SummaryTab data={data} /> : null}
     </div>
   )
@@ -1052,6 +1054,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
   const [searchHintOpen, setSearchHintOpen] = useState(false)
   const [searchDestination, setSearchDestination] = useState('Co-testing')
   const [searchCustomDestination, setSearchCustomDestination] = useState('')
+  const [highlightSampleId, setHighlightSampleId] = useState<string | null>(null)
   const allBoxSamples = useMemo(() => data.boxes.flatMap((box) => box.samples.map((sample) => ({ box, sample }))), [data.boxes])
   const searchHints = useMemo(() => {
     const term = searchBarcode.trim().toLowerCase()
@@ -1067,6 +1070,31 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
     }
     return 'not_found' as const
   })()
+
+  // Typing/scanning a barcode that resolves to an exact match jumps straight to
+  // its box and highlights the cell — selecting an autocomplete hint does the
+  // same. No extra click needed to "go to" the box.
+  function handleSearchChange(value: string) {
+    setSearchBarcode(value)
+    setSearchHintOpen(true)
+    const code = value.trim()
+    for (const box of data.boxes) {
+      const sample = box.samples.find((s) => s.barcode === code)
+      if (sample) {
+        setViewBoxId(box.id)
+        if (box.status === 'open') setIntakeBoxId(box.id)
+        setSelectedPosition(null)
+        setHighlightSampleId(sample.id)
+        return
+      }
+    }
+    setHighlightSampleId(null)
+  }
+
+  function selectSearchHint(box: HpvStorageBox, sample: HpvSample) {
+    setSearchHintOpen(false)
+    handleSearchChange(sample.barcode)
+  }
 
   async function checkoutFromSearch(sample: HpvSample) {
     const effectiveDestination = searchDestination === 'อื่นๆ' ? searchCustomDestination.trim() || 'อื่นๆ' : searchDestination
@@ -1298,7 +1326,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
             <Search className="absolute top-3 left-3 size-4 text-[#88a1a7]" />
             <Input
               value={searchBarcode}
-              onChange={(e) => { setSearchBarcode(e.target.value); setSearchHintOpen(true) }}
+              onChange={(e) => handleSearchChange(e.target.value)}
               onFocus={() => setSearchHintOpen(true)}
               onBlur={() => setTimeout(() => setSearchHintOpen(false), 150)}
               className="pl-9"
@@ -1310,7 +1338,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
                   <button
                     key={sample.id}
                     type="button"
-                    onMouseDown={(e) => { e.preventDefault(); setSearchBarcode(sample.barcode); setSearchHintOpen(false) }}
+                    onMouseDown={(e) => { e.preventDefault(); selectSearchHint(box, sample) }}
                     className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition hover:bg-[#f6fbfa]"
                   >
                     <span className="mono text-sm font-bold text-[#315763]">{sample.barcode}</span>
@@ -1326,11 +1354,12 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
             <div className="rounded-md bg-[#eef9f7] p-3">
               <p className="text-sm font-bold text-[#0b7f76]">{searchResult.box.boxCode}</p>
               <div className="mt-1 flex items-center gap-2"><p className="text-xs text-[#789097]">{formatHpvBoxPosition(searchResult.sample.position)} · {searchResult.sample.status}</p><SpecimenTypeBadge type={searchResult.sample.specimenType} /></div>
-              <button type="button" onClick={() => { setViewBoxId(searchResult.box.id); if (searchResult.box.status === 'open') setIntakeBoxId(searchResult.box.id); setSelectedPosition(null) }} className="mt-1.5 text-xs font-bold text-[#0b7f76] underline hover:no-underline">ไปที่กล่องนี้</button>
+              <p className="mt-1.5 text-xs font-semibold text-[#0b7f76]">แสดงและไฮไลต์ในกล่องด้านขวาแล้ว</p>
               {searchResult.sample.status === 'stored' ? (
                 <div className="mt-2 space-y-1.5 border-t border-[#cfe6e2] pt-2">
-                  <Select value={searchDestination} onChange={(e) => setSearchDestination(e.target.value)} className="h-8 text-xs"><option>Co-testing</option><option>HPV-OHR</option><option>อื่นๆ</option></Select>
-                  {searchDestination === 'อื่นๆ' ? <Input value={searchCustomDestination} onChange={(e) => setSearchCustomDestination(e.target.value)} placeholder="ระบุปลายทาง" className="h-8 text-xs" /> : null}
+                  <p className="text-[11px] font-semibold text-[#58747d]">จุดประสงค์</p>
+                  <Select value={searchDestination} onChange={(e) => setSearchDestination(e.target.value)} className="h-8 text-xs" aria-label="จุดประสงค์"><option>Co-testing</option><option>HPV-OHR</option><option>อื่นๆ</option></Select>
+                  {searchDestination === 'อื่นๆ' ? <Input value={searchCustomDestination} onChange={(e) => setSearchCustomDestination(e.target.value)} placeholder="ระบุจุดประสงค์" className="h-8 text-xs" /> : null}
                   <Button type="button" disabled={busy} onClick={() => void checkoutFromSearch(searchResult.sample)} className="h-8 w-full text-xs"><ArrowUpFromLine className="size-3.5" /> Check out</Button>
                 </div>
               ) : null}
@@ -1356,7 +1385,7 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
                     const remainingDays = box.destroyDueAt ? daysUntil(bangkokDateKey(box.destroyDueAt), today) : 0
                     const storedCount = box.samples.filter((s) => s.status === 'stored').length
                     return (
-                      <tr key={box.id} onClick={() => { setViewBoxId(box.id); if (box.status === 'open') setIntakeBoxId(box.id); setSelectedPosition(null) }} className={`cursor-pointer transition-colors ${isSelected ? 'bg-[#eef9f7]' : 'hover:bg-[#f7fbfc]'}`}>
+                      <tr key={box.id} onClick={() => { setViewBoxId(box.id); if (box.status === 'open') setIntakeBoxId(box.id); setSelectedPosition(null); setHighlightSampleId(null) }} className={`cursor-pointer transition-colors ${isSelected ? 'bg-[#eef9f7]' : 'hover:bg-[#f7fbfc]'}`}>
                         <td className="mono px-4 py-2 font-bold text-[#315763]">{box.boxCode}</td>
                         <td className="mono px-2 py-2 text-center font-bold text-[#315763]">{storedCount}/{box.capacity}</td>
                         <td className="px-2 py-2"><HpvBoxAgeBadge box={box} today={today} /></td>
@@ -1372,17 +1401,18 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
             <p className="px-4 py-8 text-center text-sm text-[#91a4a9]">ยังไม่มี Storage box</p>
           )}
         </Card>
-        <BoxPanel box={selectedBox} today={today} selectedPosition={selectedPosition} onSelectPosition={setSelectedPosition} onMove={moveOrSwap} onClose={closeBox} onReopen={reopenBox} onDestroy={destroyBox} onDelete={deleteBox} onRename={renameBox} onDeleteSample={deleteSample} />
+        <BoxPanel box={selectedBox} today={today} selectedPosition={selectedPosition} onSelectPosition={setSelectedPosition} highlightSampleId={highlightSampleId} onMove={moveOrSwap} onClose={closeBox} onReopen={reopenBox} onDestroy={destroyBox} onDelete={deleteBox} onRename={renameBox} onDeleteSample={deleteSample} />
       </div>
     </div>
   )
 }
 
-function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onClose, onReopen, onDestroy, onDelete, onRename, onDeleteSample }: {
+function BoxPanel({ box, today, selectedPosition, onSelectPosition, highlightSampleId, onMove, onClose, onReopen, onDestroy, onDelete, onRename, onDeleteSample }: {
   box: HpvStorageBox | null
   today: string
   selectedPosition?: number | null
   onSelectPosition?: (pos: number | null) => void
+  highlightSampleId?: string | null
   onMove?: (sampleId: string, toPosition: number) => void
   onClose?: (box: HpvStorageBox) => void
   onReopen?: (box: HpvStorageBox) => void
@@ -1429,9 +1459,12 @@ function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onCl
             const checkedOut = sample?.status === 'checked_out'
             const isSelected = !sample && selectedPosition === position
             const isDragTarget = dragOver === position
+            const isHighlighted = !!sample && sample.id === highlightSampleId
 
             let cellClass = 'aspect-square overflow-hidden rounded-md border p-1.5 transition-colors '
-            if (isSelected) {
+            if (isHighlighted) {
+              cellClass += 'border-[#0b7f76] bg-[#fff4cf] ring-2 ring-[#e0a415] ring-offset-1'
+            } else if (isSelected) {
               cellClass += 'border-[#0b7f76] bg-[#d4f0ed] ring-2 ring-[#0b7f76] cursor-pointer'
             } else if (isDragTarget) {
               cellClass += 'border-[#0b7f76] bg-[#e5f6f4] ring-2 ring-dashed ring-[#0b7f76]'
@@ -1510,7 +1543,8 @@ function HpvBoxAgeBadge({ box, today }: { box: HpvStorageBox; today: string }) {
   return <StatusBadge tone="accepted" label="ปกติ" />
 }
 
-function CheckoutTab({ data, onWorkspace, onNotice }: {
+function CheckoutTab({ actor, data, onWorkspace, onNotice }: {
+  actor: BmActor
   data: HpvWorkspace
   onWorkspace: (workspace: HpvWorkspace, text: string) => void
   onNotice: (notice: { tone: 'success' | 'danger' | 'warning' | 'info'; text: string } | null) => void
@@ -1522,41 +1556,96 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
   const [busy, setBusy] = useState(false)
   const [historySearch, setHistorySearch] = useState('')
   const [historyHintOpen, setHistoryHintOpen] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<HpvCheckoutStatusFilter>('pending')
+  const [yearFilter, setYearFilter] = useState(HPV_CHECKOUT_YEAR_ALL)
+  const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const [dialogOpen, setDialogOpen] = useState(false)
   const effectiveDestination = destination === 'อื่นๆ' ? customDestination.trim() || 'อื่นๆ' : destination
   const storedSamples = data.boxes.flatMap((box) => box.samples.map((sample) => ({ ...sample, box }))).filter((sample) => sample.status === 'stored')
-  const checkedOutSamples = useMemo(() => {
+  const deliveriesById = useMemo(() => new Map(data.deliveries.map((delivery) => [delivery.id, delivery])), [data.deliveries])
+  const checkedOutSamples = useMemo<DeliverySample[]>(() => {
     const fromBoxes = data.boxes.flatMap((box) => box.samples.filter((s) => s.status === 'checked_out').map((sample) => ({ ...sample, box: box as HpvStorageBox | null })))
     const external = data.externalSamples.filter((s) => s.status === 'checked_out').map((sample) => ({ ...sample, box: null as HpvStorageBox | null }))
     return [...fromBoxes, ...external].sort((a, b) => (b.checkedOutAt ?? '').localeCompare(a.checkedOutAt ?? ''))
   }, [data.boxes, data.externalSamples])
-  const filteredCheckedOutSamples = useMemo(() => {
-    const term = historySearch.trim().toLowerCase()
-    if (!term) return checkedOutSamples
-    return checkedOutSamples.filter((sample) =>
-      [sample.barcode, sample.box?.boxCode, sample.checkoutDestination, sample.checkoutNote, sample.checkedOutByName]
-        .filter(Boolean)
-        .some((field) => field!.toLowerCase().includes(term)),
-    )
-  }, [checkedOutSamples, historySearch])
+  const pendingCount = checkedOutSamples.filter((sample) => sample.deliveryStatus === 'pending').length
+  const deliveredCount = checkedOutSamples.length - pendingCount
+  const checkoutYears = useMemo(() => {
+    const years = new Set(checkedOutSamples.map((sample) => hpvCheckoutYear(sample.checkedOutAt)).filter((year): year is string => Boolean(year)))
+    return [...years].sort((a, b) => b.localeCompare(a))
+  }, [checkedOutSamples])
+  const filteredCheckedOutSamples = useMemo(
+    () => filterHpvCheckoutSamples(checkedOutSamples, statusFilter, historySearch, yearFilter),
+    [checkedOutSamples, statusFilter, historySearch, yearFilter],
+  )
+  const selectableIds = useMemo(
+    () => filteredCheckedOutSamples.filter((sample) => sample.deliveryStatus === 'pending').map((sample) => sample.id),
+    [filteredCheckedOutSamples],
+  )
   const historyHints = historySearch.trim() ? filteredCheckedOutSamples.slice(0, 6) : []
-  const historyPagination = usePagination(filteredCheckedOutSamples.length, 10)
+  const historyPagination = usePagination(filteredCheckedOutSamples.length, 50)
   const pagedCheckedOutSamples = filteredCheckedOutSamples.slice(historyPagination.start, historyPagination.end)
+  // Selection is derived against what is currently selectable rather than reset
+  // on every refresh, so rows that became delivered (or dropped out of the
+  // active filter) simply stop counting instead of leaving stale ids behind.
+  const selectedIds = useMemo(() => selectableIds.filter((id) => selected.has(id)), [selectableIds, selected])
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
+  const selectedSamples = useMemo(() => checkedOutSamples.filter((sample) => selectedSet.has(sample.id)), [checkedOutSamples, selectedSet])
+  const allSelected = selectableIds.length > 0 && selectedIds.length === selectableIds.length
+  const selectAllRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = selectedIds.length > 0 && !allSelected
+  }, [allSelected, selectedIds])
+
+  function toggleSample(id: string) {
+    setSelected((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set(selectableIds))
+  }
 
   function exportCheckout() {
     const rows = [
-      ['Barcode', 'Box', 'Position', 'From storage box', 'Destination', 'Note', 'Checkout At', 'By'],
-      ...checkedOutSamples.map((s) => [
-        s.barcode,
-        s.box?.boxCode ?? '-',
-        s.box ? formatHpvBoxPosition(s.position) : '-',
-        s.fromStorageBox ? 'Yes' : 'No',
-        s.checkoutDestination ?? 'Co-testing',
-        s.checkoutNote ?? '',
-        s.checkedOutAt ? formatDateTime(s.checkedOutAt) : '',
-        s.checkedOutByName ?? '',
-      ]),
+      ['Barcode', 'Box', 'Position', 'From storage box', 'จุดประสงค์', 'Note', 'Checkout At', 'By', 'สถานะ', 'รอบส่งมอบ', 'ผู้รับ', 'Delivered At'],
+      ...checkedOutSamples.map((s) => {
+        const delivery = s.deliveryId ? deliveriesById.get(s.deliveryId) : undefined
+        return [
+          s.barcode,
+          s.box?.boxCode ?? '-',
+          s.box ? formatHpvBoxPosition(s.position) : '-',
+          s.fromStorageBox ? 'Yes' : 'No',
+          s.checkoutDestination ?? 'Co-testing',
+          s.checkoutNote ?? '',
+          s.checkedOutAt ? formatDateTime(s.checkedOutAt) : '',
+          s.checkedOutByName ?? '',
+          s.deliveryStatus === 'delivered' ? 'ส่งตัวอย่างแล้ว' : 'รอส่งตัวอย่าง',
+          delivery?.deliveryCode ?? '',
+          delivery?.receiverName ?? '',
+          delivery?.deliveredAt ? formatDateTime(delivery.deliveredAt) : '',
+        ]
+      }),
     ]
     downloadCsv(`hpv_checkout_${new Date().toISOString().slice(0, 10)}.csv`, rows)
+  }
+
+  async function undoDelivery(deliveryId: string, deliveryCode: string) {
+    if (!window.confirm(`ยกเลิกรอบส่งมอบ "${deliveryCode}" ใช่ไหม?\n\nตัวอย่างทั้งหมดในรอบนี้จะกลับเป็น "รอส่งตัวอย่าง" และลายเซ็นผู้รับจะถูกลบ`)) return
+    setBusy(true)
+    try {
+      const result = await api<{ workspace: HpvWorkspace }>(`/api/hpv/storage/deliveries/${deliveryId}`, { method: 'DELETE' })
+      onWorkspace(result.workspace, `ยกเลิกรอบส่งมอบ ${deliveryCode} แล้ว`)
+    } catch (error) {
+      onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'ยกเลิกรอบส่งมอบไม่สำเร็จ' })
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function checkout(codeInput = barcode) {
@@ -1604,8 +1693,8 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
           <h2 className="font-bold text-[#173d50]">Checkout</h2>
           <div className="relative"><ScanLine className="absolute top-3 left-3 size-5 text-[#88a1a7]" /><Input autoFocus value={barcode} onChange={(e) => setBarcode(e.target.value)} className="h-12 pl-11 mono text-base" placeholder="Sample barcode" /></div>
           <p className="text-xs text-[#8ba0a5]">ถ้า barcode นี้ไม่มีอยู่ใน storage box ระบบจะบันทึก checkout ให้และทำสัญลักษณ์ว่าไม่ได้มาจาก storage box (ระบุเป็น Clinician-collected โดยอัตโนมัติ)</p>
-          <Field label="Destination"><Select value={destination} onChange={(e) => setDestination(e.target.value)}><option>Co-testing</option><option>HPV-OHR</option><option>อื่นๆ</option></Select></Field>
-          {destination === 'อื่นๆ' ? <Field label="ระบุ"><Input value={customDestination} onChange={(e) => setCustomDestination(e.target.value)} placeholder="ระบุปลายทาง" /></Field> : null}
+          <Field label="จุดประสงค์"><Select value={destination} onChange={(e) => setDestination(e.target.value)}><option>Co-testing</option><option>HPV-OHR</option><option>อื่นๆ</option></Select></Field>
+          {destination === 'อื่นๆ' ? <Field label="ระบุ"><Input value={customDestination} onChange={(e) => setCustomDestination(e.target.value)} placeholder="ระบุจุดประสงค์" /></Field> : null}
           <Field label="Note"><Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
           <div className="flex gap-2"><Button disabled={busy || !barcode.trim()}><CheckCircle2 className="size-4" /> Checkout</Button><Button type="button" variant="secondary" onClick={() => setCameraOn((value) => !value)}>{cameraOn ? <X className="size-4" /> : <Camera className="size-4" />} Camera</Button></div>
           {cameraOn ? <div className="overflow-hidden rounded-md border border-[#d6e2e3] bg-black"><video ref={videoRef} className="aspect-video w-full object-cover" /></div> : null}
@@ -1616,6 +1705,44 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
           <span className="font-bold text-[#173d50]">Checkout history ({filteredCheckedOutSamples.length}{historySearch.trim() ? ` / ${checkedOutSamples.length}` : ''})</span>
           {checkedOutSamples.length > 0 ? <Button variant="ghost" className="gap-1 px-2 py-1 text-xs" onClick={exportCheckout}><Download className="size-3" /> Export CSV</Button> : null}
         </div>
+        <div className="flex flex-wrap items-center gap-2 border-b border-[#edf2f2] px-4 py-2.5">
+          <div className="inline-flex gap-1 rounded-lg border border-[#d6e2e3] bg-white p-1" role="group" aria-label="กรองตามสถานะตัวอย่าง">
+            {([
+              { key: 'pending', label: 'รอส่งตัวอย่าง', count: pendingCount },
+              { key: 'delivered', label: 'ส่งตัวอย่างแล้ว', count: deliveredCount },
+              { key: 'all', label: 'ทั้งหมด', count: checkedOutSamples.length },
+            ] as const).map(({ key, label, count }) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={statusFilter === key}
+                onClick={() => setStatusFilter(key)}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${statusFilter === key ? 'bg-[#0b7f76] text-white' : 'text-[#58747d] hover:bg-[#eef6f5]'}`}
+              >
+                {label} ({count})
+              </button>
+            ))}
+          </div>
+          {checkoutYears.length > 0 ? (
+            <Select value={yearFilter} onChange={(e) => setYearFilter(e.target.value)} className="h-9 w-28 text-xs" aria-label="กรองปีที่ checkout">
+              <option value={HPV_CHECKOUT_YEAR_ALL}>ทุกปี</option>
+              {checkoutYears.map((year) => <option key={year} value={year}>{year}</option>)}
+            </Select>
+          ) : null}
+          {selectableIds.length > 0 ? (
+            <label className="ml-auto inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-xs font-semibold text-[#55727c] hover:bg-[#eef5f4]">
+              <input ref={selectAllRef} type="checkbox" className="size-4 accent-[#0b7f76]" checked={allSelected} onChange={toggleAll} />
+              เลือกทั้งหมด ({selectedIds.length}/{selectableIds.length})
+            </label>
+          ) : null}
+        </div>
+        {selectedIds.length > 0 ? (
+          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-[#bfe0da] bg-[#f2faf8] px-4 py-2.5">
+            <span className="text-sm font-bold text-[#176b68]">เลือกแล้ว {selectedIds.length} รายการ</span>
+            <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => setSelected(new Set())}>ล้าง</Button>
+            <Button className="ml-auto" disabled={busy} onClick={() => setDialogOpen(true)}><PenLine className="size-4" /> ส่งมอบตัวอย่าง ({selectedIds.length})</Button>
+          </div>
+        ) : null}
         <div className="relative border-b border-[#edf2f2] px-4 py-2.5">
           <div className="relative">
             <Search className="absolute top-2.5 left-3 size-4 text-[#8ca1a5]" />
@@ -1645,38 +1772,91 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
           ) : null}
         </div>
         <div className="divide-y divide-[#edf2f2]">
-          {pagedCheckedOutSamples.map((sample) => (
-            <div key={sample.id} className="flex flex-wrap items-start justify-between gap-4 px-4 py-3.5">
-              <div className="min-w-0 flex-1 space-y-1.5">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <p className="mono text-sm font-bold text-[#315763]">{sample.barcode}</p>
-                  <SpecimenTypeBadge type={sample.specimenType} />
-                  {!sample.fromStorageBox ? <StatusBadge tone="warning" label="ไม่ได้มาจาก Storage box" /> : null}
+          {pagedCheckedOutSamples.map((sample) => {
+            const delivery = sample.deliveryId ? deliveriesById.get(sample.deliveryId) : undefined
+            const pending = sample.deliveryStatus === 'pending'
+            const isSelected = selectedSet.has(sample.id)
+            return (
+              <div
+                key={sample.id}
+                className={`flex flex-wrap items-start justify-between gap-4 border-l-2 py-3.5 pr-4 pl-2 transition ${isSelected ? 'border-l-[#0b7f76] bg-[#f2faf8]' : 'border-l-transparent'}`}
+              >
+                <div className="flex min-w-0 flex-1 gap-2">
+                  {pending ? (
+                    <label className="inline-flex min-h-11 w-8 shrink-0 cursor-pointer items-start justify-center pt-0.5">
+                      <input
+                        type="checkbox"
+                        className="size-4 accent-[#0b7f76]"
+                        checked={isSelected}
+                        onChange={() => toggleSample(sample.id)}
+                        aria-label={`เลือก ${sample.barcode}`}
+                      />
+                    </label>
+                  ) : (
+                    <span className="w-8 shrink-0" aria-hidden="true" />
+                  )}
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <p className="mono text-sm font-bold text-[#315763]">{sample.barcode}</p>
+                      <SpecimenTypeBadge type={sample.specimenType} />
+                      <StatusBadge tone={pending ? 'warning' : 'accepted'} label={pending ? 'รอส่งตัวอย่าง' : 'ส่งตัวอย่างแล้ว'} />
+                      {!sample.fromStorageBox ? <StatusBadge tone="neutral" label="ไม่ได้มาจาก Storage box" /> : null}
+                    </div>
+                    <p className="flex items-center gap-1.5 text-xs text-[#8ba0a5]">
+                      <Boxes className="size-3.5 shrink-0" aria-hidden="true" />
+                      {sample.box ? `${sample.box.boxCode} · ${formatHpvBoxPosition(sample.position)}` : 'ไม่มีข้อมูลกล่อง'}
+                    </p>
+                    <p className="flex items-center gap-1.5 text-xs font-semibold text-[#0b7f76]">
+                      <Send className="size-3.5 shrink-0" aria-hidden="true" />
+                      {sample.checkoutDestination ?? 'Co-testing'}
+                    </p>
+                    {sample.checkoutNote ? <p className="border-l-2 border-[#e1eaeb] pl-2 text-xs text-[#789097] italic">{sample.checkoutNote}</p> : null}
+                    {delivery ? (
+                      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[#8ba0a5]">
+                        <span className="mono font-bold text-[#55727c]">{delivery.deliveryCode}</span>
+                        <span>รับโดย {delivery.receiverName ?? 'ลงนามอิเล็กทรอนิกส์'} · {formatDateTime(delivery.deliveredAt)}</span>
+                        <a href={`/hpv/delivery/${delivery.id}/report`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-[#0b7f76] hover:underline">
+                          <FileText className="size-3" aria-hidden="true" /> พิมพ์ใบส่งมอบ
+                        </a>
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
-                <p className="flex items-center gap-1.5 text-xs text-[#8ba0a5]">
-                  <Boxes className="size-3.5 shrink-0" aria-hidden="true" />
-                  {sample.box ? `${sample.box.boxCode} · ${formatHpvBoxPosition(sample.position)}` : 'ไม่มีข้อมูลกล่อง'}
-                </p>
-                <p className="flex items-center gap-1.5 text-xs font-semibold text-[#0b7f76]">
-                  <Send className="size-3.5 shrink-0" aria-hidden="true" />
-                  {sample.checkoutDestination ?? 'Co-testing'}
-                </p>
-                {sample.checkoutNote ? <p className="border-l-2 border-[#e1eaeb] pl-2 text-xs text-[#789097] italic">{sample.checkoutNote}</p> : null}
-              </div>
-              <div className="flex shrink-0 flex-col items-end gap-1.5">
-                <button onClick={() => void undoCheckout(sample)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-500 hover:bg-red-100"><Trash2 className="size-3" /> ลบ</button>
-                <div className="text-right text-xs text-[#8ba0a5]">
-                  <p className="mono">{sample.checkedOutAt ? formatDateTime(sample.checkedOutAt) : '-'}</p>
-                  <p className="mt-0.5 font-medium text-[#55727c]">{sample.checkedOutByName ?? '-'}</p>
+                <div className="flex shrink-0 flex-col items-end gap-1.5">
+                  {pending ? (
+                    <button onClick={() => void undoCheckout(sample)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-500 hover:bg-red-100"><Trash2 className="size-3" /> ลบ</button>
+                  ) : null}
+                  {!pending && delivery && actor.role === 'Admin' ? (
+                    <button onClick={() => void undoDelivery(delivery.id, delivery.deliveryCode)} disabled={busy} className="flex items-center gap-1 rounded border border-[#edc7cb] bg-[#fff7f7] px-2 py-1 text-[10px] font-bold text-[#af3541] hover:bg-[#ffebed] disabled:opacity-50"><RotateCcw className="size-3" /> ยกเลิกรอบส่งมอบ</button>
+                  ) : null}
+                  <div className="text-right text-xs text-[#8ba0a5]">
+                    <p className="mono">{sample.checkedOutAt ? formatDateTime(sample.checkedOutAt) : '-'}</p>
+                    <p className="mt-0.5 font-medium text-[#55727c]">{sample.checkedOutByName ?? '-'}</p>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
           {!checkedOutSamples.length ? <p className="px-4 py-10 text-center text-sm text-[#91a4a9]">ยังไม่มี Checkout</p> : null}
-          {checkedOutSamples.length > 0 && !filteredCheckedOutSamples.length ? <p className="px-4 py-10 text-center text-sm text-[#91a4a9]">ไม่พบรายการที่ตรงกับคำค้นหา</p> : null}
+          {checkedOutSamples.length > 0 && !filteredCheckedOutSamples.length ? (
+            <p className="px-4 py-10 text-center text-sm text-[#91a4a9]">
+              {statusFilter === 'pending' && !historySearch.trim() && yearFilter === HPV_CHECKOUT_YEAR_ALL ? 'ส่งมอบครบทุกตัวอย่างแล้ว' : 'ไม่พบรายการที่ตรงกับคำค้นหา'}
+            </p>
+          ) : null}
         </div>
-        {filteredCheckedOutSamples.length > 10 ? <Pagination {...historyPagination} total={filteredCheckedOutSamples.length} onChange={historyPagination.setPage} /> : null}
+        {filteredCheckedOutSamples.length > 50 ? <Pagination {...historyPagination} total={filteredCheckedOutSamples.length} onChange={historyPagination.setPage} /> : null}
       </Card>
+      {dialogOpen && selectedSamples.length > 0 ? (
+        <HpvDeliveryDialog
+          samples={selectedSamples}
+          onClose={() => setDialogOpen(false)}
+          onDone={(result) => {
+            setDialogOpen(false)
+            onWorkspace(result.workspace, `ยืนยันรับตัวอย่าง ${selectedSamples.length} รายการแล้ว (${result.deliveryCode})`)
+            window.open(`/hpv/delivery/${result.deliveryId}/report`, '_blank', 'noopener')
+          }}
+        />
+      ) : null}
     </div>
   )
 }

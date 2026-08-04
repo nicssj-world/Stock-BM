@@ -1,4 +1,4 @@
-import type { HpvBoxStatus, HpvDestructionState, HpvSpecimenType } from '@/lib/hpv/types'
+import type { HpvBoxStatus, HpvDeliveryStatus, HpvDestructionState, HpvSpecimenType } from '@/lib/hpv/types'
 import { bangkokDateKey, daysUntil, todayBangkok } from '@/lib/bm/rules'
 
 export const HPV_BOX_CAPACITY = 25
@@ -121,6 +121,51 @@ export function summarizeHpvSites(distributions: HpvDistributionLike[], receipts
     summary.outstanding = summary.issued - (receivedFromIssuedKits[summary.siteId] ?? 0) - summary.returned
   }
   return summaries
+}
+
+export const HPV_CHECKOUT_PURPOSES = ['Co-testing', 'HPV-OHR'] as const
+
+// The hand-over slip records the purpose as two tick boxes, so free-text values
+// (the "อื่นๆ" option) fall through to a third column instead of being lost.
+export function hpvCheckoutPurpose(destination: string | null | undefined) {
+  const value = (destination ?? 'Co-testing').trim()
+  const coTesting = value.toLowerCase() === 'co-testing'
+  const hpvOhr = value.toLowerCase() === 'hpv-ohr'
+  return { coTesting, hpvOhr, other: coTesting || hpvOhr ? null : value || null }
+}
+
+export type HpvCheckoutStatusFilter = 'pending' | 'delivered' | 'all'
+export const HPV_CHECKOUT_YEAR_ALL = 'all'
+
+export interface HpvCheckoutRowLike {
+  barcode: string
+  deliveryStatus: HpvDeliveryStatus
+  checkedOutAt?: string | null
+  box?: { boxCode: string } | null
+  checkoutDestination?: string | null
+  checkoutNote?: string | null
+  checkedOutByName?: string | null
+}
+
+// Bangkok calendar year of the checkout timestamp, used both to build the year
+// filter's option list and to compare against the selected year.
+export function hpvCheckoutYear(checkedOutAt: string | null | undefined) {
+  return checkedOutAt ? bangkokDateKey(checkedOutAt).slice(0, 4) : null
+}
+
+// Checked-out samples are filtered by hand-over status first (the Checkout tab
+// defaults to "waiting to be delivered"), then by checkout year, then by the
+// free-text search box.
+export function filterHpvCheckoutSamples<T extends HpvCheckoutRowLike>(samples: T[], status: HpvCheckoutStatusFilter, term: string, year: string = HPV_CHECKOUT_YEAR_ALL) {
+  const needle = term.trim().toLowerCase()
+  return samples.filter((sample) => {
+    if (status !== 'all' && sample.deliveryStatus !== status) return false
+    if (year !== HPV_CHECKOUT_YEAR_ALL && hpvCheckoutYear(sample.checkedOutAt) !== year) return false
+    if (!needle) return true
+    return [sample.barcode, sample.box?.boxCode, sample.checkoutDestination, sample.checkoutNote, sample.checkedOutByName]
+      .filter((field): field is string => Boolean(field))
+      .some((field) => field.toLowerCase().includes(needle))
+  })
 }
 
 export function formatHpvBoxPosition(position: number | null) {

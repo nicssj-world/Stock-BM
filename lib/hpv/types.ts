@@ -6,6 +6,7 @@ export type HpvSpecimenType = 'self_collected' | 'clinician_collected'
 export type HpvBoxStatus = 'open' | 'full' | 'destroyed'
 export type HpvDestructionState = 'none' | 'due_soon' | 'due_now'
 export type HpvSampleStatus = 'stored' | 'checked_out' | 'destroyed'
+export type HpvDeliveryStatus = 'pending' | 'delivered'
 
 export interface HpvSite {
   id: string
@@ -106,6 +107,21 @@ export interface HpvSample {
   checkedOutByName: string | null
   checkoutDestination: string | null
   checkoutNote: string | null
+  deliveryStatus: HpvDeliveryStatus
+  deliveryId: string | null
+}
+
+export interface HpvSampleDelivery {
+  id: string
+  deliveryCode: string
+  destination: string | null
+  receiverName: string | null
+  note: string | null
+  sampleCount: number
+  signatureAttachmentId: string | null
+  deliveredAt: string
+  createdByName: string | null
+  createdAt: string
 }
 
 export interface HpvStorageBox {
@@ -129,7 +145,13 @@ export interface HpvWorkspace {
   receipts: HpvSiteReceipt[]
   boxes: HpvStorageBox[]
   externalSamples: HpvSample[]
+  deliveries: HpvSampleDelivery[]
   stock: StockWorkspace
+}
+
+export interface HpvDeliveryDetail {
+  delivery: HpvSampleDelivery
+  samples: (HpvSample & { boxCode: string | null })[]
 }
 
 export interface HpvDashboard {

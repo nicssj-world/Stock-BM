@@ -4,12 +4,15 @@ import { addTwoMonths, getHpvDestructionState, nextHpvBoxPosition, summarizeHpvS
 import type { BmActor } from '@/lib/bm/types'
 import type {
   HpvDashboard,
+  HpvDeliveryDetail,
+  HpvDeliveryStatus,
   HpvKitDistribution,
   HpvKitDistributionLine,
   HpvKitReturn,
   HpvKitReturnLine,
   HpvBoxStatus,
   HpvSample,
+  HpvSampleDelivery,
   HpvSpecimenType,
   HpvSite,
   HpvSiteReceipt,
@@ -18,6 +21,7 @@ import type {
 } from '@/lib/hpv/types'
 import { todayBangkok } from '@/lib/bm/rules'
 import { writeAudit } from '@/lib/server/audit'
+import { deleteEntityAttachments, uploadAttachment } from '@/lib/server/attachments'
 import { HttpError } from '@/lib/server/errors'
 import { getStockWorkspace } from '@/lib/server/stock'
 import { getAdminClient } from '@/lib/supabase/admin'
@@ -181,6 +185,23 @@ function sampleFromRow(row: RecordRow, names: Map<string, string>): HpvSample {
     checkedOutByName: names.get(asString(row.checked_out_by)) ?? null,
     checkoutDestination: nullableString(row.checkout_destination),
     checkoutNote: nullableString(row.checkout_note),
+    deliveryStatus: (nullableString(row.delivery_status) ?? 'pending') as HpvDeliveryStatus,
+    deliveryId: nullableString(row.delivery_id),
+  }
+}
+
+function deliveryFromRow(row: RecordRow, names: Map<string, string>): HpvSampleDelivery {
+  return {
+    id: asString(row.id),
+    deliveryCode: asString(row.delivery_code),
+    destination: nullableString(row.destination),
+    receiverName: nullableString(row.receiver_name),
+    note: nullableString(row.note),
+    sampleCount: asNumber(row.sample_count),
+    signatureAttachmentId: nullableString(row.signature_attachment_id),
+    deliveredAt: asString(row.delivered_at),
+    createdByName: names.get(asString(row.created_by)) ?? null,
+    createdAt: asString(row.created_at),
   }
 }
 
@@ -210,6 +231,7 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
     { data: receiptData, error: receiptError },
     { data: boxData, error: boxError },
     { data: sampleData, error: sampleError },
+    { data: deliveryData, error: deliveryError },
     stock,
   ] = await Promise.all([
     admin.from('bm_hpv_sites').select('*').order('name'),
@@ -224,6 +246,7 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
     admin.from('bm_hpv_site_receipts').select('*, bm_hpv_sites(name)').order('created_at', { ascending: false }).limit(200),
     admin.from('bm_hpv_storage_boxes').select('*').order('created_at', { ascending: false }).limit(100),
     admin.from('bm_hpv_samples').select('*').order('stored_at', { ascending: false }).limit(2500),
+    admin.from('bm_hpv_sample_deliveries').select('*').order('delivered_at', { ascending: false }).limit(200),
     getStockWorkspace(actor),
   ])
   fail(siteError)
@@ -234,6 +257,7 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
   fail(receiptError)
   fail(boxError)
   fail(sampleError)
+  if (deliveryError && !deliveryError.message.includes('bm_hpv_sample_deliveries')) fail(deliveryError)
 
   const siteRows = (siteData ?? []) as RecordRow[]
   const distributionRows = (distributionData ?? []) as RecordRow[]
@@ -243,12 +267,14 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
   const receiptRows = (receiptData ?? []) as RecordRow[]
   const sampleRows = (sampleData ?? []) as RecordRow[]
   const boxRows = (boxData ?? []) as RecordRow[]
+  const deliveryRows = deliveryError ? [] : (deliveryData ?? []) as RecordRow[]
   const names = await getNameMap([
     ...distributionRows.map((row) => asString(row.created_by)),
     ...kitReturnRows.map((row) => asString(row.created_by)),
     ...receiptRows.map((row) => asString(row.created_by)),
     ...sampleRows.map((row) => asString(row.stored_by)),
     ...sampleRows.map((row) => asString(row.checked_out_by)),
+    ...deliveryRows.map((row) => asString(row.created_by)),
   ])
 
   const samples = sampleRows.map((row) => sampleFromRow(row, names))
@@ -323,6 +349,7 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
     receipts,
     boxes: boxRows.map((row) => boxFromRow(row, samplesByBox.get(asString(row.id)) ?? [])),
     externalSamples,
+    deliveries: deliveryRows.map((row) => deliveryFromRow(row, names)),
     stock,
   }
 }
@@ -790,18 +817,21 @@ export async function deleteHpvSample(id: string, actor: BmActor) {
 export async function undoHpvSampleCheckout(id: string, actor: BmActor) {
   assertAdmin(actor)
   const admin = getAdminClient()
-  const { data: sample, error: sampleError } = await admin.from('bm_hpv_samples').select('id,barcode,status,box_id').eq('id', id).maybeSingle()
+  const { data: sample, error: sampleError } = await admin.from('bm_hpv_samples').select('id,barcode,status,box_id,delivery_status').eq('id', id).maybeSingle()
   fail(sampleError)
   const row = sample as RecordRow | null
   if (!row) throw new HttpError(404, 'HPV sample not found')
   if (asString(row.status) !== 'checked_out') throw new HttpError(409, 'ยกเลิก checkout ได้เฉพาะ sample ที่ checkout แล้ว')
+  if (asString(row.delivery_status) === 'delivered') {
+    throw new HttpError(409, 'ยกเลิก checkout ไม่ได้ ตัวอย่างนี้ส่งมอบแล้ว — ต้องยกเลิกรอบส่งมอบก่อน')
+  }
 
   const boxId = nullableString(row.box_id)
   if (boxId) {
     // Sample came from a storage box — undoing checkout puts it back to stored in its original position.
     const { error } = await admin
       .from('bm_hpv_samples')
-      .update({ status: 'stored', checked_out_at: null, checked_out_by: null, checkout_destination: null, checkout_note: null })
+      .update({ status: 'stored', checked_out_at: null, checked_out_by: null, checkout_destination: null, checkout_note: null, delivery_status: 'pending', delivery_id: null })
       .eq('id', id)
     fail(error)
   } else {
@@ -890,6 +920,8 @@ export async function checkoutHpvSample(input: { barcode: string; destination?: 
         checked_out_by: actor.id,
         checkout_destination: destination,
         checkout_note: note,
+        delivery_status: 'pending',
+        delivery_id: null,
       })
       .select('id')
       .single()
@@ -908,9 +940,149 @@ export async function checkoutHpvSample(input: { barcode: string; destination?: 
       checked_out_by: actor.id,
       checkout_destination: destination,
       checkout_note: note,
+      delivery_status: 'pending',
+      delivery_id: null,
     })
     .eq('id', asString(sampleRow.id))
   fail(error)
   await writeAudit(actor, 'hpv.sample.checkout', 'hpv-sample', asString(sampleRow.id), { barcode, destination })
   return getHpvWorkspace(actor)
+}
+
+const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024
+
+async function nextHpvDeliveryCode() {
+  // Bangkok date so the running number resets with the working day, not UTC midnight.
+  const day = todayBangkok().replace(/-/g, '')
+  const prefix = `HPVD-${day}-`
+  const { data, error } = await getAdminClient()
+    .from('bm_hpv_sample_deliveries')
+    .select('delivery_code')
+    .like('delivery_code', `${prefix}%`)
+  fail(error)
+  const used = ((data ?? []) as RecordRow[])
+    .map((row) => Number(asString(row.delivery_code).slice(prefix.length)))
+    .filter((value) => Number.isFinite(value))
+  const next = (used.length ? Math.max(...used) : 0) + 1
+  return `${prefix}${String(next).padStart(2, '0')}`
+}
+
+export async function createHpvSampleDelivery(
+  input: { sampleIds: string[]; destination?: string | null; receiverName?: string | null; note?: string | null; signature: File },
+  actor: BmActor,
+) {
+  const admin = getAdminClient()
+  const sampleIds = [...new Set(input.sampleIds)]
+  if (!sampleIds.length) throw new HttpError(400, 'กรุณาเลือกตัวอย่างอย่างน้อย 1 รายการ')
+  if (sampleIds.length > 200) throw new HttpError(400, 'ส่งมอบได้ครั้งละไม่เกิน 200 ตัวอย่าง')
+  if (input.signature.type !== 'image/png') throw new HttpError(400, 'ลายเซ็นต้องเป็นไฟล์ PNG')
+  if (input.signature.size > MAX_SIGNATURE_BYTES) throw new HttpError(400, 'ไฟล์ลายเซ็นใหญ่เกิน 2 MB')
+
+  const { data: sampleData, error: sampleError } = await admin
+    .from('bm_hpv_samples')
+    .select('id,barcode,status,delivery_status')
+    .in('id', sampleIds)
+  fail(sampleError)
+  const sampleRows = (sampleData ?? []) as RecordRow[]
+  if (sampleRows.length !== sampleIds.length) throw new HttpError(404, 'ไม่พบตัวอย่างบางรายการที่เลือก')
+  const blocked = sampleRows.filter((row) => asString(row.status) !== 'checked_out' || asString(row.delivery_status) !== 'pending')
+  if (blocked.length) {
+    throw new HttpError(409, `ส่งมอบไม่ได้ ตัวอย่างต่อไปนี้ไม่ได้อยู่ในสถานะรอส่งตัวอย่าง: ${blocked.map((row) => asString(row.barcode)).join(', ')}`)
+  }
+
+  const deliveredAt = new Date().toISOString()
+  const { data: deliveryData, error: deliveryError } = await admin
+    .from('bm_hpv_sample_deliveries')
+    .insert({
+      delivery_code: await nextHpvDeliveryCode(),
+      destination: clean(input.destination),
+      receiver_name: clean(input.receiverName),
+      note: clean(input.note),
+      sample_count: sampleIds.length,
+      delivered_at: deliveredAt,
+      created_by: actor.id,
+    })
+    .select('*')
+    .single()
+  fail(deliveryError)
+  const deliveryRow = deliveryData as RecordRow
+  const deliveryId = asString(deliveryRow.id)
+
+  const signature = await uploadAttachment(
+    { module: 'hpv', entityType: 'hpv-delivery', entityId: deliveryId, kind: 'receiver-signature', file: input.signature },
+    actor,
+  )
+  const { error: signatureError } = await admin
+    .from('bm_hpv_sample_deliveries')
+    .update({ signature_attachment_id: signature.id })
+    .eq('id', deliveryId)
+  fail(signatureError)
+
+  const { error: updateError } = await admin
+    .from('bm_hpv_samples')
+    .update({ delivery_status: 'delivered', delivery_id: deliveryId })
+    .in('id', sampleIds)
+  fail(updateError)
+
+  await writeAudit(actor, 'hpv.delivery.create', 'hpv-delivery', deliveryId, {
+    deliveryCode: asString(deliveryRow.delivery_code),
+    destination: clean(input.destination),
+    receiverName: clean(input.receiverName),
+    barcodes: sampleRows.map((row) => asString(row.barcode)),
+  })
+  return { workspace: await getHpvWorkspace(actor), deliveryId, deliveryCode: asString(deliveryRow.delivery_code) }
+}
+
+export async function undoHpvSampleDelivery(id: string, actor: BmActor) {
+  assertAdmin(actor)
+  const admin = getAdminClient()
+  const { data, error } = await admin.from('bm_hpv_sample_deliveries').select('id,delivery_code').eq('id', id).maybeSingle()
+  fail(error)
+  const row = data as RecordRow | null
+  if (!row) throw new HttpError(404, 'ไม่พบรอบส่งมอบนี้')
+
+  const { error: sampleError } = await admin
+    .from('bm_hpv_samples')
+    .update({ delivery_status: 'pending', delivery_id: null })
+    .eq('delivery_id', id)
+  fail(sampleError)
+
+  // Drop the signature file first — the delivery row's FK is ON DELETE SET NULL,
+  // so removing it afterwards would leave an orphaned object in the bucket.
+  await deleteEntityAttachments({ module: 'hpv', entityType: 'hpv-delivery', entityId: id })
+  const { error: deleteError } = await admin.from('bm_hpv_sample_deliveries').delete().eq('id', id)
+  fail(deleteError)
+
+  await writeAudit(actor, 'hpv.delivery.undo', 'hpv-delivery', id, { deliveryCode: asString(row.delivery_code) })
+  return getHpvWorkspace(actor)
+}
+
+export async function getHpvDelivery(id: string): Promise<HpvDeliveryDetail | null> {
+  const admin = getAdminClient()
+  const { data, error } = await admin.from('bm_hpv_sample_deliveries').select('*').eq('id', id).maybeSingle()
+  fail(error)
+  const deliveryRow = data as RecordRow | null
+  if (!deliveryRow) return null
+
+  const { data: sampleData, error: sampleError } = await admin
+    .from('bm_hpv_samples')
+    .select('*, bm_hpv_storage_boxes(box_code)')
+    .eq('delivery_id', id)
+    .order('barcode')
+  fail(sampleError)
+  const sampleRows = (sampleData ?? []) as RecordRow[]
+
+  const names = await getNameMap([
+    asString(deliveryRow.created_by),
+    ...sampleRows.map((row) => asString(row.stored_by)),
+    ...sampleRows.map((row) => asString(row.checked_out_by)),
+  ])
+
+  return {
+    delivery: deliveryFromRow(deliveryRow, names),
+    samples: sampleRows.map((row) => ({
+      ...sampleFromRow(row, names),
+      boxCode: nullableString((row.bm_hpv_storage_boxes as RecordRow | null)?.box_code),
+    })),
+  }
 }
