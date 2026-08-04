@@ -102,16 +102,34 @@ export function LjChart({
   const yTicks = hasStats ? [-3, -2, -1, 0, 1, 2, 3] : []
   const unitLabel = chart.unit ? ` (${chart.unit})` : ''
 
+  // Without a mean/SD baseline the chart still needs to show data points
+  // relative to each other on the y-axis (auto-ranged from the plotted
+  // statValues) instead of collapsing every point to the vertical center.
+  const usableStatValues = visible.filter((p) => !p.isVoided).map((p) => p.statValue)
+  const fallbackDataMin = usableStatValues.length ? Math.min(...usableStatValues) : 0
+  const fallbackDataMax = usableStatValues.length ? Math.max(...usableStatValues) : 0
+  const fallbackPad = fallbackDataMax > fallbackDataMin ? (fallbackDataMax - fallbackDataMin) * 0.2 : Math.max(Math.abs(fallbackDataMax) * 0.1, 0.5)
+  const fallbackMin = fallbackDataMin - fallbackPad
+  const fallbackMax = fallbackDataMax + fallbackPad
+  const hasFallbackRange = !hasStats && usableStatValues.length > 0 && fallbackMax > fallbackMin
+  const fallbackTicks = hasFallbackRange ? [0, 0.25, 0.5, 0.75, 1].map((t) => fallbackMin + t * (fallbackMax - fallbackMin)) : []
+
   function xAt(index: number) {
     if (visible.length <= 1) return PAD.left + PLOT_W / 2
     return PAD.left + (index / (visible.length - 1)) * PLOT_W
   }
   function yAt(statValue: number) {
-    if (!hasStats) return PAD.top + PLOT_H / 2
-    const yMax = mean! + 4 * sd!
-    const yMin = mean! - 4 * sd!
-    const clamped = Math.max(yMin, Math.min(yMax, statValue))
-    return PAD.top + ((yMax - clamped) / (yMax - yMin)) * PLOT_H
+    if (hasStats) {
+      const yMax = mean! + 4 * sd!
+      const yMin = mean! - 4 * sd!
+      const clamped = Math.max(yMin, Math.min(yMax, statValue))
+      return PAD.top + ((yMax - clamped) / (yMax - yMin)) * PLOT_H
+    }
+    if (hasFallbackRange) {
+      const clamped = Math.max(fallbackMin, Math.min(fallbackMax, statValue))
+      return PAD.top + ((fallbackMax - clamped) / (fallbackMax - fallbackMin)) * PLOT_H
+    }
+    return PAD.top + PLOT_H / 2
   }
 
   const zones = hasStats
@@ -180,6 +198,7 @@ export function LjChart({
       {!hasStats ? (
         <p className="mt-3 rounded-md border border-[#eed4a6] bg-[#fff9ed] px-3 py-2 text-xs text-[#99601b]">
           {displayedMean.label} ยังไม่มี mean/SD ที่ใช้แสดงกราฟ — เลือกการ์ดอื่นเพื่อเปรียบเทียบได้
+          {hasFallbackRange ? ` (แสดงจุดตามช่วงค่าที่มีอยู่ไปก่อน${chart.scale === 'log10' ? ' โดยแปลงเป็น log10 แล้ว' : ''} ยังไม่มีเส้น mean/SD/Westgard zone)` : ''}
         </p>
       ) : null}
 
@@ -187,7 +206,7 @@ export function LjChart({
         <svg viewBox={`0 0 ${W} ${H}`} className="mt-3 w-full" role="img" aria-label={`Levey-Jennings chart for ${chart.analyteName}`}>
           <title>{`Levey-Jennings: ${chart.analyteName} (${chart.lotNumber})`}</title>
           <text x={PAD.left} y={16} fontSize={12} fontWeight={700} fill="#173d50">
-            Value{unitLabel}
+            {chart.scale === 'log10' ? `log10 Value${unitLabel}` : `Value${unitLabel}`}
           </text>
           {monthLabel ? (
             <text x={PAD.left + PLOT_W} y={16} textAnchor="end" fontSize={12} fontWeight={700} fill="#173d50">
@@ -222,7 +241,19 @@ export function LjChart({
                   </g>
                 )
               })
-            : null}
+            : hasFallbackRange
+              ? fallbackTicks.map((value, i) => {
+                  const y = yAt(value)
+                  return (
+                    <g key={`fallback-ytick-${i}`}>
+                      <line x1={PAD.left} x2={PAD.left + PLOT_W} y1={y} y2={y} stroke="#dbe7e9" strokeWidth={0.8} />
+                      <text x={PAD.left - 8} y={y - 2} textAnchor="end" fontSize={9} fill="#42616a">
+                        {fmt(value)}
+                      </text>
+                    </g>
+                  )
+                })
+              : null}
           <line x1={PAD.left} x2={PAD.left + PLOT_W} y1={PAD.top + PLOT_H} y2={PAD.top + PLOT_H} stroke="#aebfc4" />
           <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={PAD.top + PLOT_H} stroke="#aebfc4" />
           {xTicks.map((index) => {
@@ -281,7 +312,8 @@ export function LjChart({
             const x = xAt(i)
             const y = yAt(p.statValue)
             const color = p.isVoided ? '#9aafb4' : STATUS_COLOR[p.status] ?? '#16a34a'
-            const tip = `${safeFormatDateTime(p.runDatetime)} · ${fmt(p.value)} · z ${p.z.toFixed(2)}${p.violatedRules.length ? ` · ${p.violatedRules.join(', ')}` : ''}${p.isVoided ? ' · voided' : ''}`
+            const valueLabel = chart.scale === 'log10' ? `${fmt(p.value)}${unitLabel} · log10 ${p.statValue.toFixed(3)}` : fmt(p.value)
+            const tip = `${safeFormatDateTime(p.runDatetime)} · ${valueLabel} · z ${p.z.toFixed(2)}${p.violatedRules.length ? ` · ${p.violatedRules.join(', ')}` : ''}${p.isVoided ? ' · voided' : ''}`
             const node =
               p.status === 'rejected' && !p.isVoided ? (
                 <g stroke={color} strokeWidth={2}>
@@ -323,7 +355,8 @@ export function LjChart({
             <thead className="sticky top-0 bg-[#f6fafa] text-[#55727c]">
               <tr>
                 <th className="px-2 py-1.5 font-semibold">Date</th>
-                <th className="px-2 py-1.5 text-right font-semibold">Value</th>
+                <th className="px-2 py-1.5 text-right font-semibold">Value{unitLabel}</th>
+                {chart.scale === 'log10' ? <th className="px-2 py-1.5 text-right font-semibold">log10</th> : null}
                 <th className="px-2 py-1.5 text-right font-semibold">z</th>
                 <th className="px-2 py-1.5 font-semibold">Status</th>
                 <th className="px-2 py-1.5 font-semibold">Rules</th>
@@ -334,12 +367,13 @@ export function LjChart({
                 <tr key={p.resultId} className={p.isVoided ? 'text-[#9aafb4] line-through' : ''}>
                   <td className="px-2 py-1.5">{safeFormatDateTime(p.runDatetime)}</td>
                   <td className="mono px-2 py-1.5 text-right tabular-nums">{fmt(p.value)}</td>
+                  {chart.scale === 'log10' ? <td className="mono px-2 py-1.5 text-right tabular-nums">{p.statValue.toFixed(3)}</td> : null}
                   <td className="mono px-2 py-1.5 text-right tabular-nums">{p.z.toFixed(2)}</td>
                   <td className="px-2 py-1.5"><StatusBadge tone={p.isVoided ? 'neutral' : p.status} label={p.isVoided ? 'voided' : p.status} /></td>
                   <td className="px-2 py-1.5">{p.violatedRules.join(', ') || '—'}</td>
                 </tr>
               ))}
-              {!visible.length ? <tr><td colSpan={5} className="px-2 py-6 text-center text-[#91a4a9]">ยังไม่มีข้อมูล</td></tr> : null}
+              {!visible.length ? <tr><td colSpan={chart.scale === 'log10' ? 6 : 5} className="px-2 py-6 text-center text-[#91a4a9]">ยังไม่มีข้อมูล</td></tr> : null}
             </tbody>
           </table>
         </div>

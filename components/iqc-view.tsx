@@ -2465,9 +2465,11 @@ function SpecForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolea
   })
   const [busy, setBusy] = useState(false)
   const lotSpecs = data.specs.filter((s) => s.controlLotId === form.controlLotId)
+  const selectedAnalyteIsLog = data.analytes.find((a) => a.id === form.analyteId)?.scale === 'log10'
   return (
     <Card className="space-y-3 p-4 lg:col-span-2">
       <h2 className="font-bold text-[#173d50]">Assigned spec (mean/SD ของผู้ผลิต)</h2>
+      <p className="text-xs text-[#789097]">สำหรับ Viral load (log10 scale): กรอก Assigned mean/SD เป็นค่า <strong>log10</strong> ตามที่ certificate ระบุโดยตรง — ระบบไม่แปลงค่านี้ให้ (การแปลง log10 อัตโนมัติใช้เฉพาะตอนบันทึกผล IQC ประจำวันจากค่า Copies/mL หรือ IU/mL เท่านั้น)</p>
       <form
         className="grid gap-2 md:grid-cols-5"
         onSubmit={async (e) => {
@@ -2515,11 +2517,11 @@ function SpecForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise<boolea
             ))}
           </Select>
         </Field>
-        <Field label="Assigned mean">
-          <Input className="mono" type="number" step="any" value={form.assignedMean} onChange={(e) => setForm({ ...form, assignedMean: e.target.value })} />
+        <Field label={selectedAnalyteIsLog ? 'Assigned mean (log10)' : 'Assigned mean'} hint={selectedAnalyteIsLog ? 'กรอกเป็นค่า log10 จาก certificate — ห้ามกรอกค่า Copies/mL หรือ IU/mL ดิบ' : undefined}>
+          <Input className="mono" type="number" step="any" value={form.assignedMean} onChange={(e) => setForm({ ...form, assignedMean: e.target.value })} placeholder={selectedAnalyteIsLog ? 'เช่น 4.98' : undefined} />
         </Field>
-        <Field label="Assigned SD">
-          <Input className="mono" type="number" step="any" value={form.assignedSd} onChange={(e) => setForm({ ...form, assignedSd: e.target.value })} />
+        <Field label={selectedAnalyteIsLog ? 'Assigned SD (log10)' : 'Assigned SD'} hint={selectedAnalyteIsLog ? 'กรอกเป็นค่า log10 (เช่น ±0.5 log)' : undefined}>
+          <Input className="mono" type="number" step="any" value={form.assignedSd} onChange={(e) => setForm({ ...form, assignedSd: e.target.value })} placeholder={selectedAnalyteIsLog ? 'เช่น 0.15' : undefined} />
         </Field>
         <Field label="Expected (qual)">
           <Input value={form.expectedQualitative} onChange={(e) => setForm({ ...form, expectedQualitative: e.target.value })} placeholder="valid/pos" />

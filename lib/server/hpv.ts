@@ -654,6 +654,19 @@ export async function createHpvStorageBox(input: { boxCode: string }, actor: BmA
   return getHpvWorkspace(actor)
 }
 
+export async function renameHpvStorageBox(id: string, boxCode: string, actor: BmActor) {
+  assertAdmin(actor)
+  const trimmed = boxCode.trim()
+  if (!trimmed) throw new HttpError(400, 'ระบุชื่อกล่อง')
+  const { error } = await getAdminClient()
+    .from('bm_hpv_storage_boxes')
+    .update({ box_code: trimmed, updated_at: new Date().toISOString() })
+    .eq('id', id)
+  if (error) throw new HttpError(400, error.code === '23505' ? `มีกล่องชื่อ ${trimmed} อยู่แล้ว` : error.message || 'เปลี่ยนชื่อกล่องไม่สำเร็จ')
+  await writeAudit(actor, 'hpv.box.rename', 'hpv-box', id, { boxCode: trimmed })
+  return getHpvWorkspace(actor)
+}
+
 export async function closeHpvStorageBox(id: string, actor: BmActor) {
   assertAdmin(actor)
   const { data: box, error: boxError } = await getAdminClient().from('bm_hpv_storage_boxes').select('status').eq('id', id).maybeSingle()

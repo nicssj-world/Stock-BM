@@ -1041,6 +1041,8 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
   const { openBoxes, viewBox: selectedBox, intakeBox: scanBox } = resolveHpvStorageBoxes(data.boxes, viewBoxId, intakeBoxId)
   const effectiveBoxId = selectedBox?.id ?? ''
   const [searchBarcode, setSearchBarcode] = useState('')
+  const [searchDestination, setSearchDestination] = useState('Co-testing')
+  const [searchCustomDestination, setSearchCustomDestination] = useState('')
   const searchResult = (() => {
     const code = searchBarcode.trim()
     if (!code) return null
@@ -1050,6 +1052,24 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
     }
     return 'not_found' as const
   })()
+
+  async function checkoutFromSearch(sample: HpvSample) {
+    const effectiveDestination = searchDestination === 'อื่นๆ' ? searchCustomDestination.trim() || 'อื่นๆ' : searchDestination
+    setBusy(true)
+    try {
+      const result = await api<{ workspace: HpvWorkspace }>('/api/hpv/storage/checkout', {
+        method: 'POST',
+        body: JSON.stringify({ barcode: sample.barcode, destination: effectiveDestination }),
+      })
+      onWorkspace(result.workspace, `Checkout ${sample.barcode} ไป ${effectiveDestination} แล้ว`)
+      setSearchBarcode('')
+      setSearchCustomDestination('')
+    } catch (error) {
+      onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'Checkout ไม่สำเร็จ' })
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function scan(codeInput = barcode) {
     const code = normalizeScan(codeInput)
@@ -1172,6 +1192,23 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
     }
   }
 
+  async function renameBox(box: HpvStorageBox) {
+    const next = window.prompt('ชื่อกล่องใหม่:', box.boxCode)
+    if (next == null || !next.trim() || next.trim() === box.boxCode) return
+    setBusy(true)
+    try {
+      const result = await api<{ workspace: HpvWorkspace }>(`/api/hpv/storage/boxes/${box.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ action: 'rename', boxCode: next.trim() }),
+      })
+      onWorkspace(result.workspace, `เปลี่ยนชื่อกล่องเป็น ${next.trim()} แล้ว`)
+    } catch (error) {
+      onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'เปลี่ยนชื่อกล่องไม่สำเร็จ' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function deleteBox(box: HpvStorageBox) {
     if (!window.confirm(`ลบกล่อง "${box.boxCode}" ใช่ไหม?\n\nถ้ามี sample อยู่ในกล่องจะลบไม่ได้`)) return
     setBusy(true)
@@ -1251,6 +1288,13 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
               <p className="text-sm font-bold text-[#0b7f76]">{searchResult.box.boxCode}</p>
               <div className="mt-1 flex items-center gap-2"><p className="text-xs text-[#789097]">{formatHpvBoxPosition(searchResult.sample.position)} · {searchResult.sample.status}</p><SpecimenTypeBadge type={searchResult.sample.specimenType} /></div>
               <button type="button" onClick={() => { setViewBoxId(searchResult.box.id); if (searchResult.box.status === 'open') setIntakeBoxId(searchResult.box.id); setSelectedPosition(null) }} className="mt-1.5 text-xs font-bold text-[#0b7f76] underline hover:no-underline">ไปที่กล่องนี้</button>
+              {searchResult.sample.status === 'stored' ? (
+                <div className="mt-2 space-y-1.5 border-t border-[#cfe6e2] pt-2">
+                  <Select value={searchDestination} onChange={(e) => setSearchDestination(e.target.value)} className="h-8 text-xs"><option>Co-testing</option><option>HPV-OHR</option><option>อื่นๆ</option></Select>
+                  {searchDestination === 'อื่นๆ' ? <Input value={searchCustomDestination} onChange={(e) => setSearchCustomDestination(e.target.value)} placeholder="ระบุปลายทาง" className="h-8 text-xs" /> : null}
+                  <Button type="button" disabled={busy} onClick={() => void checkoutFromSearch(searchResult.sample)} className="h-8 w-full text-xs"><ArrowUpFromLine className="size-3.5" /> Check out</Button>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </Card>
@@ -1289,13 +1333,13 @@ function StorageTab({ data, today, onWorkspace, onNotice }: {
             <p className="px-4 py-8 text-center text-sm text-[#91a4a9]">ยังไม่มี Storage box</p>
           )}
         </Card>
-        <BoxPanel box={selectedBox} today={today} selectedPosition={selectedPosition} onSelectPosition={setSelectedPosition} onMove={moveOrSwap} onClose={closeBox} onReopen={reopenBox} onDestroy={destroyBox} onDelete={deleteBox} onDeleteSample={deleteSample} />
+        <BoxPanel box={selectedBox} today={today} selectedPosition={selectedPosition} onSelectPosition={setSelectedPosition} onMove={moveOrSwap} onClose={closeBox} onReopen={reopenBox} onDestroy={destroyBox} onDelete={deleteBox} onRename={renameBox} onDeleteSample={deleteSample} />
       </div>
     </div>
   )
 }
 
-function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onClose, onReopen, onDestroy, onDelete, onDeleteSample }: {
+function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onClose, onReopen, onDestroy, onDelete, onRename, onDeleteSample }: {
   box: HpvStorageBox | null
   today: string
   selectedPosition?: number | null
@@ -1305,6 +1349,7 @@ function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onCl
   onReopen?: (box: HpvStorageBox) => void
   onDestroy?: (box: HpvStorageBox) => void
   onDelete?: (box: HpvStorageBox) => void
+  onRename?: (box: HpvStorageBox) => void
   onDeleteSample?: (sample: HpvSample) => void
 }) {
   const [dragOver, setDragOver] = useState<number | null>(null)
@@ -1320,7 +1365,10 @@ function BoxPanel({ box, today, selectedPosition, onSelectPosition, onMove, onCl
     <Card className="overflow-hidden">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#e1eaeb] bg-[linear-gradient(115deg,#fafdfe,#eef9f7)] px-4 py-4">
         <div>
-          <h2 className="mt-1 text-xl font-bold text-[#173d50]">{box.boxCode}</h2>
+          <div className="mt-1 flex items-center gap-1.5">
+            <h2 className="text-xl font-bold text-[#173d50]">{box.boxCode}</h2>
+            {onRename ? <button onClick={() => onRename(box)} title="แก้ไขชื่อกล่อง" className="rounded p-1 text-[#8ba0a5] hover:bg-[#eef4f4] hover:text-[#315763]"><Pencil className="size-3.5" /></button> : null}
+          </div>
           <p className="mt-1 text-xs text-[#789097]">{occupied}/{HPV_BOX_CAPACITY} positions · created {formatDateTime(box.createdAt)}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -1517,7 +1565,7 @@ function CheckoutTab({ data, onWorkspace, onNotice }: {
           <h2 className="font-bold text-[#173d50]">Checkout</h2>
           <div className="relative"><ScanLine className="absolute top-3 left-3 size-5 text-[#88a1a7]" /><Input autoFocus value={barcode} onChange={(e) => setBarcode(e.target.value)} className="h-12 pl-11 mono text-base" placeholder="Sample barcode" /></div>
           <p className="text-xs text-[#8ba0a5]">ถ้า barcode นี้ไม่มีอยู่ใน storage box ระบบจะบันทึก checkout ให้และทำสัญลักษณ์ว่าไม่ได้มาจาก storage box (ระบุเป็น Clinician-collected โดยอัตโนมัติ)</p>
-          <Field label="Destination"><Select value={destination} onChange={(e) => setDestination(e.target.value)}><option>Co-testing</option><option>GeneXpert</option><option>PCR</option><option>อื่นๆ</option></Select></Field>
+          <Field label="Destination"><Select value={destination} onChange={(e) => setDestination(e.target.value)}><option>Co-testing</option><option>HPV-OHR</option><option>อื่นๆ</option></Select></Field>
           {destination === 'อื่นๆ' ? <Field label="ระบุ"><Input value={customDestination} onChange={(e) => setCustomDestination(e.target.value)} placeholder="ระบุปลายทาง" /></Field> : null}
           <Field label="Note"><Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
           <div className="flex gap-2"><Button disabled={busy || !barcode.trim()}><CheckCircle2 className="size-4" /> Checkout</Button><Button type="button" variant="secondary" onClick={() => setCameraOn((value) => !value)}>{cameraOn ? <X className="size-4" /> : <Camera className="size-4" />} Camera</Button></div>
