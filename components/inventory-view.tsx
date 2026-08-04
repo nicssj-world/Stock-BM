@@ -12,6 +12,10 @@ import { StockMetric, StockMetricStrip, StockModuleShell, StockPanelTitle } from
 
 const INVENTORY_PAGE_SIZE = 8
 
+function isVisibleLot(lot: StockLot) {
+  return !(lot.totalOnHand === 0 && lot.expiryState === 'expired')
+}
+
 export function InventoryView({ actor, initialData, defaultLocationId }: { actor: BmActor; initialData: StockWorkspace; defaultLocationId?: string }) {
   const [data, setData] = useState(initialData)
   const [selectedItemId, setSelectedItemId] = useState(initialData.items[0]?.id ?? '')
@@ -172,7 +176,7 @@ function MobileInventoryList({
               <div className="border-t border-[#dce8e9] px-3 py-2">
                 <button type="button" onClick={onOpenDetail} className="mb-2 flex w-full items-center justify-between rounded-md border border-[#cfe2df] bg-[#f1faf8] px-3 py-2 text-left text-xs font-bold text-[#08766e]"><span>ดูรายละเอียด item</span><span>Lots · ledger · info</span></button>
                 <div className="grid gap-2">
-                  {item.lots.map((lot) => (
+                  {item.lots.filter(isVisibleLot).map((lot) => (
                     <button key={lot.id} type="button" onClick={() => onLotAction({ item, lot })} className="rounded-md border border-[#e1eaeb] bg-white px-3 py-2 text-left">
                       <div className="flex items-start justify-between gap-2">
                         <span className="min-w-0">
@@ -187,7 +191,7 @@ function MobileInventoryList({
                       </div>
                     </button>
                   ))}
-                  {!item.lots.length ? <p className="rounded-md border border-dashed border-[#d5e2e3] px-3 py-5 text-center text-sm text-[#91a4a9]">ยังไม่มี Lot รับเข้า</p> : null}
+                  {!item.lots.filter(isVisibleLot).length ? <p className="rounded-md border border-dashed border-[#d5e2e3] px-3 py-5 text-center text-sm text-[#91a4a9]">ยังไม่มี Lot รับเข้า</p> : null}
                 </div>
               </div>
             ) : null}
@@ -222,8 +226,8 @@ function StockDetail({ actor, item, transactions, locations, onReverse, onLotAct
     {tab === 'lots' ? <section className="px-4 py-4">
       <div className="flex items-center justify-between"><h3 className="font-bold text-[#173d50]">Lots / Location balances</h3><PackageCheck className="size-5 text-[#0b7f76]" /></div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        {item.lots.map((lot) => <LotCard key={lot.id} lot={lot} item={item} locations={locations} onLotAction={() => onLotAction({ item, lot })} />)}
-        {!item.lots.length ? <p className="col-span-full rounded-md border border-dashed border-[#d5e2e3] px-3 py-7 text-center text-sm text-[#91a4a9]">ยังไม่มี Lot รับเข้า</p> : null}
+        {item.lots.filter(isVisibleLot).map((lot) => <LotCard key={lot.id} lot={lot} item={item} locations={locations} onLotAction={() => onLotAction({ item, lot })} />)}
+        {!item.lots.filter(isVisibleLot).length ? <p className="col-span-full rounded-md border border-dashed border-[#d5e2e3] px-3 py-7 text-center text-sm text-[#91a4a9]">ยังไม่มี Lot รับเข้า</p> : null}
       </div>
     </section> : null}
     {tab === 'movements' ? <section>
