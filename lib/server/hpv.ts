@@ -428,11 +428,10 @@ export async function createHpvDistribution(input: {
   overrideReason?: string | null
 }, actor: BmActor) {
   const admin = getAdminClient()
-  const { data: site, error: siteError } = await admin.from('bm_hpv_sites').select('id,name,code,is_active,self_supplied').eq('id', input.siteId).maybeSingle()
+  const { data: site, error: siteError } = await admin.from('bm_hpv_sites').select('id,name,code,is_active').eq('id', input.siteId).maybeSingle()
   fail(siteError)
   const siteRow = site as RecordRow | null
   if (!siteRow?.is_active) throw new HttpError(400, 'Active HPV site not found')
-  if (siteRow.self_supplied) throw new HttpError(400, 'หน่วยงานนี้ใช้ชุดตรวจตัวเอง จึงไม่ต้องเบิกจาก Stock กลาง')
 
   const kitColumn = input.kitType === 'self_collected' ? 'hpv_self_collected' : 'hpv_clinician_collected'
   const { data: requiredItems, error: itemError } = await admin

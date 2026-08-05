@@ -448,7 +448,7 @@ function DistributionTab({
                         onChange={(e) => setSelectedLineKeys((current) => ({ ...current, [item.id]: e.target.value }))}
                       >
                         {itemLines.map((line) => (
-                          <option key={line.key} value={line.key}>LOT {line.lot.lotNumber} · {line.balance.locationCode} ({formatQuantity(line.balance.onHand)} {item.unit})</option>
+                          <option key={line.key} value={line.key}>exp {line.lot.expiryDate ? formatDate(line.lot.expiryDate) : '-'} · {line.balance.locationCode} ({formatQuantity(line.balance.onHand)} {item.unit})</option>
                         ))}
                         {!itemLines.length ? <option value="">ไม่มี lot ที่มียอดคงเหลือ</option> : null}
                       </Select>
