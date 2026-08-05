@@ -631,7 +631,7 @@ function IssueForm({
               key={option.locationId}
               selected={option.locationId === form.locationId}
               title={option.locationCode}
-              meta={`${formatQuantity(option.onHand)} ${item?.unit ?? ''}`}
+              meta={`${option.locationName} · ${formatQuantity(option.onHand)} ${item?.unit ?? ''}`}
               compact
               onClick={() => setForm({ ...form, locationId: option.locationId })}
             />
@@ -727,7 +727,7 @@ function MoveForm({
       <form onSubmit={submit} className="grid gap-4 lg:grid-cols-2">
         <Field label="สินค้า / Item"><Select required value={form.itemId} onChange={(event) => { const next = stockedItems.find((candidate) => candidate.id === event.target.value); const nextLot = next?.lots.find((candidate) => candidate.totalOnHand > 0); setForm({ ...form, itemId: event.target.value, lotId: nextLot?.id ?? '', fromLocationId: nextLot?.balances[0]?.locationId ?? '', toLocationId: '' }) }}>{stockedItems.map((option) => <option key={option.id} value={option.id}>{option.itemCode} · {option.name}</option>)}</Select></Field>
         <Field label="Lot"><Select required value={form.lotId} onChange={(event) => { const nextLot = lots.find((candidate) => candidate.id === event.target.value); setForm({ ...form, lotId: event.target.value, fromLocationId: nextLot?.balances[0]?.locationId ?? '', toLocationId: '' }) }}>{lots.map((option) => <option key={option.id} value={option.id}>{option.lotNumber} · {formatQuantity(option.totalOnHand)} {item?.unit}</option>)}</Select></Field>
-        <Field label="จาก / From"><Select required value={form.fromLocationId} onChange={(event) => setForm({ ...form, fromLocationId: event.target.value })}>{fromBalances.map((option) => <option key={option.locationId} value={option.locationId}>{option.locationCode} · {formatQuantity(option.onHand)} {item?.unit}</option>)}</Select></Field>
+        <Field label="จาก / From"><Select required value={form.fromLocationId} onChange={(event) => setForm({ ...form, fromLocationId: event.target.value })}>{fromBalances.map((option) => <option key={option.locationId} value={option.locationId}>{option.locationCode} · {option.locationName} · {formatQuantity(option.onHand)} {item?.unit}</option>)}</Select></Field>
         <Field label="ไป / To"><Select required value={form.toLocationId} onChange={(event) => setForm({ ...form, toLocationId: event.target.value })}><option value="">เลือก destination</option>{destinationOptions.map((option) => <option key={option.id} value={option.id}>{option.code} · {option.name}</option>)}</Select></Field>
         <Field label={`จำนวน / Quantity${item ? ` (${item.unit})` : ''}`}><Input required type="number" min="0.001" max={fromBalance?.onHand} step="0.001" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} /></Field>
         <Field label="Reference"><Input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></Field>
@@ -1014,7 +1014,7 @@ function AdjustForm({
                     key={option.id}
                     selected={option.id === form.locationId}
                     title={option.code}
-                    meta={`${formatQuantity(bal)} ${item?.unit ?? ''}`}
+                    meta={`${option.name} · ${formatQuantity(bal)} ${item?.unit ?? ''}`}
                     compact
                     onClick={() => setForm({ ...form, locationId: option.id })}
                   />
