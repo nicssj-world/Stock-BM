@@ -31,7 +31,7 @@ export function InventoryView({ actor, initialData, defaultLocationId }: { actor
     const term = q.trim().toLowerCase()
     return data.items.filter((item) => {
       const matches = !term || `${item.itemCode} ${item.name} ${item.categoryName}`.toLowerCase().includes(term)
-      const statusOk = status === 'all' || (status === 'low' && item.isLowStock) || (status === 'expiring' && item.lots.some((lot) => lot.expiryState === 'expiring')) || (status === 'expired' && item.lots.some((lot) => lot.expiryState === 'expired'))
+      const statusOk = (status === 'all' && item.isActive) || (status === 'low' && item.isLowStock) || (status === 'expiring' && item.lots.some((lot) => lot.totalOnHand > 0 && lot.expiryState === 'expiring')) || (status === 'expired' && item.lots.some((lot) => lot.totalOnHand > 0 && lot.expiryState === 'expired'))
       const locationOk = locationFilter === 'all' || item.lots.some((lot) => lot.balances.some((balance) => balance.locationId === locationFilter && balance.onHand > 0))
       return matches && statusOk && locationOk && stockItemMatchesEquipment(item, equipmentFilter)
     })
