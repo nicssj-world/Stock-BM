@@ -257,7 +257,7 @@ function LotCard({ lot, item, locations, onLotAction }: { lot: StockLot; item: S
   return <div className={`rounded-md border p-3 ${color}`}>
     <div className="flex items-start justify-between gap-2"><div><p className="mono text-xs font-bold text-[#315763]">{lot.lotNumber}</p><p className="mt-1 text-[11px] text-[#8b9da2]">EXP {formatDate(lot.expiryDate)}</p></div><ExpiryBadge state={lot.expiryState} /></div>
     <p className="mono mt-3 text-lg font-bold text-[#173d50]">{formatQuantity(lot.totalOnHand)} <span className="text-[11px] font-semibold text-[#789097]">{item.unit}</span></p>
-    <div className="mt-2 space-y-1">{lot.balances.map((balance) => <p key={balance.locationId} className="flex justify-between text-[11px] text-[#6f868b]"><span>{balance.locationCode}</span><span className="mono">{formatQuantity(balance.onHand)}</span></p>)}</div>
+    <div className="mt-2 space-y-1">{lot.balances.map((balance) => <p key={balance.locationId} className="flex justify-between gap-2 text-[11px] text-[#6f868b]"><span className="min-w-0 truncate">{balance.locationCode} · {balance.locationName}</span><span className="mono shrink-0">{formatQuantity(balance.onHand)}</span></p>)}</div>
     <div className="mt-2 flex flex-wrap gap-1">
       <Button variant="ghost" className="px-2 py-1 text-xs" onClick={onLotAction}><MoveRight className="size-3" /> Actions</Button>
       <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => printLotLabel(lot, item, locations.find((location) => location.id === lot.balances[0]?.locationId))}><Printer className="size-3" /> Label</Button>
