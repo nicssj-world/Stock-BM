@@ -17,6 +17,7 @@ const itemSchema = z.object({
   manufacturer: z.string().trim().max(120).nullable().optional(),
   manufacturerBarcode: z.string().trim().max(180).nullable().optional(),
   equipmentIds: z.array(z.string().uuid()).max(100).optional(),
+  locationIds: z.array(z.string().uuid()).max(100).optional(),
   trackLot: z.boolean(),
   trackExpiry: z.boolean(),
   isHpv: z.boolean().optional(),

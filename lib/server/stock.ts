@@ -69,6 +69,7 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
     { data: balanceData, error: balanceError },
     { data: equipmentData, error: equipmentError },
     { data: itemEquipmentLinkData, error: itemEquipmentLinkError },
+    { data: itemLocationLinkData, error: itemLocationLinkError },
   ] = await Promise.all([
     admin.from('bm_stock_categories').select('*').order('name'),
     admin.from('bm_stock_locations').select('*').order('code'),
@@ -80,6 +81,7 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
     admin.from('bm_stock_lot_location_balances').select('lot_id,location_id,on_hand'),
     admin.from('bm_equipment').select('id,code,name,status').order('code'),
     admin.from('bm_stock_item_equipment_links').select('stock_item_id,equipment_id'),
+    admin.from('bm_stock_item_location_links').select('stock_item_id,location_id'),
   ])
   fail(categoryError)
   fail(locationError)
@@ -89,6 +91,7 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
   fail(balanceError)
   fail(equipmentError)
   fail(itemEquipmentLinkError)
+  fail(itemLocationLinkError)
 
   const categoryRows = (categoryData ?? []) as RecordRow[]
   const locationRows = (locationData ?? []) as RecordRow[]
@@ -108,6 +111,13 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
     const equipmentId = asString(row.equipment_id)
     if (!itemId || !equipmentId) continue
     equipmentIdsByItem.set(itemId, [...(equipmentIdsByItem.get(itemId) ?? []), equipmentId])
+  }
+  const locationIdsByItem = new Map<string, string[]>()
+  for (const row of (itemLocationLinkData ?? []) as RecordRow[]) {
+    const itemId = asString(row.stock_item_id)
+    const locationId = asString(row.location_id)
+    if (!itemId || !locationId) continue
+    locationIdsByItem.set(itemId, [...(locationIdsByItem.get(itemId) ?? []), locationId])
   }
   const transactionIds = ids(transactionRows, 'id')
   const { data: transactionLineData, error: transactionLineError } = transactionIds.length
@@ -208,6 +218,7 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
       hpvSelfCollected: Boolean(row.hpv_self_collected),
       hpvClinicianCollected: Boolean(row.hpv_clinician_collected),
       equipmentIds: equipmentIdsByItem.get(asString(row.id)) ?? [],
+      locationIds: locationIdsByItem.get(asString(row.id)) ?? [],
       isActive: Boolean(row.is_active),
       totalOnHand,
       usableOnHand,
@@ -316,6 +327,28 @@ async function replaceItemEquipmentLinks(itemId: string, equipmentIds: string[] 
   }
 }
 
+async function replaceItemLocationLinks(itemId: string, locationIds: string[] | undefined, actor: BmActor) {
+  if (locationIds === undefined) return
+  const uniqueLocationIds = [...new Set(locationIds.filter(Boolean))]
+  const admin = getAdminClient()
+  if (uniqueLocationIds.length) {
+    const { data, error } = await admin.from('bm_stock_locations').select('id').in('id', uniqueLocationIds)
+    fail(error)
+    const foundIds = new Set(((data ?? []) as RecordRow[]).map((row) => asString(row.id)))
+    if (foundIds.size !== uniqueLocationIds.length) throw new HttpError(400, 'One or more selected locations were not found')
+  }
+  const { error: deleteError } = await admin.from('bm_stock_item_location_links').delete().eq('stock_item_id', itemId)
+  fail(deleteError)
+  if (uniqueLocationIds.length) {
+    const { error: insertError } = await admin.from('bm_stock_item_location_links').insert(uniqueLocationIds.map((locationId) => ({
+      stock_item_id: itemId,
+      location_id: locationId,
+      created_by: actor.id,
+    })))
+    fail(insertError)
+  }
+}
+
 export async function createCategory(name: string, actor: BmActor) {
   await assertAdmin(actor)
   const { data, error } = await getAdminClient()
@@ -403,6 +436,7 @@ export async function createItem(input: {
   manufacturer?: string | null
   manufacturerBarcode?: string | null
   equipmentIds?: string[]
+  locationIds?: string[]
   trackLot: boolean
   trackExpiry: boolean
   isHpv?: boolean
@@ -438,6 +472,7 @@ export async function createItem(input: {
     .single()
   fail(error)
   await replaceItemEquipmentLinks(asString((data as RecordRow).id), input.equipmentIds, actor)
+  await replaceItemLocationLinks(asString((data as RecordRow).id), input.locationIds, actor)
   await writeAudit(actor, 'item.create', 'stock-item', asString((data as RecordRow).id), input)
   return getStockWorkspace(actor)
 }
@@ -486,6 +521,7 @@ export async function updateItem(itemId: string, input: Partial<Parameters<typeo
   const { error } = await getAdminClient().from('bm_stock_items').update(updates).eq('id', itemId)
   fail(error)
   await replaceItemEquipmentLinks(itemId, input.equipmentIds, actor)
+  await replaceItemLocationLinks(itemId, input.locationIds, actor)
   await writeAudit(actor, 'item.update', 'stock-item', itemId, input)
   return getStockWorkspace(actor)
 }

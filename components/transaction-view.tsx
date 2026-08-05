@@ -51,6 +51,16 @@ function downloadCsv(filename: string, rows: string[][]) {
   URL.revokeObjectURL(url)
 }
 
+function defaultLocationForItem(item: StockItem | undefined, locations: StockWorkspace['locations'], fallbackLocationId: string) {
+  const linkedLocationId = item?.locationIds?.find((id) => locations.some((location) => location.id === id))
+  return linkedLocationId ?? fallbackLocationId
+}
+
+function preferredBalanceLocationId(item: StockItem | undefined, balances: { locationId: string }[]) {
+  const linkedBalance = balances.find((balance) => item?.locationIds?.includes(balance.locationId))
+  return linkedBalance?.locationId ?? balances[0]?.locationId ?? ''
+}
+
 function firstAvailableReceiveLocation(locations: StockWorkspace['locations'], defaultLocationId?: string) {
   if (defaultLocationId && locations.some((location) => location.id === defaultLocationId)) {
     return defaultLocationId
@@ -376,7 +386,7 @@ function ReceiveForm({
           onPickFirst={() => {
             const first = filteredItems[0]
             if (first) {
-              setForm({ ...form, itemId: first.id, lotNumber: '', expiryDate: '' })
+              setForm({ ...form, itemId: first.id, lotNumber: '', expiryDate: '', locationId: defaultLocationForItem(first, locations, form.locationId) })
               setItemSearch('')
             }
           }}
@@ -388,7 +398,7 @@ function ReceiveForm({
               selected={option.id === form.itemId}
               title={`${option.itemCode} · ${option.name}`}
               meta={`${option.categoryName} · ${option.unit}${option.catalogNo ? ` · ${option.catalogNo}` : ''}`}
-              onClick={() => setForm({ ...form, itemId: option.id, lotNumber: '', expiryDate: '' })}
+              onClick={() => setForm({ ...form, itemId: option.id, lotNumber: '', expiryDate: '', locationId: defaultLocationForItem(option, locations, form.locationId) })}
             />
           ))}
         </div>
@@ -520,7 +530,7 @@ function IssueForm({
   const [form, setForm] = useState({
     itemId: firstLot?.itemId ?? firstItem?.id ?? '',
     lotId: firstLot?.id ?? '',
-    locationId: defaultLocationId ?? firstLot?.balances[0]?.locationId ?? '',
+    locationId: defaultLocationId ?? (firstLot ? preferredBalanceLocationId(firstQtyItem, firstLot.balances) : ''),
     quantity: firstQtyItem?.defaultIssueQty != null ? String(firstQtyItem.defaultIssueQty) : readStoredValue(LAST_ISSUE_QUANTITY_KEY),
     purpose: readStoredValue(LAST_ISSUE_PURPOSE_KEY),
     reference: '',
@@ -544,7 +554,7 @@ function IssueForm({
       ...form,
       itemId: nextItem.id,
       lotId: nextLot?.id ?? '',
-      locationId: nextLot?.balances[0]?.locationId ?? '',
+      locationId: nextLot ? preferredBalanceLocationId(nextItem, nextLot.balances) : '',
       quantity: nextItem.defaultIssueQty != null ? String(nextItem.defaultIssueQty) : readStoredValue(LAST_ISSUE_QUANTITY_KEY),
       overrideReason: '',
     })
@@ -608,7 +618,7 @@ function IssueForm({
         <PanelTitle icon={<CalendarDays />} title="2. เลือก Lot / Select lot" detail="เรียงตาม FEFO ในข้อมูลเดิม" />
         <div className="grid gap-2">
           {lots.map((option) => (
-            <LotChoice key={option.id} lot={option} unit={item?.unit ?? ''} selected={option.id === form.lotId} onClick={() => setForm({ ...form, lotId: option.id, locationId: option.balances[0]?.locationId ?? '', overrideReason: '' })} />
+            <LotChoice key={option.id} lot={option} unit={item?.unit ?? ''} selected={option.id === form.lotId} onClick={() => setForm({ ...form, lotId: option.id, locationId: preferredBalanceLocationId(item, option.balances), overrideReason: '' })} />
           ))}
         </div>
       </MobilePanel>

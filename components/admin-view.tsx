@@ -59,6 +59,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
     manufacturer: '',
     manufacturerBarcode: '',
     equipmentIds: [] as string[],
+    locationIds: [] as string[],
     trackLot: true,
     trackExpiry: true,
     isHpv: false,
@@ -97,6 +98,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
       manufacturer: item.manufacturer ?? '',
       manufacturerBarcode: item.manufacturerBarcode ?? '',
       equipmentIds: item.equipmentIds ?? [],
+      locationIds: item.locationIds ?? [],
       trackLot: item.trackLot,
       trackExpiry: item.trackExpiry,
       isHpv: item.isHpv,
@@ -160,6 +162,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
             <p className="mono text-xs font-bold text-[#315763]">{item.itemCode}</p>
             <p className="mt-0.5 truncate font-semibold text-[#58727b]">{item.name}</p>
             {item.equipmentIds?.length ? <p className="mt-0.5 text-[10px] text-[#0b7f76]">{item.equipmentIds.length} linked equipment</p> : null}
+            {item.locationIds?.length ? <p className="mt-0.5 text-[10px] text-[#0b7f76]">{item.locationIds.length} linked location{item.locationIds.length === 1 ? '' : 's'}</p> : null}
             <p className="mt-0.5 text-[10px] text-[#91a3a7]">{item.categoryName} · {item.unit} · min {item.minimumStock}</p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
@@ -207,6 +210,24 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
               </span>
             </label>)}
             {!(data.equipmentOptions ?? []).length ? <p className="text-xs text-[#81979c]">ยังไม่มีเครื่องมือในทะเบียน</p> : null}
+          </div>
+        </div>
+        <div className="rounded-md border border-[#d8e6e6] bg-[#f8fbfc] p-3">
+          <p className="text-xs font-bold text-[#315763]">Location เริ่มต้น / Default locations</p>
+          <p className="mt-1 text-[11px] text-[#81979c]">เลือกได้หลาย location ระบบจะเลือกให้อัตโนมัติตอนรับ-จ่าย stock item นี้</p>
+          <div className="mt-2 space-y-2">
+            {data.locations.map((location) => <label key={location.id} className="flex items-start gap-2 text-xs text-[#58747d]">
+              <input
+                type="checkbox"
+                checked={form.locationIds.includes(location.id)}
+                onChange={(event) => setForm({ ...form, locationIds: event.target.checked ? [...form.locationIds, location.id] : form.locationIds.filter((id) => id !== location.id) })}
+              />
+              <span className="min-w-0">
+                <span className="font-semibold text-[#0b7f76]">{location.code} · {location.name}</span>
+                {!location.isActive ? <span className="ml-1 text-[10px] text-[#91a3a7]">(inactive)</span> : null}
+              </span>
+            </label>)}
+            {!data.locations.length ? <p className="text-xs text-[#81979c]">ยังไม่มี location</p> : null}
           </div>
         </div>
         <label className="flex items-center gap-2 text-xs font-semibold text-[#58747d]"><input type="checkbox" checked={form.trackLot} onChange={(event) => setForm({ ...form, trackLot: event.target.checked, trackExpiry: event.target.checked ? form.trackExpiry : false })} /> Track lot</label>
