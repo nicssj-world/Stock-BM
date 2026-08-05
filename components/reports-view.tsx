@@ -64,7 +64,7 @@ function ReportCard({ title, format, detail, href, icon, tone }: { title: string
     amber: 'bg-[#fff1d5] text-[#a76511]',
   }[tone]
   return (
-    <button type="button" onClick={() => { window.location.href = href }} className="group flex min-h-44 flex-col p-4 text-left transition hover:bg-[#fbfefd] focus-visible:bg-[#fbfefd] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0b7f76] focus-visible:outline-none">
+    <button type="button" onClick={() => { window.location.href = href }} className="group flex min-h-44 flex-col p-4 text-left transition hover:bg-[#eef9f7] hover:shadow-[inset_0_0_0_1px_#a9cdca] focus-visible:bg-[#eef9f7] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0b7f76] focus-visible:outline-none">
       <div className="flex items-start justify-between gap-3"><span className={`flex size-9 items-center justify-center rounded-lg ${toneClasses} [&>svg]:size-4`}>{icon}</span><span className="mono rounded border border-[#dbe7e6] bg-white px-1.5 py-0.5 text-[10px] font-bold text-[#617c84]">{format}</span></div>
       <h3 className="mt-4 font-bold text-[#173d50]">{title}</h3>
       <p className="mt-1 text-xs leading-5 text-[#789097]">{detail}</p>
