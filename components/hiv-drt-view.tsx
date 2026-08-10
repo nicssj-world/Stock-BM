@@ -246,6 +246,9 @@ function StoragePanel({ workspace, busy, mutate, setNotice, initialFilter }: {
   const [barcode, setBarcode] = useState('')
   const [position, setPosition] = useState<number | null>(null)
   const [search, setSearch] = useState('')
+  const [searchHintOpen, setSearchHintOpen] = useState(false)
+  const [searchDestination, setSearchDestination] = useState('LAB Rama')
+  const [highlightSampleId, setHighlightSampleId] = useState<string | null>(null)
 
   const effectiveRackId = workspace.racks.some((rack) => rack.id === selectedRackId) ? selectedRackId : (workspace.racks[0]?.id ?? '')
   const rack = workspace.racks.find((item) => item.id === effectiveRackId) ?? null
@@ -254,12 +257,43 @@ function StoragePanel({ workspace, busy, mutate, setNotice, initialFilter }: {
   const canDestroySelectedSample = selectedSample
     ? getHivDrtDestructionState(selectedSample.destroyDueOn, selectedSample.status) === 'due_now'
     : false
+  const searchTerm = search.trim().toLowerCase()
+  const searchHints = useMemo(
+    () => (searchTerm ? workspace.samples.filter((sample) => sample.status === 'stored' && sample.barcode.toLowerCase().includes(searchTerm)).slice(0, 6) : []),
+    [searchTerm, workspace.samples],
+  )
   const searchResult = search.trim()
     ? workspace.samples.find((sample) => sample.status === 'stored' && sample.barcode.toLowerCase().includes(search.trim().toLowerCase())) ?? null
     : null
   const destructionAttention = workspace.samples
     .filter((sample) => sample.status === 'stored' && getHivDrtDestructionState(sample.destroyDueOn, sample.status) !== 'none')
     .sort((a, b) => (a.destroyDueOn ?? '').localeCompare(b.destroyDueOn ?? ''))
+
+  // Typing/scanning a barcode that resolves to an exact match jumps straight to
+  // its rack and highlights the cell — selecting an autocomplete hint does the
+  // same. No extra click needed to "go to" the tube.
+  function handleSearchChange(value: string) {
+    setSearch(value)
+    setSearchHintOpen(true)
+    const code = value.trim()
+    const match = code ? workspace.samples.find((sample) => sample.status === 'stored' && sample.barcode === code) : null
+    if (match) {
+      setSelectedRackId(match.currentRackId ?? '')
+      setHighlightSampleId(match.id)
+    } else {
+      setHighlightSampleId(null)
+    }
+  }
+
+  function selectSearchHint(sample: HivDrtSample) {
+    handleSearchChange(sample.barcode)
+    setSearchHintOpen(false)
+  }
+
+  async function checkoutFromSearch(sample: HivDrtSample) {
+    const ok = await mutate('/api/hiv-drt/checkout', { method: 'POST', body: JSON.stringify({ barcode: sample.barcode, destination: searchDestination }) }, `Checkout ${sample.barcode} ไป ${searchDestination} แล้ว`)
+    if (ok) { setSearch(''); setHighlightSampleId(null) }
+  }
 
   async function store(code = barcode) {
     if (!effectiveRackId || !code.trim()) return
@@ -323,8 +357,46 @@ function StoragePanel({ workspace, busy, mutate, setNotice, initialFilter }: {
           {camera.cameraOn ? <CameraFrame videoRef={camera.videoRef} /> : null}
         </Card>
         <Card className="p-4">
-          <Field label="ค้นหา Barcode"><div className="relative"><Search className="absolute top-2.5 left-3 size-4 text-[#8ba0a5]" /><Input value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9 mono" placeholder="ค้นหาตำแหน่ง tube" /></div></Field>
-          {search.trim() ? searchResult ? <button type="button" onClick={() => { setSelectedRackId(searchResult.currentRackId ?? ''); setSelectedSampleId(searchResult.id) }} className="mt-3 w-full rounded-lg border border-[#badbd7] bg-[#f1faf9] p-3 text-left"><strong className="mono text-sm">{searchResult.barcode}</strong><p className="mt-1 text-xs text-[#58747d]">{searchResult.storedRackCode} · {formatHivDrtPosition(searchResult.currentPosition)}</p></button> : <p className="mt-3 text-xs text-[#a76511]">ไม่พบ tube ใน Storage</p> : null}
+          <Field label="ค้นหา Barcode">
+            <div className="relative">
+              <Search className="absolute top-2.5 left-3 size-4 text-[#8ba0a5]" />
+              <Input
+                value={search}
+                onChange={(event) => handleSearchChange(event.target.value)}
+                onFocus={() => setSearchHintOpen(true)}
+                onBlur={() => setTimeout(() => setSearchHintOpen(false), 150)}
+                className="pl-9 mono"
+                placeholder="ค้นหาตำแหน่ง tube"
+              />
+              {searchHintOpen && searchHints.length > 0 ? (
+                <div className="absolute top-full right-0 left-0 z-10 mt-1 max-h-56 overflow-y-auto rounded-lg border border-[#d4e3e3] bg-white shadow-lg">
+                  {searchHints.map((sample) => (
+                    <button
+                      key={sample.id}
+                      type="button"
+                      onMouseDown={(event) => { event.preventDefault(); selectSearchHint(sample) }}
+                      className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs hover:bg-[#f1faf9]"
+                    >
+                      <span className="mono font-semibold text-[#173d50]">{sample.barcode}</span>
+                      <span className="text-[#789097]">{sample.storedRackCode} · {formatHivDrtPosition(sample.currentPosition)}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </Field>
+          {search.trim() ? searchResult ? (
+            <div className="mt-3 rounded-lg border border-[#badbd7] bg-[#f1faf9] p-3">
+              <strong className="mono text-sm">{searchResult.barcode}</strong>
+              <p className="mt-1 text-xs text-[#58747d]">{searchResult.storedRackCode} · {formatHivDrtPosition(searchResult.currentPosition)}</p>
+              <div className="mt-2 space-y-2">
+                <Input value={searchDestination} onChange={(event) => setSearchDestination(event.target.value)} placeholder="Lab ปลายทาง" className="h-8 text-xs" aria-label="Lab ปลายทาง" />
+                <Button type="button" disabled={busy || !searchDestination.trim()} className="h-8 w-full text-xs" onClick={() => void checkoutFromSearch(searchResult)}>
+                  <Send className="size-3.5" /> Checkout ส่งตรวจ
+                </Button>
+              </div>
+            </div>
+          ) : <p className="mt-3 text-xs text-[#a76511]">ไม่พบ tube ใน Storage</p> : null}
         </Card>
       </div>
 
@@ -334,7 +406,7 @@ function StoragePanel({ workspace, busy, mutate, setNotice, initialFilter }: {
             <div><p className="text-[10px] font-bold tracking-[.18em] text-[#0b7f76] uppercase">12 columns × 8 rows</p><h2 className="mt-1 text-lg font-bold text-[#173d50]">{rack?.rackCode ?? 'เลือก Rack'}</h2></div>
             <div className="flex items-center gap-2"><Select value={effectiveRackId} onChange={(event) => setSelectedRackId(event.target.value)} className="min-w-48"><option value="">เลือก Rack</option>{workspace.racks.map((item) => <option key={item.id} value={item.id}>{item.rackCode} · {item.samples.length}/96</option>)}</Select>{rack ? <Button variant="danger" disabled={busy || rack.samples.length > 0} onClick={() => void deleteRack(rack)} title={rack.samples.length ? 'ต้องย้ายหรือลบ tube ออกจาก Rack ก่อน' : 'ลบ Rack'}><Trash2 className="size-4" /></Button> : null}</div>
           </div>
-          {rack ? <RackGrid rack={rack} selectedSampleId={selectedSampleId} onSelect={setSelectedSampleId} onMove={moveSample} busy={busy} /> : <EmptyState icon={<Boxes />} text="สร้างหรือเลือก Rack เพื่อเริ่มจัดเก็บ tube" />}
+          {rack ? <RackGrid rack={rack} selectedSampleId={selectedSampleId} highlightSampleId={highlightSampleId} onSelect={setSelectedSampleId} onMove={moveSample} busy={busy} /> : <EmptyState icon={<Boxes />} text="สร้างหรือเลือก Rack เพื่อเริ่มจัดเก็บ tube" />}
         </Card>
         {selectedSample ? (
           <Card className="border-l-4 border-l-[#0b7f76] p-4">
@@ -395,10 +467,17 @@ function rackSampleVisual(sample: HivDrtSample | undefined) {
   }
 }
 
-function RackGrid({ rack, selectedSampleId, onSelect, onMove, busy }: { rack: HivDrtRack; selectedSampleId: string | null; onSelect: (id: string | null) => void; onMove: (sampleId: string, position: number) => void; busy: boolean }) {
+function RackGrid({ rack, selectedSampleId, highlightSampleId, onSelect, onMove, busy }: { rack: HivDrtRack; selectedSampleId: string | null; highlightSampleId?: string | null; onSelect: (id: string | null) => void; onMove: (sampleId: string, position: number) => void; busy: boolean }) {
   const byPosition = new Map(rack.samples.map((sample) => [sample.currentPosition, sample]))
-  const [mobileRow, setMobileRow] = useState(0)
+  const highlightSample = highlightSampleId ? rack.samples.find((sample) => sample.id === highlightSampleId) : null
+  const [mobileRow, setMobileRow] = useState(() => (highlightSample?.currentPosition ? Math.floor((highlightSample.currentPosition - 1) / 12) : 0))
+  const [trackedHighlightId, setTrackedHighlightId] = useState(highlightSampleId ?? null)
   const selectedSample = rack.samples.find((sample) => sample.id === selectedSampleId) ?? null
+
+  if ((highlightSampleId ?? null) !== trackedHighlightId) {
+    setTrackedHighlightId(highlightSampleId ?? null)
+    if (highlightSample?.currentPosition) setMobileRow(Math.floor((highlightSample.currentPosition - 1) / 12))
+  }
 
   function selectOrMove(sample: HivDrtSample | undefined, position: number) {
     if (busy) return
@@ -422,6 +501,7 @@ function RackGrid({ rack, selectedSampleId, onSelect, onMove, busy }: { rack: Hi
             const position = mobileRow * 12 + column + 1
             const sample = byPosition.get(position)
             const selected = sample?.id === selectedSampleId
+            const highlighted = !!sample && sample.id === highlightSampleId
             const visual = rackSampleVisual(sample)
             return (
               <button
@@ -431,7 +511,7 @@ function RackGrid({ rack, selectedSampleId, onSelect, onMove, busy }: { rack: Hi
                 disabled={busy}
                 aria-label={`${formatHivDrtPosition(position)} ${sample?.barcode ?? 'ว่าง'} · ${visual.label}`}
                 onClick={() => selectOrMove(sample, position)}
-                className={`relative min-h-18 touch-manipulation rounded-xl border px-2 py-2 text-center transition active:scale-[.97] disabled:opacity-50 ${visual.cell} ${selected ? 'ring-2 ring-[#0b7f76] ring-offset-2' : ''}`}
+                className={`relative min-h-18 touch-manipulation rounded-xl border px-2 py-2 text-center transition active:scale-[.97] disabled:opacity-50 ${highlighted ? 'border-[#0b7f76] bg-[#fff4cf] ring-2 ring-[#e0a415] ring-offset-1' : visual.cell} ${selected && !highlighted ? 'ring-2 ring-[#0b7f76] ring-offset-2' : ''}`}
               >
                 {visual.marker ? <span className={`absolute top-1.5 right-1.5 rounded px-1 py-0.5 text-[8px] font-bold leading-none ${visual.markerClass}`}>{visual.marker}</span> : null}
                 <span className={`mx-auto block size-3.5 rounded-full border ${visual.dot}`} />
@@ -450,7 +530,7 @@ function RackGrid({ rack, selectedSampleId, onSelect, onMove, busy }: { rack: Hi
           <div />
           {Array.from({ length: 12 }, (_, index) => <div key={index} className="text-center mono text-[10px] font-bold text-[#6e898f]">{index + 1}</div>)}
           {Array.from({ length: 8 }, (_, row) => (
-            <RackRow key={row} row={row} byPosition={byPosition} selectedSampleId={selectedSampleId} onSelect={onSelect} onMove={onMove} busy={busy} />
+            <RackRow key={row} row={row} byPosition={byPosition} selectedSampleId={selectedSampleId} highlightSampleId={highlightSampleId} onSelect={onSelect} onMove={onMove} busy={busy} />
           ))}
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-4 text-[11px] text-[#6f888f]"><Legend color="bg-[#dff3f0] border-[#8bc8c1]" label="ปกติ" /><Legend color="bg-[#fff3d5] border-[#edc97f]" label="ใกล้ครบ ≤30 วัน" /><Legend color="bg-[#fff0f1] border-[#ef9aa4]" label="ครบกำหนดทำลาย" /><Legend color="bg-white border-[#d7e4e5]" label="ช่องว่าง" /><span>คลิก tube แล้วคลิกช่องปลายทาง หรือ Drag & Drop เพื่อย้าย/สลับ</span></div>
@@ -459,7 +539,7 @@ function RackGrid({ rack, selectedSampleId, onSelect, onMove, busy }: { rack: Hi
   )
 }
 
-function RackRow({ row, byPosition, selectedSampleId, onSelect, onMove, busy }: { row: number; byPosition: Map<number | null, HivDrtSample>; selectedSampleId: string | null; onSelect: (id: string | null) => void; onMove: (sampleId: string, position: number) => void; busy: boolean }) {
+function RackRow({ row, byPosition, selectedSampleId, highlightSampleId, onSelect, onMove, busy }: { row: number; byPosition: Map<number | null, HivDrtSample>; selectedSampleId: string | null; highlightSampleId?: string | null; onSelect: (id: string | null) => void; onMove: (sampleId: string, position: number) => void; busy: boolean }) {
   return (
     <>
       <div className="grid place-items-center mono text-xs font-bold text-[#315763]">{String.fromCharCode(65 + row)}</div>
@@ -467,6 +547,7 @@ function RackRow({ row, byPosition, selectedSampleId, onSelect, onMove, busy }: 
         const position = row * 12 + column + 1
         const sample = byPosition.get(position)
         const selected = sample?.id === selectedSampleId
+        const highlighted = !!sample && sample.id === highlightSampleId
         const visual = rackSampleVisual(sample)
         return (
           <button
@@ -482,7 +563,7 @@ function RackRow({ row, byPosition, selectedSampleId, onSelect, onMove, busy }: 
               if (selectedSampleId && selectedSampleId !== sample?.id) onMove(selectedSampleId, position)
               else onSelect(sample?.id ?? null)
             }}
-            className={`group relative h-14 rounded-lg border text-center transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${visual.desktopCell} ${selected ? 'ring-2 ring-[#0b7f76] ring-offset-2' : ''}`}
+            className={`group relative h-14 rounded-lg border text-center transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${highlighted ? 'border-[#0b7f76] bg-[#fff4cf] ring-2 ring-[#e0a415] ring-offset-1' : visual.desktopCell} ${selected && !highlighted ? 'ring-2 ring-[#0b7f76] ring-offset-2' : ''}`}
           >
             {visual.marker ? <span className={`absolute top-1 right-1 rounded px-1 py-0.5 text-[7px] font-bold leading-none ${visual.markerClass}`}>{visual.marker}</span> : null}
             <span className={`mx-auto block size-3 rounded-full border ${visual.dot}`} />
