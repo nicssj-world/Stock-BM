@@ -14,4 +14,26 @@ describe('lot verification actions', () => {
     expect(route).toContain('export async function DELETE')
     expect(service).toContain('export async function deleteVerification')
   })
+
+  it('keeps finalized verification data editable and removable by Admin', () => {
+    expect(view).toContain('const editable = true')
+    expect(view).toContain('isAdmin && editable')
+    expect(service).not.toContain("if (status === 'released' || status === 'rejected') throw new HttpError(409")
+  })
+
+  it('guards Parallel verification before release', () => {
+    expect(service).toContain("if (patch.status === 'released') await assertCanRelease(id)")
+  })
+
+  it('starts finalized verification cards collapsed but keeps their details accessible', () => {
+    expect(view).toContain("const [expanded, setExpanded] = useState(v.status !== 'released' && v.status !== 'rejected')")
+    expect(view).toContain('aria-expanded={expanded}')
+    expect(view).toContain('แสดงรายละเอียด')
+  })
+
+  it('gives the saved conclusion a prominent, semantic summary treatment', () => {
+    expect(view).toContain('function isPositiveConclusion')
+    expect(view).toContain('สรุปผล')
+    expect(view).toContain('aria-label={`สรุปผล ${v.conclusion}`}')
+  })
 })

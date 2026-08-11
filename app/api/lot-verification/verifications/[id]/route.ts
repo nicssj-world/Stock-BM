@@ -4,11 +4,14 @@ import { deleteVerification, updateVerification } from '@/lib/server/lotverif'
 import { readJson, respond } from '@/lib/server/route'
 
 const schema = z.object({
+  instrumentId: z.string().uuid().nullable().optional(),
   status: z.enum(['draft', 'in-progress', 'passed', 'failed', 'released', 'rejected']).optional(),
   conclusion: z.string().trim().max(2000).nullable().optional(),
   acceptanceCriteria: z.string().trim().max(1000).nullable().optional(),
   title: z.string().trim().max(200).nullable().optional(),
   method: z.enum(['parallel-comparison', 'qc-acceptance', 'patient-comparison']).optional(),
+  parallelAnalyteId: z.string().uuid().nullable().optional(),
+  parallelLimit: z.number().finite().positive().nullable().optional(),
 })
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {

@@ -15,4 +15,9 @@ describe('Lot-to-Lot reagent selection', () => {
     expect(service).toContain('const reagentLots: LotOption[] = lots.flatMap')
     expect(service).toContain('await assertReagentStockLots')
   })
+
+  it('filters Reagent lots in the database query before building dropdown options', () => {
+    expect(service).toContain("bm_stock_categories!inner(name)")
+    expect(service).toContain(".eq('bm_stock_categories.name', 'Reagent')")
+  })
 })
