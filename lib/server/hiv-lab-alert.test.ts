@@ -27,4 +27,14 @@ describe('HIV LAB Alert server safeguards', () => {
     expect(source).toContain('created.rack_position')
     expect(source).not.toContain('created.position')
   })
+
+  it('exposes stored Rack occupancy and passes an optional position to the locked RPC', () => {
+    expect(existsSync(sourcePath)).toBe(true)
+    if (!existsSync(sourcePath)) return
+    const source = readFileSync(sourcePath, 'utf8')
+    expect(source).toContain('occupiedPositions')
+    expect(source).toContain('isValidHivDrtPosition')
+    expect(source).toContain('p_position: position')
+    expect(source).toContain('no auto-fill position is available in the selected hiv drt rack')
+  })
 })

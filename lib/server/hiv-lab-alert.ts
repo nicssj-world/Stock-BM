@@ -2,7 +2,7 @@ import 'server-only'
 
 import type { BmActor } from '@/lib/bm/types'
 import { bangkokDateKey } from '@/lib/bm/rules'
-import { nextHivDrtRackPosition, HIV_DRT_RACK_CAPACITY } from '@/lib/hiv-drt/rules'
+import { isValidHivDrtPosition, nextHivDrtRackPosition, HIV_DRT_RACK_CAPACITY } from '@/lib/hiv-drt/rules'
 import type { HivLabAlert, HivLabAlertLineStatus, HivLabAlertRack, HivLabAlertWorkspace } from '@/lib/hiv-lab-alert/types'
 import { buildHivLabAlertMessage, maskPatientName } from '@/lib/hiv-lab-alert/rules'
 import { writeAudit } from '@/lib/server/audit'
@@ -16,6 +16,16 @@ function fail(error: DbError, message = 'HIV LAB Alert database operation failed
   if (!error) return
   if (error.code === '23505') throw new HttpError(409, 'LN นี้มีอยู่แล้วใน HIV DRT หรือ HIV LAB Alert')
   if (error.code === 'PGRST202') throw new HttpError(500, 'ยังไม่ได้ติดตั้งฐานข้อมูล HIV LAB Alert')
+  const dbMessage = error.message.toLowerCase()
+  if (dbMessage.includes('requested hiv drt position must be between')) {
+    throw new HttpError(400, 'ตำแหน่งที่เลือกไม่ถูกต้อง')
+  }
+  if (dbMessage.includes('requested hiv drt position is already occupied')) {
+    throw new HttpError(409, 'ตำแหน่งที่เลือกมี tube อยู่แล้ว กรุณาเลือกช่องอื่น')
+  }
+  if (dbMessage.includes('no auto-fill position is available in the selected hiv drt rack')) {
+    throw new HttpError(409, 'Rack นี้เต็มแล้ว กรุณาเลือก Rack อื่น')
+  }
   throw new HttpError(400, message)
 }
 
@@ -111,13 +121,15 @@ export async function getHivLabAlertWorkspace(actor: BmActor): Promise<HivLabAle
     const occupied = sampleRows
       .filter((sample) => asString(sample.current_rack_id) === rackId && asString(sample.status) === 'stored')
       .map((sample) => nullableNumber(sample.current_position))
-      .filter((position): position is number => position !== null)
+      .filter((position): position is number => position !== null && isValidHivDrtPosition(position))
+      .sort((left, right) => left - right)
     return {
       id: rackId,
       rackCode,
       capacity: Number(row.capacity) || HIV_DRT_RACK_CAPACITY,
       nextPosition,
       nextAutoPosition: nextHivDrtRackPosition(occupied, nextPosition),
+      occupiedPositions: occupied,
     }
   })
 
@@ -133,12 +145,16 @@ function rpcRow(data: unknown) {
 }
 
 export async function createHivLabAlert(
-  input: { hn: string; ln: string; patientName: string; rackId: string },
+  input: { hn: string; ln: string; patientName: string; rackId: string; position?: number | null },
   actor: BmActor,
 ) {
   assertHivLabAlertAccess(actor)
   const hn = input.hn.trim()
   const ln = input.ln.trim()
+  const position = input.position ?? null
+  if (position !== null && !isValidHivDrtPosition(position)) {
+    throw new HttpError(400, 'ตำแหน่งที่เลือกไม่ถูกต้อง')
+  }
   const patientNameMasked = maskPatientName(input.patientName)
   if (!patientNameMasked) throw new HttpError(400, 'กรุณาระบุชื่อ-นามสกุล')
 
@@ -148,6 +164,7 @@ export async function createHivLabAlert(
     p_patient_name_masked: patientNameMasked,
     p_rack_id: input.rackId,
     p_actor: actor.id,
+    p_position: position,
   })
   fail(error)
   const created = rpcRow(data)

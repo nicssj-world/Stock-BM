@@ -8,6 +8,7 @@ const schema = z.object({
   ln: z.string().trim().min(1).max(180),
   patientName: z.string().trim().min(1).max(200),
   rackId: z.string().uuid(),
+  position: z.number().int().min(1).max(96).nullable().optional(),
 })
 
 export async function POST(request: Request) {

@@ -6,6 +6,7 @@ export interface HivLabAlertRack {
   capacity: number
   nextPosition: number
   nextAutoPosition: number | null
+  occupiedPositions: number[]
 }
 
 export interface HivLabAlert {

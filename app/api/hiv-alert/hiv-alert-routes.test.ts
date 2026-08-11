@@ -12,6 +12,7 @@ describe('HIV LAB Alert API contract', () => {
     const create = source('app/api/hiv-alert/alerts/route.ts')
     expect(create).toContain('patientName')
     expect(create).toContain('rackId: z.string().uuid()')
+    expect(create).toContain('position: z.number().int().min(1).max(96).nullable().optional()')
     expect(create).toContain('createHivLabAlert')
   })
 
