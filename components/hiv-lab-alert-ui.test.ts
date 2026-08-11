@@ -18,6 +18,17 @@ describe('HIV LAB Alert interface', () => {
     expect(view).not.toContain('Log')
   })
 
+  it('uses the full-name label in the alert list without the masked-name note', () => {
+    expect(view).toContain('ชื่อ-นามสกุล')
+    expect(view).not.toContain('ชื่อปกปิด')
+    expect(view).not.toContain('ไม่เก็บชื่อจริง')
+  })
+
+  it('places the HIV DRT sample link in the column after created time', () => {
+    expect(view).toContain('<th className="px-4 py-3">เปิดตัวอย่าง</th>')
+    expect(view.indexOf('formatDateTime(alert.createdAt)')).toBeLessThan(view.indexOf('href={`/hiv-drt?view=storage&sample='))
+  })
+
   it('requires a manual LINE action and locks the row after success', () => {
     expect(view).toContain('ยังไม่ส่ง LINE อัตโนมัติ')
     expect(view).toContain('/api/hiv-alert/alerts/${alert.id}/send')
