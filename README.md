@@ -20,9 +20,18 @@ NEXT_PUBLIC_BM_SUPABASE_ANON_KEY=
 BM_SUPABASE_SERVICE_ROLE_KEY=
 LINE_CHANNEL_ACCESS_TOKEN=
 LINE_GROUP_ID=
+LINE_CHANNEL_SECRET=
 ```
 
-`LINE_CHANNEL_ACCESS_TOKEN` และ `LINE_GROUP_ID` ใช้เฉพาะฝั่ง server สำหรับ HIV LAB Alert ห้ามใส่ค่าเหล่านี้ในตัวแปร `NEXT_PUBLIC_*` หรือส่งให้ browser และต้องเชิญ LINE Official Account เข้า group เป้าหมายก่อนส่งข้อความ
+`LINE_CHANNEL_ACCESS_TOKEN` และ `LINE_GROUP_ID` ใช้เฉพาะฝั่ง server สำหรับ HIV LAB Alert ห้ามใส่ค่าเหล่านี้ในตัวแปร `NEXT_PUBLIC_*` หรือส่งให้ browser และต้องเชิญ LINE Official Account เข้า group เป้าหมายก่อนส่งข้อความ ส่วน `LINE_CHANNEL_SECRET` ใช้ตรวจสอบลายเซ็นของ LINE Webhook ที่ `/api/line/webhook` และต้องเก็บเป็น server secret เช่นกัน
+
+หลัง deploy แล้ว ให้ตั้ง Webhook URL ใน LINE Developers Console เป็น:
+
+```text
+https://<production-domain>/api/line/webhook
+```
+
+ส่งข้อความทดสอบในกลุ่ม แล้วอ่านค่า `LINE_GROUP_ID_CANDIDATES` จาก server log จากนั้นนำ `groupId` ไปตั้งใน `LINE_GROUP_ID` และนำ Route ชั่วคราวออกหรือปิด Webhook หากไม่ต้องการรับ event ต่อ
 
 HN/LN และข้อมูล HIV ยังเป็นข้อมูลที่ระบุตัวผู้ป่วยได้ ควรให้ DPO/ฝ่ายความปลอดภัยของโรงพยาบาลอนุมัติการส่งเข้า LINE group ก่อนใช้งานจริง
 
