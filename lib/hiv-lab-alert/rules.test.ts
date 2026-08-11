@@ -21,11 +21,11 @@ describe('HIV LAB Alert LINE message', () => {
       patientNameMasked: 'ศิxxxน์ จำxxxน์',
       sentAt,
     })).toBe([
-      'แจ้งเตือน VL > 1,000 copies/mL',
+      '🚨 แจ้งเตือน VL > 1,000 copies/mL',
       'HN : HN-001',
       'LN : LN-001',
-      'ชื่อปกปิด : ศิxxxน์ จำxxxน์',
-      'ประทับวันที่ : 11/08/2569',
+      '👤 ศิxxxน์ จำxxxน์',
+      '📅 11/08/2569',
     ].join('\n'))
   })
 })

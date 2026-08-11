@@ -30,10 +30,10 @@ export function buildHivLabAlertMessage(input: {
   sentAt: string
 }) {
   return [
-    'แจ้งเตือน VL > 1,000 copies/mL',
+    '🚨 แจ้งเตือน VL > 1,000 copies/mL',
     `HN : ${input.hn}`,
     `LN : ${input.ln}`,
-    `ชื่อปกปิด : ${input.patientNameMasked}`,
-    `ประทับวันที่ : ${formatHivLabAlertDate(input.sentAt)}`,
+    `👤 ${input.patientNameMasked}`,
+    `📅 ${formatHivLabAlertDate(input.sentAt)}`,
   ].join('\n')
 }
