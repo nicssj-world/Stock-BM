@@ -46,4 +46,16 @@ describe('HIV LAB Alert interface', () => {
     expect(view).toContain('{availableRacks.map((rack) =>')
     expect(view).toContain('!availableRacks.length')
   })
+
+  it('keeps Auto-fill as default and offers an occupied-aware manual position dialog', () => {
+    expect(view).toContain('position: number | null')
+    expect(view).toContain('เลือกตำแหน่งเอง')
+    expect(view).toContain('HIV_DRT_RACK_CAPACITY')
+    expect(view).toContain('disabled={occupiedPositions.has(position)}')
+    expect(view).toContain('ยืนยันตำแหน่ง')
+    expect(view).toContain('ยกเลิก')
+    expect(view).toContain('ใช้ Auto-fill')
+    expect(view).toContain('position: form.position')
+    expect(view).toContain('position: null')
+  })
 })

@@ -1,19 +1,19 @@
 'use client'
 
 import Link from 'next/link'
-import { BellRing, Check, ExternalLink, LoaderCircle, Pencil, Plus, Send, Trash2, X } from 'lucide-react'
-import { useState } from 'react'
+import { BellRing, Check, ExternalLink, Grid3X3, LoaderCircle, Pencil, Plus, Send, Trash2, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import type { BmActor } from '@/lib/bm/types'
 import { formatDateTime } from '@/lib/bm/rules'
-import { formatHivDrtPosition } from '@/lib/hiv-drt/rules'
-import type { HivLabAlert, HivLabAlertWorkspace } from '@/lib/hiv-lab-alert/types'
+import { formatHivDrtPosition, HIV_DRT_RACK_CAPACITY } from '@/lib/hiv-drt/rules'
+import type { HivLabAlert, HivLabAlertRack, HivLabAlertWorkspace } from '@/lib/hiv-lab-alert/types'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatusBadge } from '@/components/ui'
 import { Pagination, usePagination } from '@/components/pagination'
 
 type NoticeState = { tone: 'info' | 'success' | 'warning' | 'danger'; text: string } | null
-type FormState = { hn: string; ln: string; patientName: string; rackId: string }
+type FormState = { hn: string; ln: string; patientName: string; rackId: string; position: number | null }
 
-const emptyForm: FormState = { hn: '', ln: '', patientName: '', rackId: '' }
+const emptyForm: FormState = { hn: '', ln: '', patientName: '', rackId: '', position: null }
 const HIV_LAB_ALERT_PAGE_SIZE = 20
 
 export function HivLabAlertView({ actor, initialData }: { actor: BmActor; initialData: HivLabAlertWorkspace }) {
@@ -22,6 +22,7 @@ export function HivLabAlertView({ actor, initialData }: { actor: BmActor; initia
   const [editingId, setEditingId] = useState<string | null>(null)
   const [notice, setNotice] = useState<NoticeState>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [rackDialogOpen, setRackDialogOpen] = useState(false)
   const alertPagination = usePagination(workspace.alerts.length, HIV_LAB_ALERT_PAGE_SIZE)
   const pagedAlerts = workspace.alerts.slice(alertPagination.start, alertPagination.end)
   const availableRacks = workspace.racks.filter((rack) => rack.nextAutoPosition !== null)
@@ -41,7 +42,7 @@ export function HivLabAlertView({ actor, initialData }: { actor: BmActor; initia
     try {
       const body = editingId
         ? { hn: form.hn.trim(), ...(form.patientName.trim() ? { patientName: form.patientName.trim() } : {}) }
-        : form
+        : { hn: form.hn.trim(), ln: form.ln.trim(), patientName: form.patientName.trim(), rackId: form.rackId, position: form.position }
       const result = await api<{ workspace: HivLabAlertWorkspace }>(editingId ? `/api/hiv-alert/alerts/${editingId}` : '/api/hiv-alert/alerts', {
         method: editingId ? 'PATCH' : 'POST',
         body: JSON.stringify(body),
@@ -58,7 +59,7 @@ export function HivLabAlertView({ actor, initialData }: { actor: BmActor; initia
 
   function editAlert(alert: HivLabAlert) {
     setEditingId(alert.id)
-    setForm({ hn: alert.hn, ln: alert.ln, patientName: '', rackId: '' })
+    setForm({ hn: alert.hn, ln: alert.ln, patientName: '', rackId: '', position: null })
     setNotice({ tone: 'info', text: 'กรอกชื่อจริงใหม่เฉพาะกรณีต้องการเปลี่ยนชื่อ ระบบจะเก็บเฉพาะชื่อปกปิด' })
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -112,8 +113,8 @@ export function HivLabAlertView({ actor, initialData }: { actor: BmActor; initia
             <Field label="LN / HIV DRT Barcode" hint={editingId ? 'LN ผูกกับตัวอย่าง HIV DRT แล้ว จึงแก้ไขไม่ได้' : 'ระบบจะใช้ LN เป็น Barcode / Sample ID ใน HIV DRT'}><Input value={form.ln} onChange={(event) => setForm((current) => ({ ...current, ln: event.target.value }))} className="mono" placeholder="LN / Sample ID" autoComplete="off" disabled={Boolean(editingId)} required /></Field>
             <Field label="ชื่อ-นามสกุล" hint={editingId ? 'เว้นว่างได้หากแก้เฉพาะ HN; ระบบไม่เก็บชื่อจริง' : 'ระบบจะเก็บและส่งต่อเฉพาะชื่อปกปิด เช่น ศิxxxน์ จำxxxน์'}><Input value={form.patientName} onChange={(event) => setForm((current) => ({ ...current, patientName: event.target.value }))} placeholder={editingId ? 'กรอกใหม่เมื่อเปลี่ยนชื่อ' : 'ชื่อจริงและนามสกุล'} autoComplete="off" required={!editingId} /></Field>
             {!editingId ? <>
-              <Field label="Rack" hint="เลือกเฉพาะ Rack ที่ยังมีช่องว่าง; ตำแหน่งจะ Auto-fill และยืนยันซ้ำแบบ lock ตอนบันทึก"><Select value={form.rackId} onChange={(event) => setForm((current) => ({ ...current, rackId: event.target.value }))} disabled={!availableRacks.length} required><option value="">{availableRacks.length ? 'เลือก Rack' : 'ไม่มี Rack ที่ว่าง'}</option>{availableRacks.map((rack) => <option key={rack.id} value={rack.id}>{rack.rackCode} · ความจุ {rack.capacity}</option>)}</Select></Field>
-              <div className="rounded-lg border border-[#c9dedf] bg-[#f3f9f9] p-3 text-sm text-[#315763]"><p className="font-semibold">ช่องเก็บที่จะใช้</p><p className="mt-1 text-lg font-bold text-[#0b7f76]">{selectedRack ? `${selectedRack.rackCode} · ${formatHivDrtPosition(selectedRack.nextAutoPosition)}` : 'เลือก Rack ก่อน'}</p><p className="mt-1 text-[11px] leading-5 text-[#789097]">เป็นตำแหน่งคาดการณ์ปัจจุบัน ตำแหน่งจริงจะถูกล็อกและคำนวณอีกครั้งใน transaction</p></div>
+              <Field label="Rack" hint="เลือกเฉพาะ Rack ที่ยังมีช่องว่าง; ระบบจะ Auto-fill เป็นค่าเริ่มต้น หรือเลือกตำแหน่งเองได้"><Select value={form.rackId} onChange={(event) => setForm((current) => ({ ...current, rackId: event.target.value, position: null }))} disabled={!availableRacks.length} required><option value="">{availableRacks.length ? 'เลือก Rack' : 'ไม่มี Rack ที่ว่าง'}</option>{availableRacks.map((rack) => <option key={rack.id} value={rack.id}>{rack.rackCode} · ความจุ {rack.capacity}</option>)}</Select></Field>
+              <div className="rounded-lg border border-[#c9dedf] bg-[#f3f9f9] p-3 text-sm text-[#315763]"><p className="font-semibold">ช่องเก็บที่จะใช้</p><p className="mt-1 text-lg font-bold text-[#0b7f76]">{selectedRack ? `${selectedRack.rackCode} · ${formatHivDrtPosition(form.position ?? selectedRack.nextAutoPosition)}` : 'เลือก Rack ก่อน'}</p><p className="mt-1 text-[11px] leading-5 text-[#789097]">{form.position === null ? 'ระบบจะ Auto-fill จากช่องว่างถัดไป และยืนยันตำแหน่งจริงอีกครั้งใน transaction' : 'เลือกตำแหน่งเองแล้ว ระบบจะตรวจสอบและ lock ซ้ำอีกครั้งตอนบันทึก'}</p><div className="mt-3 flex flex-wrap gap-2"><Button type="button" variant="secondary" className="min-h-10 flex-1" disabled={busy !== null || !selectedRack} onClick={() => setRackDialogOpen(true)}><Grid3X3 className="size-4" /> เลือกตำแหน่งเอง</Button>{form.position !== null ? <Button type="button" variant="ghost" className="min-h-10" disabled={busy !== null} onClick={() => setForm((current) => ({ ...current, position: null }))}>ใช้ Auto-fill</Button> : null}</div></div>
             </> : null}
             <div className="rounded-lg border border-[#eed4a6] bg-[#fff9ed] p-3 text-xs leading-5 text-[#8f5919]">การบันทึกยังไม่ส่ง LINE อัตโนมัติ ต้องกดปุ่ม “ส่งเข้า LINE” ที่รายการภายหลัง และหลังส่งสำเร็จจะแก้ไขหรือลบไม่ได้</div>
             <div className="flex flex-wrap gap-2"><Button disabled={busy !== null || (!editingId && (!selectedRack || selectedRack.nextAutoPosition === null))} className="flex-1">{busy === 'create' || busy?.startsWith('edit:') ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}{editingId ? 'บันทึกการแก้ไข' : 'บันทึก Alert + เก็บเข้า Storage'}</Button>{editingId ? <Button type="button" variant="secondary" disabled={busy !== null} onClick={resetForm}><X className="size-4" /> ยกเลิก</Button> : null}</div>
@@ -128,9 +129,53 @@ export function HivLabAlertView({ actor, initialData }: { actor: BmActor; initia
             <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left text-sm"><thead className="bg-[#f4f8f8] text-[10px] font-bold tracking-[.08em] text-[#718a91] uppercase"><tr><th className="px-4 py-3">HN / LN</th><th className="px-4 py-3">ชื่อปกปิด</th><th className="px-4 py-3">HIV DRT Storage</th><th className="px-4 py-3">LINE</th><th className="px-4 py-3">สร้างเมื่อ</th><th className="px-4 py-3 text-right">ดำเนินการ</th></tr></thead><tbody className="divide-y divide-[#edf2f2]">{pagedAlerts.map((alert) => <AlertRow key={alert.id} alert={alert} busy={busy} onEdit={editAlert} onDelete={removeAlert} onSend={sendAlert} />)}</tbody></table></div>
             {workspace.alerts.length > HIV_LAB_ALERT_PAGE_SIZE ? <Pagination {...alertPagination} total={workspace.alerts.length} onChange={alertPagination.setPage} /> : null}
             {!workspace.alerts.length ? <div className="grid place-items-center px-4 py-16 text-center text-sm text-[#8aa0a5]"><BellRing className="mb-2 size-8 text-[#91bbb8]" /><p>ยังไม่มี HIV LAB Alert</p><p className="mt-1 text-xs">เมื่อบันทึกแล้ว ตัวอย่างจะปรากฏใน HIV DRT Storage ทันที</p></div> : null}
-          </Card>
+           </Card>
+         </div>
+       </div>
+       {rackDialogOpen && selectedRack ? <RackPositionDialog rack={selectedRack} selectedPosition={form.position} onClose={() => setRackDialogOpen(false)} onConfirm={(position) => { setForm((current) => ({ ...current, position })); setRackDialogOpen(false) }} /> : null}
+     </div>
+  )
+}
+
+function RackPositionDialog({ rack, selectedPosition, onClose, onConfirm }: { rack: HivLabAlertRack; selectedPosition: number | null; onClose: () => void; onConfirm: (position: number | null) => void }) {
+  const [draftPosition, setDraftPosition] = useState<number | null>(selectedPosition ?? rack.nextAutoPosition)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const occupiedPositions = new Set(rack.occupiedPositions)
+
+  useEffect(() => {
+    closeButtonRef.current?.focus()
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-[#173d50]/45 p-4 sm:items-center" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="hiv-rack-position-title" tabIndex={-1} className="w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl outline-none">
+        <header className="flex items-start justify-between gap-4 border-b border-[#dce8e9] bg-[#fbfdfd] px-4 py-4 sm:px-5">
+          <div>
+            <p className="text-[10px] font-bold tracking-[0.18em] text-[#0b7f76] uppercase">Manual position</p>
+            <h2 id="hiv-rack-position-title" className="mt-1 text-lg font-bold text-[#173d50]">เลือกตำแหน่งใน {rack.rackCode}</h2>
+            <p className="mt-1 text-xs text-[#789097]">ช่องที่มี tube อยู่แล้วจะแสดงเป็นสีเทาและเลือกไม่ได้ · ว่าง {HIV_DRT_RACK_CAPACITY - occupiedPositions.size} ช่อง</p>
+          </div>
+          <button ref={closeButtonRef} type="button" onClick={onClose} aria-label="ปิด" className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-[#6d858d] transition hover:bg-[#eef5f4]"><X className="size-5" /></button>
+        </header>
+
+        <div className="space-y-4 p-4 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#dce8e9] bg-[#f3f9f9] px-3 py-2 text-xs text-[#315763]"><span>ตำแหน่งที่เลือก: <strong className="mono text-[#0b7f76]">{formatHivDrtPosition(draftPosition)}</strong></span><span>Auto-fill: <strong className="mono text-[#0b7f76]">{formatHivDrtPosition(rack.nextAutoPosition)}</strong></span></div>
+          <div className="grid grid-cols-6 gap-1.5 rounded-xl border border-[#dce8e9] bg-[#f7fbfb] p-2 sm:grid-cols-12 sm:gap-2 sm:p-3">
+            {Array.from({ length: HIV_DRT_RACK_CAPACITY }, (_, index) => index + 1).map((position) => {
+              const occupied = occupiedPositions.has(position)
+              const selected = draftPosition === position
+              return <button key={position} type="button" disabled={occupiedPositions.has(position)} aria-pressed={selected} aria-label={`${formatHivDrtPosition(position)}${occupied ? ' มี tube แล้ว' : ''}`} onClick={() => setDraftPosition(position)} className={`flex aspect-square min-h-10 flex-col items-center justify-center rounded-md border text-[10px] font-bold transition sm:min-h-11 ${occupied ? 'cursor-not-allowed border-[#dbe2e2] bg-[#e3e9e9] text-[#9aacaf]' : selected ? 'border-[#0b7f76] bg-[#0b7f76] text-white shadow-[0_0_0_2px_#bce8e2]' : 'border-[#c9dedf] bg-white text-[#315763] hover:border-[#0b7f76] hover:bg-[#edf9f7]'}`}>
+                <span>{formatHivDrtPosition(position)}</span><span className="mt-0.5 text-[8px] font-medium opacity-70">{occupied ? 'เต็ม' : selected ? 'เลือก' : 'ว่าง'}</span>
+              </button>
+            })}
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-2 text-[11px] text-[#58747d]"><span className="inline-flex items-center gap-1.5"><span className="size-3 rounded border border-[#c9dedf] bg-white" />ว่าง</span><span className="inline-flex items-center gap-1.5"><span className="size-3 rounded border border-[#0b7f76] bg-[#0b7f76]" />เลือกอยู่</span><span className="inline-flex items-center gap-1.5"><span className="size-3 rounded border border-[#dbe2e2] bg-[#e3e9e9]" />มี tube แล้ว</span></div>
+          <div className="flex flex-col-reverse gap-2 border-t border-[#edf2f2] pt-4 sm:flex-row sm:justify-end"><Button type="button" variant="ghost" onClick={() => onConfirm(null)}>ใช้ Auto-fill</Button><Button type="button" variant="secondary" onClick={onClose}>ยกเลิก</Button><Button type="button" disabled={draftPosition === null || occupiedPositions.has(draftPosition)} onClick={() => onConfirm(draftPosition)}><Check className="size-4" /> ยืนยันตำแหน่ง</Button></div>
         </div>
-      </div>
+      </section>
     </div>
   )
 }
