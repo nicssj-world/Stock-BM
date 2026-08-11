@@ -8,11 +8,13 @@ import { formatDateTime } from '@/lib/bm/rules'
 import { formatHivDrtPosition } from '@/lib/hiv-drt/rules'
 import type { HivLabAlert, HivLabAlertWorkspace } from '@/lib/hiv-lab-alert/types'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatusBadge } from '@/components/ui'
+import { Pagination, usePagination } from '@/components/pagination'
 
 type NoticeState = { tone: 'info' | 'success' | 'warning' | 'danger'; text: string } | null
 type FormState = { hn: string; ln: string; patientName: string; rackId: string }
 
 const emptyForm: FormState = { hn: '', ln: '', patientName: '', rackId: '' }
+const HIV_LAB_ALERT_PAGE_SIZE = 20
 
 export function HivLabAlertView({ actor, initialData }: { actor: BmActor; initialData: HivLabAlertWorkspace }) {
   const [workspace, setWorkspace] = useState(initialData)
@@ -20,8 +22,11 @@ export function HivLabAlertView({ actor, initialData }: { actor: BmActor; initia
   const [editingId, setEditingId] = useState<string | null>(null)
   const [notice, setNotice] = useState<NoticeState>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const alertPagination = usePagination(workspace.alerts.length, HIV_LAB_ALERT_PAGE_SIZE)
+  const pagedAlerts = workspace.alerts.slice(alertPagination.start, alertPagination.end)
+  const availableRacks = workspace.racks.filter((rack) => rack.nextAutoPosition !== null)
 
-  const selectedRack = workspace.racks.find((rack) => rack.id === form.rackId) ?? null
+  const selectedRack = availableRacks.find((rack) => rack.id === form.rackId) ?? null
 
   function resetForm() {
     setEditingId(null)
@@ -107,12 +112,12 @@ export function HivLabAlertView({ actor, initialData }: { actor: BmActor; initia
             <Field label="LN / HIV DRT Barcode" hint={editingId ? 'LN ผูกกับตัวอย่าง HIV DRT แล้ว จึงแก้ไขไม่ได้' : 'ระบบจะใช้ LN เป็น Barcode / Sample ID ใน HIV DRT'}><Input value={form.ln} onChange={(event) => setForm((current) => ({ ...current, ln: event.target.value }))} className="mono" placeholder="LN / Sample ID" autoComplete="off" disabled={Boolean(editingId)} required /></Field>
             <Field label="ชื่อ-นามสกุล" hint={editingId ? 'เว้นว่างได้หากแก้เฉพาะ HN; ระบบไม่เก็บชื่อจริง' : 'ระบบจะเก็บและส่งต่อเฉพาะชื่อปกปิด เช่น ศิxxxน์ จำxxxน์'}><Input value={form.patientName} onChange={(event) => setForm((current) => ({ ...current, patientName: event.target.value }))} placeholder={editingId ? 'กรอกใหม่เมื่อเปลี่ยนชื่อ' : 'ชื่อจริงและนามสกุล'} autoComplete="off" required={!editingId} /></Field>
             {!editingId ? <>
-              <Field label="Rack" hint="เลือก Rack เอง; ตำแหน่งจะ Auto-fill โดยระบบและยืนยันซ้ำแบบ lock ตอนบันทึก"><Select value={form.rackId} onChange={(event) => setForm((current) => ({ ...current, rackId: event.target.value }))} required><option value="">เลือก Rack</option>{workspace.racks.map((rack) => <option key={rack.id} value={rack.id}>{rack.rackCode} · ความจุ {rack.capacity}</option>)}</Select></Field>
+              <Field label="Rack" hint="เลือกเฉพาะ Rack ที่ยังมีช่องว่าง; ตำแหน่งจะ Auto-fill และยืนยันซ้ำแบบ lock ตอนบันทึก"><Select value={form.rackId} onChange={(event) => setForm((current) => ({ ...current, rackId: event.target.value }))} disabled={!availableRacks.length} required><option value="">{availableRacks.length ? 'เลือก Rack' : 'ไม่มี Rack ที่ว่าง'}</option>{availableRacks.map((rack) => <option key={rack.id} value={rack.id}>{rack.rackCode} · ความจุ {rack.capacity}</option>)}</Select></Field>
               <div className="rounded-lg border border-[#c9dedf] bg-[#f3f9f9] p-3 text-sm text-[#315763]"><p className="font-semibold">ช่องเก็บที่จะใช้</p><p className="mt-1 text-lg font-bold text-[#0b7f76]">{selectedRack ? `${selectedRack.rackCode} · ${formatHivDrtPosition(selectedRack.nextAutoPosition)}` : 'เลือก Rack ก่อน'}</p><p className="mt-1 text-[11px] leading-5 text-[#789097]">เป็นตำแหน่งคาดการณ์ปัจจุบัน ตำแหน่งจริงจะถูกล็อกและคำนวณอีกครั้งใน transaction</p></div>
             </> : null}
             <div className="rounded-lg border border-[#eed4a6] bg-[#fff9ed] p-3 text-xs leading-5 text-[#8f5919]">การบันทึกยังไม่ส่ง LINE อัตโนมัติ ต้องกดปุ่ม “ส่งเข้า LINE” ที่รายการภายหลัง และหลังส่งสำเร็จจะแก้ไขหรือลบไม่ได้</div>
             <div className="flex flex-wrap gap-2"><Button disabled={busy !== null || (!editingId && (!selectedRack || selectedRack.nextAutoPosition === null))} className="flex-1">{busy === 'create' || busy?.startsWith('edit:') ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}{editingId ? 'บันทึกการแก้ไข' : 'บันทึก Alert + เก็บเข้า Storage'}</Button>{editingId ? <Button type="button" variant="secondary" disabled={busy !== null} onClick={resetForm}><X className="size-4" /> ยกเลิก</Button> : null}</div>
-            {!workspace.racks.length ? <Link href="/hiv-drt?view=storage" className="inline-flex items-center gap-1 text-xs font-semibold text-[#0b7f76] hover:underline">สร้าง Rack ใน HIV DRT ก่อน <ExternalLink className="size-3" /></Link> : null}
+            {!availableRacks.length ? <Link href="/hiv-drt?view=storage" className="inline-flex items-center gap-1 text-xs font-semibold text-[#0b7f76] hover:underline">สร้าง Rack หรือเพิ่ม Rack ที่ว่างใน HIV DRT ก่อน <ExternalLink className="size-3" /></Link> : null}
           </form>
         </Card>
 
@@ -120,7 +125,8 @@ export function HivLabAlertView({ actor, initialData }: { actor: BmActor; initia
           {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
           <Card className="overflow-hidden">
             <div className="flex flex-col gap-2 border-b border-[#dce8e9] bg-[#fbfdfd] p-4 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-bold text-[#173d50]">รายการ HIV LAB Alert</h2><p className="mt-1 text-xs text-[#789097]">ชื่อที่แสดงในระบบและ LINE เป็นชื่อปกปิดเท่านั้น · {workspace.alerts.length} รายการ</p></div><Link href="/hiv-drt?view=storage" className="inline-flex items-center gap-1 text-xs font-semibold text-[#0b7f76] hover:underline">เปิด HIV DRT Storage <ExternalLink className="size-3" /></Link></div>
-            <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left text-sm"><thead className="bg-[#f4f8f8] text-[10px] font-bold tracking-[.08em] text-[#718a91] uppercase"><tr><th className="px-4 py-3">HN / LN</th><th className="px-4 py-3">ชื่อปกปิด</th><th className="px-4 py-3">HIV DRT Storage</th><th className="px-4 py-3">LINE</th><th className="px-4 py-3">สร้างเมื่อ</th><th className="px-4 py-3 text-right">ดำเนินการ</th></tr></thead><tbody className="divide-y divide-[#edf2f2]">{workspace.alerts.map((alert) => <AlertRow key={alert.id} alert={alert} busy={busy} onEdit={editAlert} onDelete={removeAlert} onSend={sendAlert} />)}</tbody></table></div>
+            <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left text-sm"><thead className="bg-[#f4f8f8] text-[10px] font-bold tracking-[.08em] text-[#718a91] uppercase"><tr><th className="px-4 py-3">HN / LN</th><th className="px-4 py-3">ชื่อปกปิด</th><th className="px-4 py-3">HIV DRT Storage</th><th className="px-4 py-3">LINE</th><th className="px-4 py-3">สร้างเมื่อ</th><th className="px-4 py-3 text-right">ดำเนินการ</th></tr></thead><tbody className="divide-y divide-[#edf2f2]">{pagedAlerts.map((alert) => <AlertRow key={alert.id} alert={alert} busy={busy} onEdit={editAlert} onDelete={removeAlert} onSend={sendAlert} />)}</tbody></table></div>
+            {workspace.alerts.length > HIV_LAB_ALERT_PAGE_SIZE ? <Pagination {...alertPagination} total={workspace.alerts.length} onChange={alertPagination.setPage} /> : null}
             {!workspace.alerts.length ? <div className="grid place-items-center px-4 py-16 text-center text-sm text-[#8aa0a5]"><BellRing className="mb-2 size-8 text-[#91bbb8]" /><p>ยังไม่มี HIV LAB Alert</p><p className="mt-1 text-xs">เมื่อบันทึกแล้ว ตัวอย่างจะปรากฏใน HIV DRT Storage ทันที</p></div> : null}
           </Card>
         </div>

@@ -32,7 +32,7 @@ const hivLabAlertManagementItem: NavItem = { href: '/hiv-alert', label: 'HIV LAB
 
 const managementSection: NavSection = {
   title: 'Management',
-  items: [hpvManagementItem, hivDrtManagementItem, hivLabAlertManagementItem],
+  items: [hpvManagementItem, hivLabAlertManagementItem, hivDrtManagementItem],
 }
 
 const assistantManagementSection: NavSection = {

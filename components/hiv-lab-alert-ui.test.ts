@@ -28,8 +28,22 @@ describe('HIV LAB Alert interface', () => {
   it('links every new record to HIV DRT and keeps the Alert out of Assistant navigation', () => {
     expect(view).toContain('/hiv-drt?view=storage&sample=')
     expect(shell).toContain("href: '/hiv-alert'")
-    expect(shell).toContain('items: [hpvManagementItem, hivDrtManagementItem, hivLabAlertManagementItem]')
+    expect(shell).toContain('items: [hpvManagementItem, hivLabAlertManagementItem, hivDrtManagementItem]')
     expect(shell).toContain("items: [hpvManagementItem, { href: '/morning-talk'")
     expect(proxy).toContain("'/hiv-alert/:path*'")
+  })
+
+  it('shows at most 20 alerts per page with previous and next controls', () => {
+    expect(view).toContain('const HIV_LAB_ALERT_PAGE_SIZE = 20')
+    expect(view).toContain('usePagination(workspace.alerts.length, HIV_LAB_ALERT_PAGE_SIZE)')
+    expect(view).toContain('const pagedAlerts = workspace.alerts.slice(alertPagination.start, alertPagination.end)')
+    expect(view).toContain('{pagedAlerts.map(')
+    expect(view).toContain('<Pagination {...alertPagination} total={workspace.alerts.length} onChange={alertPagination.setPage} />')
+  })
+
+  it('hides full HIV DRT racks from the new-alert dropdown', () => {
+    expect(view).toContain('const availableRacks = workspace.racks.filter((rack) => rack.nextAutoPosition !== null)')
+    expect(view).toContain('{availableRacks.map((rack) =>')
+    expect(view).toContain('!availableRacks.length')
   })
 })
