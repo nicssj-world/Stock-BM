@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, Biohazard, Boxes, ClipboardCheck, Dna, GitCompareArrows, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck, Stethoscope, Thermometer, Users } from 'lucide-react'
+import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, BellRing, Biohazard, Boxes, ClipboardCheck, Dna, GitCompareArrows, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck, Stethoscope, Thermometer, Users } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import { api } from '@/components/ui'
 
@@ -28,10 +28,11 @@ const stockSection: NavSection = {
 
 const hpvManagementItem: NavItem = { href: '/hpv', label: 'HPV Genotype', icon: Dna }
 const hivDrtManagementItem: NavItem = { href: '/hiv-drt', label: 'HIV DRT', icon: Biohazard }
+const hivLabAlertManagementItem: NavItem = { href: '/hiv-alert', label: 'HIV LAB Alert', icon: BellRing }
 
 const managementSection: NavSection = {
   title: 'Management',
-  items: [hpvManagementItem, hivDrtManagementItem],
+  items: [hpvManagementItem, hivDrtManagementItem, hivLabAlertManagementItem],
 }
 
 const assistantManagementSection: NavSection = {

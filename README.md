@@ -18,7 +18,13 @@
 NEXT_PUBLIC_BM_SUPABASE_URL=
 NEXT_PUBLIC_BM_SUPABASE_ANON_KEY=
 BM_SUPABASE_SERVICE_ROLE_KEY=
+LINE_CHANNEL_ACCESS_TOKEN=
+LINE_GROUP_ID=
 ```
+
+`LINE_CHANNEL_ACCESS_TOKEN` และ `LINE_GROUP_ID` ใช้เฉพาะฝั่ง server สำหรับ HIV LAB Alert ห้ามใส่ค่าเหล่านี้ในตัวแปร `NEXT_PUBLIC_*` หรือส่งให้ browser และต้องเชิญ LINE Official Account เข้า group เป้าหมายก่อนส่งข้อความ
+
+HN/LN และข้อมูล HIV ยังเป็นข้อมูลที่ระบุตัวผู้ป่วยได้ ควรให้ DPO/ฝ่ายความปลอดภัยของโรงพยาบาลอนุมัติการส่งเข้า LINE group ก่อนใช้งานจริง
 
 ใช้ Supabase project เดียวกับ `Genomic-CBH` แต่ Molecular-CBH QMS ใช้ cookie แยกชื่อ `bm-stock-auth`
 
