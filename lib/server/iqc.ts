@@ -858,6 +858,7 @@ export async function deleteIqcEntity(entity: keyof typeof IQC_ENTITY, id: strin
       { table: 'iqc_tea_specs', column: 'analyte_id' },
       { table: 'iqc_uncertainty_budgets', column: 'analyte_id' },
       { table: 'lotverif_measurements', column: 'analyte_id' },
+      { table: 'lotverif_verifications', column: 'parallel_analyte_id' },
     ], id, IQC_DELETE_MESSAGE)
   } else if (entity === 'instrument') {
     await assertNoIqcReferences([{ table: 'iqc_runs', column: 'instrument_id' }], id, IQC_DELETE_MESSAGE)
@@ -878,6 +879,7 @@ export async function deleteControlLot(id: string, actor: BmActor) {
     { table: 'iqc_result_values', column: 'control_lot_id' },
     { table: 'lotverif_verifications', column: 'new_control_lot_id' },
     { table: 'lotverif_verifications', column: 'old_control_lot_id' },
+    { table: 'lotverif_parallel_rows', column: 'control_lot_id' },
   ], id, IQC_DELETE_MESSAGE)
   const { error } = await getAdminClient().from('iqc_control_lots').delete().eq('id', id)
   fail(error)

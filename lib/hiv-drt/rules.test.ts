@@ -7,10 +7,19 @@ import {
   getHivDrtDestructionState,
   getHivDrtTatState,
   HIV_DRT_RACK_CAPACITY,
+  isValidHivDrtPosition,
   nextHivDrtRackPosition,
 } from './rules'
 
 describe('HIV DRT rack rules', () => {
+  it('accepts only integer positions inside the rack capacity', () => {
+    expect(isValidHivDrtPosition(1)).toBe(true)
+    expect(isValidHivDrtPosition(96)).toBe(true)
+    expect(isValidHivDrtPosition(0)).toBe(false)
+    expect(isValidHivDrtPosition(97)).toBe(false)
+    expect(isValidHivDrtPosition(1.5)).toBe(false)
+  })
+
   it('uses an 8 x 12 rack with A1-H12 coordinates', () => {
     expect(HIV_DRT_RACK_CAPACITY).toBe(96)
     expect(formatHivDrtPosition(1)).toBe('A1')

@@ -48,11 +48,12 @@ async function getNameMap(userIds: string[]) {
   return new Map(((data ?? []) as RecordRow[]).map((row) => [asString(row.id), asString(row.display_name)]))
 }
 
-function sampleFromRow(row: RecordRow, names: Map<string, string>): HivDrtSample {
+function sampleFromRow(row: RecordRow, names: Map<string, string>, alertIds: Map<string, string>): HivDrtSample {
   return {
     id: asString(row.id),
     barcode: asString(row.barcode),
     outlabLn: nullableString(row.outlab_ln),
+    hivLabAlertId: alertIds.get(asString(row.id)) ?? null,
     status: asString(row.status) as HivDrtSample['status'],
     fromStorage: Boolean(row.from_storage),
     currentRackId: nullableString(row.current_rack_id),
@@ -77,19 +78,22 @@ function sampleFromRow(row: RecordRow, names: Map<string, string>): HivDrtSample
 export async function getHivDrtWorkspace(actor: BmActor): Promise<HivDrtWorkspace> {
   assertHivDrtAccess(actor)
   const admin = getAdminClient()
-  const [{ data: rackData, error: rackError }, { data: sampleData, error: sampleError }] = await Promise.all([
+  const [{ data: rackData, error: rackError }, { data: sampleData, error: sampleError }, { data: alertData, error: alertError }] = await Promise.all([
     admin.from('bm_hiv_drt_racks').select('*').order('created_at', { ascending: false }).limit(200),
     admin.from('bm_hiv_drt_samples').select('*').order('created_at', { ascending: false }).limit(5000),
+    admin.from('bm_hiv_lab_alerts').select('id,hiv_drt_sample_id').limit(5000),
   ])
   fail(rackError)
   fail(sampleError)
+  fail(alertError)
   const rackRows = (rackData ?? []) as RecordRow[]
   const sampleRows = (sampleData ?? []) as RecordRow[]
+  const alertIds = new Map(((alertData ?? []) as RecordRow[]).map((row) => [asString(row.hiv_drt_sample_id), asString(row.id)]))
   const names = await getNameMap([
     ...rackRows.map((row) => asString(row.created_by)),
     ...sampleRows.flatMap((row) => [asString(row.stored_by), asString(row.checked_out_by), asString(row.result_received_by), asString(row.destroyed_by)]),
   ])
-  const samples = sampleRows.map((row) => sampleFromRow(row, names))
+  const samples = sampleRows.map((row) => sampleFromRow(row, names, alertIds))
   const samplesByRack = new Map<string, HivDrtSample[]>()
   for (const sample of samples) {
     if (sample.status === 'stored' && sample.currentRackId) {

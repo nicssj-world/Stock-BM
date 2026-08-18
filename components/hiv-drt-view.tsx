@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
@@ -146,7 +147,7 @@ export function HivDrtView({ actor, initialData }: { actor: BmActor; initialData
           busy={busy}
         />
       ) : null}
-      {tab === 'storage' ? <StoragePanel workspace={workspace} busy={busy} mutate={mutate} setNotice={setNotice} initialFilter={searchParams.get('filter')} /> : null}
+      {tab === 'storage' ? <StoragePanel workspace={workspace} busy={busy} mutate={mutate} setNotice={setNotice} initialFilter={searchParams.get('filter')} initialSampleId={searchParams.get('sample')} /> : null}
       {tab === 'tracking' ? <TrackingPanel workspace={workspace} busy={busy} mutate={mutate} initialFilter={searchParams.get('filter')} setNotice={setNotice} /> : null}
       {tab === 'history' ? <HistoryPanel workspace={workspace} busy={busy} mutate={mutate} /> : null}
     </div>
@@ -233,22 +234,25 @@ function Metric({ icon, label, value, tone }: { icon: React.ReactNode; label: st
   )
 }
 
-function StoragePanel({ workspace, busy, mutate, setNotice, initialFilter }: {
+function StoragePanel({ workspace, busy, mutate, setNotice, initialFilter, initialSampleId }: {
   workspace: HivDrtWorkspace
   busy: boolean
   mutate: (url: string, options: RequestInit, success: string) => Promise<boolean>
   setNotice: (notice: NoticeState) => void
   initialFilter: string | null
+  initialSampleId: string | null
 }) {
-  const [selectedRackId, setSelectedRackId] = useState(workspace.racks[0]?.id ?? '')
-  const [selectedSampleId, setSelectedSampleId] = useState<string | null>(null)
+  const initialTarget = initialSampleId ? workspace.samples.find((sample) => sample.id === initialSampleId) ?? null : null
+  const initialStoredTarget = initialTarget?.status === 'stored' ? initialTarget : null
+  const [selectedRackId, setSelectedRackId] = useState(initialStoredTarget?.currentRackId ?? workspace.racks[0]?.id ?? '')
+  const [selectedSampleId, setSelectedSampleId] = useState<string | null>(initialStoredTarget?.id ?? null)
   const [rackCode, setRackCode] = useState(`DRT-${todayBangkok().replaceAll('-', '')}-01`)
   const [barcode, setBarcode] = useState('')
   const [position, setPosition] = useState<number | null>(null)
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(initialTarget?.barcode ?? '')
   const [searchHintOpen, setSearchHintOpen] = useState(false)
   const [searchDestination, setSearchDestination] = useState('LAB Rama')
-  const [highlightSampleId, setHighlightSampleId] = useState<string | null>(null)
+  const [highlightSampleId, setHighlightSampleId] = useState<string | null>(initialStoredTarget?.id ?? null)
 
   const effectiveRackId = workspace.racks.some((rack) => rack.id === selectedRackId) ? selectedRackId : (workspace.racks[0]?.id ?? '')
   const rack = workspace.racks.find((item) => item.id === effectiveRackId) ?? null
@@ -411,7 +415,7 @@ function StoragePanel({ workspace, busy, mutate, setNotice, initialFilter }: {
         {selectedSample ? (
           <Card className="border-l-4 border-l-[#0b7f76] p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div><div className="flex flex-wrap items-center gap-2"><strong className="mono text-base text-[#173d50]">{selectedSample.barcode}</strong><StatusBadge tone="accepted" label="stored" /><DestructionBadge sample={selectedSample} /></div><p className="mt-2 text-xs text-[#789097]">{selectedSample.storedRackCode} · {formatHivDrtPosition(selectedSample.currentPosition)} · เก็บ {selectedSample.storedAt ? formatDateTime(selectedSample.storedAt) : '-'}</p><p className="mt-1 text-xs text-[#789097]">กำหนดทำลาย {formatDate(selectedSample.destroyDueOn)}</p></div>
+              <div><div className="flex flex-wrap items-center gap-2"><strong className="mono text-base text-[#173d50]">{selectedSample.barcode}</strong><StatusBadge tone="accepted" label="stored" /><DestructionBadge sample={selectedSample} /></div><p className="mt-2 text-xs text-[#789097]">{selectedSample.storedRackCode} · {formatHivDrtPosition(selectedSample.currentPosition)} · เก็บ {selectedSample.storedAt ? formatDateTime(selectedSample.storedAt) : '-'}</p><p className="mt-1 text-xs text-[#789097]">กำหนดทำลาย {formatDate(selectedSample.destroyDueOn)}</p>{selectedSample.hivLabAlertId ? <HivLabAlertLink alertId={selectedSample.hivLabAlertId} /> : null}</div>
               <div className="flex flex-wrap gap-2"><Button variant="danger" disabled={busy} onClick={() => void deleteSample(selectedSample)}><Trash2 className="size-4" /> ลบ tube</Button>{canDestroySelectedSample ? <Button variant="secondary" disabled={busy} onClick={() => void destroySample(selectedSample, mutate)}><Archive className="size-4" /> บันทึกทำลาย</Button> : null}</div>
             </div>
           </Card>
@@ -420,7 +424,7 @@ function StoragePanel({ workspace, busy, mutate, setNotice, initialFilter }: {
           <Card className="overflow-hidden">
             <div className="flex items-center justify-between border-b border-[#dce8e9] bg-[#fbfdfd] px-4 py-3"><div><h3 className="font-bold text-[#173d50]">Tube ใน {rack.rackCode}</h3><p className="mt-0.5 text-xs text-[#789097]">ลบได้โดยตรงจากรายการนี้</p></div><span className="mono rounded-full bg-[#e8f7f5] px-2.5 py-1 text-xs font-bold text-[#0b7f76]">{rack.samples.length}/96</span></div>
             <div className="max-h-72 divide-y divide-[#edf2f2] overflow-y-auto">
-              {rack.samples.map((sample) => <div key={sample.id} className="flex items-center gap-3 px-4 py-2.5"><button type="button" onClick={() => setSelectedSampleId(sample.id)} className="min-w-0 flex-1 text-left"><strong className="mono block truncate text-sm text-[#173d50]">{sample.barcode}</strong><span className="text-xs text-[#789097]">ตำแหน่ง {formatHivDrtPosition(sample.currentPosition)} · ทำลาย {formatDate(sample.destroyDueOn)}</span></button><Button variant="danger" disabled={busy} onClick={() => void deleteSample(sample)}><Trash2 className="size-4" /> ลบ</Button></div>)}
+              {rack.samples.map((sample) => <div key={sample.id} className="flex items-center gap-3 px-4 py-2.5"><div className="min-w-0 flex-1"><button type="button" onClick={() => setSelectedSampleId(sample.id)} className="w-full text-left"><strong className="mono block truncate text-sm text-[#173d50]">{sample.barcode}</strong><span className="text-xs text-[#789097]">ตำแหน่ง {formatHivDrtPosition(sample.currentPosition)} · ทำลาย {formatDate(sample.destroyDueOn)}</span></button>{sample.hivLabAlertId ? <HivLabAlertLink alertId={sample.hivLabAlertId} /> : null}</div><Button variant="danger" disabled={busy} onClick={() => void deleteSample(sample)}><Trash2 className="size-4" /> ลบ</Button></div>)}
               {!rack.samples.length ? <p className="px-4 py-8 text-center text-sm text-[#8aa0a5]">Rack นี้ยังไม่มี tube</p> : null}
             </div>
           </Card>
@@ -689,7 +693,11 @@ function DestructionBadge({ sample }: { sample: HivDrtSample }) {
 }
 
 function TrackingRow({ sample, busy, onDelete }: { sample: HivDrtSample; busy: boolean; onDelete: (sample: HivDrtSample) => void }) {
-  return <div className="flex items-center gap-3 px-4 py-3"><div className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#fff0f1] text-[#b33b46]"><Clock3 className="size-4" /></div><div className="min-w-0 flex-1"><strong className="mono text-sm text-[#173d50]">{sample.barcode}</strong><p className="mt-1 truncate text-xs text-[#789097]">{sample.checkoutDestination} · ครบ {formatDate(sample.tatDueOn)}</p></div><TatBadge sample={sample} /><Button variant="danger" disabled={busy} onClick={() => onDelete(sample)} aria-label={`ลบ ${sample.barcode}`}><Trash2 className="size-4" /> ลบ</Button></div>
+  return <div className="flex items-center gap-3 px-4 py-3"><div className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#fff0f1] text-[#b33b46]"><Clock3 className="size-4" /></div><div className="min-w-0 flex-1"><strong className="mono text-sm text-[#173d50]">{sample.barcode}</strong><p className="mt-1 truncate text-xs text-[#789097]">{sample.checkoutDestination} · ครบ {formatDate(sample.tatDueOn)}</p>{sample.hivLabAlertId ? <HivLabAlertLink alertId={sample.hivLabAlertId} /> : null}</div><TatBadge sample={sample} /><Button variant="danger" disabled={busy} onClick={() => onDelete(sample)} aria-label={`ลบ ${sample.barcode}`}><Trash2 className="size-4" /> ลบ</Button></div>
+}
+
+function HivLabAlertLink({ alertId }: { alertId: string }) {
+  return <Link href={`/hiv-alert#alert-${alertId}`} className="mt-1 inline-flex text-[11px] font-semibold text-[#0b7f76] hover:underline">เปิด HIV LAB Alert →</Link>
 }
 
 function PanelTitle({ icon, title, count, tone, action, onClick }: { icon: React.ReactNode; title: string; count: number; tone: 'danger' | 'warning'; action: string; onClick: () => void }) {

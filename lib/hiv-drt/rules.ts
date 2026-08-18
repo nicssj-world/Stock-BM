@@ -59,6 +59,10 @@ export function nextHivDrtRackPosition(occupiedPositions: number[], startAt = 1)
   return null
 }
 
+export function isValidHivDrtPosition(position: number) {
+  return Number.isInteger(position) && position >= 1 && position <= HIV_DRT_RACK_CAPACITY
+}
+
 export function formatHivDrtPosition(position: number | null) {
   if (position === null) return '-'
   const row = Math.ceil(position / HIV_DRT_RACK_COLUMNS)
