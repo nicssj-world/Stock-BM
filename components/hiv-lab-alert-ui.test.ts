@@ -7,6 +7,11 @@ const shell = readFileSync(join(process.cwd(), 'components/app-shell.tsx'), 'utf
 const proxy = readFileSync(join(process.cwd(), 'proxy.ts'), 'utf8')
 
 describe('HIV LAB Alert interface', () => {
+  it('uses the same page width as HPV Genotype and HIV DRT', () => {
+    expect(view).toContain('mx-auto max-w-[1600px] space-y-5')
+    expect(view).not.toContain('max-w-[1500px]')
+  })
+
   it('keeps the latest minimal patient form and masks the name at the boundary', () => {
     expect(view).toContain('HN')
     expect(view).toContain('LN / HIV DRT Barcode')
@@ -34,6 +39,11 @@ describe('HIV LAB Alert interface', () => {
     expect(view).toContain('/api/hiv-alert/alerts/${alert.id}/send')
     expect(view).toContain('ส่งสำเร็จ')
     expect(view).toContain('!sent && !sending')
+  })
+
+  it('keeps row actions compact on narrow screens', () => {
+    expect(view).toContain('flex min-w-0 flex-wrap justify-end gap-1.5')
+    expect(view).toContain('min-h-8 whitespace-nowrap px-2.5 py-1 text-xs')
   })
 
   it('links every new record to HIV DRT and keeps the Alert out of Assistant navigation', () => {

@@ -95,7 +95,7 @@ export function HivLabAlertView({ actor, initialData }: { actor: BmActor; initia
   }
 
   return (
-    <div className="mx-auto max-w-[1500px] space-y-5">
+    <div className="mx-auto max-w-[1600px] space-y-5">
       <PageHeader
         eyebrow="Management"
         title="HIV LAB Alert"
@@ -191,7 +191,7 @@ function AlertRow({ alert, busy, onEdit, onDelete, onSend }: { alert: HivLabAler
       <td className="px-4 py-3">{sent ? <><StatusBadge tone="accepted" label="ส่งสำเร็จ" /><p className="mt-1 text-[11px] text-[#789097]">{alert.lineSentAt ? formatDateTime(alert.lineSentAt) : '-'}</p></> : sending ? <StatusBadge tone="warning" label="กำลังส่ง" /> : <><StatusBadge tone="neutral" label="ยังไม่ส่ง" /><p className="mt-1 text-[11px] text-[#789097]">ลองส่งแล้ว {alert.lineSendAttempts} ครั้ง</p></>}</td>
       <td className="px-4 py-3 text-xs text-[#58747d]">{formatDateTime(alert.createdAt)}</td>
       <td className="px-4 py-3"><Link href={`/hiv-drt?view=storage&sample=${encodeURIComponent(alert.hivDrtSampleId)}`} className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0b7f76] hover:underline">เปิดตัวอย่างใน HIV DRT <ExternalLink className="size-3" /></Link></td>
-      <td className="px-4 py-3"><div className="flex min-w-44 flex-wrap justify-end gap-2">{sent ? <Button type="button" variant="secondary" disabled><Check className="size-4" /> ส่งสำเร็จ</Button> : <Button type="button" disabled={busy !== null || sending} onClick={() => void onSend(alert)}><Send className="size-4" /> {busy === `send:${alert.id}` ? 'กำลังส่ง' : 'ส่งเข้า LINE'}</Button>}{!sent && !sending ? <><Button type="button" variant="ghost" disabled={busy !== null} onClick={() => onEdit(alert)} aria-label={`แก้ไข ${alert.ln}`}><Pencil className="size-4" /> แก้ไข</Button><Button type="button" variant="danger" disabled={busy !== null} onClick={() => void onDelete(alert)} aria-label={`ลบ ${alert.ln}`}><Trash2 className="size-4" /> ลบ</Button></> : null}</div></td>
+      <td className="px-4 py-3"><div className="flex min-w-0 flex-wrap justify-end gap-1.5">{sent ? <Button type="button" variant="secondary" className="min-h-8 whitespace-nowrap px-2.5 py-1 text-xs" disabled><Check className="size-3.5" /> ส่งสำเร็จ</Button> : <Button type="button" className="min-h-8 whitespace-nowrap px-2.5 py-1 text-xs" disabled={busy !== null || sending} onClick={() => void onSend(alert)}><Send className="size-3.5" /> {busy === `send:${alert.id}` ? 'กำลังส่ง' : 'ส่งเข้า LINE'}</Button>}{!sent && !sending ? <><Button type="button" variant="ghost" className="min-h-8 whitespace-nowrap px-2.5 py-1 text-xs" disabled={busy !== null} onClick={() => onEdit(alert)} aria-label={`แก้ไข ${alert.ln}`}><Pencil className="size-3.5" /> แก้ไข</Button><Button type="button" variant="danger" className="min-h-8 whitespace-nowrap px-2.5 py-1 text-xs" disabled={busy !== null} onClick={() => void onDelete(alert)} aria-label={`ลบ ${alert.ln}`}><Trash2 className="size-3.5" /> ลบ</Button></> : null}</div></td>
     </tr>
   )
 }
