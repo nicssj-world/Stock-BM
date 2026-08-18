@@ -64,6 +64,7 @@ describe('HIV DRT interface', () => {
 
   it('adds an Outlab LN action beside delete and shows it after Tube', () => {
     expect(source).toContain('+ LN Outlab')
+    expect(source).toContain('!min-h-8 !shrink-0 !whitespace-nowrap')
     expect(source).toContain('outlabLnDraft.trim() || null')
     expect(source).toContain('<th className="px-4 py-3">LN Outlab</th>')
     expect(source).toContain('{sample.outlabLn ?? \'-\'}')
