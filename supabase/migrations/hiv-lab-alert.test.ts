@@ -10,6 +10,10 @@ function findManualPositionMigration() {
   return readdirSync(join(process.cwd(), 'supabase/migrations')).find((name) => name.endsWith('_hiv_lab_alert_manual_position.sql'))
 }
 
+function findSampleAlertCascadeMigration() {
+  return readdirSync(join(process.cwd(), 'supabase/migrations')).find((name) => name.endsWith('_hiv_drt_sample_alert_cascade.sql'))
+}
+
 describe('HIV LAB Alert migration', () => {
   it('creates a protected alert table linked to HIV DRT samples', () => {
     const migrationName = findMigration()
@@ -45,6 +49,15 @@ describe('HIV LAB Alert migration', () => {
 describe('HIV LAB Alert migration discovery', () => {
   it('will not silently skip the migration file', () => {
     expect(existsSync(join(process.cwd(), 'supabase/migrations'))).toBe(true)
+  })
+
+  it('cascades linked alert cleanup when a tube is deleted from HIV DRT', () => {
+    const migrationName = findSampleAlertCascadeMigration()
+    expect(migrationName).toBeTruthy()
+    if (!migrationName) return
+    const sql = readFileSync(join(process.cwd(), 'supabase/migrations', migrationName), 'utf8')
+    expect(sql).toContain('drop constraint if exists bm_hiv_lab_alerts_hiv_drt_sample_id_fkey')
+    expect(sql).toContain('on delete cascade')
   })
 
   it('replaces auto-fill RPC with an optional locked manual position', () => {
