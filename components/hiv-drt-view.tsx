@@ -580,10 +580,12 @@ function TrackingPanel({ workspace, busy, mutate, initialFilter, setNotice }: { 
   const [destination, setDestination] = useState('LAB Rama')
   const [search, setSearch] = useState('')
   const [onlyOverdue, setOnlyOverdue] = useState(initialFilter === 'overdue')
+  const [editingOutlabLnId, setEditingOutlabLnId] = useState<string | null>(null)
+  const [outlabLnDraft, setOutlabLnDraft] = useState('')
   const today = todayBangkok()
   const waiting = useMemo(() => workspace.samples.filter((sample) => sample.status === 'checked_out')
     .filter((sample) => !onlyOverdue || getHivDrtTatState(sample.checkedOutAt, sample.status, today) === 'overdue')
-    .filter((sample) => !search.trim() || sample.barcode.toLowerCase().includes(search.trim().toLowerCase()) || sample.checkoutDestination?.toLowerCase().includes(search.trim().toLowerCase())), [onlyOverdue, search, today, workspace.samples])
+    .filter((sample) => !search.trim() || sample.barcode.toLowerCase().includes(search.trim().toLowerCase()) || sample.outlabLn?.toLowerCase().includes(search.trim().toLowerCase()) || sample.checkoutDestination?.toLowerCase().includes(search.trim().toLowerCase())), [onlyOverdue, search, today, workspace.samples])
 
   const camera = useCameraScanner({ onScan: setBarcode, onError: (text) => setNotice({ tone: 'danger', text }), stopOnScan: true })
 
@@ -597,6 +599,21 @@ function TrackingPanel({ workspace, busy, mutate, initialFilter, setNotice }: { 
   async function receive(sample: HivDrtSample) {
     if (!window.confirm(`ยืนยันว่าได้รับผล HIV Genotyping ของ ${sample.barcode} แล้ว?`)) return
     await mutate(`/api/hiv-drt/samples/${sample.id}/result`, { method: 'POST' }, `บันทึกรับผล ${sample.barcode} แล้ว`)
+  }
+
+  function startOutlabLnEdit(sample: HivDrtSample) {
+    setEditingOutlabLnId(sample.id)
+    setOutlabLnDraft(sample.outlabLn ?? '')
+  }
+
+  function cancelOutlabLnEdit() {
+    setEditingOutlabLnId(null)
+    setOutlabLnDraft('')
+  }
+
+  async function saveOutlabLn(sample: HivDrtSample) {
+    const ok = await mutate(`/api/hiv-drt/samples/${sample.id}`, { method: 'PATCH', body: JSON.stringify({ outlabLn: outlabLnDraft.trim() || null }) }, `บันทึก LN Outlab ของ ${sample.barcode} แล้ว`)
+    if (ok) cancelOutlabLnEdit()
   }
 
   return (
@@ -613,7 +630,7 @@ function TrackingPanel({ workspace, busy, mutate, initialFilter, setNotice }: { 
       </Card>
       <Card className="overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-[#dce8e9] bg-[#fbfdfd] p-4 lg:flex-row lg:items-center lg:justify-between"><div><h2 className="font-bold text-[#173d50]">รายการรอผล</h2><p className="mt-1 text-xs text-[#789097]">เรียงรายการเกิน TAT ขึ้นก่อน</p></div><div className="flex flex-col gap-2 sm:flex-row"><div className="relative"><Search className="absolute top-2.5 left-3 size-4 text-[#8ba0a5]" /><Input value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" placeholder="ค้นหา Barcode หรือ Lab" /></div><label className="flex items-center gap-2 rounded-md border border-[#cfdee0] bg-white px-3 py-2 text-xs font-semibold text-[#58747d]"><input type="checkbox" checked={onlyOverdue} onChange={(event) => setOnlyOverdue(event.target.checked)} className="accent-[#b33b46]" /> เฉพาะเกิน TAT</label></div></div>
-        <div className="overflow-x-auto"><table className="w-full min-w-[920px] text-left text-sm"><thead className="bg-[#f4f8f8] text-[10px] font-bold tracking-[.08em] text-[#718a91] uppercase"><tr><th className="px-4 py-3">Tube</th><th className="px-4 py-3">Lab ปลายทาง</th><th className="px-4 py-3">Checkout</th><th className="px-4 py-3">TAT</th><th className="px-4 py-3">สถานะ</th><th className="px-4 py-3 text-right">Action</th></tr></thead><tbody className="divide-y divide-[#edf2f2]">{waiting.sort((a, b) => Number(getHivDrtTatState(b.checkedOutAt, b.status, today) === 'overdue') - Number(getHivDrtTatState(a.checkedOutAt, a.status, today) === 'overdue')).map((sample) => <tr key={sample.id} className="hover:bg-[#f8fbfb]"><td className="px-4 py-3"><strong className="mono text-[#173d50]">{sample.barcode}</strong><p className="mt-1 text-[11px] text-[#8ba0a5]">{sample.fromStorage ? `${sample.storedRackCode} · ${formatHivDrtPosition(sample.storedPosition)}` : 'Direct checkout'}</p></td><td className="px-4 py-3 text-[#315763]">{sample.checkoutDestination}</td><td className="px-4 py-3 text-xs text-[#58747d]">{sample.checkedOutAt ? formatDateTime(sample.checkedOutAt) : '-'}</td><td className="px-4 py-3"><p className="font-semibold text-[#315763]">ครบ {formatDate(sample.tatDueOn)}</p><p className="mt-1 text-[11px] text-[#8ba0a5]">ผ่าน {sample.checkedOutAt ? businessDaysElapsed(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(new Date(sample.checkedOutAt)), today) : 0} วันทำการ</p></td><td className="px-4 py-3"><TatBadge sample={sample} /></td><td className="px-4 py-3"><div className="flex justify-end gap-2"><Button disabled={busy} onClick={() => void receive(sample)}><Check className="size-4" /> ได้รับผลแล้ว</Button><Button variant="danger" disabled={busy} onClick={() => void deleteSampleRecord(sample, mutate)}><Trash2 className="size-4" /> ลบ</Button></div></td></tr>)}</tbody></table></div>
+         <div className="overflow-x-auto"><table className="w-full min-w-[1040px] text-left text-sm"><thead className="bg-[#f4f8f8] text-[10px] font-bold tracking-[.08em] text-[#718a91] uppercase"><tr><th className="px-4 py-3">Tube</th><th className="px-4 py-3">LN Outlab</th><th className="px-4 py-3">Lab ปลายทาง</th><th className="px-4 py-3">Checkout</th><th className="px-4 py-3">TAT</th><th className="px-4 py-3">สถานะ</th><th className="px-4 py-3 text-right">Action</th></tr></thead><tbody className="divide-y divide-[#edf2f2]">{waiting.sort((a, b) => Number(getHivDrtTatState(b.checkedOutAt, b.status, today) === 'overdue') - Number(getHivDrtTatState(a.checkedOutAt, a.status, today) === 'overdue')).map((sample) => <tr key={sample.id} className="hover:bg-[#f8fbfb]"><td className="px-4 py-3"><strong className="mono text-[#173d50]">{sample.barcode}</strong><p className="mt-1 text-[11px] text-[#8ba0a5]">{sample.fromStorage ? `${sample.storedRackCode} · ${formatHivDrtPosition(sample.storedPosition)}` : 'Direct checkout'}</p></td><td className="px-4 py-3">{editingOutlabLnId === sample.id ? <div className="flex min-w-48 items-center gap-1"><Input autoFocus value={outlabLnDraft} onChange={(event) => setOutlabLnDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void saveOutlabLn(sample); if (event.key === 'Escape') cancelOutlabLnEdit() }} placeholder="เลข LN" className="mono" /><Button type="button" disabled={busy} onClick={() => void saveOutlabLn(sample)} className="px-2.5">บันทึก</Button></div> : <span className="mono text-[#315763]">{sample.outlabLn ?? '-'}</span>}</td><td className="px-4 py-3 text-[#315763]">{sample.checkoutDestination}</td><td className="px-4 py-3 text-xs text-[#58747d]">{sample.checkedOutAt ? formatDateTime(sample.checkedOutAt) : '-'}</td><td className="px-4 py-3"><p className="font-semibold text-[#315763]">ครบ {formatDate(sample.tatDueOn)}</p><p className="mt-1 text-[11px] text-[#8ba0a5]">ผ่าน {sample.checkedOutAt ? businessDaysElapsed(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(new Date(sample.checkedOutAt)), today) : 0} วันทำการ</p></td><td className="px-4 py-3"><TatBadge sample={sample} /></td><td className="px-4 py-3"><div className="flex justify-end gap-2"><Button disabled={busy} onClick={() => void receive(sample)}><Check className="size-4" /> ได้รับผลแล้ว</Button><Button type="button" variant="secondary" disabled={busy} onClick={() => startOutlabLnEdit(sample)}>+ LN Outlab</Button><Button variant="danger" disabled={busy} onClick={() => void deleteSampleRecord(sample, mutate)}><Trash2 className="size-4" /> ลบ</Button></div></td></tr>)}</tbody></table></div>
         {!waiting.length ? <EmptyState icon={<CheckCircle2 />} text={onlyOverdue ? 'ไม่มีรายการเกิน TAT' : 'ไม่มีรายการรอผล'} /> : null}
       </Card>
     </div>

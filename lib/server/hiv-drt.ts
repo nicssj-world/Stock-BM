@@ -52,6 +52,7 @@ function sampleFromRow(row: RecordRow, names: Map<string, string>): HivDrtSample
   return {
     id: asString(row.id),
     barcode: asString(row.barcode),
+    outlabLn: nullableString(row.outlab_ln),
     status: asString(row.status) as HivDrtSample['status'],
     fromStorage: Boolean(row.from_storage),
     currentRackId: nullableString(row.current_rack_id),
@@ -217,6 +218,29 @@ export async function moveHivDrtSample(id: string, position: number, actor: BmAc
   })
   fail(error)
   await writeAudit(actor, 'hiv_drt.sample.move', 'hiv-drt-sample', id, { position })
+  return getHivDrtWorkspace(actor)
+}
+
+export async function updateHivDrtOutlabLn(id: string, outlabLn: string | null, actor: BmActor) {
+  assertHivDrtAccess(actor)
+  const admin = getAdminClient()
+  const { data: sample, error: sampleError } = await admin
+    .from('bm_hiv_drt_samples')
+    .select('id,barcode,status')
+    .eq('id', id)
+    .maybeSingle()
+  fail(sampleError)
+  const row = sample as RecordRow | null
+  if (!row) throw new HttpError(404, 'ไม่พบ tube')
+  if (asString(row.status) !== 'checked_out') throw new HttpError(409, 'เพิ่ม LN Outlab ได้เฉพาะรายการที่กำลังรอผล')
+  const normalizedLn = outlabLn?.trim() || null
+  const updatedAt = new Date().toISOString()
+  const { error } = await admin
+    .from('bm_hiv_drt_samples')
+    .update({ outlab_ln: normalizedLn, updated_at: updatedAt })
+    .eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'hiv_drt.sample.outlab_ln.update', 'hiv-drt-sample', id, { barcode: asString(row.barcode), outlabLn: normalizedLn })
   return getHivDrtWorkspace(actor)
 }
 

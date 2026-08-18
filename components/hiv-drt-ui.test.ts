@@ -62,6 +62,14 @@ describe('HIV DRT interface', () => {
     expect(source).not.toContain('Specimen type')
   })
 
+  it('adds an Outlab LN action beside delete and shows it after Tube', () => {
+    expect(source).toContain('+ LN Outlab')
+    expect(source).toContain('outlabLnDraft.trim() || null')
+    expect(source).toContain('<th className="px-4 py-3">LN Outlab</th>')
+    expect(source).toContain('{sample.outlabLn ?? \'-\'}')
+    expect(source).toContain("method: 'PATCH'")
+  })
+
   it('adds staff navigation and actionable dashboard links', () => {
     expect(shell).toContain("href: '/hiv-drt'")
     expect(shell).toContain("title: 'Management'")

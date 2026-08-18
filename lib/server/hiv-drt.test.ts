@@ -39,6 +39,13 @@ describe('HIV DRT server safeguards', () => {
     expect(source).toContain("input.destination?.trim() || 'LAB Rama'")
   })
 
+  it('persists an Outlab LN only for a waiting result', () => {
+    expect(source).toContain('export async function updateHivDrtOutlabLn')
+    expect(source).toContain("asString(row.status) !== 'checked_out'")
+    expect(source).toContain('outlab_ln: normalizedLn')
+    expect(source).toContain("'hiv_drt.sample.outlab_ln.update'")
+  })
+
   it('audits every lifecycle transition and requires a reason to undo results', () => {
     expect(source).toContain("'hiv_drt.sample.store'")
     expect(source).toContain("'hiv_drt.sample.checkout'")

@@ -5,6 +5,7 @@ export type HivDrtDestructionState = 'none' | 'due_soon' | 'due_now'
 export interface HivDrtSample {
   id: string
   barcode: string
+  outlabLn: string | null
   status: HivDrtSampleStatus
   fromStorage: boolean
   currentRackId: string | null

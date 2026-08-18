@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 const sql = readFileSync(join(process.cwd(), 'supabase/migrations/202607220001_hiv_drt_management.sql'), 'utf8')
 const cursorSql = readFileSync(join(process.cwd(), 'supabase/migrations/202607230001_hiv_drt_rack_cursor.sql'), 'utf8')
 const repairSql = readFileSync(join(process.cwd(), 'supabase/migrations/202607230002_hiv_drt_cursor_repair.sql'), 'utf8')
+const outlabSql = readFileSync(join(process.cwd(), 'supabase/migrations/202608180001_hiv_drt_outlab_ln.sql'), 'utf8')
 
 describe('HIV DRT migration', () => {
   it('creates 8x12 racks and tube lifecycle storage', () => {
@@ -35,5 +36,10 @@ describe('HIV DRT migration', () => {
     expect(repairSql).toContain('add column if not exists next_position')
     expect(repairSql).toContain('greatest(')
     expect(repairSql).toContain('rack.next_position')
+  })
+
+  it('adds an optional Outlab LN field to samples', () => {
+    expect(outlabSql).toContain('add column outlab_ln text')
+    expect(outlabSql).toContain("nullif(trim(outlab_ln), '') is not null")
   })
 })
