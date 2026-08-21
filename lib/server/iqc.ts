@@ -453,7 +453,11 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     }))
 
     const usable = points.filter((p) => !p.isVoided).map((p) => p.statValue)
-    const lockEligible = usable.length >= LAB_LOCK_MIN_POINTS
+    // Same set the lock writes (getUsableLabValues): voided and rejected points
+    // never contribute to a lab mean/SD, so the running value shown before the
+    // lock matches what "Lock & ปิด Lot" would store.
+    const labUsable = points.filter((p) => !p.isVoided && p.status !== 'rejected').map((p) => p.statValue)
+    const lockEligible = labUsable.length >= LAB_LOCK_MIN_POINTS
     const latest = [...points].reverse().find((p) => !p.isVoided)
 
     // Lot-change annotations relevant to this analyte (Trucount only on absolute analytes)
@@ -498,6 +502,9 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
       labSd: labStatisticsLocked ? spec?.labSd ?? null : null,
       labN: labStatisticsLocked ? spec?.labN ?? null : null,
       labLockedAt: spec?.labLockedAt ?? null,
+      runningLabMean: lockEligible ? mean(labUsable) : null,
+      runningLabSd: lockEligible ? sd(labUsable) : null,
+      runningLabN: labUsable.length,
       lockEligible,
       status: latest?.status ?? 'accepted',
       points,

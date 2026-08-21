@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Table2 } from 'lucide-react'
-import type { IqcChart } from '@/lib/iqc/types'
+import { LAB_LOCK_MIN_POINTS, type IqcChart } from '@/lib/iqc/types'
 import { formatDateTime } from '@/lib/bm/rules'
 import { Button, StatusBadge } from '@/components/ui'
 
@@ -85,9 +85,15 @@ export function LjChart({
     lab: {
       cardLabel: 'LAB Mean / SD',
       label: 'LAB Mean/SD',
-      mean: chart.labMean,
-      sd: chart.labSd,
-      detail: chart.labLockedAt ? `Locked · n ${chart.labN ?? chart.n}` : `ยังไม่ lock · run ปัจจุบัน n ${chart.n}`,
+      // Before the lock the running value stands in, so the card stops reading
+      // as "never calculated" once the analyte has enough points.
+      mean: chart.labMean ?? chart.runningLabMean,
+      sd: chart.labSd ?? chart.runningLabSd,
+      detail: chart.labLockedAt
+        ? `Locked · n ${chart.labN ?? chart.n}`
+        : chart.runningLabMean != null
+          ? `คำนวณสด n ${chart.runningLabN} · ยังไม่ lock จึงยังไม่ใช้เป็นเกณฑ์ Westgard`
+          : `ยังไม่ครบ ${LAB_LOCK_MIN_POINTS} จุด · ตอนนี้ n ${chart.runningLabN}`,
       tone: chart.labLockedAt ? 'border-[#bfe3cf] bg-[#f1fbf4] text-[#18763a]' : 'border-[#eed4a6] bg-[#fff9ed] text-[#a9700f]',
     },
   }

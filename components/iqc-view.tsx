@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { AlertTriangle, CalendarClock, Calculator, ChevronDown, ClipboardList, Eye, Gauge, Layers3, Lock, LineChart, ListFilter, PlusCircle, Printer, Search, Settings, Sigma, Trash2, Wrench } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
-import type { IqcCorrectiveAction, IqcUncertaintyBudget, IqcWorkspace } from '@/lib/iqc/types'
+import { LAB_LOCK_MIN_POINTS, type IqcCorrectiveAction, type IqcUncertaintyBudget, type IqcWorkspace } from '@/lib/iqc/types'
 import { findCorrectiveActionForPoint, runsWithoutCorrectiveActions } from '@/lib/iqc/corrective-actions'
 import { hasTestSet, parseTestSets } from '@/lib/iqc/test-sets'
 import { formatDate, formatDateTime } from '@/lib/bm/rules'
@@ -475,7 +475,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
                               {latest ? ` · latest ${fmtCompact(latest.value)} (${formatDateTime(latest.runDatetime)})` : ''}
                             </p>
                             <p className="mt-1 text-[11px] text-[#58747d]">
-                              Assigned: {fmtCompact(chart.assignedMean)} / SD {fmtCompact(chart.assignedSd)} · LAB: {fmtCompact(chart.labMean)} / SD {fmtCompact(chart.labSd)}{chart.labN != null ? ` (n ${chart.labN})` : ' (รอ Lock & ปิด Lot)'}
+                              Assigned: {fmtCompact(chart.assignedMean)} / SD {fmtCompact(chart.assignedSd)} · LAB: {fmtCompact(chart.labMean ?? chart.runningLabMean)} / SD {fmtCompact(chart.labSd ?? chart.runningLabSd)}{chart.labLockedAt ? ` (locked n ${chart.labN ?? chart.runningLabN})` : chart.runningLabMean != null ? ` (คำนวณสด n ${chart.runningLabN} · รอ Lock & ปิด Lot)` : ` (ยังไม่ครบ ${LAB_LOCK_MIN_POINTS} จุด · n ${chart.runningLabN})`}
                             </p>
                           </div>
                           <div className="flex flex-wrap items-center justify-start gap-2 sm:justify-end">

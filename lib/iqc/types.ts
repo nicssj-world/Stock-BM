@@ -153,6 +153,12 @@ export interface IqcChart {
   labSd: number | null
   labN: number | null
   labLockedAt: string | null
+  // Live lab mean/SD recomputed from the current accepted points on every load
+  // once the analyte reaches LAB_LOCK_MIN_POINTS. Informational until locked:
+  // the active Westgard limit still follows the locked values only.
+  runningLabMean: number | null
+  runningLabSd: number | null
+  runningLabN: number
   lockEligible: boolean
   status: QcStatus
   points: IqcChartPoint[]
