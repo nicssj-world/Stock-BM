@@ -968,6 +968,26 @@ function ReceiptsTab({ actor, data, onWorkspace, onNotice }: {
     }
   }
 
+  async function deleteReceipt(receipt: HpvSiteReceipt) {
+    if (busy) return
+    const reason = window.prompt(`เหตุผลการลบ Receive Log ของ ${receipt.siteName} จำนวน ${receipt.sampleCount} ตัวอย่าง:`)
+    if (!reason?.trim()) return
+    if (!window.confirm(`ยืนยันลบ Receive Log ของ ${receipt.siteName} จำนวน ${receipt.sampleCount} ตัวอย่างหรือไม่? ยอดสรุปของหน่วยงานจะถูกคำนวณใหม่`)) return
+    setBusy(true)
+    try {
+      const result = await api<{ workspace: HpvWorkspace }>(`/api/hpv/receipts/${receipt.id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ reason: reason.trim() }),
+      })
+      onWorkspace(result.workspace, 'ลบ Receive Log แล้ว')
+      if (editingReceipt?.id === receipt.id) setEditingReceipt(null)
+    } catch (error) {
+      onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'ลบ Receive Log ไม่สำเร็จ' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="grid gap-4 xl:grid-cols-[380px_minmax(0,1fr)]">
       <Card className={`p-4 ${editingReceipt ? 'ring-1 ring-[#0b7f76]' : ''}`}>
@@ -1021,9 +1041,10 @@ function ReceiptsTab({ actor, data, onWorkspace, onNotice }: {
               </div>
               <div className="flex items-center gap-3">
                 <p className="mono text-lg font-bold text-[#0b7f76]">{receipt.sampleCount}</p>
-                {actor.role === 'Admin' ? (
-                  <button onClick={() => setEditingReceipt({ id: receipt.id, receivedOn: receipt.receivedOn, sampleCount: String(receipt.sampleCount), selfSupplied: receipt.selfSupplied, note: receipt.note ?? '' })} className="flex items-center gap-1 rounded border border-[#c7dde0] bg-[#f5f9fa] px-2 py-1 text-[10px] font-bold text-[#55727c] hover:bg-[#ebf5f6]"><Pencil className="size-3" /></button>
-                ) : null}
+                {actor.role === 'Admin' ? <div className="flex items-center gap-1">
+                  <button disabled={busy} aria-label="แก้ไข Receive Log" title="แก้ไข Receive Log" onClick={() => setEditingReceipt({ id: receipt.id, receivedOn: receipt.receivedOn, sampleCount: String(receipt.sampleCount), selfSupplied: receipt.selfSupplied, note: receipt.note ?? '' })} className="flex items-center gap-1 rounded border border-[#c7dde0] bg-[#f5f9fa] px-2 py-1 text-[10px] font-bold text-[#55727c] hover:bg-[#ebf5f6] disabled:opacity-50"><Pencil className="size-3" /></button>
+                  <button disabled={busy} aria-label="ลบ Receive Log" title="ลบ Receive Log" onClick={() => deleteReceipt(receipt)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-500 hover:bg-red-100 disabled:opacity-50"><Trash2 className="size-3" /></button>
+                </div> : null}
               </div>
             </div>
           ))}

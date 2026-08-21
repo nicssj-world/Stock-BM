@@ -538,6 +538,37 @@ export async function updateHpvReceipt(input: { id: string; receivedOn?: string;
   return getHpvWorkspace(actor)
 }
 
+export async function deleteHpvReceipt(id: string, reason: string, actor: BmActor) {
+  assertAdmin(actor)
+  const cleanReason = reason.trim()
+  if (!cleanReason) throw new HttpError(400, 'กรุณาระบุเหตุผลการลบ Receive Log')
+  if (cleanReason.length > 500) throw new HttpError(400, 'เหตุผลการลบยาวเกินไป')
+
+  const admin = getAdminClient()
+  const { data, error: readError } = await admin
+    .from('bm_hpv_site_receipts')
+    .select('id,site_id,received_on,sample_count,self_supplied,note,created_by,created_at')
+    .eq('id', id)
+    .maybeSingle()
+  fail(readError)
+  const receipt = data as RecordRow | null
+  if (!receipt) throw new HttpError(404, 'ไม่พบ HPV Receive Log')
+
+  const { error } = await admin.from('bm_hpv_site_receipts').delete().eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'hpv.receipt.delete', 'hpv-receipt', id, {
+    reason: cleanReason,
+    siteId: asString(receipt.site_id),
+    receivedOn: asString(receipt.received_on),
+    sampleCount: asNumber(receipt.sample_count),
+    selfSupplied: Boolean(receipt.self_supplied),
+    note: nullableString(receipt.note),
+    createdBy: asString(receipt.created_by),
+    createdAt: asString(receipt.created_at),
+  })
+  return getHpvWorkspace(actor)
+}
+
 export async function createHpvReceipt(input: { siteId: string; receivedOn: string; sampleCount: number; selfSupplied?: boolean; note?: string | null }, actor: BmActor) {
   const { data, error } = await getAdminClient()
     .from('bm_hpv_site_receipts')
