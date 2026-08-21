@@ -1,12 +1,12 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { ArrowDownToLine, ArrowUpFromLine, FileDown, History, MoveRight, PackageCheck, PackageSearch, Printer, RotateCcw, X } from 'lucide-react'
+import { ArrowDownToLine, ArrowUpFromLine, FileDown, History, MoveRight, PackageCheck, PackageSearch, Pencil, Printer, RotateCcw, X } from 'lucide-react'
 import type { BmActor, StockItem, StockLot, StockTransaction, StockWorkspace } from '@/lib/bm/types'
 import { formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
 import { stockItemMatchesEquipment } from '@/lib/bm/stock-equipment-filter'
 import { printLotLabel } from '@/lib/bm/label-print'
-import { api, Button, Card, Input, Notice, PageHeader, Select } from '@/components/ui'
+import { api, Button, Card, Field, Input, Notice, PageHeader, Select } from '@/components/ui'
 import { Pagination, usePagination } from '@/components/pagination'
 import { StockMetric, StockMetricStrip, StockModuleShell, StockPanelTitle } from '@/components/stock-module-shell'
 
@@ -25,6 +25,7 @@ export function InventoryView({ actor, initialData, defaultLocationId }: { actor
   const [equipmentFilter, setEquipmentFilter] = useState('all')
   const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
   const [actionLot, setActionLot] = useState<{ item: StockItem; lot: StockLot } | null>(null)
+  const [editLot, setEditLot] = useState<{ item: StockItem; lot: StockLot } | null>(null)
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
 
   const visibleItems = useMemo(() => {
@@ -133,11 +134,12 @@ export function InventoryView({ actor, initialData, defaultLocationId }: { actor
             {!visibleItems.length ? <p className="px-4 py-14 text-center text-sm text-[#91a4a9]">ไม่พบรายการ</p> : null}
             {visibleItems.length > INVENTORY_PAGE_SIZE ? <Pagination {...itemPagination} total={visibleItems.length} onChange={itemPagination.setPage} /> : null}
           </div>
-          <div className="xl:sticky xl:top-5 xl:max-h-[calc(100vh-2.5rem)] xl:self-start xl:overflow-y-auto"><StockDetail actor={actor} item={selectedItem} transactions={itemTransactions} locations={data.locations} onReverse={reverse} onLotAction={setActionLot} /></div>
+          <div className="xl:sticky xl:top-5 xl:max-h-[calc(100vh-2.5rem)] xl:self-start xl:overflow-y-auto"><StockDetail actor={actor} item={selectedItem} transactions={itemTransactions} locations={data.locations} onReverse={reverse} onLotAction={setActionLot} onEditLot={setEditLot} /></div>
         </div>
       </Card>
-      {mobileDetailOpen && selectedItem ? <MobileItemDetailDrawer actor={actor} item={selectedItem} transactions={itemTransactions} locations={data.locations} onReverse={reverse} onLotAction={setActionLot} onClose={() => setMobileDetailOpen(false)} /> : null}
-      {actionLot ? <LotActionSheet item={actionLot.item} lot={actionLot.lot} locations={data.locations} onClose={() => setActionLot(null)} /> : null}
+      {mobileDetailOpen && selectedItem ? <MobileItemDetailDrawer actor={actor} item={selectedItem} transactions={itemTransactions} locations={data.locations} onReverse={reverse} onLotAction={setActionLot} onEditLot={setEditLot} onClose={() => setMobileDetailOpen(false)} /> : null}
+      {actionLot ? <LotActionSheet actor={actor} item={actionLot.item} lot={actionLot.lot} locations={data.locations} onEdit={() => { setEditLot(actionLot); setActionLot(null) }} onClose={() => setActionLot(null)} /> : null}
+      {editLot ? <LotEditDialog item={editLot.item} lot={editLot.lot} onClose={() => setEditLot(null)} onSaved={(stock) => { setData(stock); setEditLot(null); setNotice({ tone: 'success', text: 'แก้ไข Lot และวันหมดอายุทั้งระบบแล้ว' }) }} onError={(text) => setNotice({ tone: 'danger', text })} /> : null}
     </StockModuleShell>
   )
 }
@@ -203,7 +205,7 @@ function MobileInventoryList({
   )
 }
 
-function StockDetail({ actor, item, transactions, locations, onReverse, onLotAction }: { actor: BmActor; item: StockItem | null; transactions: StockTransaction[]; locations: StockWorkspace['locations']; onReverse: (tx: StockTransaction) => void; onLotAction: (value: { item: StockItem; lot: StockLot }) => void }) {
+function StockDetail({ actor, item, transactions, locations, onReverse, onLotAction, onEditLot }: { actor: BmActor; item: StockItem | null; transactions: StockTransaction[]; locations: StockWorkspace['locations']; onReverse: (tx: StockTransaction) => void; onLotAction: (value: { item: StockItem; lot: StockLot }) => void; onEditLot: (value: { item: StockItem; lot: StockLot }) => void }) {
   const ledgerPagination = usePagination(transactions.length, 15)
   const [tab, setTab] = useState<'lots' | 'movements' | 'info'>('lots')
   if (!item) return <div className="flex min-h-[520px] items-center justify-center p-8 text-center"><div><PackageSearch className="mx-auto size-10 text-[#b6c6c9]" /><p className="mt-3 text-sm text-[#82979d]">ยังไม่มีสินค้า / No items</p></div></div>
@@ -226,7 +228,7 @@ function StockDetail({ actor, item, transactions, locations, onReverse, onLotAct
     {tab === 'lots' ? <section className="px-4 py-4">
       <div className="flex items-center justify-between"><h3 className="font-bold text-[#173d50]">Lots / Location balances</h3><PackageCheck className="size-5 text-[#0b7f76]" /></div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        {item.lots.filter(isVisibleLot).map((lot) => <LotCard key={lot.id} lot={lot} item={item} locations={locations} onLotAction={() => onLotAction({ item, lot })} />)}
+        {item.lots.filter(isVisibleLot).map((lot) => <LotCard key={lot.id} actor={actor} lot={lot} item={item} locations={locations} onLotAction={() => onLotAction({ item, lot })} onEditLot={() => onEditLot({ item, lot })} />)}
         {!item.lots.filter(isVisibleLot).length ? <p className="col-span-full rounded-md border border-dashed border-[#d5e2e3] px-3 py-7 text-center text-sm text-[#91a4a9]">ยังไม่มี Lot รับเข้า</p> : null}
       </div>
     </section> : null}
@@ -244,15 +246,15 @@ function StockDetail({ actor, item, transactions, locations, onReverse, onLotAct
   </div>
 }
 
-function MobileItemDetailDrawer({ actor, item, transactions, locations, onReverse, onLotAction, onClose }: { actor: BmActor; item: StockItem; transactions: StockTransaction[]; locations: StockWorkspace['locations']; onReverse: (transaction: StockTransaction) => void; onLotAction: (value: { item: StockItem; lot: StockLot }) => void; onClose: () => void }) {
-  return <div className="fixed inset-0 z-50 bg-[#08242b]/45 p-2 xl:hidden" onClick={onClose}><div className="mx-auto flex h-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[#cadcda] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}><div className="flex items-center justify-between border-b border-[#e0e9ea] bg-[#f7fcfb] px-4 py-3"><div><p className="text-[10px] font-bold tracking-[0.14em] text-[#0b7f76] uppercase">Item detail</p><p className="mono mt-0.5 text-xs font-bold text-[#315763]">{item.itemCode}</p></div><button type="button" onClick={onClose} className="flex size-10 items-center justify-center rounded-lg text-[#58747d] hover:bg-[#eaf5f3]" aria-label="ปิดรายละเอียด"><X className="size-5" /></button></div><div className="min-h-0 flex-1 overflow-y-auto"><StockDetail actor={actor} item={item} transactions={transactions} locations={locations} onReverse={onReverse} onLotAction={onLotAction} /></div></div></div>
+function MobileItemDetailDrawer({ actor, item, transactions, locations, onReverse, onLotAction, onEditLot, onClose }: { actor: BmActor; item: StockItem; transactions: StockTransaction[]; locations: StockWorkspace['locations']; onReverse: (transaction: StockTransaction) => void; onLotAction: (value: { item: StockItem; lot: StockLot }) => void; onEditLot: (value: { item: StockItem; lot: StockLot }) => void; onClose: () => void }) {
+  return <div className="fixed inset-0 z-50 bg-[#08242b]/45 p-2 xl:hidden" onClick={onClose}><div className="mx-auto flex h-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[#cadcda] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}><div className="flex items-center justify-between border-b border-[#e0e9ea] bg-[#f7fcfb] px-4 py-3"><div><p className="text-[10px] font-bold tracking-[0.14em] text-[#0b7f76] uppercase">Item detail</p><p className="mono mt-0.5 text-xs font-bold text-[#315763]">{item.itemCode}</p></div><button type="button" onClick={onClose} className="flex size-10 items-center justify-center rounded-lg text-[#58747d] hover:bg-[#eaf5f3]" aria-label="ปิดรายละเอียด"><X className="size-5" /></button></div><div className="min-h-0 flex-1 overflow-y-auto"><StockDetail actor={actor} item={item} transactions={transactions} locations={locations} onReverse={onReverse} onLotAction={onLotAction} onEditLot={onEditLot} /></div></div></div>
 }
 
 function InfoLine({ label, value }: { label: string; value: string }) {
   return <div className="rounded-lg border border-[#e1ebeb] bg-white px-3 py-3"><p className="text-[10px] font-bold tracking-[0.12em] text-[#8ba0a5] uppercase">{label}</p><p className="mt-1 text-sm font-semibold text-[#315763]">{value}</p></div>
 }
 
-function LotCard({ lot, item, locations, onLotAction }: { lot: StockLot; item: StockItem; locations: StockWorkspace['locations']; onLotAction: () => void }) {
+function LotCard({ actor, lot, item, locations, onLotAction, onEditLot }: { actor: BmActor; lot: StockLot; item: StockItem; locations: StockWorkspace['locations']; onLotAction: () => void; onEditLot: () => void }) {
   const color = lot.expiryState === 'expired' ? 'border-[#efc7cc] bg-[#fff8f8]' : lot.expiryState === 'expiring' ? 'border-[#eed4a6] bg-[#fffdf7]' : 'border-[#d8e6e6] bg-white'
   return <div className={`rounded-md border p-3 ${color}`}>
     <div className="flex items-start justify-between gap-2"><div><p className="mono text-xs font-bold text-[#315763]">{lot.lotNumber}</p><p className="mt-1 text-[11px] text-[#8b9da2]">EXP {formatDate(lot.expiryDate)}</p></div><ExpiryBadge state={lot.expiryState} /></div>
@@ -260,12 +262,13 @@ function LotCard({ lot, item, locations, onLotAction }: { lot: StockLot; item: S
     <div className="mt-2 space-y-1">{lot.balances.map((balance) => <p key={balance.locationId} className="flex justify-between gap-2 text-[11px] text-[#6f868b]"><span className="min-w-0 truncate">{balance.locationCode} · {balance.locationName}</span><span className="mono shrink-0">{formatQuantity(balance.onHand)}</span></p>)}</div>
     <div className="mt-2 flex flex-wrap gap-1">
       <Button variant="ghost" className="px-2 py-1 text-xs" onClick={onLotAction}><MoveRight className="size-3" /> Actions</Button>
+      {actor.role === 'Admin' ? <Button variant="ghost" className="px-2 py-1 text-xs" onClick={onEditLot}><Pencil className="size-3" /> Edit Lot</Button> : null}
       <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => printLotLabel(lot, item, locations.find((location) => location.id === lot.balances[0]?.locationId))}><Printer className="size-3" /> Label</Button>
     </div>
   </div>
 }
 
-function LotActionSheet({ item, lot, locations, onClose }: { item: StockItem; lot: StockLot; locations: StockWorkspace['locations']; onClose: () => void }) {
+function LotActionSheet({ actor, item, lot, locations, onEdit, onClose }: { actor: BmActor; item: StockItem; lot: StockLot; locations: StockWorkspace['locations']; onEdit: () => void; onClose: () => void }) {
   const firstLocationId = lot.balances[0]?.locationId
   const firstLocation = locations.find((location) => location.id === firstLocationId)
   const issueHref = `/movements?mode=issue&lotId=${lot.id}${firstLocationId ? `&locationId=${firstLocationId}` : ''}`
@@ -282,6 +285,7 @@ function LotActionSheet({ item, lot, locations, onClose }: { item: StockItem; lo
           <button type="button" onClick={onClose} className="flex size-9 shrink-0 items-center justify-center rounded-md text-[#789097] hover:bg-[#eef5f4]"><X className="size-5" /></button>
         </div>
         <div className="grid gap-2 p-3">
+          {actor.role === 'Admin' ? <Button variant="secondary" className="h-12 w-full" onClick={onEdit}><Pencil className="size-4" /> แก้ไข Lot / Expiry ทั้งระบบ</Button> : null}
           <Button className="h-12 w-full" onClick={() => { window.location.href = issueHref }}><ArrowUpFromLine className="size-4" /> ตัด stock / Issue</Button>
           <Button variant="secondary" className="h-12 w-full" onClick={() => { window.location.href = moveHref }}><MoveRight className="size-4" /> ย้ายที่ / Move</Button>
           <Button variant="secondary" className="h-12 w-full" onClick={() => { window.location.href = `/movements?mode=receive&itemId=${item.id}` }}><ArrowDownToLine className="size-4" /> รับเพิ่ม / Receive more</Button>
@@ -290,6 +294,57 @@ function LotActionSheet({ item, lot, locations, onClose }: { item: StockItem; lo
       </div>
     </div>
   )
+}
+
+function LotEditDialog({ item, lot, onClose, onSaved, onError }: { item: StockItem; lot: StockLot; onClose: () => void; onSaved: (stock: StockWorkspace) => void; onError: (text: string) => void }) {
+  const [lotNumber, setLotNumber] = useState(lot.lotNumber)
+  const [expiryDate, setExpiryDate] = useState(lot.expiryDate ?? '')
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function save(event: React.FormEvent) {
+    event.preventDefault()
+    if (busy || !lotNumber.trim() || (item.trackExpiry && !expiryDate) || !reason.trim()) return
+    if (!window.confirm(`ยืนยันแก้ไข Lot ${lot.lotNumber} ให้เป็น ${lotNumber.trim()} และปรับข้อมูลที่อ้างอิงทั้งระบบหรือไม่?`)) return
+    setBusy(true)
+    try {
+      const result = await api<{ stock: StockWorkspace }>(`/api/stock/lots/${lot.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          lotNumber: lotNumber.trim(),
+          expiryDate: item.trackExpiry ? expiryDate || null : null,
+          reason: reason.trim(),
+        }),
+      })
+      onSaved(result.stock)
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'แก้ไข Lot ไม่สำเร็จ')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#08242b]/45 p-3" onClick={onClose}>
+    <form className="w-full max-w-lg rounded-xl border border-[#cadcda] bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()} onSubmit={save}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-bold tracking-[0.14em] text-[#0b7f76] uppercase">Global lot correction</p>
+          <h2 className="mt-1 text-lg font-bold text-[#173d50]">แก้ไข Lot และวันหมดอายุ</h2>
+          <p className="mt-1 text-xs text-[#789097]">{item.itemCode} · ยอดคงเหลือ {formatQuantity(lot.totalOnHand)} {item.unit}</p>
+        </div>
+        <button type="button" onClick={onClose} className="flex size-9 items-center justify-center rounded-md text-[#789097] hover:bg-[#eef5f4]" aria-label="ปิด"><X className="size-5" /></button>
+      </div>
+      <div className="mt-4 space-y-3">
+        <Notice tone="warning">การบันทึกจะเปลี่ยนข้อมูลต้นทางของ Lot เดิม ทำให้ประวัติรับ-จ่าย ยอดคงเหลือ FEFO การสแกน และรายงานที่อ้างอิง Lot นี้แสดงค่าใหม่ โดยไม่ลบรายการเดิม</Notice>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="ชื่อ Lot ใหม่"><Input required maxLength={120} value={lotNumber} onChange={(event) => setLotNumber(event.target.value)} /></Field>
+          <Field label="วันหมดอายุใหม่"><Input required={item.trackExpiry} disabled={!item.trackExpiry} type="date" value={item.trackExpiry ? expiryDate : ''} onChange={(event) => setExpiryDate(event.target.value)} /></Field>
+        </div>
+        <Field label="เหตุผลการแก้ไข"><Input required maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="เช่น แก้ตามฉลากสินค้าจริง" /></Field>
+      </div>
+      <div className="mt-5 flex justify-end gap-2"><Button type="button" variant="ghost" onClick={onClose}>ยกเลิก</Button><Button type="submit" disabled={busy}>{busy ? 'กำลังบันทึก…' : 'บันทึกการแก้ไขทั้งระบบ'}</Button></div>
+    </form>
+  </div>
 }
 
 function TransactionRow({ actor, transaction, onReverse }: { actor: BmActor; transaction: StockTransaction; onReverse: () => void }) {
@@ -323,4 +378,3 @@ function MovementBadge({ type }: { type: StockTransaction['transactionType'] }) 
 function MiniStat({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
   return <div className="rounded-md border border-[#dbe7e8] bg-white/80 px-3 py-2"><p className="text-[9px] font-bold tracking-[0.1em] text-[#91a3a7] uppercase">{label}</p><p className={`mono mt-1 text-xs font-bold ${accent ? 'text-[#be3d49]' : 'text-[#41616b]'}`}>{value}</p></div>
 }
-

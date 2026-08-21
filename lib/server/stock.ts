@@ -561,6 +561,26 @@ export async function deleteItem(id: string, actor: BmActor) {
   return getStockWorkspace(actor)
 }
 
+export async function updateStockLot(
+  lotId: string,
+  input: { lotNumber: string; expiryDate?: string | null; reason: string },
+  actor: BmActor,
+) {
+  await assertAdmin(actor)
+  const { error } = await getAdminClient().rpc('update_bm_stock_lot', {
+    p_lot: lotId,
+    p_lot_number: input.lotNumber.trim(),
+    p_expiry_date: input.expiryDate || null,
+    p_reason: input.reason.trim(),
+    p_actor: actor.id,
+  })
+  if (error?.code === '23505') {
+    throw new HttpError(409, 'Lot number นี้ซ้ำกับ Lot อื่นของ item เดียวกัน')
+  }
+  fail(error)
+  return getStockWorkspace(actor)
+}
+
 async function hasAnyRows(table: string, column: string, values: string[]) {
   if (!values.length) return false
   const { count, error } = await getAdminClient()
