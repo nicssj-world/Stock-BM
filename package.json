@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "bootstrap:stock-admin": "node --env-file-if-exists=.env.local scripts/bootstrap-stock-admin.mjs",
-    "seed:iqc-cd4": "node --env-file-if-exists=.env.local scripts/import-iqc-cd4.mjs"
+    "seed:iqc-cd4": "node --env-file-if-exists=.env.local scripts/import-iqc-cd4.mjs",
+    "seed:iqc-vl": "node --env-file-if-exists=.env.local scripts/import-iqc-vl.mjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.2.7",
