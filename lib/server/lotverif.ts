@@ -52,6 +52,9 @@ function stockItemCategoryName(item: RecordRow | undefined) {
 function isReagentStockItem(item: RecordRow | undefined) {
   return stockItemCategoryName(item).trim().toLowerCase() === 'reagent'
 }
+function isVlQuantitativeAnalyte(analyte: RecordRow | undefined) {
+  return asString(analyte?.data_type) === 'quantitative' && /-VL\b/i.test(asString(analyte?.code))
+}
 function assertAdmin(actor: BmActor) {
   if (actor.role !== 'Admin') throw new HttpError(403, 'Admin permission required')
 }
@@ -97,7 +100,7 @@ function mapParallelRow(row: RecordRow): LotVerifParallelRow {
     controlLabel: nullableString(row.control_label),
     controlMean: nullableNumber(row.control_mean),
     controlSd: nullableNumber(row.control_sd),
-    statsSource: source === 'assigned' || source === 'lab' ? source : 'manual',
+    statsSource: source === 'assigned' || source === 'lab' || source === 'baseline' ? source : 'manual',
     oldRun1: nullableNumber(row.old_run_1),
     oldRun2: nullableNumber(row.old_run_2),
     newRun1: nullableNumber(row.new_run_1),
@@ -264,6 +267,7 @@ export async function getLotVerifWorkspace(actor: BmActor): Promise<LotVerifWork
     { data: parallelData, error: parallelError },
     { data: analyteData, error: analyteError },
     { data: statsData, error: statsError },
+    { data: baselineData, error: baselineError },
     { data: instrumentData, error: instrumentError },
     { data: instrumentEquipmentLinkData, error: instrumentEquipmentLinkError },
     { data: equipmentData, error: equipmentError },
@@ -275,9 +279,10 @@ export async function getLotVerifWorkspace(actor: BmActor): Promise<LotVerifWork
     admin.from('lotverif_parallel_rows').select('*').order('level_no', { ascending: true }),
     admin.from('iqc_analytes').select('id,code,name,data_type,scale,unit').eq('is_active', true).order('code'),
     admin.from('iqc_control_specs').select('control_lot_id,analyte_id,assigned_mean,assigned_sd,lab_mean,lab_sd,lab_locked_at,active_limit'),
+    admin.from('iqc_baselines').select('control_lot_id,analyte_id,instrument_id,mean,sd,state').eq('state', 'approved'),
     admin.from('iqc_instruments').select('id,code,name,model,is_active').eq('is_active', true).order('code'),
     admin.from('bm_equipment_module_links').select('equipment_id,entity_id').eq('module', 'iqc').eq('entity_type', 'instrument'),
-    admin.from('bm_equipment').select('id,code,name,model'),
+    admin.from('bm_equipment').select('id,code,name,model,status'),
     admin.from('iqc_control_plans').select('analyte_id,instrument_id,is_active').eq('is_active', true),
     loadLotLabels(),
   ])
@@ -286,6 +291,7 @@ export async function getLotVerifWorkspace(actor: BmActor): Promise<LotVerifWork
   fail(parallelError)
   fail(analyteError)
   fail(statsError)
+  fail(baselineError)
   fail(instrumentError)
   fail(instrumentEquipmentLinkError)
   fail(equipmentError)
@@ -309,12 +315,13 @@ export async function getLotVerifWorkspace(actor: BmActor): Promise<LotVerifWork
   }
   const instrumentRecords: LotVerifInstrument[] = instrumentRows.map((row) => {
     const equipment = equipmentById.get(equipmentIdByInstrument.get(asString(row.id)) ?? '')
+    const usableEquipment = equipment && asString(equipment.status) !== 'decommissioned' ? equipment : undefined
     return {
       id: asString(row.id),
-      code: equipment ? asString(equipment.code) : asString(row.code),
-      name: equipment ? asString(equipment.name) : asString(row.name),
-      model: equipment ? nullableString(equipment.model) : nullableString(row.model),
-      equipmentId: equipmentIdByInstrument.get(asString(row.id)) ?? null,
+      code: usableEquipment ? asString(usableEquipment.code) : asString(row.code),
+      name: usableEquipment ? asString(usableEquipment.name) : asString(row.name),
+      model: usableEquipment ? nullableString(usableEquipment.model) : nullableString(row.model),
+      equipmentId: usableEquipment ? equipmentIdByInstrument.get(asString(row.id)) ?? null : null,
     }
   })
   const instruments = instrumentRecords.filter((instrument) => Boolean(instrument.equipmentId))
@@ -436,16 +443,31 @@ export async function getLotVerifWorkspace(actor: BmActor): Promise<LotVerifWork
     instrumentIds: [...new Set(instrumentIdsByAnalyte.get(asString(row.id)) ?? [])],
   }))
 
-  const parallelControlStats: LotVerifControlStat[] = ((statsData ?? []) as RecordRow[]).map((row) => {
+  // VL must use an approved, instrument-scoped QC baseline. Do not expose the
+  // legacy Assigned/Lab fallback for VL to the verification picker, otherwise
+  // the old narrow Assigned SD can silently re-enter the calculation.
+  const parallelControlStats: LotVerifControlStat[] = ((statsData ?? []) as RecordRow[]).flatMap((row) => {
+    if (isVlQuantitativeAnalyte(analyteById.get(asString(row.analyte_id)))) return []
     const stat = activeControlStat(row)
-    return {
+    return [{
       controlLotId: asString(row.control_lot_id),
       analyteId: asString(row.analyte_id),
+      instrumentId: null,
       mean: stat.mean,
       sd: stat.sd,
       source: stat.source,
-    }
+    }]
   })
+  for (const row of (baselineData ?? []) as RecordRow[]) {
+    parallelControlStats.push({
+      controlLotId: asString(row.control_lot_id),
+      analyteId: asString(row.analyte_id),
+      instrumentId: nullableString(row.instrument_id),
+      mean: nullableNumber(row.mean),
+      sd: nullableNumber(row.sd),
+      source: 'baseline',
+    })
+  }
 
   const openStatuses: LotVerifStatus[] = ['draft', 'in-progress', 'passed', 'failed']
   return {
@@ -497,9 +519,15 @@ async function loadInstrumentScope(instrumentId: string): Promise<InstrumentScop
   fail(planError)
   fail(linkError)
   if (!instrumentData || !Boolean((instrumentData as RecordRow).is_active)) throw new HttpError(400, 'ไม่พบเครื่องมือที่ใช้งานอยู่')
+  const equipmentId = nullableString((linkData as RecordRow | null)?.equipment_id)
+  if (!equipmentId) throw new HttpError(400, 'เครื่องมือนี้ยังไม่ได้เชื่อมกับ Equipment')
+  const { data: equipmentData, error: equipmentError } = await admin.from('bm_equipment').select('id,status').eq('id', equipmentId).maybeSingle()
+  fail(equipmentError)
+  if (!equipmentData) throw new HttpError(400, 'ไม่พบ Equipment ที่เชื่อมกับเครื่องมือ')
+  if (asString((equipmentData as RecordRow).status) === 'decommissioned') throw new HttpError(400, 'Equipment นี้เลิกใช้งานแล้ว')
   return {
     instrumentId,
-    equipmentId: nullableString((linkData as RecordRow | null)?.equipment_id),
+    equipmentId,
     analyteIds: new Set(((planData ?? []) as RecordRow[]).map((row) => asString(row.analyte_id)).filter(Boolean)),
   }
 }
@@ -731,7 +759,7 @@ export async function saveParallelMeasurements(verificationId: string, rows: Par
   const admin = getAdminClient()
   const { data: verification, error: verificationError } = await admin
     .from('lotverif_verifications')
-    .select('id,status,method,parallel_analyte_id,parallel_scale,parallel_limit')
+    .select('id,status,method,instrument_id,parallel_analyte_id,parallel_scale,parallel_limit')
     .eq('id', verificationId)
     .maybeSingle()
   fail(verificationError)
@@ -742,18 +770,31 @@ export async function saveParallelMeasurements(verificationId: string, rows: Par
   if (!analyteId) throw new HttpError(400, 'Parallel verification ยังไม่ได้กำหนด Analyte')
   const scale = asScale(verificationRow.parallel_scale)
   const limit = nullableNumber(verificationRow.parallel_limit) ?? 1
+  const parallelAnalyte = await loadParallelAnalyte(analyteId)
+  const vlQuantitative = isVlQuantitativeAnalyte(parallelAnalyte)
 
   const controlLotIds = [...new Set(rows.map((row) => clean(row.controlLotId)).filter((id): id is string => Boolean(id)))]
-  const statsByLot = new Map<string, { mean: number | null; sd: number | null; source: 'assigned' | 'lab' }>()
+  const statsByLot = new Map<string, { mean: number | null; sd: number | null; source: 'assigned' | 'lab' | 'baseline' }>()
   if (controlLotIds.length) {
-    const [{ data: lotRows, error: lotError }, { data: specRows, error: specError }] = await Promise.all([
+    const [{ data: lotRows, error: lotError }, { data: specRows, error: specError }, { data: baselineRows, error: baselineError }] = await Promise.all([
       admin.from('iqc_control_lots').select('id').in('id', controlLotIds),
       admin.from('iqc_control_specs').select('control_lot_id,analyte_id,assigned_mean,assigned_sd,lab_mean,lab_sd,lab_locked_at,active_limit').in('control_lot_id', controlLotIds).eq('analyte_id', analyteId),
+      admin.from('iqc_baselines').select('control_lot_id,analyte_id,instrument_id,mean,sd,state').in('control_lot_id', controlLotIds).eq('analyte_id', analyteId).eq('instrument_id', nullableString(verificationRow.instrument_id) ?? '').eq('state', 'approved'),
     ])
     fail(lotError)
     fail(specError)
+    fail(baselineError)
     if (((lotRows ?? []) as RecordRow[]).length !== controlLotIds.length) throw new HttpError(400, 'ไม่พบ Control lot ที่เลือก')
-    for (const spec of (specRows ?? []) as RecordRow[]) statsByLot.set(asString(spec.control_lot_id), activeControlStat(spec))
+    if (!vlQuantitative) {
+      for (const spec of (specRows ?? []) as RecordRow[]) statsByLot.set(asString(spec.control_lot_id), activeControlStat(spec))
+    }
+    for (const baseline of (baselineRows ?? []) as RecordRow[]) {
+      statsByLot.set(asString(baseline.control_lot_id), {
+        mean: nullableNumber(baseline.mean),
+        sd: nullableNumber(baseline.sd),
+        source: 'baseline',
+      })
+    }
   }
 
   const payloads = rows.map((row) => {
@@ -761,8 +802,11 @@ export async function saveParallelMeasurements(verificationId: string, rows: Par
     const stat = controlLotId ? statsByLot.get(controlLotId) : undefined
     const manualMean = row.controlMean ?? null
     const manualSd = row.controlSd ?? null
-    const controlMean = stat?.mean ?? manualMean
-    const controlSd = stat?.sd ?? manualSd
+    if (vlQuantitative && hasParallelRun(row) && (!controlLotId || !stat || stat.mean == null || stat.sd == null)) {
+      throw new HttpError(409, 'Viral load ต้องเลือก Control lot ที่มี approved QC baseline ของเครื่องมือนี้ก่อนบันทึก Parallel comparison')
+    }
+    const controlMean = stat?.mean ?? (vlQuantitative ? null : manualMean)
+    const controlSd = stat?.sd ?? (vlQuantitative ? null : manualSd)
     const statsSource = stat?.mean != null && stat?.sd != null ? stat.source : 'manual'
     if (hasParallelRun(row) && (controlMean == null || controlSd == null)) {
       throw new HttpError(400, `Control level ${row.level} ต้องมี Mean และ SD จาก IQC หรือกรอกแบบ manual`)

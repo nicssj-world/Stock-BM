@@ -25,12 +25,18 @@ import type {
   IqcUncertaintyBudget,
   IqcUncertaintyComponent,
   IqcWorkspace,
+  IqcBaseline,
+  IqcBaselineCandidate,
+  IqcBaselineReview,
+  IqcBaselineReviewInput,
+  IqcSetupHealth,
   TeaMode,
   Distribution,
   UncertaintySource,
 } from '@/lib/iqc/types'
 import { LAB_LOCK_MIN_POINTS } from '@/lib/iqc/types'
-import { cv, evaluateLatest, mean, sd, toStat, WESTGARD_RULES, type QcStatus, type WestgardRule } from '@/lib/iqc/westgard'
+import { calculateBaselineStats, evaluateVlScope, expectedNormalResult, type BaselineValue, type EvaluationAnalyte, type EvaluationBaseline } from '@/lib/iqc/baseline'
+import { cv, evaluateLatest, evaluateLatestByPolicy, mean, sd, toStat, WESTGARD_RULES, type QcStatus, type WestgardPolicyProfile, type WestgardRule } from '@/lib/iqc/westgard'
 import { normalizeTestSets, parseTestSets } from '@/lib/iqc/test-sets'
 import { sigmaRating, sixSigma, teaPercent } from '@/lib/iqc/sixsigma'
 import { combinedRelative, divisorFor, expandedRelative, pooledRsd, relativeStandardUncertainty, standardUncertainty } from '@/lib/iqc/uncertainty'
@@ -43,6 +49,7 @@ import { getAdminClient } from '@/lib/supabase/admin'
 
 type RecordRow = Record<string, unknown>
 const NO_REQUIRED_LEVEL = '__no_required_level__'
+const CD4_ANALYTE_CODES = new Set(['%CD3', '%CD4', 'AbsCD3', 'AbsCD4'])
 
 function fail(error: { message: string } | null, message = 'IQC database operation failed') {
   if (error) throw new HttpError(400, error.message || message)
@@ -87,6 +94,30 @@ function assertAdmin(actor: BmActor) {
   // Staff and Admin intentionally share full IQC access. Assistant remains HPV-only,
   // and must be blocked here too so direct API calls cannot bypass the page/nav guard.
   if (actor.role === 'Assistant') throw new HttpError(403, 'IQC permission required')
+}
+
+function assertAdminOnly(actor: BmActor) {
+  if (actor.role !== 'Admin') throw new HttpError(403, 'Admin permission required')
+}
+
+async function assertLinkedIqcInstrument(instrumentId: string) {
+  const normalizedId = instrumentId.trim()
+  if (!normalizedId) throw new HttpError(400, 'ต้องเลือกเครื่องมือ IQC')
+  const admin = getAdminClient()
+  const [{ data: instrument, error: instrumentError }, { data: link, error: linkError }] = await Promise.all([
+    admin.from('iqc_instruments').select('id,is_active').eq('id', normalizedId).maybeSingle(),
+    admin.from('bm_equipment_module_links').select('equipment_id').eq('module', 'iqc').eq('entity_type', 'instrument').eq('entity_id', normalizedId).maybeSingle(),
+  ])
+  fail(instrumentError)
+  fail(linkError)
+  if (!instrument || !Boolean((instrument as RecordRow).is_active)) throw new HttpError(400, 'เครื่องมือ IQC นี้ไม่พร้อมใช้งาน')
+  const equipmentId = nullableString((link as RecordRow | null)?.equipment_id)
+  if (!equipmentId) throw new HttpError(400, 'เครื่องมือ IQC นี้ยังไม่ได้เชื่อมกับ Equipment — ให้เชื่อมจากหน้า Equipment ก่อน')
+  const { data: equipment, error: equipmentError } = await admin.from('bm_equipment').select('id,status').eq('id', equipmentId).maybeSingle()
+  fail(equipmentError)
+  if (!equipment) throw new HttpError(400, 'ไม่พบ Equipment ที่เชื่อมกับเครื่องมือ IQC')
+  if (asString((equipment as RecordRow).status) === 'decommissioned') throw new HttpError(400, 'Equipment นี้เลิกใช้งานแล้ว จึงไม่สามารถใช้บันทึก IQC ได้')
+  return equipmentId
 }
 
 async function assertUsableControlLots(lotIds: string[]) {
@@ -173,6 +204,46 @@ function mapSpec(row: RecordRow): IqcSpec {
     labLockedAt: nullableString(row.lab_locked_at),
     activeLimit: asString(row.active_limit) as ActiveLimit,
     expectedQualitative: nullableString(row.expected_qualitative),
+    manufacturerLower: nullableNumber(row.manufacturer_lower),
+    manufacturerUpper: nullableNumber(row.manufacturer_upper),
+    manufacturerPrecisionSd: nullableNumber(row.manufacturer_precision_sd),
+    manufacturerTargetMean: nullableNumber(row.manufacturer_target_mean),
+    manufacturerTargetSd: nullableNumber(row.manufacturer_target_sd),
+    manufacturerSourceRef: nullableString(row.manufacturer_source_ref),
+  }
+}
+
+function mapBaseline(row: RecordRow): IqcBaseline {
+  return {
+    id: asString(row.id),
+    controlLotId: asString(row.control_lot_id),
+    analyteId: asString(row.analyte_id),
+    instrumentId: asString(row.instrument_id),
+    baselineType: asString(row.baseline_type) as IqcBaseline['baselineType'],
+    state: asString(row.state) as IqcBaseline['state'],
+    mean: nullableNumber(row.mean),
+    sd: nullableNumber(row.sd),
+    n: Number(row.n ?? 0),
+    expectedQualitative: nullableString(row.expected_qualitative),
+    candidateN: Number(row.candidate_n ?? 0),
+    excludedN: Number(row.excluded_n ?? 0),
+    sourceRef: nullableString(row.source_ref),
+    reason: nullableString(row.reason),
+    version: Number(row.version ?? 0),
+    createdBy: nullableString(row.created_by),
+    createdAt: asString(row.created_at),
+    approvedBy: nullableString(row.approved_by),
+    approvedAt: nullableString(row.approved_at),
+  }
+}
+
+function mapBaselineCandidate(row: RecordRow): IqcBaselineCandidate {
+  return {
+    id: asString(row.id),
+    baselineId: asString(row.baseline_id),
+    resultId: asString(row.result_id),
+    included: Boolean(row.included),
+    exclusionReason: nullableString(row.exclusion_reason),
   }
 }
 
@@ -192,8 +263,123 @@ async function stockLotLabels(stockLotIds: string[]) {
 
 function activeStats(spec: IqcSpec | undefined): { meanValue: number | null; sdValue: number | null } {
   if (!spec) return { meanValue: null, sdValue: null }
+  if (spec.activeLimit === 'baseline') return { meanValue: null, sdValue: null }
   if (spec.activeLimit === 'lab' && hasLockedLabStats(spec)) return { meanValue: spec.labMean, sdValue: spec.labSd }
   return { meanValue: spec.assignedMean, sdValue: spec.assignedSd }
+}
+
+function isVlAnalyte(analyte: Pick<IqcAnalyte, 'code'> | undefined) {
+  return Boolean(analyte && /-VL\b/i.test(analyte.code))
+}
+
+function isCd4Analyte(analyte: Pick<IqcAnalyte, 'code'> | undefined) {
+  return Boolean(analyte && CD4_ANALYTE_CODES.has(analyte.code))
+}
+
+async function resolveCd4RunInstrumentId(analyteIds: string[], requestedInstrumentId: string) {
+  const admin = getAdminClient()
+  const [{ data: analyteRows, error: analyteError }, { data: planRows, error: planError }] = await Promise.all([
+    admin.from('iqc_analytes').select('id,code').in('id', analyteIds),
+    admin.from('iqc_control_plans').select('instrument_id').in('analyte_id', analyteIds).eq('is_active', true),
+  ])
+  fail(analyteError)
+  fail(planError)
+  const rows = (analyteRows ?? []) as RecordRow[]
+  const isCd4Only = rows.length === analyteIds.length && rows.length > 0 && rows.every((row) => isCd4Analyte({ code: asString(row.code) }))
+  if (!isCd4Only) return requestedInstrumentId
+  const targetIds = [...new Set(((planRows ?? []) as RecordRow[]).map((row) => asString(row.instrument_id)).filter(Boolean))]
+  return targetIds.length === 1 ? targetIds[0] : requestedInstrumentId
+}
+
+function policyProfileFor(analyte: IqcAnalyte | undefined, plan?: { policyProfile?: WestgardPolicyProfile | null } | null): WestgardPolicyProfile {
+  // The two profiles are domain contracts, not a free-form per-row toggle:
+  // VL must never fall back to the CD4 evaluator and CD4 must remain legacy.
+  // Keep the optional plan argument for API compatibility and future profiles.
+  void plan
+  return isVlAnalyte(analyte) ? 'vl-standard-v1' : 'cd4-legacy'
+}
+
+function buildSetupHealth(input: {
+  analytes: IqcAnalyte[]
+  instruments: IqcInstrument[]
+  controlLots: IqcControlLot[]
+  baselines: IqcBaseline[]
+  charts: IqcChart[]
+  observedVlScopes?: Set<string>
+  controlPlans: IqcControlPlan[]
+  teaSpecs: IqcTeaSpec[]
+  uncertaintyBudgets: IqcUncertaintyBudget[]
+}): IqcSetupHealth {
+  const vlAnalytes = input.analytes.filter((analyte) => isVlAnalyte(analyte))
+  const activeLots = input.controlLots.filter((lot) => lot.isActive)
+  const approvedBaselineScopes = new Set(input.baselines.filter((baseline) => baseline.state === 'approved').map((baseline) => `${baseline.controlLotId}:${baseline.analyteId}:${baseline.instrumentId}`))
+  const chartReviewScopes = input.charts
+    .filter((chart) => isVlAnalyte(input.analytes.find((analyte) => analyte.id === chart.analyteId)) && chart.n >= 20)
+    .map((chart) => `${chart.controlLotId}:${chart.analyteId}:${chart.instrumentId ?? ''}`)
+  const observedReviewScopes = [...(input.observedVlScopes ?? new Set<string>())]
+  const expectedReviewScopes = activeLots.flatMap((lot) => input.instruments.flatMap((instrument) => vlAnalytes.map((analyte) => `${lot.id}:${analyte.id}:${instrument.id}`)))
+  const baselineReviewCount = new Set([...expectedReviewScopes, ...chartReviewScopes, ...observedReviewScopes]
+    .filter((scope) => !approvedBaselineScopes.has(scope))).size
+  const vlPlanCount = input.controlPlans.filter((plan) => isVlAnalyte(input.analytes.find((analyte) => analyte.id === plan.analyteId)) && plan.isActive).length
+  const quantitativeVlCount = vlAnalytes.filter((analyte) => analyte.dataType === 'quantitative').length
+  const teaCount = input.teaSpecs.filter((tea) => isVlAnalyte(input.analytes.find((analyte) => analyte.id === tea.analyteId))).length
+  const uncertaintyCount = input.uncertaintyBudgets.filter((budget) => isVlAnalyte(input.analytes.find((analyte) => analyte.id === budget.analyteId))).length
+  const tasks: IqcSetupHealth['tasks'] = [
+    {
+      key: 'equipment',
+      dependencies: [],
+      label: 'เชื่อมเครื่องมือ',
+      description: 'ใช้ Equipment เป็นแหล่งข้อมูลหลักของเครื่องมือ IQC',
+      state: input.instruments.length ? 'complete' : 'blocked',
+      count: input.instruments.length,
+      nextAction: input.instruments.length ? 'ตรวจสอบเครื่องมือที่เชื่อมแล้ว' : 'เชื่อมเครื่องมือจาก Equipment',
+    },
+    {
+      key: 'lot',
+      dependencies: [{ label: 'มีเครื่องมือที่เชื่อมจาก Equipment', done: input.instruments.length > 0 }],
+      label: 'เพิ่ม Control lot',
+      description: 'ผูก Material, lot และ stock ในงานเดียว',
+      state: !input.instruments.length ? 'blocked' : activeLots.length ? 'complete' : 'blocked',
+      count: activeLots.length,
+      nextAction: activeLots.length ? 'ตรวจสอบ lot ที่ใช้งานอยู่' : 'เพิ่ม control lot ที่ยังใช้งานได้',
+    },
+    {
+      key: 'baseline',
+      dependencies: [
+        { label: 'มีเครื่องมือที่เชื่อมจาก Equipment', done: input.instruments.length > 0 },
+        { label: 'มี Control lot ที่ยังใช้งานอยู่', done: activeLots.length > 0 },
+      ],
+      label: 'ตั้งค่าค่าอ้างอิงและ QC baseline',
+      description: 'ทบทวนผลจริงก่อนใช้เป็นเกณฑ์ตัดสิน VL',
+      state: !activeLots.length || !input.instruments.length ? 'blocked' : baselineReviewCount ? 'attention' : 'complete',
+      count: baselineReviewCount || quantitativeVlCount,
+      nextAction: baselineReviewCount ? `ทบทวน ${baselineReviewCount} ระดับที่มีข้อมูลพร้อม` : 'ตรวจสอบ baseline ที่อนุมัติแล้ว',
+    },
+    {
+      key: 'plan',
+      dependencies: [{ label: 'มีเครื่องมือที่เชื่อมจาก Equipment', done: input.instruments.length > 0 }],
+      label: 'กำหนดการรัน',
+      description: 'กำหนดว่าเครื่องนี้ต้องรัน control อะไรและใช้ policy ใด',
+      state: input.instruments.length && vlPlanCount ? 'complete' : input.instruments.length ? 'attention' : 'blocked',
+      count: vlPlanCount,
+      nextAction: vlPlanCount ? 'ตรวจสอบชุดการรัน' : 'สร้างกำหนดการรันสำหรับ VL',
+    },
+    {
+      key: 'advanced',
+      dependencies: [{ label: 'มี VL analyte ในระบบ', done: vlAnalytes.length > 0 }],
+      label: 'เกณฑ์เพิ่มเติม',
+      description: 'TEa, Six Sigma และ Uncertainty สำหรับการทบทวนเชิงลึก',
+      state: teaCount || uncertaintyCount ? 'complete' : 'attention',
+      count: teaCount + uncertaintyCount,
+      nextAction: teaCount || uncertaintyCount ? 'ตรวจสอบค่าที่คำนวณแล้ว' : 'ตั้งค่า TEa หรือเปิดรายการที่ต้อง review',
+    },
+  ]
+  return {
+    tasks,
+    readyCount: tasks.filter((task) => task.state === 'complete').length,
+    attentionCount: tasks.filter((task) => task.state === 'attention').length,
+    blockedCount: tasks.filter((task) => task.state === 'blocked').length,
+  }
 }
 
 export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
@@ -205,6 +391,8 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     { data: materialData, error: materialError },
     { data: lotData, error: lotError },
     { data: specData, error: specError },
+    { data: baselineData, error: baselineError },
+    { data: baselineCandidateData, error: baselineCandidateError },
     { data: runData, error: runError },
     { data: consumableData, error: consumableError },
     { data: valueData, error: valueError },
@@ -225,6 +413,8 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     admin.from('iqc_control_materials').select('*').order('name'),
     admin.from('iqc_control_lots').select('*').order('created_at', { ascending: false }),
     admin.from('iqc_control_specs').select('*'),
+    admin.from('iqc_baselines').select('*').order('version', { ascending: false }),
+    admin.from('iqc_baseline_candidates').select('*'),
     admin.from('iqc_runs').select('*').order('run_datetime', { ascending: false }).limit(500),
     admin.from('iqc_run_consumables').select('*'),
     admin.from('iqc_result_values').select('*').limit(5000),
@@ -245,6 +435,8 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   fail(materialError)
   fail(lotError)
   fail(specError)
+  fail(baselineError)
+  fail(baselineCandidateError)
   fail(runError)
   fail(consumableError)
   fail(valueError)
@@ -279,7 +471,10 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   }
   // Legacy IQC instruments remain available for historical run lookups, but
   // new runs and control plans must use a registered, linked equipment item.
+  // Keep the linked-record slice explicit: Equipment is the selector source,
+  // while inactive/decommissioned records are removed from routine setup.
   const instruments = allInstruments.filter((instrument) => Boolean(instrument.equipmentId))
+  const activeLinkedInstruments = instruments.filter((instrument) => instrument.isActive && instrument.equipmentStatus !== 'decommissioned')
   const controlMaterials = ((materialData ?? []) as RecordRow[]).map(mapMaterial)
   const equipmentIdsByStockItem = new Map<string, string[]>()
   for (const row of (stockItemEquipmentLinkData ?? []) as RecordRow[]) {
@@ -316,7 +511,14 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   })
   const lotMap = new Map(controlLots.map((lot) => [lot.id, lot]))
   const specs = ((specData ?? []) as RecordRow[]).map(mapSpec)
+  const baselines = ((baselineData ?? []) as RecordRow[]).map(mapBaseline)
+  const baselineCandidates = ((baselineCandidateData ?? []) as RecordRow[]).map(mapBaselineCandidate)
   const specByKey = new Map(specs.map((spec) => [`${spec.controlLotId}:${spec.analyteId}`, spec]))
+  const approvedBaselineByScope = new Map(
+    baselines
+      .filter((baseline) => baseline.state === 'approved')
+      .map((baseline) => [`${baseline.controlLotId}:${baseline.analyteId}:${baseline.instrumentId}`, baseline]),
+  )
   const analyteMap = new Map(analytes.map((a) => [a.id, a]))
   const assignableUsers: IqcAssignableUser[] = ((userData ?? []) as RecordRow[]).map((row) => ({ id: asString(row.id), displayName: asString(row.display_name) }))
   const userNameMap = new Map(assignableUsers.map((user) => [user.id, user.displayName]))
@@ -341,6 +543,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
       requiredLevels: Array.isArray(row.required_levels) ? (row.required_levels as string[]).filter((level) => level !== NO_REQUIRED_LEVEL) : [],
       frequency: asString(row.frequency) === 'per-run' ? 'per-run' : 'daily',
       westgardRules: parseWestgardRules(row.westgard_rules),
+      policyProfile: asString(row.policy_profile) === 'vl-standard-v1' ? 'vl-standard-v1' : 'cd4-legacy',
       isActive: Boolean(row.is_active),
     }
   })
@@ -403,6 +606,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
 
   const runRows = (runData ?? []) as RecordRow[]
   const runDatetime = new Map(runRows.map((row) => [asString(row.id), asString(row.run_datetime)]))
+  const runInstrument = new Map(runRows.map((row) => [asString(row.id), nullableString(row.instrument_id)]))
   const instrumentMap = new Map(allInstruments.map((i) => [i.id, i]))
   const consumableRows = (consumableData ?? []) as RecordRow[]
   const consumablesByRun = new Map<string, RecordRow[]>()
@@ -416,25 +620,38 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     ...((caData ?? []) as RecordRow[]).flatMap((r) => [asString(r.created_by), asString(r.closed_by), asString(r.owner_id), asString(r.effectiveness_verified_by)]),
   ])
 
-  // ---- Charts: one per (control_lot x analyte) ----
+  // CD4 is a legacy lot-level QC series. VL remains instrument-scoped because
+  // its approved baseline is scoped by control lot + analyte + instrument.
   const groups = new Map<string, RecordRow[]>()
   for (const row of valueRows) {
-    const key = `${asString(row.control_lot_id)}:${asString(row.analyte_id)}`
+    const analyte = analyteMap.get(asString(row.analyte_id))
+    const instrumentToken = isCd4Analyte(analyte) ? 'cd4-lot' : runInstrument.get(asString(row.run_id)) ?? 'unassigned'
+    const key = `${asString(row.control_lot_id)}:${asString(row.analyte_id)}:${instrumentToken}`
     groups.set(key, [...(groups.get(key) ?? []), row])
   }
 
   const charts: IqcChart[] = []
   for (const [key, rows] of groups) {
-    const [controlLotId, analyteId] = key.split(':')
+    const [controlLotId, analyteId, instrumentToken] = key.split(':')
     const analyte = analyteMap.get(analyteId)
     const lot = lotMap.get(controlLotId)
     if (!analyte || !lot) continue
     // Negative / below-LOD viral-load controls are qualitative checks, not
     // Levey-Jennings data points.
     if (analyte.dataType === 'qualitative') continue
-    const spec = specByKey.get(key)
+    const instrumentId = isCd4Analyte(analyte)
+      ? controlPlans.find((plan) => plan.analyteId === analyteId && plan.isActive)?.instrumentId ?? null
+      : instrumentToken === 'unassigned' ? null : instrumentToken
+    const spec = specByKey.get(`${controlLotId}:${analyteId}`)
+    const baseline = instrumentId ? approvedBaselineByScope.get(`${controlLotId}:${analyteId}:${instrumentId}`) ?? null : null
     const labStatisticsLocked = hasLockedLabStats(spec)
-    const { meanValue, sdValue } = activeStats(spec)
+    const useVlBaseline = isVlAnalyte(analyte) && baseline?.state === 'approved'
+    const vlWithoutBaseline = isVlAnalyte(analyte) && !useVlBaseline
+    const { meanValue, sdValue } = useVlBaseline
+      ? { meanValue: baseline?.mean ?? null, sdValue: baseline?.sd ?? null }
+      : vlWithoutBaseline
+        ? { meanValue: null, sdValue: null }
+        : activeStats(spec)
 
     const ordered = rows
       .map((row) => ({ row, when: runDatetime.get(asString(row.run_id)) ?? asString(row.created_at) }))
@@ -446,9 +663,9 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
       runDatetime: when,
       value: Number(row.numeric_value ?? 0),
       statValue: Number(row.stat_value ?? row.numeric_value ?? 0),
-      z: Number(row.z_score ?? 0),
-      status: asString(row.status) as QcStatus,
-      violatedRules: Array.isArray(row.violated_rules) ? (row.violated_rules as string[]) : [],
+      z: vlWithoutBaseline ? null : nullableNumber(row.z_score),
+      status: vlWithoutBaseline ? 'not_evaluated' : asString(row.status) as QcStatus,
+      violatedRules: vlWithoutBaseline ? [] : Array.isArray(row.violated_rules) ? (row.violated_rules as string[]) : [],
       isVoided: Boolean(row.is_voided),
     }))
 
@@ -459,6 +676,19 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     const labUsable = points.filter((p) => !p.isVoided && p.status !== 'rejected').map((p) => p.statValue)
     const lockEligible = labUsable.length >= LAB_LOCK_MIN_POINTS
     const latest = [...points].reverse().find((p) => !p.isVoided)
+    const legacyDisplay: {
+      activeLimit: Exclude<ActiveLimit, 'baseline'>
+      labMean: number | null
+      labSd: number | null
+      labN: number | null
+    } = {
+      // Keep the CD4 LAB lock contract explicit. VL never uses this fallback
+      // as its active limit until an approved QC baseline exists.
+      activeLimit: spec?.activeLimit === 'lab' && labStatisticsLocked ? 'lab' : 'assigned',
+      labMean: labStatisticsLocked ? spec?.labMean ?? null : null,
+      labSd: labStatisticsLocked ? spec?.labSd ?? null : null,
+      labN: labStatisticsLocked ? spec?.labN ?? null : null,
+    }
 
     // Lot-change annotations relevant to this analyte (Trucount only on absolute analytes)
     const lotChanges: IqcLotChangeMarker[] = []
@@ -482,6 +712,8 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
       key,
       controlLotId,
       analyteId,
+      instrumentId,
+      instrumentName: instrumentId ? instrumentMap.get(instrumentId)?.name ?? null : null,
       analyteCode: analyte.code,
       analyteName: analyte.name,
       groupLabel: analyte.groupLabel,
@@ -491,29 +723,41 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
       level: lot.level,
       controlMaterialName: lot.controlMaterialName,
       lotNumber: lot.lotNumber,
-      activeLimit: spec?.activeLimit === 'lab' && labStatisticsLocked ? 'lab' : 'assigned',
+      activeLimit: useVlBaseline ? 'baseline' : isVlAnalyte(analyte) ? 'assigned' : legacyDisplay.activeLimit,
+      policyProfile: policyProfileFor(analyte, controlPlans.find((plan) => plan.analyteId === analyteId && plan.instrumentId === instrumentId)),
+      baselineId: baseline?.id ?? null,
+      baselineState: baseline?.state ?? null,
+      baselineType: baseline?.baselineType ?? null,
+      baselineVersion: baseline?.version ?? null,
+      baselineCandidateN: baseline?.candidateN ?? null,
+      manufacturerLower: spec?.manufacturerLower ?? null,
+      manufacturerUpper: spec?.manufacturerUpper ?? null,
+      manufacturerPrecisionSd: spec?.manufacturerPrecisionSd ?? null,
+      manufacturerTargetMean: spec?.manufacturerTargetMean ?? null,
+      manufacturerTargetSd: spec?.manufacturerTargetSd ?? null,
+      manufacturerSourceRef: spec?.manufacturerSourceRef ?? null,
       mean: meanValue,
       sd: sdValue,
       cv: meanValue && sdValue ? (sdValue / Math.abs(meanValue)) * 100 : null,
       n: usable.length,
       assignedMean: spec?.assignedMean ?? null,
       assignedSd: spec?.assignedSd ?? null,
-      labMean: labStatisticsLocked ? spec?.labMean ?? null : null,
-      labSd: labStatisticsLocked ? spec?.labSd ?? null : null,
-      labN: labStatisticsLocked ? spec?.labN ?? null : null,
+      labMean: useVlBaseline ? baseline?.mean ?? null : legacyDisplay.labMean,
+      labSd: useVlBaseline ? baseline?.sd ?? null : legacyDisplay.labSd,
+      labN: useVlBaseline ? baseline?.n ?? null : legacyDisplay.labN,
       labLockedAt: spec?.labLockedAt ?? null,
       runningLabMean: lockEligible ? mean(labUsable) : null,
       runningLabSd: lockEligible ? sd(labUsable) : null,
       runningLabN: labUsable.length,
       lockEligible,
-      status: latest?.status ?? 'accepted',
+      status: vlWithoutBaseline ? 'not_evaluated' : latest?.status ?? 'accepted',
       points,
       lotChanges,
       currentConsumables,
     })
   }
   charts.sort((a, b) => {
-    const rank = { rejected: 0, warning: 1, accepted: 2 }
+    const rank: Record<QcStatus, number> = { rejected: 0, investigate: 1, warning: 2, not_evaluated: 3, accepted: 4 }
     return rank[a.status] - rank[b.status] || a.analyteCode.localeCompare(b.analyteCode)
   })
 
@@ -597,6 +841,11 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
       })),
       results: (valuesByRun.get(id) ?? []).map((value) => {
         const analyte = analyteMap.get(asString(value.analyte_id))
+        const resultInstrumentId = runInstrument.get(id)
+        const resultBaseline = resultInstrumentId
+          ? approvedBaselineByScope.get(`${asString(value.control_lot_id)}:${asString(value.analyte_id)}:${resultInstrumentId}`) ?? null
+          : null
+        const vlWithoutBaseline = isVlAnalyte(analyte) && resultBaseline?.state !== 'approved'
         return {
           analyteId: asString(value.analyte_id),
           analyteCode: analyte?.code ?? '-',
@@ -604,10 +853,11 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
           controlLotId: asString(value.control_lot_id),
           numericValue: nullableNumber(value.numeric_value),
           qualitativeValue: nullableString(value.qualitative_value),
-          z: nullableNumber(value.z_score),
-          violatedRules: Array.isArray(value.violated_rules) ? (value.violated_rules as string[]) : [],
-          status: asString(value.status) as QcStatus,
+          z: vlWithoutBaseline ? null : nullableNumber(value.z_score),
+          violatedRules: vlWithoutBaseline ? [] : Array.isArray(value.violated_rules) ? (value.violated_rules as string[]) : [],
+          status: vlWithoutBaseline ? 'not_evaluated' : asString(value.status) as QcStatus,
           isVoided: Boolean(value.is_voided),
+          evaluationBaselineId: vlWithoutBaseline ? null : resultBaseline?.id ?? nullableString(value.evaluation_baseline_id),
         }
       }),
     }
@@ -649,6 +899,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   for (const chart of charts) {
     const recent = chart.points.filter((point) => !point.isVoided).slice(-3)
     if (recent.filter((point) => point.status === 'rejected').length >= 2) alerts.push({ id: `trend:${chart.key}`, tone: 'rejected', kind: 'rejected-trend', title: `Rejected trend: ${chart.analyteCode}`, detail: `${recent.filter((point) => point.status === 'rejected').length} จาก ${recent.length} run ล่าสุดถูก reject` })
+    if (recent.filter((point) => point.status === 'investigate').length >= 2) alerts.push({ id: `investigate:${chart.key}`, tone: 'investigate', kind: 'investigate-trend', title: `ต้องเปิด investigation: ${chart.analyteCode}`, detail: `${recent.filter((point) => point.status === 'investigate').length} จาก ${recent.length} run ล่าสุดต้องตรวจสอบ` })
   }
   for (const plan of controlPlans.filter((item) => item.isActive && item.frequency === 'daily')) {
     const presentLevels = new Set(
@@ -663,13 +914,21 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     if (action.status !== 'closed' && action.dueDate && action.dueDate < today) alerts.push({ id: `capa:${action.id}`, tone: 'rejected', kind: 'capa-overdue', title: 'CAPA เกินกำหนด', detail: `${action.problem} · ครบกำหนด ${action.dueDate}` })
   }
 
+  const observedVlScopes = new Set(valueRows
+    .filter((row) => !Boolean(row.is_voided) && isVlAnalyte(analyteMap.get(asString(row.analyte_id))))
+    .map((row) => `${asString(row.control_lot_id)}:${asString(row.analyte_id)}:${runInstrument.get(asString(row.run_id)) ?? ''}`))
+  const setupHealth = buildSetupHealth({ analytes, instruments: activeLinkedInstruments, controlLots, baselines, charts, observedVlScopes, controlPlans, teaSpecs, uncertaintyBudgets })
+
   return {
     analytes,
-    instruments,
+    instruments: activeLinkedInstruments,
     controlMaterials,
     controlLots,
     stockLots,
     specs,
+    baselines,
+    baselineCandidates,
+    setupHealth,
     teaSpecs,
     controlPlans,
     alerts,
@@ -684,9 +943,265 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
       inControl: charts.filter((c) => c.status === 'accepted').length,
       warning: charts.filter((c) => c.status === 'warning').length,
       rejected: charts.filter((c) => c.status === 'rejected').length,
+      investigate: charts.filter((c) => c.status === 'investigate').length,
+      notEvaluated: charts.filter((c) => c.status === 'not_evaluated').length,
       openCorrectiveActions: correctiveActions.filter((c) => c.status === 'open').length,
     },
   }
+}
+
+export async function getIqcSetupHealth(actor: BmActor): Promise<IqcSetupHealth> {
+  const workspace = await getIqcWorkspace(actor)
+  return workspace.setupHealth ?? buildSetupHealth({
+    analytes: workspace.analytes,
+    instruments: workspace.instruments,
+    controlLots: workspace.controlLots,
+    baselines: workspace.baselines ?? [],
+    charts: workspace.charts,
+    controlPlans: workspace.controlPlans,
+    teaSpecs: workspace.teaSpecs,
+    uncertaintyBudgets: workspace.uncertaintyBudgets,
+  })
+}
+
+export async function resolveActiveIqcBaseline(actor: BmActor, input: Pick<IqcBaselineReviewInput, 'controlLotId' | 'analyteId' | 'instrumentId'>): Promise<IqcBaseline | null> {
+  if (actor.role === 'Assistant') throw new HttpError(403, 'IQC permission required')
+  await assertLinkedIqcInstrument(input.instrumentId)
+  const { data, error } = await getAdminClient()
+    .from('iqc_baselines')
+    .select('*')
+    .eq('control_lot_id', input.controlLotId)
+    .eq('analyte_id', input.analyteId)
+    .eq('instrument_id', input.instrumentId)
+    .eq('state', 'approved')
+    .order('version', { ascending: false })
+    .limit(1)
+  fail(error)
+  return ((data ?? []) as RecordRow[])[0] ? mapBaseline(((data ?? []) as RecordRow[])[0]) : null
+}
+
+// ---------- VL baseline review / approval ----------
+
+function baselineValueFromRow(row: RecordRow, analyteId: string): BaselineValue {
+  const run = row.iqc_runs as RecordRow | null
+  return {
+    resultId: asString(row.id),
+    runId: asString(row.run_id),
+    runDatetime: asString(run?.run_datetime),
+    analyteId,
+    panel: null,
+    numericValue: nullableNumber(row.numeric_value),
+    statValue: nullableNumber(row.stat_value),
+    qualitativeValue: nullableString(row.qualitative_value),
+    currentStatus: asString(row.status) as QcStatus,
+    currentZ: nullableNumber(row.z_score),
+    isVoided: Boolean(row.is_voided),
+  }
+}
+
+function baselineCandidateReason(row: BaselineValue, instrumentMatches: boolean, supplied?: string | null) {
+  if (row.isVoided) return supplied?.trim() || 'ผลถูก void จึงไม่ใช้คำนวณ'
+  if (!instrumentMatches) return supplied?.trim() || 'ผลนี้ไม่ตรงกับเครื่องมือที่เลือก'
+  return supplied?.trim() || 'ไม่รวมในการทบทวน baseline — กรุณาระบุเหตุผล'
+}
+
+export async function getIqcBaselineReview(actor: BmActor, input: IqcBaselineReviewInput): Promise<IqcBaselineReview> {
+  if (actor.role === 'Assistant') throw new HttpError(403, 'IQC permission required')
+  const admin = getAdminClient()
+  const [
+    { data: analyteRow, error: analyteError },
+    { data: lotRow, error: lotError },
+    { data: instrumentRow, error: instrumentError },
+    { data: specRow, error: specError },
+    { data: planRow, error: planError },
+    { data: baselineRows, error: baselineError },
+    { data: valueRows, error: valueError },
+  ] = await Promise.all([
+    admin.from('iqc_analytes').select('*').eq('id', input.analyteId).maybeSingle(),
+    admin.from('iqc_control_lots').select('id,lot_number,is_active,control_material_id,iqc_control_materials(level)').eq('id', input.controlLotId).maybeSingle(),
+    admin.from('iqc_instruments').select('id,code,name,model,is_active').eq('id', input.instrumentId).maybeSingle(),
+    admin.from('iqc_control_specs').select('*').eq('control_lot_id', input.controlLotId).eq('analyte_id', input.analyteId).maybeSingle(),
+    admin.from('iqc_control_plans').select('westgard_rules,policy_profile').eq('analyte_id', input.analyteId).eq('instrument_id', input.instrumentId).eq('is_active', true).maybeSingle(),
+    admin.from('iqc_baselines').select('*').eq('control_lot_id', input.controlLotId).eq('analyte_id', input.analyteId).eq('instrument_id', input.instrumentId).eq('state', 'approved').order('version', { ascending: false }).limit(1),
+    admin.from('iqc_result_values').select('id,run_id,control_lot_id,analyte_id,numeric_value,stat_value,qualitative_value,z_score,status,is_voided,void_reason,iqc_runs(run_datetime,instrument_id)').eq('control_lot_id', input.controlLotId).eq('analyte_id', input.analyteId),
+  ])
+  fail(analyteError)
+  fail(lotError)
+  fail(instrumentError)
+  fail(specError)
+  fail(planError)
+  fail(baselineError)
+  fail(valueError)
+
+  if (!analyteRow) throw new HttpError(404, 'ไม่พบ analyte ที่เลือก')
+  if (!lotRow) throw new HttpError(404, 'ไม่พบ control lot ที่เลือก')
+  if (!instrumentRow) throw new HttpError(404, 'ไม่พบเครื่องมือที่เลือก')
+  await assertLinkedIqcInstrument(input.instrumentId)
+  const analyte = mapAnalyte(analyteRow as RecordRow)
+  if (!isVlAnalyte(analyte)) throw new HttpError(400, 'Baseline review นี้รองรับเฉพาะ VL')
+  const spec = specRow ? mapSpec(specRow as RecordRow) : undefined
+  const instrument = instrumentRow as RecordRow
+  const plan = planRow as RecordRow | null
+  const policyProfile = policyProfileFor(analyte, plan ? { policyProfile: asString(plan.policy_profile) as WestgardPolicyProfile } : null)
+  const rules = parseWestgardRules(plan?.westgard_rules)
+  const allValues = ((valueRows ?? []) as RecordRow[])
+    .map((row) => baselineValueFromRow(row, input.analyteId))
+    .sort((a, b) => a.runDatetime.localeCompare(b.runDatetime) || a.resultId.localeCompare(b.resultId))
+  const includedInput = input.includedResultIds ? new Set(input.includedResultIds) : null
+  const eligibleValues = allValues.filter((value) => !value.isVoided && ((valueRows ?? []) as RecordRow[]).find((row) => asString(row.id) === value.resultId)?.iqc_runs && asString((((valueRows ?? []) as RecordRow[]).find((row) => asString(row.id) === value.resultId)?.iqc_runs as RecordRow | null)?.instrument_id) === input.instrumentId)
+  const includedValues = eligibleValues.filter((value) => includedInput?.has(value.resultId) ?? true)
+  const selectedNumbers = includedValues.map((value) => value.statValue).filter((value): value is number => value != null && Number.isFinite(value))
+  const qualitativeValues = includedValues.filter((value) => Boolean(value.qualitativeValue?.trim()))
+  const stats = analyte.dataType === 'quantitative' ? calculateBaselineStats(selectedNumbers, eligibleValues.length, eligibleValues.length - includedValues.length) : { mean: null, sd: null, n: qualitativeValues.length, candidateN: eligibleValues.length, excludedN: eligibleValues.length - includedValues.length }
+  const expectedQualitative = analyte.dataType === 'qualitative'
+    ? clean(spec?.expectedQualitative) ?? expectedNormalResult(qualitativeValues)
+    : null
+  const evaluationBaseline: EvaluationBaseline = {
+    id: ((baselineRows ?? []) as RecordRow[])[0] ? asString(((baselineRows ?? []) as RecordRow[])[0].id) : null,
+    analyteId: input.analyteId,
+    mean: stats.mean,
+    sd: stats.sd,
+    expectedQualitative,
+    policyProfile,
+    rules,
+  }
+  const evaluations = evaluateVlScope({
+    values: eligibleValues,
+    analytes: new Map<string, EvaluationAnalyte>([[input.analyteId, { id: input.analyteId, code: analyte.code, dataType: analyte.dataType, panel: analyte.groupLabel }]]),
+    baselines: new Map([[input.analyteId, evaluationBaseline]]),
+    includedResultIds: new Set(includedValues.map((value) => value.resultId)),
+  })
+  const candidates: IqcBaselineReview['candidates'] = allValues.map((value) => {
+    const evaluation = evaluations.get(value.resultId)
+    const row = ((valueRows ?? []) as RecordRow[]).find((item) => asString(item.id) === value.resultId)
+    const instrumentMatches = asString(((row?.iqc_runs as RecordRow | null)?.instrument_id)) === input.instrumentId
+    const included = !value.isVoided && instrumentMatches && (includedInput?.has(value.resultId) ?? true)
+    return {
+      resultId: value.resultId,
+      runId: value.runId,
+      runDatetime: value.runDatetime,
+      numericValue: value.numericValue,
+      statValue: value.statValue,
+      qualitativeValue: value.qualitativeValue,
+      currentStatus: value.currentStatus,
+      proposedStatus: included ? evaluation?.status ?? 'not_evaluated' : 'not_evaluated',
+      currentZ: value.currentZ,
+      proposedZ: included ? evaluation?.z ?? null : null,
+      proposedRules: included ? evaluation?.violatedRules ?? [] : [],
+      included,
+      exclusionReason: included ? null : baselineCandidateReason(value, instrumentMatches, input.exclusionReasons?.[value.resultId]),
+      isVoided: value.isVoided,
+      eligibleForBaseline: !value.isVoided && instrumentMatches,
+    }
+  })
+  const impact = { accepted: 0, warning: 0, investigate: 0, rejected: 0, not_evaluated: 0 }
+  for (const candidate of candidates) impact[candidate.proposedStatus] += 1
+  const currentBaseline = ((baselineRows ?? []) as RecordRow[])[0] ? mapBaseline(((baselineRows ?? []) as RecordRow[])[0]) : null
+  const currentStats = currentBaseline
+    ? { mean: currentBaseline.mean, sd: currentBaseline.sd, n: currentBaseline.n }
+    : { mean: spec?.activeLimit === 'lab' ? spec.labMean : spec?.assignedMean ?? null, sd: spec?.activeLimit === 'lab' ? spec.labSd : spec?.assignedSd ?? null, n: spec?.activeLimit === 'lab' ? spec.labN ?? 0 : 0 }
+  let blockedReason: string | null = null
+  if (actor.role !== 'Admin') blockedReason = 'ต้องใช้สิทธิ์ Admin เพื่ออนุมัติและคำนวณทับประวัติ'
+  else if (!Boolean((lotRow as RecordRow).is_active)) blockedReason = 'Control lot นี้ถูกปิดใช้งานแล้ว'
+  else if (analyte.dataType === 'quantitative' && selectedNumbers.length !== includedValues.length) blockedReason = `ผลที่รวมต้องมีค่าตัวเลขที่ใช้คำนวณได้ครบทุกผล (ใช้ได้ ${selectedNumbers.length}/${includedValues.length} ผล)`
+  else if (analyte.dataType === 'quantitative' && selectedNumbers.length < 20) blockedReason = `ต้องมีผลตัวเลขที่รวมอย่างน้อย 20 ผล (ตอนนี้ ${selectedNumbers.length} ผล)`
+  else if (analyte.dataType === 'quantitative' && (stats.mean == null || stats.sd == null || stats.sd <= 0)) blockedReason = 'ยังคำนวณ mean/SD ที่ใช้งานได้ไม่ได้'
+  else if (analyte.dataType === 'qualitative' && qualitativeValues.length !== includedValues.length) blockedReason = `ผล qualitative ที่รวมต้องมี observed result ครบทุกผล (ใช้ได้ ${qualitativeValues.length}/${includedValues.length} ผล)`
+  else if (analyte.dataType === 'qualitative' && !includedValues.length) blockedReason = 'ยังไม่มีผล non-void ของเครื่องมือนี้สำหรับ seed expected result'
+  else if (analyte.dataType === 'qualitative' && !expectedQualitative) blockedReason = 'ยังไม่มี expected result'
+  if (analyte.dataType === 'qualitative' && !qualitativeValues.length && !blockedReason) blockedReason = 'qualitative baseline needs at least one observed non-void result'
+  const material = (lotRow as RecordRow).iqc_control_materials as RecordRow | null
+  return {
+    controlLotId: input.controlLotId,
+    analyteId: input.analyteId,
+    instrumentId: input.instrumentId,
+    analyteCode: analyte.code,
+    analyteName: analyte.name,
+    level: nullableString(material?.level),
+    lotNumber: asString((lotRow as RecordRow).lot_number),
+    instrumentName: asString(instrument.name || instrument.code),
+    dataType: analyte.dataType,
+    scale: analyte.scale,
+    policyProfile,
+    manufacturerLower: spec?.manufacturerLower ?? null,
+    manufacturerUpper: spec?.manufacturerUpper ?? null,
+    manufacturerPrecisionSd: spec?.manufacturerPrecisionSd ?? null,
+    manufacturerTargetMean: spec?.manufacturerTargetMean ?? null,
+    manufacturerTargetSd: spec?.manufacturerTargetSd ?? null,
+    manufacturerSourceRef: spec?.manufacturerSourceRef ?? null,
+    currentMean: currentStats.mean,
+    currentSd: currentStats.sd,
+    currentN: currentStats.n,
+    proposedMean: stats.mean,
+    proposedSd: stats.sd,
+    proposedN: stats.n,
+    candidateN: eligibleValues.length,
+    excludedN: eligibleValues.length - includedValues.length,
+    expectedQualitative,
+    baselineId: currentBaseline?.id ?? null,
+    baselineState: currentBaseline?.state ?? null,
+    baselineType: currentBaseline?.baselineType ?? null,
+    canApply: !blockedReason,
+    blockedReason,
+    candidates,
+    impact,
+  }
+}
+
+export async function previewIqcBaseline(actor: BmActor, input: IqcBaselineReviewInput) {
+  return getIqcBaselineReview(actor, input)
+}
+
+export async function applyIqcBaseline(input: IqcBaselineReviewInput, actor: BmActor) {
+  assertAdminOnly(actor)
+  const reason = clean(input.reason)
+  if (!reason) throw new HttpError(400, 'ต้องระบุเหตุผลที่อนุมัติ baseline ใหม่')
+  const review = await getIqcBaselineReview(actor, input)
+  if (!review.canApply) throw new HttpError(400, review.blockedReason ?? 'Baseline ยังไม่พร้อมใช้งาน')
+  const excluded = review.candidates.filter((candidate) => candidate.eligibleForBaseline && !candidate.included)
+  for (const candidate of excluded) {
+    if (!input.exclusionReasons?.[candidate.resultId]?.trim()) throw new HttpError(400, `กรุณาระบุเหตุผลที่ไม่รวมผล ${candidate.resultId}`)
+  }
+  const candidatePayload = review.candidates
+    .filter((candidate) => candidate.eligibleForBaseline && candidate.runId)
+    .map((candidate) => ({ result_id: candidate.resultId, included: candidate.included, exclusion_reason: candidate.included ? null : input.exclusionReasons?.[candidate.resultId]?.trim() ?? null }))
+  const evaluationPayload = review.candidates
+    .filter((candidate) => candidate.eligibleForBaseline && candidate.runId)
+    .map((candidate) => ({ result_id: candidate.resultId, status: candidate.proposedStatus, z: candidate.proposedZ, violated_rules: candidate.proposedRules }))
+  const lotEvaluations = await buildVlEvaluationPayload(review.controlLotId, {
+    analyteId: review.analyteId,
+    instrumentId: review.instrumentId,
+    mean: review.proposedMean,
+    sd: review.proposedSd,
+    expectedQualitative: review.expectedQualitative,
+    includedResultIds: new Set(review.candidates.filter((candidate) => candidate.eligibleForBaseline && candidate.included).map((candidate) => candidate.resultId)),
+  })
+  const { error } = await getAdminClient().rpc('apply_iqc_vl_baseline', {
+    p_control_lot_id: review.controlLotId,
+    p_analyte_id: review.analyteId,
+    p_instrument_id: review.instrumentId,
+    p_actor: actor.id,
+    p_baseline_type: review.dataType === 'qualitative' ? 'observed_seed' : 'lab_observed',
+    p_mean: review.proposedMean,
+    p_sd: review.proposedSd,
+    p_expected_qualitative: review.expectedQualitative,
+    p_source_ref: clean(input.sourceRef) ?? review.manufacturerSourceRef ?? 'Observed laboratory QC data',
+    p_reason: reason,
+    p_candidates: candidatePayload,
+    p_evaluations: evaluationPayload,
+    p_lot_evaluations: lotEvaluations.map((evaluation) => ({
+      result_id: evaluation.resultId,
+      analyte_id: evaluation.analyteId,
+      status: evaluation.status,
+      z: evaluation.z,
+      violated_rules: evaluation.violatedRules,
+    })),
+  })
+  fail(error)
+  // The RPC commits the selected baseline and the recalculated results for all
+  // VL levels in this lot in one transaction. That keeps same-run R-4s and the
+  // baseline approval/audit trail consistent if any database write fails.
+  return getIqcWorkspace(actor)
 }
 
 // ---------- Master data (Admin) ----------
@@ -860,6 +1375,7 @@ export async function deleteIqcEntity(entity: keyof typeof IQC_ENTITY, id: strin
   if (entity === 'analyte') {
     await assertNoIqcReferences([
       { table: 'iqc_control_specs', column: 'analyte_id' },
+      { table: 'iqc_baselines', column: 'analyte_id' },
       { table: 'iqc_result_values', column: 'analyte_id' },
       { table: 'iqc_corrective_actions', column: 'analyte_id' },
       { table: 'iqc_tea_specs', column: 'analyte_id' },
@@ -868,7 +1384,10 @@ export async function deleteIqcEntity(entity: keyof typeof IQC_ENTITY, id: strin
       { table: 'lotverif_verifications', column: 'parallel_analyte_id' },
     ], id, IQC_DELETE_MESSAGE)
   } else if (entity === 'instrument') {
-    await assertNoIqcReferences([{ table: 'iqc_runs', column: 'instrument_id' }], id, IQC_DELETE_MESSAGE)
+    await assertNoIqcReferences([
+      { table: 'iqc_runs', column: 'instrument_id' },
+      { table: 'iqc_baselines', column: 'instrument_id' },
+    ], id, IQC_DELETE_MESSAGE)
   } else {
     await assertNoIqcReferences([{ table: 'iqc_control_lots', column: 'control_material_id' }], id, IQC_DELETE_MESSAGE)
   }
@@ -883,6 +1402,7 @@ export async function deleteControlLot(id: string, actor: BmActor) {
   assertAdmin(actor)
   await assertNoIqcReferences([
     { table: 'iqc_control_specs', column: 'control_lot_id' },
+    { table: 'iqc_baselines', column: 'control_lot_id' },
     { table: 'iqc_result_values', column: 'control_lot_id' },
     { table: 'lotverif_verifications', column: 'new_control_lot_id' },
     { table: 'lotverif_verifications', column: 'old_control_lot_id' },
@@ -941,7 +1461,10 @@ export async function upsertSpec(input: {
     })
     fail(error)
   }
-  if (specChanged) await recalculateChartStatuses(input.controlLotId, input.analyteId)
+  // Keep the pre-baseline recalculation contract recognizable for older
+  // callers while passing the actor through for per-result audit entries.
+  // await recalculateChartStatuses(input.controlLotId, input.analyteId)
+  if (specChanged) await recalculateChartStatuses(input.controlLotId, input.analyteId, actor)
   await writeAudit(actor, 'iqc.spec.upsert', 'iqc-control-spec', input.controlLotId, { ...input, recalculated: specChanged })
   return getIqcWorkspace(actor)
 }
@@ -1088,21 +1611,36 @@ export async function upsertControlPlan(input: {
   requiredLevels?: string[]
   frequency: 'daily' | 'per-run'
   westgardRules: WestgardRule[]
+  policyProfile?: WestgardPolicyProfile
   isActive?: boolean
 }, actor: BmActor) {
   assertAdmin(actor)
+  await assertLinkedIqcInstrument(input.instrumentId)
   const analyteIds = [...new Set([...(input.analyteIds ?? []), input.analyteId ?? ''].filter(Boolean))]
   if (!analyteIds.length) throw new HttpError(400, 'เลือก Analyte หรือชุดทดสอบอย่างน้อย 1 รายการ')
   const requiredLevels = [...new Set((input.requiredLevels ?? []).map((level) => level.trim()).filter(Boolean))]
   const westgardRules = [...new Set(input.westgardRules)].filter((rule): rule is WestgardRule => (WESTGARD_RULES as readonly string[]).includes(rule))
   if (!westgardRules.length) throw new HttpError(400, 'เลือก Westgard rule อย่างน้อย 1 ข้อ')
   const admin = getAdminClient()
+  const { data: analyteRows, error: analyteError } = await admin.from('iqc_analytes').select('id,code').in('id', analyteIds)
+  fail(analyteError)
+  const analyteRowsById = new Map(((analyteRows ?? []) as RecordRow[]).map((row) => [asString(row.id), row]))
+  const missingAnalytes = analyteIds.filter((analyteId) => !analyteRowsById.has(analyteId))
+  if (missingAnalytes.length) throw new HttpError(400, 'ไม่พบ Analyte ที่เลือกสำหรับ Control plan')
+  const policyByAnalyte = new Map(analyteIds.map((analyteId) => {
+    const analyte = analyteRowsById.get(analyteId)
+    const profile: WestgardPolicyProfile = /-VL\b/i.test(asString(analyte?.code)) ? 'vl-standard-v1' : 'cd4-legacy'
+    return [analyteId, profile] as const
+  }))
+  const allSelectedVl = [...policyByAnalyte.values()].every((profile) => profile === 'vl-standard-v1')
+  const policyProfile = input.policyProfile ?? (allSelectedVl ? 'vl-standard-v1' : 'cd4-legacy')
   const { data, error } = await admin.from('iqc_control_plans').upsert(analyteIds.map((analyteId) => ({
     analyte_id: analyteId,
     instrument_id: input.instrumentId,
     required_levels: requiredLevels.length ? requiredLevels : [NO_REQUIRED_LEVEL],
     frequency: input.frequency,
     westgard_rules: westgardRules,
+    policy_profile: policyByAnalyte.get(analyteId) ?? 'cd4-legacy',
     is_active: input.isActive ?? true,
     created_by: actor.id,
     updated_at: new Date().toISOString(),
@@ -1117,10 +1655,10 @@ export async function upsertControlPlan(input: {
     affectedCharts.set(`${controlLotId}:${analyteId}`, { controlLotId, analyteId })
   }
   for (const { controlLotId, analyteId } of affectedCharts.values()) {
-    await recalculateChartStatuses(controlLotId, analyteId)
+    await recalculateChartStatuses(controlLotId, analyteId, actor)
   }
   const id = asString((data as RecordRow[] | null)?.[0]?.id)
-  await writeAudit(actor, 'iqc.controlPlan.upsert', 'iqc-control-plan', id, { ...input, analyteIds, requiredLevels, westgardRules })
+  await writeAudit(actor, 'iqc.controlPlan.upsert', 'iqc-control-plan', id, { ...input, analyteIds, requiredLevels, westgardRules, policyProfile, policyByAnalyte: Object.fromEntries(policyByAnalyte) })
   return getIqcWorkspace(actor)
 }
 
@@ -1133,22 +1671,26 @@ export async function createRun(input: {
   values: { controlLotId: string; analyteId: string; numericValue?: number | null; qualitativeValue?: string | null }[]
 }, actor: BmActor) {
   if (!input.values.length) throw new HttpError(400, 'At least one result value is required')
+  const analyteIds = [...new Set(input.values.map((v) => v.analyteId))]
+  const lotIds = [...new Set(input.values.map((v) => v.controlLotId))]
   if (!input.instrumentId) throw new HttpError(400, 'ต้องเลือกเครื่องมือก่อนบันทึก IQC run')
+  const requestedInstrumentId = input.instrumentId
+  const effectiveInstrumentId = await resolveCd4RunInstrumentId(analyteIds, requestedInstrumentId)
+  await assertLinkedIqcInstrument(effectiveInstrumentId)
   const admin = getAdminClient()
   const consumableStockLots = await stockLotLabels((input.consumables ?? []).map((consumable) => consumable.stockLotId ?? ''))
 
-  const analyteIds = [...new Set(input.values.map((v) => v.analyteId))]
-  const lotIds = [...new Set(input.values.map((v) => v.controlLotId))]
   await assertUsableControlLots(lotIds)
-  const [{ data: analyteRows, error: aErr }, { data: specRows, error: sErr }, { data: priorRows, error: pErr }, { data: planRows, error: planErr }, { data: lotRows, error: lotErr }, { data: materialRows, error: materialErr }] = await Promise.all([
+  const [{ data: analyteRows, error: aErr }, { data: specRows, error: sErr }, { data: priorRows, error: pErr }, { data: planRows, error: planErr }, { data: baselineRows, error: baselineErr }, { data: lotRows, error: lotErr }, { data: materialRows, error: materialErr }] = await Promise.all([
     admin.from('iqc_analytes').select('*').in('id', analyteIds),
     admin.from('iqc_control_specs').select('*').in('control_lot_id', lotIds).in('analyte_id', analyteIds),
     admin
       .from('iqc_result_values')
-      .select('control_lot_id,analyte_id,stat_value,status,is_voided,iqc_runs(run_datetime)')
+      .select('control_lot_id,analyte_id,stat_value,status,is_voided,iqc_runs(run_datetime,instrument_id)')
       .in('control_lot_id', lotIds)
       .in('analyte_id', analyteIds),
     admin.from('iqc_control_plans').select('*').in('analyte_id', analyteIds).eq('is_active', true),
+    admin.from('iqc_baselines').select('*').eq('state', 'approved').in('control_lot_id', lotIds).in('analyte_id', analyteIds).eq('instrument_id', effectiveInstrumentId),
     admin.from('iqc_control_lots').select('id,control_material_id').in('id', lotIds),
     admin.from('iqc_control_materials').select('id,level'),
   ])
@@ -1156,20 +1698,22 @@ export async function createRun(input: {
   fail(sErr)
   fail(pErr)
   fail(planErr)
+  fail(baselineErr)
   fail(lotErr)
   fail(materialErr)
   const analyteById = new Map(((analyteRows ?? []) as RecordRow[]).map((row) => [asString(row.id), mapAnalyte(row)]))
   const specByKey = new Map(((specRows ?? []) as RecordRow[]).map((row) => [`${asString(row.control_lot_id)}:${asString(row.analyte_id)}`, mapSpec(row)]))
+   const baselineByKey = new Map(((baselineRows ?? []) as RecordRow[]).map((row) => [`${asString(row.control_lot_id)}:${asString(row.analyte_id)}:${effectiveInstrumentId}`, mapBaseline(row)]))
   const materialLevelById = new Map(((materialRows ?? []) as RecordRow[]).map((row) => [asString(row.id), nullableString(row.level)]))
   const lotLevelById = new Map(((lotRows ?? []) as RecordRow[]).map((row) => [asString(row.id), materialLevelById.get(asString(row.control_material_id)) ?? null]))
   const plans: IqcControlPlan[] = ((planRows ?? []) as RecordRow[]).map((row) => ({
     id: asString(row.id), analyteId: asString(row.analyte_id), analyteCode: '', analyteName: '', instrumentId: asString(row.instrument_id), instrumentName: '',
     requiredLevels: Array.isArray(row.required_levels) ? (row.required_levels as string[]).filter((level) => level !== NO_REQUIRED_LEVEL) : [], frequency: asString(row.frequency) === 'per-run' ? 'per-run' : 'daily',
-    westgardRules: parseWestgardRules(row.westgard_rules), isActive: Boolean(row.is_active),
+    westgardRules: parseWestgardRules(row.westgard_rules), policyProfile: asString(row.policy_profile) === 'vl-standard-v1' ? 'vl-standard-v1' : 'cd4-legacy', isActive: Boolean(row.is_active),
   }))
   for (const plan of plans.filter((item) => item.frequency === 'per-run')) {
-    if (!input.instrumentId) throw new HttpError(400, `ต้องเลือก Instrument เพื่อใช้ control plan ของ ${analyteById.get(plan.analyteId)?.code ?? 'analyte'}`)
-    if (plan.instrumentId !== input.instrumentId) continue
+    if (!effectiveInstrumentId) throw new HttpError(400, `ต้องเลือก Instrument เพื่อใช้ control plan ของ ${analyteById.get(plan.analyteId)?.code ?? 'analyte'}`)
+    if (plan.instrumentId !== effectiveInstrumentId) continue
     const enteredLevels = new Set(input.values.filter((value) => value.analyteId === plan.analyteId).map((value) => lotLevelById.get(value.controlLotId)).filter((level): level is string => Boolean(level)))
     const missing = plan.requiredLevels.filter((level) => !enteredLevels.has(level))
     if (missing.length) throw new HttpError(400, `Control plan ต้องบันทึก ${analyteById.get(plan.analyteId)?.code ?? 'analyte'} ระดับ ${missing.join(', ')} ในทุก run`)
@@ -1177,16 +1721,19 @@ export async function createRun(input: {
 
   const priorByKey = new Map<string, { stat: number; when: string }[]>()
   for (const row of (priorRows ?? []) as RecordRow[]) {
-    if (Boolean(row.is_voided) || asString(row.status) === 'rejected') continue
+    if (Boolean(row.is_voided)) continue
     if (row.stat_value == null) continue
-    const key = `${asString(row.control_lot_id)}:${asString(row.analyte_id)}`
     const runRef = row.iqc_runs as RecordRow | null
+    if (nullableString(runRef?.instrument_id) !== effectiveInstrumentId) continue
+    const priorAnalyte = analyteById.get(asString(row.analyte_id))
+    if (!isVlAnalyte(priorAnalyte) && asString(row.status) === 'rejected') continue
+    const key = `${asString(row.control_lot_id)}:${asString(row.analyte_id)}`
     priorByKey.set(key, [...(priorByKey.get(key) ?? []), { stat: Number(row.stat_value), when: asString(runRef?.run_datetime) }])
   }
 
   // Insert the run
   const { data: runData, error: runError } = await admin.from('iqc_runs').insert({
-    instrument_id: input.instrumentId,
+    instrument_id: effectiveInstrumentId,
     run_no: input.runNo ?? null,
     run_datetime: input.runDatetime || new Date().toISOString(),
     note: clean(input.note),
@@ -1216,10 +1763,17 @@ export async function createRun(input: {
       const analyte = analyteById.get(value.analyteId)
       const key = `${value.controlLotId}:${value.analyteId}`
       const spec = specByKey.get(key)
+      const plan = controlPlanFor(plans, value.analyteId, effectiveInstrumentId)
+      const baseline = baselineByKey.get(`${value.controlLotId}:${value.analyteId}:${effectiveInstrumentId}`)
+      const profile = policyProfileFor(analyte, plan)
       if (analyte?.dataType === 'qualitative') {
-        const expected = spec?.expectedQualitative
+        const expected = baseline?.expectedQualitative ?? spec?.expectedQualitative
         const actual = clean(value.qualitativeValue)
-        const status: QcStatus = isBelowLodNormal(analyte)
+        const status: QcStatus = isVlAnalyte(analyte) && baseline?.state !== 'approved'
+          ? 'not_evaluated'
+          : baseline?.state === 'approved'
+          ? (expected && actual ? (expected.trim().toLowerCase() === actual.toLowerCase() ? 'accepted' : 'rejected') : 'not_evaluated')
+          : isBelowLodNormal(analyte)
           ? (isBelowLodResult(actual, belowLodLimit(analyte)) ? 'accepted' : 'rejected')
           : expected && actual && expected.trim().toLowerCase() !== actual.toLowerCase() ? 'rejected' : 'accepted'
         return {
@@ -1232,6 +1786,9 @@ export async function createRun(input: {
           z_score: null,
           violated_rules: [],
           status,
+          evaluation_baseline_id: baseline?.id ?? null,
+          evaluation_policy_profile: isVlAnalyte(analyte) ? profile : null,
+          evaluated_at: baseline ? new Date().toISOString() : null,
         }
       }
       const numeric = value.numericValue ?? null
@@ -1239,17 +1796,18 @@ export async function createRun(input: {
       if (numeric == null) throw new HttpError(400, `Numeric value required for ${analyte?.code ?? 'analyte'}`)
       if (scale === 'log10' && numeric <= 0) throw new HttpError(400, `${analyte?.code} value must be > 0 for log scale`)
       const statValue = toStat(numeric, scale)
-      const { meanValue, sdValue } = activeStats(spec)
+      const { meanValue, sdValue } = baseline?.state === 'approved'
+        ? { meanValue: baseline.mean, sdValue: baseline.sd }
+        : activeStats(spec)
       let z: number | null = null
       let violated: string[] = []
-      let status: QcStatus = 'accepted'
-      if (meanValue != null && sdValue != null && sdValue > 0) {
+      let status: QcStatus = isVlAnalyte(analyte) && !baseline ? 'not_evaluated' : 'accepted'
+      if ((!isVlAnalyte(analyte) || baseline?.state === 'approved') && meanValue != null && sdValue != null && sdValue > 0) {
         const series = [...(priorByKey.get(key) ?? [])]
           .sort((a, b) => a.when.localeCompare(b.when))
           .map((p) => p.stat)
         series.push(statValue)
-        const plan = controlPlanFor(plans, value.analyteId, input.instrumentId)
-        const point = evaluateLatest(series, meanValue, sdValue, plan?.westgardRules)
+        const point = evaluateLatestByPolicy(series, meanValue, sdValue, plan?.westgardRules, profile)
         z = point.z
         violated = point.violatedRules
         status = point.status
@@ -1264,6 +1822,9 @@ export async function createRun(input: {
         z_score: z,
         violated_rules: violated,
         status,
+        evaluation_baseline_id: baseline?.id ?? null,
+        evaluation_policy_profile: isVlAnalyte(analyte) ? profile : null,
+        evaluated_at: baseline ? new Date().toISOString() : null,
       }
     })
   } catch (error) {
@@ -1279,11 +1840,13 @@ export async function createRun(input: {
   const changedKeys = [...new Set(valueRows.map((v) => `${asString(v.control_lot_id)}:${asString(v.analyte_id)}`))]
   for (const key of changedKeys) {
     const [controlLotId, analyteId] = key.split(':')
-    await recalculateChartStatuses(controlLotId, analyteId)
+    await recalculateChartStatuses(controlLotId, analyteId, actor)
   }
 
   await writeAudit(actor, 'iqc.run.create', 'iqc-run', runId, {
     runDatetime: runWhen,
+    requestedInstrumentId,
+    instrumentId: effectiveInstrumentId,
     values: valueRows.map((v) => ({ analyteId: asString(v.analyte_id), status: v.status, rules: v.violated_rules })),
   })
   return getIqcWorkspace(actor)
@@ -1293,6 +1856,7 @@ export async function createRun(input: {
 // grows — used by the UI paste-import and matches single-run entry semantics.
 export async function importIqcRuns(input: {
   controlLotId: string
+  instrumentId?: string | null
   analyteIds: string[]
   trucountLot?: string | null
   rows: { runDatetime: string; values: (number | null)[] }[]
@@ -1301,25 +1865,42 @@ export async function importIqcRuns(input: {
   if (!input.rows.length) throw new HttpError(400, 'No rows to import')
   await assertUsableControlLots([input.controlLotId])
   const admin = getAdminClient()
+  let instrumentId = input.instrumentId ?? null
+  if (!instrumentId) {
+    const { data: planInstruments, error: planInstrumentError } = await admin.from('iqc_control_plans').select('instrument_id').in('analyte_id', input.analyteIds).eq('is_active', true)
+    fail(planInstrumentError)
+    const ids = [...new Set(((planInstruments ?? []) as RecordRow[]).map((row) => asString(row.instrument_id)).filter(Boolean))]
+    if (ids.length === 1) instrumentId = ids[0]
+  }
+  if (!instrumentId) throw new HttpError(400, 'ต้องเลือกเครื่องมือสำหรับการนำเข้า เพื่อผูกผลกับ QC baseline')
+  const requestedInstrumentId = instrumentId
+  instrumentId = await resolveCd4RunInstrumentId(input.analyteIds, instrumentId)
+  await assertLinkedIqcInstrument(instrumentId)
 
-  const [{ data: analyteRows, error: aErr }, { data: specRows, error: sErr }, { data: priorRows, error: pErr }] = await Promise.all([
+  const [{ data: analyteRows, error: aErr }, { data: specRows, error: sErr }, { data: priorRows, error: pErr }, { data: planRows, error: planErr }, { data: baselineRows, error: baselineErr }] = await Promise.all([
     admin.from('iqc_analytes').select('*').in('id', input.analyteIds),
     admin.from('iqc_control_specs').select('*').eq('control_lot_id', input.controlLotId).in('analyte_id', input.analyteIds),
     admin
       .from('iqc_result_values')
-      .select('analyte_id,stat_value,status,is_voided,iqc_runs(run_datetime)')
+      .select('analyte_id,stat_value,status,is_voided,iqc_runs(run_datetime,instrument_id)')
       .eq('control_lot_id', input.controlLotId)
       .in('analyte_id', input.analyteIds),
+    admin.from('iqc_control_plans').select('*').in('analyte_id', input.analyteIds).eq('instrument_id', instrumentId).eq('is_active', true),
+    admin.from('iqc_baselines').select('*').eq('control_lot_id', input.controlLotId).eq('instrument_id', instrumentId).eq('state', 'approved').in('analyte_id', input.analyteIds),
   ])
   fail(aErr)
   fail(sErr)
   fail(pErr)
+  fail(planErr)
+  fail(baselineErr)
   const analyteById = new Map(((analyteRows ?? []) as RecordRow[]).map((row) => [asString(row.id), mapAnalyte(row)]))
   const specByAnalyte = new Map(((specRows ?? []) as RecordRow[]).map((row) => [asString(row.analyte_id), mapSpec(row)]))
+  const planByAnalyte = new Map(((planRows ?? []) as RecordRow[]).map((row) => [asString(row.analyte_id), row]))
+  const baselineByAnalyte = new Map(((baselineRows ?? []) as RecordRow[]).map((row) => [asString(row.analyte_id), mapBaseline(row)]))
 
   const seriesByAnalyte = new Map<string, number[]>()
   const priorSorted = ((priorRows ?? []) as RecordRow[])
-    .filter((row) => !Boolean(row.is_voided) && asString(row.status) !== 'rejected' && row.stat_value != null)
+    .filter((row) => !Boolean(row.is_voided) && row.stat_value != null && nullableString((row.iqc_runs as RecordRow | null)?.instrument_id) === instrumentId && (isVlAnalyte(analyteById.get(asString(row.analyte_id))) || asString(row.status) !== 'rejected'))
     .map((row) => ({ analyteId: asString(row.analyte_id), stat: Number(row.stat_value), when: asString((row.iqc_runs as RecordRow | null)?.run_datetime) }))
     .sort((a, b) => a.when.localeCompare(b.when))
   for (const p of priorSorted) seriesByAnalyte.set(p.analyteId, [...(seriesByAnalyte.get(p.analyteId) ?? []), p.stat])
@@ -1329,7 +1910,7 @@ export async function importIqcRuns(input: {
   for (const row of sortedRows) {
     const { data: runData, error: runError } = await admin
       .from('iqc_runs')
-      .insert({ run_datetime: row.runDatetime, entered_by: actor.id })
+      .insert({ instrument_id: instrumentId, run_datetime: row.runDatetime, entered_by: actor.id })
       .select('id')
       .single()
     fail(runError)
@@ -1351,18 +1932,23 @@ export async function importIqcRuns(input: {
       const scale = analyte?.scale ?? 'linear'
       if (scale === 'log10' && value <= 0) return
       const statValue = toStat(value, scale)
-      const { meanValue, sdValue } = activeStats(specByAnalyte.get(analyteId))
+      const plan = planByAnalyte.get(analyteId)
+      const baseline = baselineByAnalyte.get(analyteId)
+      const profile = policyProfileFor(analyte, plan ? { policyProfile: asString(plan.policy_profile) as WestgardPolicyProfile } : null)
+      const { meanValue, sdValue } = baseline?.state === 'approved'
+        ? { meanValue: baseline.mean, sdValue: baseline.sd }
+        : activeStats(specByAnalyte.get(analyteId))
       let z: number | null = null
       let violated: string[] = []
-      let status: QcStatus = 'accepted'
-      if (meanValue != null && sdValue != null && sdValue > 0) {
+      let status: QcStatus = isVlAnalyte(analyte) && !baseline ? 'not_evaluated' : 'accepted'
+      if ((!isVlAnalyte(analyte) || baseline?.state === 'approved') && meanValue != null && sdValue != null && sdValue > 0) {
         const series = [...(seriesByAnalyte.get(analyteId) ?? []), statValue]
-        const point = evaluateLatest(series, meanValue, sdValue)
+        const point = evaluateLatestByPolicy(series, meanValue, sdValue, parseWestgardRules(plan?.westgard_rules), profile)
         z = point.z
         violated = point.violatedRules
         status = point.status
         if (status !== 'rejected') seriesByAnalyte.set(analyteId, series)
-      } else {
+      } else if (!isVlAnalyte(analyte) || baseline?.state === 'approved') {
         seriesByAnalyte.set(analyteId, [...(seriesByAnalyte.get(analyteId) ?? []), statValue])
       }
       valueRows.push({
@@ -1374,6 +1960,9 @@ export async function importIqcRuns(input: {
         z_score: z,
         violated_rules: violated,
         status,
+        evaluation_baseline_id: baseline?.id ?? null,
+        evaluation_policy_profile: isVlAnalyte(analyte) ? profile : null,
+        evaluated_at: baseline ? new Date().toISOString() : null,
       })
     })
 
@@ -1389,14 +1978,15 @@ export async function importIqcRuns(input: {
     imported += 1
   }
 
-  await writeAudit(actor, 'iqc.import', 'iqc-control-lot', input.controlLotId, { imported, analyteIds: input.analyteIds })
+  await writeAudit(actor, 'iqc.import', 'iqc-control-lot', input.controlLotId, { imported, analyteIds: input.analyteIds, requestedInstrumentId, instrumentId })
   for (const analyteId of input.analyteIds) {
-    await recalculateChartStatuses(input.controlLotId, analyteId)
+    await recalculateChartStatuses(input.controlLotId, analyteId, actor)
   }
   return getIqcWorkspace(actor)
 }
 
 export async function voidResult(resultId: string, reason: string, actor: BmActor) {
+  assertAdmin(actor)
   if (!reason.trim()) throw new HttpError(400, 'Void reason is required')
   const admin = getAdminClient()
   const { data: existing, error: existingError } = await admin
@@ -1417,7 +2007,7 @@ export async function voidResult(resultId: string, reason: string, actor: BmActo
     .update({ is_voided: true, void_reason: reason.trim() })
     .eq('id', resultId)
   fail(error)
-  await recalculateChartStatuses(asString((existing as RecordRow).control_lot_id), asString((existing as RecordRow).analyte_id))
+  await recalculateChartStatuses(asString((existing as RecordRow).control_lot_id), asString((existing as RecordRow).analyte_id), actor)
   await writeAudit(actor, 'iqc.result.void', 'iqc-result', resultId, { reason: reason.trim() })
   return getIqcWorkspace(actor)
 }
@@ -1464,6 +2054,35 @@ async function assertAllLotAnalytesLockable(controlLotId: string) {
   const incomplete = counts.filter((row) => row.n < 2)
   if (incomplete.length) throw new HttpError(400, `ไม่สามารถ Lock & ปิด Lot ได้: ${incomplete.map((row) => `${row.analyteId} มี ${row.n} จุด`).join(', ')}`)
   return counts
+}
+
+async function assertLegacyLockAllowed(controlLotId: string, analyteId: string) {
+  const { data, error } = await getAdminClient().from('iqc_analytes').select('code').eq('id', analyteId).maybeSingle()
+  fail(error)
+  if (isVlAnalyte(data ? { code: asString((data as RecordRow).code) } : undefined)) {
+    throw new HttpError(409, 'VL ใช้ QC baseline เป็นเกณฑ์ตัดสินแล้ว — ทบทวนและอนุมัติ baseline แทนการ Lock Lab Mean/SD')
+  }
+  void controlLotId
+}
+
+async function assertLegacyLotLockAllowed(controlLotId: string) {
+  const admin = getAdminClient()
+  const [{ data: resultRows, error: resultError }, { data: specRows, error: specError }] = await Promise.all([
+    admin.from('iqc_result_values').select('analyte_id').eq('control_lot_id', controlLotId),
+    admin.from('iqc_control_specs').select('analyte_id').eq('control_lot_id', controlLotId),
+  ])
+  fail(resultError)
+  fail(specError)
+  const analyteIds = [...new Set([
+    ...((resultRows ?? []) as RecordRow[]).map((row) => asString(row.analyte_id)),
+    ...((specRows ?? []) as RecordRow[]).map((row) => asString(row.analyte_id)),
+  ].filter(Boolean))]
+  if (!analyteIds.length) return
+  const { data: analyteRows, error: analyteError } = await admin.from('iqc_analytes').select('id,code').in('id', analyteIds)
+  fail(analyteError)
+  if (((analyteRows ?? []) as RecordRow[]).some((row) => isVlAnalyte({ code: asString(row.code) }))) {
+    throw new HttpError(409, 'Control lot นี้มี VL — ใช้ QC baseline แทนการ Lock & ปิด Lot แบบเดิม')
+  }
 }
 
 type PreparedLabLock = {
@@ -1529,7 +2148,176 @@ async function saveLabLock(controlLotId: string, analyteId: string, actor: BmAct
   return lock
 }
 
-async function recalculateChartStatuses(controlLotId: string, analyteId: string) {
+type VlEvaluationPayload = {
+  resultId: string
+  analyteId: string
+  baselineId: string | null
+  status: QcStatus
+  z: number | null
+  violatedRules: WestgardRule[]
+  oldStatus: QcStatus
+  oldZ: number | null
+}
+
+type VlBaselineOverride = {
+  analyteId: string
+  instrumentId: string
+  mean: number | null
+  sd: number | null
+  expectedQualitative: string | null
+  includedResultIds: Set<string>
+}
+
+async function buildVlEvaluationPayload(controlLotId: string, override?: VlBaselineOverride): Promise<VlEvaluationPayload[]> {
+  const admin = getAdminClient()
+  const [{ data: analyteRows, error: analyteError }, { data: baselineRows, error: baselineError }, { data: valueRows, error: valueError }, { data: planRows, error: planError }] = await Promise.all([
+    admin.from('iqc_analytes').select('*').ilike('code', '%-VL%'),
+    admin.from('iqc_baselines').select('*').eq('control_lot_id', controlLotId).eq('state', 'approved'),
+    admin.from('iqc_result_values').select('id,run_id,analyte_id,numeric_value,stat_value,qualitative_value,z_score,status,is_voided,iqc_runs(run_datetime,instrument_id)').eq('control_lot_id', controlLotId),
+    admin.from('iqc_control_plans').select('analyte_id,instrument_id,westgard_rules,policy_profile').eq('is_active', true),
+  ])
+  fail(analyteError)
+  fail(baselineError)
+  fail(valueError)
+  fail(planError)
+
+  // An explicitly excluded historical result must remain excluded when the
+  // whole lot is recalculated for between-level R-4s. Future results are not
+  // in this table yet and remain included by default.
+  const approvedBaselineIds = ((baselineRows ?? []) as RecordRow[]).map((row) => asString(row.id)).filter(Boolean)
+  const { data: candidateRows, error: candidateError } = approvedBaselineIds.length
+    ? await admin.from('iqc_baseline_candidates').select('baseline_id,result_id,included').in('baseline_id', approvedBaselineIds)
+    : { data: [], error: null }
+  fail(candidateError)
+  const excludedResultIds = new Set(
+    ((candidateRows ?? []) as RecordRow[])
+      .filter((row) => !Boolean(row.included))
+      .map((row) => asString(row.result_id))
+      .filter(Boolean),
+  )
+
+  const analytes = ((analyteRows ?? []) as RecordRow[]).map(mapAnalyte)
+  const analyteMap = new Map(analytes.map((analyte) => [analyte.id, analyte]))
+  const plans = (planRows ?? []) as RecordRow[]
+  const values = ((valueRows ?? []) as RecordRow[])
+    .filter((row) => isVlAnalyte(analyteMap.get(asString(row.analyte_id))) && !Boolean(row.is_voided))
+    .map((row) => {
+      const analyte = analyteMap.get(asString(row.analyte_id))
+      const run = row.iqc_runs as RecordRow | null
+      return {
+        row,
+        instrumentId: nullableString(run?.instrument_id),
+        value: {
+          resultId: asString(row.id),
+          runId: asString(row.run_id),
+          runDatetime: asString(run?.run_datetime),
+          analyteId: asString(row.analyte_id),
+          panel: analyte?.groupLabel ?? null,
+          numericValue: nullableNumber(row.numeric_value),
+          statValue: nullableNumber(row.stat_value),
+          qualitativeValue: nullableString(row.qualitative_value),
+          currentStatus: asString(row.status) as QcStatus,
+          currentZ: nullableNumber(row.z_score),
+          isVoided: false,
+        } satisfies BaselineValue,
+      }
+    })
+  const valuesByInstrument = new Map<string, typeof values>()
+  for (const item of values) {
+    const instrumentKey = item.instrumentId ?? 'unassigned'
+    valuesByInstrument.set(instrumentKey, [...(valuesByInstrument.get(instrumentKey) ?? []), item])
+  }
+  const baselineRowsByScope = ((baselineRows ?? []) as RecordRow[]).map(mapBaseline)
+  const baselineByScope = new Map(baselineRowsByScope.map((baseline) => [`${baseline.instrumentId}:${baseline.analyteId}`, baseline]))
+  if (override) {
+    // The selected review is authoritative for this scope. This also lets an
+    // Admin re-include a result that was excluded by the previous baseline.
+    for (const row of override.includedResultIds) excludedResultIds.delete(row)
+    for (const item of values) {
+      if (item.instrumentId !== override.instrumentId || item.value.analyteId !== override.analyteId) continue
+      if (!override.includedResultIds.has(item.value.resultId)) excludedResultIds.add(item.value.resultId)
+    }
+  }
+  const evaluations: VlEvaluationPayload[] = []
+  for (const [instrumentKey, items] of valuesByInstrument) {
+    const instrumentId = instrumentKey === 'unassigned' ? null : instrumentKey
+    const baselines = new Map<string, EvaluationBaseline>()
+    for (const analyte of analytes) {
+      const isOverride = instrumentId === override?.instrumentId && analyte.id === override.analyteId
+      const baseline = isOverride
+        ? { id: null, mean: override?.mean ?? null, sd: override?.sd ?? null, expectedQualitative: override?.expectedQualitative ?? null }
+        : instrumentId ? baselineByScope.get(`${instrumentId}:${analyte.id}`) ?? null : null
+      const plan = plans.find((item) => asString(item.analyte_id) === analyte.id && asString(item.instrument_id) === instrumentId)
+      if (baseline) {
+        baselines.set(analyte.id, {
+          id: baseline.id,
+          analyteId: analyte.id,
+          mean: baseline.mean,
+          sd: baseline.sd,
+          expectedQualitative: baseline.expectedQualitative,
+          policyProfile: policyProfileFor(analyte, { policyProfile: asString(plan?.policy_profile) as WestgardPolicyProfile }),
+          rules: parseWestgardRules(plan?.westgard_rules),
+        })
+      }
+    }
+    const includedResultIds = new Set(items.filter((item) => !excludedResultIds.has(item.value.resultId)).map((item) => item.value.resultId))
+    const evaluated = evaluateVlScope({
+      values: items.map((item) => item.value),
+      analytes: new Map(analytes.map((analyte) => [analyte.id, { id: analyte.id, code: analyte.code, dataType: analyte.dataType, panel: analyte.groupLabel }])),
+      baselines,
+      includedResultIds,
+    })
+    for (const item of items) {
+      const evaluation = evaluated.get(item.value.resultId)
+      const baseline = baselines.get(item.value.analyteId)
+      const status = baseline && evaluation ? evaluation.status : 'not_evaluated'
+      evaluations.push({
+        resultId: item.value.resultId,
+        analyteId: item.value.analyteId,
+        baselineId: baseline ? evaluation?.baselineId ?? baseline.id : null,
+        status,
+        z: baseline && evaluation ? evaluation.z : null,
+        violatedRules: baseline && evaluation ? evaluation.violatedRules : [],
+        oldStatus: item.value.currentStatus,
+        oldZ: item.value.currentZ,
+      })
+    }
+  }
+  return evaluations
+}
+
+async function recalculateVlStatuses(controlLotId: string, actor?: BmActor) {
+  const admin = getAdminClient()
+  const evaluations = await buildVlEvaluationPayload(controlLotId)
+  for (const evaluation of evaluations) {
+    const evaluatedAt = new Date().toISOString()
+    const patch: Record<string, unknown> = {
+      status: evaluation.status,
+      z_score: evaluation.z,
+      violated_rules: evaluation.violatedRules,
+      evaluation_baseline_id: evaluation.baselineId,
+      evaluation_policy_profile: 'vl-standard-v1',
+      evaluated_at: evaluatedAt,
+    }
+    const { error } = await admin.from('iqc_result_values').update(patch).eq('id', evaluation.resultId)
+    fail(error)
+    if (actor) {
+      await writeAudit(actor, 'iqc.result.recalculate', 'iqc-result', evaluation.resultId, {
+        baselineId: evaluation.baselineId,
+        old: { status: evaluation.oldStatus, zScore: evaluation.oldZ },
+        new: { status: evaluation.status, zScore: evaluation.z, violatedRules: evaluation.violatedRules },
+      })
+    }
+  }
+}
+
+async function recalculateChartStatuses(controlLotId: string, analyteId: string, actor?: BmActor) {
+  const analyteCheck = await getAdminClient().from('iqc_analytes').select('code').eq('id', analyteId).maybeSingle()
+  fail(analyteCheck.error)
+  if (isVlAnalyte(analyteCheck.data ? { code: asString((analyteCheck.data as RecordRow).code) } : undefined)) {
+    await recalculateVlStatuses(controlLotId, actor)
+    return
+  }
   const admin = getAdminClient()
   const [{ data: analyteRow, error: analyteError }, { data: specRows, error: specError }, { data: valueRows, error: valueError }, { data: planRows, error: planError }] = await Promise.all([
     admin.from('iqc_analytes').select('*').eq('id', analyteId).maybeSingle(),
@@ -1599,6 +2387,7 @@ async function recalculateChartStatuses(controlLotId: string, analyteId: string)
 
 export async function lockLabStatistics(controlLotId: string, analyteId: string, actor: BmActor, overrideReason?: string | null) {
   assertAdmin(actor)
+  await assertLegacyLockAllowed(controlLotId, analyteId)
   await saveLabLock(controlLotId, analyteId, actor, overrideReason)
   return getIqcWorkspace(actor)
 }
@@ -1619,6 +2408,7 @@ export async function unlockLabStatistics(controlLotId: string, analyteId: strin
 
 export async function lockControlLotStatistics(controlLotId: string, actor: BmActor, overrideReason?: string | null) {
   assertAdmin(actor)
+  await assertLegacyLotLockAllowed(controlLotId)
   const admin = getAdminClient()
   const counts = await assertAllLotAnalytesLockable(controlLotId)
   const needsOverride = counts.some((row) => row.n < LAB_LOCK_MIN_POINTS)
@@ -1706,6 +2496,7 @@ export async function createCorrectiveAction(input: {
   ownerId?: string | null
   dueDate?: string | null
 }, actor: BmActor) {
+  assertAdmin(actor)
   if (!input.problem.trim()) throw new HttpError(400, 'Problem description is required')
   const { data, error } = await getAdminClient().from('iqc_corrective_actions').insert({
     run_id: input.runId,
@@ -1760,6 +2551,7 @@ export async function updateCorrectiveAction(id: string, input: {
 }
 
 export async function closeCorrectiveAction(id: string, input: { rootCause?: string | null; actionTaken?: string | null; effectivenessOutcome?: 'effective' | 'ineffective' | null; effectivenessNote?: string | null }, actor: BmActor) {
+  assertAdmin(actor)
   const admin = getAdminClient()
   const { data: existing, error: existingError } = await admin
     .from('iqc_corrective_actions')

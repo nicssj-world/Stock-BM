@@ -2,18 +2,31 @@
 // All stats run on `stat_value` (already log10-transformed for log-scale analytes).
 
 export type AnalyteScale = 'linear' | 'log10'
-export type QcStatus = 'accepted' | 'warning' | 'rejected'
+export type QcStatus = 'accepted' | 'warning' | 'investigate' | 'rejected' | 'not_evaluated'
+export type WestgardPolicyProfile = 'cd4-legacy' | 'vl-standard-v1'
+export type R4sMode = 'series' | 'same-run-only'
 
 export interface WestgardPoint {
   z: number
-  violatedRules: string[]
+  violatedRules: WestgardRule[]
   status: QcStatus
+}
+
+// Public contract name used by server/UI consumers. Keep the older
+// WestgardPoint name as a compatibility alias for existing CD4 callers.
+export type WestgardEvaluation = WestgardPoint
+
+export interface SameRunPoint {
+  resultId: string
+  z: number
 }
 
 // Rules that reject a run. 1-2s is a warning only (prompts inspection).
 export const WESTGARD_RULES = ['1-2s', '1-3s', '2-2s', 'R-4s', '4-1s', '10x'] as const
 export type WestgardRule = (typeof WESTGARD_RULES)[number]
 const REJECT_RULES = new Set<WestgardRule>(['1-3s', '2-2s', 'R-4s', '4-1s', '10x'])
+const VL_REJECT_RULES = new Set<WestgardRule>(['1-3s', '2-2s'])
+const VL_INVESTIGATE_RULES = new Set<WestgardRule>(['R-4s', '4-1s', '10x'])
 
 export function mean(values: number[]): number {
   if (!values.length) return 0
@@ -46,7 +59,15 @@ export function toStat(value: number, scale: AnalyteScale): number {
 
 // Evaluate Westgard multi-rules across a chronological series (oldest first).
 // Each point is judged using itself and the preceding points.
-export function evaluateWestgard(series: number[], m: number, s: number, enabledRules: readonly WestgardRule[] = WESTGARD_RULES): WestgardPoint[] {
+function evaluateWithConfig(
+  series: number[],
+  m: number,
+  s: number,
+  enabledRules: readonly WestgardRule[],
+  rejectRules: ReadonlySet<WestgardRule>,
+  investigateRules: ReadonlySet<WestgardRule>,
+  r4sMode: R4sMode,
+): WestgardPoint[] {
   const enabled = new Set(enabledRules)
   const usable = s > 0
   const zs = series.map((v) => (usable ? (v - m) / s : 0))
@@ -58,7 +79,7 @@ export function evaluateWestgard(series: number[], m: number, s: number, enabled
       if (i >= 1) {
         const zp = zs[i - 1]
         if (enabled.has('2-2s') && ((z > 2 && zp > 2) || (z < -2 && zp < -2))) rules.push('2-2s')
-        if (enabled.has('R-4s') && Math.abs(z - zp) > 4) rules.push('R-4s')
+        if (r4sMode === 'series' && enabled.has('R-4s') && Math.abs(z - zp) > 4) rules.push('R-4s')
       }
       if (i >= 3) {
         const w = zs.slice(i - 3, i + 1)
@@ -70,14 +91,63 @@ export function evaluateWestgard(series: number[], m: number, s: number, enabled
       }
       if (enabled.has('1-2s') && Math.abs(z) > 2 && !rules.includes('1-3s')) rules.push('1-2s')
     }
-    const hasReject = rules.some((rule) => REJECT_RULES.has(rule))
-    const status: QcStatus = hasReject ? 'rejected' : rules.includes('1-2s') ? 'warning' : 'accepted'
+    const hasReject = rules.some((rule) => rejectRules.has(rule))
+    const hasInvestigation = rules.some((rule) => investigateRules.has(rule))
+    const status: QcStatus = hasReject ? 'rejected' : hasInvestigation ? 'investigate' : rules.includes('1-2s') ? 'warning' : 'accepted'
     return { z, violatedRules: rules, status }
   })
+}
+
+// The original evaluator remains the CD4-compatible default. VL uses the
+// policy-aware evaluator below so that a same-level time series never applies
+// R-4s across separate runs.
+export function evaluateWestgard(series: number[], m: number, s: number, enabledRules: readonly WestgardRule[] = WESTGARD_RULES): WestgardPoint[] {
+  return evaluateWithConfig(series, m, s, enabledRules, REJECT_RULES, new Set(), 'series')
+}
+
+export function evaluateWestgardByPolicy(
+  series: number[],
+  m: number,
+  s: number,
+  enabledRules: readonly WestgardRule[] = WESTGARD_RULES,
+  profile: WestgardPolicyProfile = 'cd4-legacy',
+): WestgardPoint[] {
+  if (profile === 'vl-standard-v1') {
+    return evaluateWithConfig(series, m, s, enabledRules, VL_REJECT_RULES, VL_INVESTIGATE_RULES, 'same-run-only')
+  }
+  return evaluateWestgard(series, m, s, enabledRules)
 }
 
 // Convenience: evaluate only the latest point given the prior accepted series.
 export function evaluateLatest(series: number[], m: number, s: number, enabledRules: readonly WestgardRule[] = WESTGARD_RULES): WestgardPoint {
   const points = evaluateWestgard(series, m, s, enabledRules)
   return points[points.length - 1] ?? { z: 0, violatedRules: [], status: 'accepted' }
+}
+
+export function evaluateLatestByPolicy(
+  series: number[],
+  m: number,
+  s: number,
+  enabledRules: readonly WestgardRule[] = WESTGARD_RULES,
+  profile: WestgardPolicyProfile = 'cd4-legacy',
+): WestgardPoint {
+  const points = evaluateWestgardByPolicy(series, m, s, enabledRules, profile)
+  return points[points.length - 1] ?? { z: 0, violatedRules: [], status: 'accepted' }
+}
+
+// R-4s is a between-level rule for VL. It is intentionally not part of the
+// ordinary chronological series evaluator. A pair is eligible only when both
+// results are in the same run; every member of a violating pair is marked so
+// the run can be investigated as a whole.
+export function sameRunR4s(resultPoints: readonly SameRunPoint[], threshold = 4): string[] {
+  const flagged = new Set<string>()
+  for (let i = 0; i < resultPoints.length; i += 1) {
+    for (let j = i + 1; j < resultPoints.length; j += 1) {
+      if (Math.abs(resultPoints[i].z - resultPoints[j].z) > threshold) {
+        flagged.add(resultPoints[i].resultId)
+        flagged.add(resultPoints[j].resultId)
+      }
+    }
+  }
+  return [...flagged]
 }

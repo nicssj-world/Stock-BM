@@ -404,7 +404,13 @@ function ParallelComparisonPanel({
   const [error, setError] = useState('')
   const scale = v.parallelScale ?? 'linear'
   const unit = v.parallelUnit ?? (scale === 'log10' ? 'copies/mL' : null)
-  const statsFor = (controlLotId: string) => data.parallelControlStats.find((stat) => stat.controlLotId === controlLotId && stat.analyteId === v.parallelAnalyteId)
+  const parallelAnalyte = data.analytes.find((analyte) => analyte.id === v.parallelAnalyteId)
+  const vlQuantitative = parallelAnalyte?.dataType === 'quantitative' && /-VL\b/i.test(parallelAnalyte.code)
+  const statsFor = (controlLotId: string) => {
+    const matches = data.parallelControlStats.filter((stat) => stat.controlLotId === controlLotId && stat.analyteId === v.parallelAnalyteId)
+    if (vlQuantitative) return matches.find((stat) => stat.instrumentId === v.instrumentId && stat.source === 'baseline')
+    return matches.find((stat) => stat.instrumentId === v.instrumentId && stat.source === 'baseline') ?? matches.find((stat) => stat.instrumentId === v.instrumentId) ?? matches.find((stat) => stat.instrumentId == null)
+  }
   const parallelControlLots = data.controlLots.filter((lot) =>
     (!v.instrumentId || lot.instrumentIds.includes(v.instrumentId)) &&
     (!v.parallelAnalyteId || lot.analyteIds.includes(v.parallelAnalyteId)),
@@ -487,11 +493,12 @@ function ParallelComparisonPanel({
               {rows.map((row) => {
                 const calculated = v.parallelRows.find((item) => item.level === row.level)
                 const stat = statsFor(row.controlLotId)
+                const baselineRequired = vlQuantitative && Boolean(row.controlLotId) && (!stat || stat.mean == null || stat.sd == null)
                 return <tr key={row.level}>
                   <td className="px-2 py-1.5 font-semibold text-[#3f6470]">{row.level}</td>
-                   <td className="px-2 py-1.5"><Select disabled={!editable || busy} value={row.controlLotId} onChange={(event) => selectControl(row.level, event.target.value)}><option value="">Manual / ไม่ระบุ</option>{parallelControlLots.map((lot) => <option key={lot.id} value={lot.id}>{lot.label}</option>)}</Select>{row.controlLotId && stat ? <span className="mt-0.5 block text-[10px] text-[#789097]">ใช้ค่า {stat.source === 'lab' ? 'Lab' : 'Assigned'} จาก IQC</span> : null}</td>
-                  <td className="px-2 py-1.5"><Input readOnly={stat?.mean != null && stat?.sd != null} disabled={!editable || busy} type="number" step="any" value={row.controlMean} onChange={(event) => updateRow(row.level, { controlMean: event.target.value })} /></td>
-                  <td className="px-2 py-1.5"><Input readOnly={stat?.mean != null && stat?.sd != null} disabled={!editable || busy} type="number" step="any" value={row.controlSd} onChange={(event) => updateRow(row.level, { controlSd: event.target.value })} /></td>
+                   <td className="px-2 py-1.5"><Select disabled={!editable || busy} value={row.controlLotId} onChange={(event) => selectControl(row.level, event.target.value)}><option value="">{vlQuantitative ? 'เลือก Control lot ที่มี baseline' : 'Manual / ไม่ระบุ'}</option>{parallelControlLots.map((lot) => <option key={lot.id} value={lot.id}>{lot.label}</option>)}</Select>{row.controlLotId && stat ? <span className="mt-0.5 block text-[10px] text-[#789097]">ใช้ค่า {stat.source === 'baseline' ? 'QC baseline' : stat.source === 'lab' ? 'Lab' : 'Assigned'} จาก IQC{stat.source === 'baseline' ? ' · approved' : ''}</span> : null}{baselineRequired ? <span className="mt-0.5 block text-[10px] font-semibold text-[#b33b46]">ยังไม่มี approved QC baseline ของเครื่องมือนี้</span> : null}</td>
+                   <td className="px-2 py-1.5"><Input readOnly={vlQuantitative || (stat?.mean != null && stat?.sd != null)} disabled={!editable || busy || baselineRequired} type="number" step="any" value={row.controlMean} onChange={(event) => updateRow(row.level, { controlMean: event.target.value })} /></td>
+                   <td className="px-2 py-1.5"><Input readOnly={vlQuantitative || (stat?.mean != null && stat?.sd != null)} disabled={!editable || busy || baselineRequired} type="number" step="any" value={row.controlSd} onChange={(event) => updateRow(row.level, { controlSd: event.target.value })} /></td>
                   {(['oldRun1', 'oldRun2', 'newRun1', 'newRun2'] as const).map((field) => <td key={field} className="px-2 py-1.5"><Input disabled={!editable || busy} type="number" min={scale === 'log10' ? '0.000001' : undefined} step="any" value={row[field]} onChange={(event) => updateRow(row.level, { [field]: event.target.value })} /></td>)}
                   <td className="mono px-2 py-1.5 tabular-nums">{displayParallelNumber(calculated?.currentMean ?? null)}</td>
                   <td className="mono px-2 py-1.5 tabular-nums">{displayParallelNumber(calculated?.newMean ?? null)}</td>

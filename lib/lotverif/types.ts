@@ -95,9 +95,10 @@ export interface LotVerifAnalyte {
 export interface LotVerifControlStat {
   controlLotId: string
   analyteId: string
+  instrumentId: string | null
   mean: number | null
   sd: number | null
-  source: 'assigned' | 'lab'
+  source: 'assigned' | 'lab' | 'baseline'
 }
 
 export interface LotVerifParallelRow {
@@ -108,7 +109,7 @@ export interface LotVerifParallelRow {
   controlLabel: string | null
   controlMean: number | null
   controlSd: number | null
-  statsSource: 'assigned' | 'lab' | 'manual'
+  statsSource: 'assigned' | 'lab' | 'baseline' | 'manual'
   oldRun1: number | null
   oldRun2: number | null
   newRun1: number | null

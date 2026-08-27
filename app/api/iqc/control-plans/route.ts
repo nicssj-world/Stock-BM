@@ -9,6 +9,7 @@ const schema = z.object({
   requiredLevels: z.array(z.string().trim().min(1).max(80)).default([]),
   frequency: z.enum(['daily', 'per-run']),
   westgardRules: z.array(z.enum(['1-2s', '1-3s', '2-2s', 'R-4s', '4-1s', '10x'])).min(1),
+  policyProfile: z.enum(['cd4-legacy', 'vl-standard-v1']).optional(),
   isActive: z.boolean().optional(),
 })
 

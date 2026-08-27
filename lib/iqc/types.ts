@@ -1,8 +1,12 @@
-import type { AnalyteScale, QcStatus, WestgardRule } from '@/lib/iqc/westgard'
+import type { AnalyteScale, QcStatus, WestgardPolicyProfile, WestgardRule } from '@/lib/iqc/westgard'
 
-export type { AnalyteScale, QcStatus } from '@/lib/iqc/westgard'
+export type { AnalyteScale, QcStatus, WestgardPolicyProfile } from '@/lib/iqc/westgard'
+export type IqcPolicyProfile = 'cd4-legacy' | 'vl-standard-v1'
 export type AnalyteDataType = 'quantitative' | 'qualitative'
-export type ActiveLimit = 'assigned' | 'lab'
+export type ActiveLimit = 'assigned' | 'lab' | 'baseline'
+export type IqcBaselineState = 'draft' | 'approved' | 'superseded'
+export type IqcBaselineType = 'lab_observed' | 'observed_seed'
+export type IqcSetupTaskState = 'complete' | 'attention' | 'blocked'
 export type ConsumableKind = 'staining-reagent' | 'trucount-tube' | 'mastermix' | 'reagent' | 'other'
 export type ConsumableScope = 'all' | 'absolute-only'
 
@@ -74,6 +78,123 @@ export interface IqcSpec {
   labLockedAt: string | null
   activeLimit: ActiveLimit
   expectedQualitative: string | null
+  manufacturerLower: number | null
+  manufacturerUpper: number | null
+  manufacturerPrecisionSd: number | null
+  manufacturerTargetMean: number | null
+  manufacturerTargetSd: number | null
+  manufacturerSourceRef: string | null
+}
+
+export interface IqcBaseline {
+  id: string
+  controlLotId: string
+  analyteId: string
+  instrumentId: string
+  baselineType: IqcBaselineType
+  state: IqcBaselineState
+  mean: number | null
+  sd: number | null
+  n: number
+  expectedQualitative: string | null
+  candidateN: number
+  excludedN: number
+  sourceRef: string | null
+  reason: string | null
+  version: number
+  createdBy: string | null
+  createdAt: string
+  approvedBy: string | null
+  approvedAt: string | null
+}
+
+export interface IqcBaselineCandidate {
+  id: string
+  baselineId: string
+  resultId: string
+  included: boolean
+  exclusionReason: string | null
+}
+
+export interface IqcBaselineReviewCandidate {
+  resultId: string
+  runId: string
+  runDatetime: string
+  numericValue: number | null
+  statValue: number | null
+  qualitativeValue: string | null
+  currentStatus: QcStatus
+  proposedStatus: QcStatus
+  currentZ: number | null
+  proposedZ: number | null
+  proposedRules: WestgardRule[]
+  included: boolean
+  exclusionReason: string | null
+  isVoided: boolean
+  eligibleForBaseline?: boolean
+}
+
+export interface IqcBaselineReview {
+  controlLotId: string
+  analyteId: string
+  instrumentId: string
+  analyteCode: string
+  analyteName: string
+  level: string | null
+  lotNumber: string
+  instrumentName: string
+  dataType: AnalyteDataType
+  scale: AnalyteScale
+  policyProfile: WestgardPolicyProfile
+  manufacturerLower: number | null
+  manufacturerUpper: number | null
+  manufacturerPrecisionSd: number | null
+  manufacturerTargetMean: number | null
+  manufacturerTargetSd: number | null
+  manufacturerSourceRef: string | null
+  currentMean: number | null
+  currentSd: number | null
+  currentN: number
+  proposedMean: number | null
+  proposedSd: number | null
+  proposedN: number
+  candidateN: number
+  excludedN: number
+  expectedQualitative: string | null
+  baselineId: string | null
+  baselineState: IqcBaselineState | null
+  baselineType: IqcBaselineType | null
+  canApply: boolean
+  blockedReason: string | null
+  candidates: IqcBaselineReviewCandidate[]
+  impact: Record<QcStatus, number>
+}
+
+export interface IqcBaselineReviewInput {
+  controlLotId: string
+  analyteId: string
+  instrumentId: string
+  includedResultIds?: string[]
+  exclusionReasons?: Record<string, string | null | undefined>
+  reason?: string | null
+  sourceRef?: string | null
+}
+
+export interface IqcSetupTask {
+  key: 'equipment' | 'lot' | 'baseline' | 'plan' | 'advanced'
+  label: string
+  description: string
+  state: IqcSetupTaskState
+  count: number
+  nextAction: string
+  dependencies: { label: string; done: boolean }[]
+}
+
+export interface IqcSetupHealth {
+  tasks: IqcSetupTask[]
+  readyCount: number
+  attentionCount: number
+  blockedCount: number
 }
 
 export interface IqcConsumable {
@@ -96,6 +217,7 @@ export interface IqcRunResult {
   violatedRules: string[]
   status: QcStatus
   isVoided: boolean
+  evaluationBaselineId?: string | null
 }
 
 export interface IqcRun {
@@ -116,7 +238,7 @@ export interface IqcChartPoint {
   runDatetime: string
   value: number
   statValue: number
-  z: number
+  z: number | null
   status: QcStatus
   violatedRules: string[]
   isVoided: boolean
@@ -128,11 +250,14 @@ export interface IqcLotChangeMarker {
   lotNumber: string
 }
 
-// One Levey-Jennings chart per (control lot x analyte).
+// CD4 legacy uses one chart per (control lot x analyte); VL adds instrument
+// scope because its approved baseline is instrument-specific.
 export interface IqcChart {
   key: string
   controlLotId: string
   analyteId: string
+  instrumentId?: string | null
+  instrumentName?: string | null
   analyteCode: string
   analyteName: string
   groupLabel: string | null
@@ -143,6 +268,18 @@ export interface IqcChart {
   controlMaterialName: string
   lotNumber: string
   activeLimit: ActiveLimit
+  policyProfile?: WestgardPolicyProfile
+  baselineId?: string | null
+  baselineState?: IqcBaselineState | null
+  baselineType?: IqcBaselineType | null
+  baselineVersion?: number | null
+  baselineCandidateN?: number | null
+  manufacturerLower?: number | null
+  manufacturerUpper?: number | null
+  manufacturerPrecisionSd?: number | null
+  manufacturerTargetMean?: number | null
+  manufacturerTargetSd?: number | null
+  manufacturerSourceRef?: string | null
   mean: number | null
   sd: number | null
   cv: number | null
@@ -199,13 +336,14 @@ export interface IqcControlPlan {
   requiredLevels: string[]
   frequency: 'daily' | 'per-run'
   westgardRules: WestgardRule[]
+  policyProfile?: WestgardPolicyProfile
   isActive: boolean
 }
 
 export interface IqcAlert {
   id: string
-  tone: 'warning' | 'rejected'
-  kind: 'lot-expiring' | 'rejected-trend' | 'control-due' | 'capa-overdue'
+  tone: 'warning' | 'investigate' | 'rejected'
+  kind: 'lot-expiring' | 'rejected-trend' | 'investigate-trend' | 'control-due' | 'capa-overdue'
   title: string
   detail: string
 }
@@ -295,6 +433,9 @@ export interface IqcWorkspace {
   controlLots: IqcControlLot[]
   stockLots: IqcStockLotOption[]
   specs: IqcSpec[]
+  baselines?: IqcBaseline[]
+  baselineCandidates?: IqcBaselineCandidate[]
+  setupHealth?: IqcSetupHealth
   teaSpecs: IqcTeaSpec[]
   controlPlans: IqcControlPlan[]
   alerts: IqcAlert[]
@@ -309,6 +450,8 @@ export interface IqcWorkspace {
     inControl: number
     warning: number
     rejected: number
+    investigate?: number
+    notEvaluated?: number
     openCorrectiveActions: number
   }
 }

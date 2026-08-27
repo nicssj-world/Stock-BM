@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cv, evaluateWestgard, mean, sd, toStat, zScore } from '@/lib/iqc/westgard'
+import { cv, evaluateWestgard, evaluateWestgardByPolicy, mean, sameRunR4s, sd, toStat, zScore } from '@/lib/iqc/westgard'
 
 // CD4 %CD4 regression dataset (lot 25290, 19 runs) — see plan appendix.
 const PCT_CD4 = [
@@ -87,5 +87,30 @@ describe('evaluateWestgard — rule detection (mean 0, sd 1)', () => {
     const p = evalZ([0.2, 0.1, 0.3, 0.2, 0.4, 0.1, 0.2, 0.3, 0.1, 0.2])
     expect(p[9].violatedRules).toContain('10x')
     expect(p[9].status).toBe('rejected')
+  })
+})
+
+describe('policy profiles', () => {
+  it('keeps CD4 legacy behavior while VL does not use same-level R-4s', () => {
+    const vl = evaluateWestgardByPolicy([0, 2.3, -2.3], 0, 1, undefined, 'vl-standard-v1')
+    const cd4 = evaluateWestgardByPolicy([0, 2.3, -2.3], 0, 1, undefined, 'cd4-legacy')
+    expect(vl[2].violatedRules).not.toContain('R-4s')
+    expect(vl[2].status).toBe('warning')
+    expect(cd4[2].status).toBe('rejected')
+  })
+
+  it('does not make same-level VL R-4s a chronological rule', () => {
+    const points = evaluateWestgardByPolicy([0, 2.3, -2.3], 0, 1, ['R-4s'], 'vl-standard-v1')
+    expect(points.every((point) => point.violatedRules.length === 0)).toBe(true)
+    expect(points.every((point) => point.status === 'accepted')).toBe(true)
+  })
+
+  it('flags only pairs that are in the same run', () => {
+    expect(sameRunR4s([
+      { resultId: 'hpc', z: 2.3 },
+      { resultId: 'lpc', z: -2.3 },
+      { resultId: 'normal', z: 0 },
+    ])).toEqual(['hpc', 'lpc'])
+    expect(sameRunR4s([{ resultId: 'hpc', z: 2.3 }])).toEqual([])
   })
 })

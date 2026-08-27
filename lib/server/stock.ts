@@ -599,8 +599,8 @@ async function hasLotReferences(lotIds: string[]) {
     hasAnyRows('bm_hpv_kit_distribution_lines', 'stock_lot_id', lotIds),
     hasAnyRows('iqc_control_lots', 'stock_lot_id', lotIds),
     hasAnyRows('iqc_run_consumables', 'stock_lot_id', lotIds),
-    hasAnyRows('lot_verifications', 'new_stock_lot_id', lotIds),
-    hasAnyRows('lot_verifications', 'old_stock_lot_id', lotIds),
+    hasAnyRows('lotverif_verifications', 'new_stock_lot_id', lotIds),
+    hasAnyRows('lotverif_verifications', 'old_stock_lot_id', lotIds),
   ])
   return checks.some(Boolean)
 }

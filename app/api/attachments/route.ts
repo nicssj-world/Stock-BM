@@ -72,6 +72,8 @@ export async function POST(request: Request) {
     const mod = asModule(String(form.get("module") ?? ""));
     if (mod === "equipment" && actor.role === "Assistant")
       throw new HttpError(403, "Equipment permission required");
+    if (actor.role === "Assistant" && ["iqc", "eqa", "lotverif"].includes(mod))
+      throw new HttpError(403, "Review-module attachment permission required");
     const entityType = String(form.get("entityType") ?? "").trim();
     const entityIdRaw = form.get("entityId");
     const entityId = entityIdRaw ? String(entityIdRaw) : null;

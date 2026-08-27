@@ -5,6 +5,7 @@ import { readJson, respond } from '@/lib/server/route'
 
 const schema = z.object({
   controlLotId: z.string().uuid(),
+  instrumentId: z.string().uuid().nullable().optional(),
   analyteIds: z.array(z.string().uuid()).min(1),
   trucountLot: z.string().trim().max(80).nullable().optional(),
   rows: z

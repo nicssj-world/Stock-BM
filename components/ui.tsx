@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { AlertTriangle, CheckCircle2, LoaderCircle, Minus, XCircle } from 'lucide-react'
+import { AlertTriangle, CircleAlert, CheckCircle2, LoaderCircle, Minus, XCircle } from 'lucide-react'
 
 export function Button({
   children,
@@ -17,7 +17,7 @@ export function Button({
   }
   return (
     <button
-      className={`inline-flex min-h-9 items-center justify-center gap-2 rounded-md px-3.5 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${className}`}
+      className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-3.5 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${className}`}
       {...props}
     >
       {children}
@@ -28,7 +28,7 @@ export function Button({
 export function Input({ className = '', ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
-      className={`min-w-0 max-w-full w-full rounded-md border border-[#cfdee0] bg-white px-3 py-2 text-sm text-[#173d50] outline-none transition placeholder:text-[#9aafb4] focus:border-[#0b7f76] focus:ring-3 focus:ring-[#0b7f76]/10 ${className}`}
+      className={`min-h-11 min-w-0 max-w-full w-full rounded-md border border-[#cfdee0] bg-white px-3 py-2 text-sm text-[#173d50] outline-none transition placeholder:text-[#9aafb4] focus:border-[#0b7f76] focus:ring-3 focus:ring-[#0b7f76]/10 ${className}`}
       {...props}
     />
   )
@@ -37,7 +37,7 @@ export function Input({ className = '', ...props }: React.InputHTMLAttributes<HT
 export function Select({ className = '', ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
-      className={`w-full rounded-md border border-[#cfdee0] bg-white px-3 py-2 text-sm text-[#173d50] outline-none transition focus:border-[#0b7f76] focus:ring-3 focus:ring-[#0b7f76]/10 ${className}`}
+      className={`min-h-11 w-full rounded-md border border-[#cfdee0] bg-white px-3 py-2 text-sm text-[#173d50] outline-none transition focus:border-[#0b7f76] focus:ring-3 focus:ring-[#0b7f76]/10 ${className}`}
       {...props}
     />
   )
@@ -46,7 +46,7 @@ export function Select({ className = '', ...props }: React.SelectHTMLAttributes<
 export function Textarea({ className = '', ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
     <textarea
-      className={`w-full rounded-md border border-[#cfdee0] bg-white px-3 py-2 text-sm text-[#173d50] outline-none transition placeholder:text-[#9aafb4] focus:border-[#0b7f76] focus:ring-3 focus:ring-[#0b7f76]/10 ${className}`}
+      className={`min-h-11 w-full rounded-md border border-[#cfdee0] bg-white px-3 py-2 text-sm text-[#173d50] outline-none transition placeholder:text-[#9aafb4] focus:border-[#0b7f76] focus:ring-3 focus:ring-[#0b7f76]/10 ${className}`}
       {...props}
     />
   )
@@ -93,14 +93,16 @@ export function Notice({ children, tone = 'info' }: { children: ReactNode; tone?
   return <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${styles[tone]}`}><AlertTriangle className="mt-0.5 size-4 shrink-0" />{children}</div>
 }
 
-export type StatusTone = 'accepted' | 'warning' | 'rejected' | 'neutral'
+export type StatusTone = 'accepted' | 'warning' | 'investigate' | 'rejected' | 'not_evaluated' | 'neutral'
 
 // Status is always conveyed with icon + text + colour (never colour alone).
 export function StatusBadge({ tone, label }: { tone: StatusTone; label: string }) {
   const map = {
     accepted: { cls: 'border-[#c6e2ca] bg-[#f1faf3] text-[#2f7d44]', Icon: CheckCircle2 },
     warning: { cls: 'border-[#eed4a6] bg-[#fff9ed] text-[#a9700f]', Icon: AlertTriangle },
+    investigate: { cls: 'border-[#e6d3b5] bg-[#fff8ee] text-[#8f5f1d]', Icon: CircleAlert },
     rejected: { cls: 'border-[#efc7cc] bg-[#fff5f6] text-[#c02a37]', Icon: XCircle },
+    not_evaluated: { cls: 'border-[#d2dee0] bg-[#f6f9f9] text-[#5b7681]', Icon: Minus },
     neutral: { cls: 'border-[#d2dee0] bg-[#f6f9f9] text-[#5b7681]', Icon: Minus },
   } as const
   const { cls, Icon } = map[tone]
@@ -116,7 +118,9 @@ export function StatCard({ label, value, tone = 'neutral', hint }: { label: stri
   const accent = {
     accepted: 'text-[#2f7d44]',
     warning: 'text-[#a9700f]',
+    investigate: 'text-[#8f5f1d]',
     rejected: 'text-[#c02a37]',
+    not_evaluated: 'text-[#5b7681]',
     neutral: 'text-[#173d50]',
   }[tone]
   return (
@@ -140,7 +144,7 @@ export function Tabs<T extends string>({ tabs, active, onChange }: { tabs: { key
             role="tab"
             aria-selected={on}
             onClick={() => onChange(key)}
-            className={`flex items-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-semibold transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${on ? 'bg-[#0b7f76] text-white' : 'text-[#58747d] hover:bg-[#eef6f5]'}`}
+            className={`flex min-h-11 items-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-semibold transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${on ? 'bg-[#0b7f76] text-white' : 'text-[#58747d] hover:bg-[#eef6f5]'}`}
           >
             {Icon ? <Icon className="size-4" aria-hidden="true" /> : null}
             {label}

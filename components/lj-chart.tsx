@@ -12,7 +12,7 @@ const PAD = { top: 30, right: 28, bottom: 46, left: 74 }
 const PLOT_W = W - PAD.left - PAD.right
 const PLOT_H = H - PAD.top - PAD.bottom
 
-const STATUS_COLOR: Record<string, string> = { accepted: '#16a34a', warning: '#d97706', rejected: '#dc2626' }
+const STATUS_COLOR: Record<string, string> = { accepted: '#16a34a', warning: '#d97706', investigate: '#8f5f1d', rejected: '#dc2626', not_evaluated: '#789097' }
 const CONSUMABLE_LABEL: Record<string, string> = { 'trucount-tube': 'Trucount', 'staining-reagent': 'Reagent', mastermix: 'Mastermix', reagent: 'Reagent', other: 'Lot' }
 type MeanView = 'active' | 'assigned' | 'lab'
 
@@ -47,7 +47,9 @@ function xTickIndexes(length: number) {
 
 function chartShell(status: IqcChart['status']) {
   if (status === 'rejected') return 'border-l-4 border-l-[#dc2626] shadow-[0_18px_44px_rgba(220,38,38,0.08)]'
+  if (status === 'investigate') return 'border-l-4 border-l-[#8f5f1d] shadow-[0_18px_44px_rgba(143,95,29,0.08)]'
   if (status === 'warning') return 'border-l-4 border-l-[#d97706] shadow-[0_18px_44px_rgba(217,119,6,0.08)]'
+  if (status === 'not_evaluated') return 'border-l-4 border-l-[#789097] shadow-[0_18px_44px_rgba(120,144,151,0.08)]'
   return 'border-l-4 border-l-[#0d9488] shadow-[0_18px_44px_rgba(13,148,136,0.06)]'
 }
 
@@ -64,10 +66,13 @@ export function LjChart({
   const [meanView, setMeanView] = useState<MeanView>('active')
   const { points } = chart
 
-  const activeLimitLabel = chart.activeLimit === 'lab' ? 'LAB Mean/SD' : 'Assigned Mean/SD'
+  const legacyActiveLimitLabel = chart.activeLimit === 'lab' ? 'LAB Mean/SD' : 'Assigned Mean/SD'
+  const activeLimitLabel = chart.policyProfile === 'vl-standard-v1' && !chart.baselineId
+    ? 'ยังไม่ใช้ตัดสิน'
+    : chart.activeLimit === 'baseline' ? 'QC baseline (lab observed)' : legacyActiveLimitLabel
   const meanViews: Record<MeanView, { cardLabel: string; label: string; mean: number | null; sd: number | null; detail: string; tone: string }> = {
     active: {
-      cardLabel: 'Active Westgard limit',
+      cardLabel: 'ค่าที่ใช้ตัดสินผลตอนนี้ · Active Westgard limit',
       label: activeLimitLabel,
       mean: chart.mean,
       sd: chart.sd,
@@ -75,16 +80,16 @@ export function LjChart({
       tone: 'border-[#c7e2dc] bg-[#eef9f6] text-[#08766e]',
     },
     assigned: {
-      cardLabel: 'Assigned Mean / SD',
-      label: 'Assigned Mean/SD',
+      cardLabel: 'ค่าอ้างอิงจากผู้ผลิต (CoA) · Assigned Mean / SD',
+      label: 'ค่าอ้างอิงจากผู้ผลิต (CoA) · Assigned Mean/SD',
       mean: chart.assignedMean,
       sd: chart.assignedSd,
       detail: 'ค่าจากผู้ผลิต / certificate',
       tone: 'border-[#dbe7e8] bg-[#fbfefe] text-[#789097]',
     },
     lab: {
-      cardLabel: 'LAB Mean / SD',
-      label: 'LAB Mean/SD',
+      cardLabel: 'ค่าเฉลี่ยและ SD จากห้องปฏิบัติการ (QC baseline) · LAB Mean / SD',
+      label: 'ค่าเฉลี่ยและ SD จากห้องปฏิบัติการ (QC baseline) · LAB Mean/SD',
       // Before the lock the running value stands in, so the card stops reading
       // as "never calculated" once the analyte has enough points.
       mean: chart.labMean ?? chart.runningLabMean,
@@ -153,7 +158,7 @@ export function LjChart({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="font-bold text-[#173d50]">{chart.analyteName}</h3>
-            <StatusBadge tone={chart.status} label={chart.status} />
+            <StatusBadge tone={chart.status} label={chart.status === 'accepted' ? 'ผ่าน' : chart.status === 'warning' ? 'แจ้งเตือน' : chart.status === 'investigate' ? 'ต้องตรวจสอบ' : chart.status === 'rejected' ? 'Rejected' : 'ยังไม่ประเมิน'} />
           </div>
           <p className="mt-0.5 text-xs text-[#789097]">
             {chart.controlMaterialName}
@@ -319,7 +324,7 @@ export function LjChart({
             const y = yAt(p.statValue)
             const color = p.isVoided ? '#9aafb4' : STATUS_COLOR[p.status] ?? '#16a34a'
             const valueLabel = chart.scale === 'log10' ? `${fmt(p.value)}${unitLabel} · log10 ${p.statValue.toFixed(3)}` : fmt(p.value)
-            const tip = `${safeFormatDateTime(p.runDatetime)} · ${valueLabel} · z ${p.z.toFixed(2)}${p.violatedRules.length ? ` · ${p.violatedRules.join(', ')}` : ''}${p.isVoided ? ' · voided' : ''}`
+            const tip = `${safeFormatDateTime(p.runDatetime)} · ${valueLabel} · z ${p.z == null ? '—' : p.z.toFixed(2)}${p.violatedRules.length ? ` · ${p.violatedRules.join(', ')}` : ''}${p.isVoided ? ' · voided' : ''}`
             const node =
               p.status === 'rejected' && !p.isVoided ? (
                 <g stroke={color} strokeWidth={2}>
@@ -328,6 +333,8 @@ export function LjChart({
                 </g>
               ) : p.status === 'warning' && !p.isVoided ? (
                 <polygon points={`${x},${y - 4} ${x + 4},${y + 3.5} ${x - 4},${y + 3.5}`} fill={color} />
+              ) : p.status === 'investigate' && !p.isVoided ? (
+                <rect x={x - 4} y={y - 4} width={8} height={8} rx={1.5} fill={color} transform={`rotate(45 ${x} ${y})`} />
               ) : (
                 <circle cx={x} cy={y} r={4} fill={color} stroke="white" strokeWidth={1.4} opacity={p.isVoided ? 0.4 : 1} />
               )
@@ -374,8 +381,8 @@ export function LjChart({
                   <td className="px-2 py-1.5">{safeFormatDateTime(p.runDatetime)}</td>
                   <td className="mono px-2 py-1.5 text-right tabular-nums">{fmt(p.value)}</td>
                   {chart.scale === 'log10' ? <td className="mono px-2 py-1.5 text-right tabular-nums">{p.statValue.toFixed(3)}</td> : null}
-                  <td className="mono px-2 py-1.5 text-right tabular-nums">{p.z.toFixed(2)}</td>
-                  <td className="px-2 py-1.5"><StatusBadge tone={p.isVoided ? 'neutral' : p.status} label={p.isVoided ? 'voided' : p.status} /></td>
+                  <td className="mono px-2 py-1.5 text-right tabular-nums">{p.z == null ? '—' : p.z.toFixed(2)}</td>
+                  <td className="px-2 py-1.5"><StatusBadge tone={p.isVoided ? 'neutral' : p.status} label={p.isVoided ? 'voided' : p.status === 'accepted' ? 'ผ่าน' : p.status === 'warning' ? 'แจ้งเตือน' : p.status === 'investigate' ? 'ต้องตรวจสอบ' : p.status === 'rejected' ? 'Rejected' : 'ยังไม่ประเมิน'} /></td>
                   <td className="px-2 py-1.5">{p.violatedRules.join(', ') || '—'}</td>
                 </tr>
               ))}

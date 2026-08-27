@@ -25,6 +25,14 @@ describe('lot verification actions', () => {
     expect(service).toContain("if (patch.status === 'released') await assertCanRelease(id)")
   })
 
+  it('uses only an approved instrument-scoped baseline for quantitative VL', () => {
+    expect(service).toContain('function isVlQuantitativeAnalyte')
+    expect(service).toContain('if (isVlQuantitativeAnalyte(analyteById.get(asString(row.analyte_id)))) return []')
+    expect(service).toContain('if (!vlQuantitative) {')
+    expect(service).toContain('approved QC baseline ของเครื่องมือนี้ก่อนบันทึก Parallel comparison')
+    expect(view).toContain("if (vlQuantitative) return matches.find((stat) => stat.instrumentId === v.instrumentId && stat.source === 'baseline')")
+  })
+
   it('starts finalized verification cards collapsed but keeps their details accessible', () => {
     expect(view).toContain("const [expanded, setExpanded] = useState(v.status !== 'released' && v.status !== 'rejected')")
     expect(view).toContain('aria-expanded={expanded}')

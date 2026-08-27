@@ -285,7 +285,7 @@ export async function deleteAttachment(
   const admin = getAdminClient();
   const row = await getAttachmentRow(id);
   const attachmentModule = asString(row.module);
-  if (actor.role !== "Admin" && attachmentModule !== "iqc")
+  if (actor.role !== "Admin")
     throw new HttpError(403, "Admin permission required to delete attachment");
   await admin.storage.from(BUCKET).remove([asString(row.storage_path)]);
   const { error } = await admin.from("bm_attachments").delete().eq("id", id);

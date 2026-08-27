@@ -12,6 +12,7 @@ import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, 
 import { LjChart } from '@/components/lj-chart'
 import { AttachmentList } from '@/components/attachments'
 import { ManagedList } from '@/components/managed-list'
+import { IqcSettingsCenter } from '@/components/iqc-settings-center'
 
 type Tab = 'charts' | 'enter' | 'sixsigma' | 'uncertainty' | 'corrective' | 'manage'
 type NoticeState = { tone: 'success' | 'danger'; text: string } | null
@@ -23,18 +24,28 @@ function nowForDatetimeLocalInput() {
   return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
 }
 
-export function IqcView({ initialData }: { actor: BmActor; initialData: IqcWorkspace }) {
+type IqcViewProps = {
+  actor: BmActor
+  initialData: IqcWorkspace
+  initialTab?: Tab
+  initialSetup?: string | null
+  initialInstrumentId?: string | null
+  initialLotId?: string | null
+  initialAnalyteId?: string | null
+}
+
+export function IqcView({ actor, initialData, initialTab = 'enter', initialSetup = null, initialInstrumentId = null, initialLotId = null, initialAnalyteId = null }: IqcViewProps) {
   const [data, setData] = useState(initialData)
-  const [tab, setTab] = useState<Tab>('enter')
+  const [tab, setTab] = useState<Tab>(initialTab)
   const [notice, setNotice] = useState<NoticeState>(null)
   const [focusedCorrectiveActionId, setFocusedCorrectiveActionId] = useState<string | null>(null)
-  const canManageIqc = true
+  const canManageIqc = actor.role !== 'Assistant'
 
   const tabs = [
     { key: 'enter' as const, label: '1. บันทึกผล IQC', icon: PlusCircle },
     { key: 'charts' as const, label: '2. ตรวจสอบผล', icon: LineChart },
     { key: 'corrective' as const, label: '3. จัดการผลผิดปกติ', icon: Wrench },
-    ...(canManageIqc ? [{ key: 'manage' as const, label: '4. ตั้งค่าล็อตและเกณฑ์', icon: Settings }] : []),
+    ...(canManageIqc ? [{ key: 'manage' as const, label: '4. ตั้งค่าและทบทวน', icon: Settings }] : []),
     { key: 'sixsigma' as const, label: 'วิเคราะห์ Six Sigma', icon: Gauge },
     { key: 'uncertainty' as const, label: 'Uncertainty', icon: Sigma },
   ]
@@ -73,6 +84,8 @@ export function IqcView({ initialData }: { actor: BmActor; initialData: IqcWorks
         inControl: charts.filter((c) => c.status === 'accepted').length,
         warning: charts.filter((c) => c.status === 'warning').length,
         rejected: charts.filter((c) => c.status === 'rejected').length,
+        investigate: charts.filter((c) => c.status === 'investigate').length,
+        notEvaluated: charts.filter((c) => c.status === 'not_evaluated').length,
       },
     }
   }, [data, panel])
@@ -108,6 +121,8 @@ export function IqcView({ initialData }: { actor: BmActor; initialData: IqcWorks
         <StatCard label="In-control" value={scoped.summary.inControl} tone="accepted" />
         <StatCard label="Warning" value={scoped.summary.warning} tone="warning" />
         <StatCard label="Rejected" value={scoped.summary.rejected} tone="rejected" hint={`${data.summary.openCorrectiveActions} corrective action ค้าง`} />
+        <StatCard label="ต้องตรวจสอบ" value={scoped.summary.investigate ?? 0} tone="investigate" />
+        <StatCard label="ยังไม่ประเมิน" value={scoped.summary.notEvaluated ?? 0} tone="not_evaluated" />
       </div> : null}
 
       {tab !== 'enter' && visibleAlerts.length ? (
@@ -126,17 +141,25 @@ export function IqcView({ initialData }: { actor: BmActor; initialData: IqcWorks
       {tab === 'enter' ? <EnterTab data={scoped} onOk={ok} onErr={err} onDone={() => setTab('charts')} /> : null}
       {tab === 'sixsigma' ? <SixSigmaTab data={scoped} /> : null}
       {tab === 'uncertainty' ? <UncertaintyTab data={scoped} isAdmin={canManageIqc} onOk={ok} onErr={err} /> : null}
-      {tab === 'corrective' ? <CorrectiveTab data={data} onOk={ok} onErr={err} focusId={focusedCorrectiveActionId} /> : null}
-      {tab === 'manage' && canManageIqc ? <ManageTab data={data} onOk={ok} onErr={err} /> : null}
+      {tab === 'corrective' ? <CorrectiveTab data={data} actor={actor} onOk={ok} onErr={err} focusId={focusedCorrectiveActionId} /> : null}
+      {tab === 'manage' && canManageIqc ? <IqcSettingsCenter data={data} actor={actor} initialSetup={initialSetup} initialInstrumentId={initialInstrumentId} initialLotId={initialLotId} initialAnalyteId={initialAnalyteId} onOk={ok} onErr={err} /> : null}
     </div>
   )
 }
 
-type ChartStatusFilter = 'attention' | 'all' | 'accepted' | 'warning' | 'rejected' | 'unlocked' | 'expiring'
+type ChartStatusFilter = 'attention' | 'all' | 'accepted' | 'warning' | 'investigate' | 'rejected' | 'not_evaluated' | 'unlocked' | 'expiring'
 type LotVisibility = 'active' | 'closed'
 
 function chartStatusRank(status: IqcWorkspace['charts'][number]['status']) {
-  return status === 'rejected' ? 0 : status === 'warning' ? 1 : 2
+  return status === 'rejected' ? 0 : status === 'investigate' ? 1 : status === 'warning' ? 2 : status === 'not_evaluated' ? 3 : 4
+}
+
+function chartStatusLabel(status: IqcWorkspace['charts'][number]['status']) {
+  return status === 'accepted' ? 'ผ่าน' : status === 'warning' ? 'แจ้งเตือน' : status === 'investigate' ? 'ต้องตรวจสอบ' : status === 'rejected' ? 'Rejected' : 'ยังไม่ประเมิน'
+}
+
+function worstChartStatus(charts: IqcWorkspace['charts']): IqcWorkspace['charts'][number]['status'] {
+  return [...charts].sort((a, b) => chartStatusRank(a.status) - chartStatusRank(b.status))[0]?.status ?? 'accepted'
 }
 
 function daysUntil(dateText: string | null) {
@@ -257,7 +280,10 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
   const attentionKeys = new Set(visibleLotCharts.filter((chart) => chart.status !== 'accepted' || expiringLotIds.has(chart.controlLotId)).map((chart) => chart.key))
   const rejectedCount = visibleLotCharts.filter((chart) => chart.status === 'rejected').length
   const warningCount = visibleLotCharts.filter((chart) => chart.status === 'warning').length
-  const unlockedCount = visibleLotCharts.filter((chart) => !chart.labLockedAt).length
+  const investigateCount = visibleLotCharts.filter((chart) => chart.status === 'investigate').length
+  const notEvaluatedCount = visibleLotCharts.filter((chart) => chart.status === 'not_evaluated').length
+  const legacyCharts = visibleLotCharts.filter((chart) => chart.policyProfile !== 'vl-standard-v1')
+  const unlockedCount = legacyCharts.filter((chart) => !chart.labLockedAt).length
   const expiringCount = new Set(visibleLotCharts.filter((chart) => expiringLotIds.has(chart.controlLotId)).map((chart) => chart.controlLotId)).size
   const q = query.trim().toLowerCase()
   const filteredCharts = visibleLotCharts
@@ -265,8 +291,10 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
       if (statusFilter === 'attention' && !attentionKeys.has(chart.key)) return false
       if (statusFilter === 'accepted' && chart.status !== 'accepted') return false
       if (statusFilter === 'warning' && chart.status !== 'warning') return false
+      if (statusFilter === 'investigate' && chart.status !== 'investigate') return false
       if (statusFilter === 'rejected' && chart.status !== 'rejected') return false
-      if (statusFilter === 'unlocked' && chart.labLockedAt) return false
+      if (statusFilter === 'not_evaluated' && chart.status !== 'not_evaluated') return false
+      if (statusFilter === 'unlocked' && (chart.policyProfile === 'vl-standard-v1' || chart.labLockedAt)) return false
       if (statusFilter === 'expiring' && !expiringLotIds.has(chart.controlLotId)) return false
       if (!q) return true
       return [chart.controlMaterialName, chart.level, chart.lotNumber, chart.analyteCode, chart.analyteName, chart.groupLabel].filter(Boolean).join(' ').toLowerCase().includes(q)
@@ -287,7 +315,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
   return (
     <div className="space-y-4">
       <Card className="overflow-hidden">
-        <div className="grid gap-px bg-[#dbe8e9] sm:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-px bg-[#dbe8e9] sm:grid-cols-2 xl:grid-cols-7">
           <button
             type="button"
             onClick={() => {
@@ -300,7 +328,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
               <ListFilter className="size-4" /> Needs attention
             </div>
             <div className="mono mt-2 text-2xl font-bold text-[#173d50]">{attentionKeys.size}</div>
-            <p className="mt-1 text-xs text-[#789097]">warning, rejected หรือใกล้หมดอายุ</p>
+            <p className="mt-1 text-xs text-[#789097]">warning, investigate, rejected หรือยังไม่ประเมิน</p>
           </button>
           <button
             type="button"
@@ -329,6 +357,34 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
             </div>
             <div className="mono mt-2 text-2xl font-bold text-[#a9700f]">{warningCount}</div>
             <p className="mt-1 text-xs text-[#789097]">Westgard watch</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setStatusFilter('investigate')
+              setSelectedKey(null)
+            }}
+            className={`bg-white p-4 text-left transition hover:bg-[#fffaf0] ${statusFilter === 'investigate' ? 'ring-2 ring-inset ring-[#8f5f1d]' : ''}`}
+          >
+            <div className="flex items-center gap-2 text-[11px] font-bold tracking-[0.14em] text-[#789097] uppercase">
+              <AlertTriangle className="size-4" /> Investigate
+            </div>
+            <div className="mono mt-2 text-2xl font-bold text-[#8f5f1d]">{investigateCount}</div>
+            <p className="mt-1 text-xs text-[#789097]">open investigation</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setStatusFilter('not_evaluated')
+              setSelectedKey(null)
+            }}
+            className={`bg-white p-4 text-left transition hover:bg-[#f7fbfb] ${statusFilter === 'not_evaluated' ? 'ring-2 ring-inset ring-[#789097]' : ''}`}
+          >
+            <div className="flex items-center gap-2 text-[11px] font-bold tracking-[0.14em] text-[#789097] uppercase">
+              <AlertTriangle className="size-4" /> Not evaluated
+            </div>
+            <div className="mono mt-2 text-2xl font-bold text-[#5b7681]">{notEvaluatedCount}</div>
+            <p className="mt-1 text-xs text-[#789097]">baseline not active</p>
           </button>
           <button
             type="button"
@@ -391,6 +447,8 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
             <option value="all">{lotVisibility === 'active' ? 'All active charts' : 'All closed charts'}</option>
             <option value="rejected">Rejected</option>
             <option value="warning">Warning</option>
+            <option value="investigate">ต้องตรวจสอบ</option>
+            <option value="not_evaluated">ยังไม่ประเมิน</option>
             <option value="accepted">Accepted</option>
             <option value="expiring">Expiring lots</option>
             <option value="unlocked">Not lab-locked</option>
@@ -403,11 +461,13 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
           {filteredCharts.length ? (
             [...grouped.entries()].map(([lotId, charts]) => {
               const lot = lotsById.get(lotId)
-              const worst = charts.some((chart) => chart.status === 'rejected') ? 'rejected' : charts.some((chart) => chart.status === 'warning') ? 'warning' : 'accepted'
+              const worst = worstChartStatus(charts)
               const days = daysUntil(lot?.expiryDate ?? null)
-              const lockedCount = charts.filter((chart) => chart.labLockedAt).length
+              const legacyCharts = charts.filter((chart) => chart.policyProfile !== 'vl-standard-v1')
+              const lockedCount = legacyCharts.filter((chart) => chart.labLockedAt).length
               const unlockable = lockedCount > 0
-              const lockable = charts.some((chart) => !chart.labLockedAt && chart.n >= 2)
+              const hasVlChart = charts.some((chart) => chart.policyProfile === 'vl-standard-v1')
+              const lockable = !hasVlChart && charts.some((chart) => !chart.labLockedAt && chart.n >= 2)
               const lotBusy = busy === `lot:${lotId}`
               return (
                 <Card key={lotId} className="overflow-hidden">
@@ -416,7 +476,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="font-bold text-[#173d50]">{charts[0]?.controlMaterialName}</h3>
                         {charts[0]?.level ? <span className="rounded-full border border-[#d2dee0] px-2 py-0.5 text-[11px] font-bold text-[#55727c]">{charts[0].level}</span> : null}
-                        <StatusBadge tone={worst} label={worst} />
+                        <StatusBadge tone={worst} label={chartStatusLabel(worst)} />
                         {!lot?.isActive ? <span className="rounded-full border border-[#d2dee0] bg-[#f1f5f5] px-2 py-0.5 text-[11px] font-bold text-[#58747d]">closed</span> : null}
                       </div>
                       <p className="mono mt-1 text-xs text-[#5f7880]">Lot {charts[0]?.lotNumber}</p>
@@ -444,15 +504,16 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
                               <Lock className="size-3.5" /> Unlock ทั้ง Lot
                             </Button>
                           ) : null}
-                          {!lockable && !unlockable ? <span className="text-xs text-[#789097]">ยังไม่มี analyte ที่ lock ได้</span> : null}
+                          {hasVlChart ? <span className="text-xs text-[#0b7f76]">VL ใช้ QC baseline แทน Lock & ปิด Lot</span> : null}
+                          {!hasVlChart && !lockable && !unlockable ? <span className="text-xs text-[#789097]">ยังไม่มี analyte ที่ lock ได้</span> : null}
                         </div>
                       ) : null}
                       <div className="ml-auto shrink-0 text-right text-xs text-[#789097]">
                         <div>
                           {charts.length} analyte{charts.length > 1 ? 's' : ''}
                         </div>
-                        <div className={lockedCount === charts.length ? 'font-bold text-[#18763a]' : 'font-bold text-[#a9700f]'}>
-                          {lockedCount}/{charts.length} locked
+                        <div className={lockedCount === legacyCharts.length && legacyCharts.length > 0 ? 'font-bold text-[#18763a]' : 'font-bold text-[#a9700f]'}>
+                          {legacyCharts.length ? `${lockedCount}/${legacyCharts.length} Lab locked` : hasVlChart ? 'VL baseline แยกต่างหาก' : 'ยังไม่มี analyte ที่ lock ได้'}
                         </div>
                         {lot?.expiryDate ? <div className={days != null && days <= 30 ? 'font-bold text-[#a9700f]' : ''}>EXP {formatDate(lot.expiryDate)}</div> : null}
                       </div>
@@ -461,17 +522,21 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
                   <div className="divide-y divide-[#eef3f3]">
                     {charts.map((chart) => {
                       const latest = [...chart.points].reverse().find((point) => !point.isVoided)
+                      const legacyActiveLimitLabel = chart.activeLimit === 'lab' ? 'LAB Mean/SD' : 'Assigned Mean/SD'
+                      const activeLimitLabel = chart.policyProfile === 'vl-standard-v1' && !chart.baselineId
+                        ? 'ยังไม่ใช้ตัดสิน · รอ QC baseline'
+                        : chart.activeLimit === 'baseline' ? 'QC baseline (lab observed)' : legacyActiveLimitLabel
                       const selected = selectedChart?.key === chart.key
                       return (
                         <div key={chart.key} className={`grid w-full gap-3 px-4 py-3 text-left transition hover:bg-[#f7fbfb] sm:grid-cols-[1fr_auto] ${selected ? 'bg-[#edf8f6] ring-2 ring-inset ring-[#0b7f76]/45' : 'bg-white'}`}>
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="font-bold text-[#173d50]">{chart.analyteCode}</span>
-                              <StatusBadge tone={chart.status} label={chart.status} />
-                              {!chart.labLockedAt ? <span className="rounded-full border border-[#eed4a6] bg-[#fff9ed] px-2 py-0.5 text-[11px] font-bold text-[#a9700f]">not locked</span> : <span className="rounded-full border border-[#bfe3cf] bg-[#f1fbf4] px-2 py-0.5 text-[11px] font-bold text-[#18763a]">locked</span>}
+                              <StatusBadge tone={chart.status} label={chartStatusLabel(chart.status)} />
+                              {chart.policyProfile === 'vl-standard-v1' ? <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${chart.baselineId ? 'border-[#bfe3cf] bg-[#f1fbf4] text-[#18763a]' : 'border-[#d2dee0] bg-[#f6f9f9] text-[#5b7681]'}`}>{chart.baselineId ? 'QC baseline approved' : 'รอ QC baseline'}</span> : !chart.labLockedAt ? <span className="rounded-full border border-[#eed4a6] bg-[#fff9ed] px-2 py-0.5 text-[11px] font-bold text-[#a9700f]">not locked</span> : <span className="rounded-full border border-[#bfe3cf] bg-[#f1fbf4] px-2 py-0.5 text-[11px] font-bold text-[#18763a]">locked</span>}
                             </div>
                             <p className="mt-1 text-xs text-[#789097]">
-                              เกณฑ์ที่ใช้: {chart.activeLimit === 'lab' ? 'LAB Mean/SD' : 'Assigned Mean/SD'} · n {chart.n} · mean {fmtCompact(chart.mean)} · SD {fmtCompact(chart.sd)}
+                              เกณฑ์ที่ใช้: {activeLimitLabel} · n {chart.n} · mean {fmtCompact(chart.mean)} · SD {fmtCompact(chart.sd)}
                               {latest ? ` · latest ${fmtCompact(latest.value)} (${formatDateTime(latest.runDatetime)})` : ''}
                             </p>
                             <p className="mt-1 text-[11px] text-[#58747d]">
@@ -508,8 +573,8 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
               <LjChart chart={selectedChart} selectedResultId={selectedPointId} onPointSelect={(point) => setSelectedPointId(point.resultId)} />
               {selectedPoint ? <PointDetailCard key={`${selectedChart.key}:${selectedPoint.resultId}`} chart={selectedChart} point={selectedPoint} run={selectedRun} result={selectedRunResult} correctiveAction={linkedCorrectiveAction} busy={busy === `point:${selectedPoint.resultId}`} onVoid={() => voidPoint(selectedPoint.resultId)} onCreateCorrective={(problem) => createPointCorrectiveAction(selectedPoint, selectedChart, problem)} onOpenCorrectiveAction={onOpenCorrectiveAction} /> : null}
               <div className="flex justify-end">
-                <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-bold ${selectedChart.labLockedAt ? 'border-[#bfe3cf] bg-[#f1fbf4] text-[#18763a]' : 'border-[#eed4a6] bg-[#fff9ed] text-[#a9700f]'}`}>
-                  <Lock className="size-3.5" /> {selectedChart.labLockedAt ? 'Lab mean/SD locked' : 'Not locked - use lot action'}
+                  <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-bold ${selectedChart.policyProfile === 'vl-standard-v1' ? selectedChart.baselineId ? 'border-[#bfe3cf] bg-[#f1fbf4] text-[#18763a]' : 'border-[#d2dee0] bg-[#f6f9f9] text-[#5b7681]' : selectedChart.labLockedAt ? 'border-[#bfe3cf] bg-[#f1fbf4] text-[#18763a]' : 'border-[#eed4a6] bg-[#fff9ed] text-[#a9700f]'}`}>
+                    <Lock className="size-3.5" /> {selectedChart.policyProfile === 'vl-standard-v1' ? selectedChart.baselineId ? 'QC baseline approved' : 'รอ QC baseline' : selectedChart.labLockedAt ? 'Lab mean/SD locked' : 'Not locked - use lot action'}
                 </span>
               </div>
             </>
@@ -530,6 +595,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction 
 
 function PointDetailCard({ chart, point, run, result, correctiveAction, busy, onVoid, onCreateCorrective, onOpenCorrectiveAction }: { chart: IqcWorkspace['charts'][number]; point: IqcWorkspace['charts'][number]['points'][number]; run: IqcWorkspace['runs'][number] | null; result: IqcWorkspace['runs'][number]['results'][number] | null; correctiveAction: IqcWorkspace['correctiveActions'][number] | null; busy: boolean; onVoid: () => void; onCreateCorrective: (problem: string) => Promise<void>; onOpenCorrectiveAction: (id: string) => void }) {
   const [problem, setProblem] = useState('')
+  const needsAction = point.status === 'warning' || point.status === 'investigate' || point.status === 'rejected'
 
   async function createCorrectiveAction(event: React.FormEvent) {
     event.preventDefault()
@@ -563,7 +629,7 @@ function PointDetailCard({ chart, point, run, result, correctiveAction, busy, on
         </div>
         <div className="rounded-md border border-[#e2ecee] bg-[#fbfefe] p-3">
           <p className="text-[11px] font-bold text-[#789097] uppercase">Z-score</p>
-          <p className="mono mt-1 text-lg font-bold tabular-nums text-[#173d50]">{point.z.toFixed(2)}</p>
+          <p className="mono mt-1 text-lg font-bold tabular-nums text-[#173d50]">{point.z == null ? '—' : point.z.toFixed(2)}</p>
         </div>
         <div className="rounded-md border border-[#e2ecee] bg-[#fbfefe] p-3">
           <p className="text-[11px] font-bold text-[#789097] uppercase">Rules</p>
@@ -583,13 +649,13 @@ function PointDetailCard({ chart, point, run, result, correctiveAction, busy, on
             <Wrench className="size-3.5" /> ไปยัง Corrective action
           </Button>
         </div>
-      ) : !point.isVoided ? (
+      ) : !point.isVoided && needsAction ? (
         <form onSubmit={createCorrectiveAction} className="space-y-2 rounded-md border border-[#e2ecee] bg-[#fbfefe] p-3">
-          <p className="text-xs font-bold text-[#315763]">บันทึก Corrective action สำหรับจุดนี้</p>
+          <p className="text-xs font-bold text-[#315763]">{point.status === 'investigate' ? 'เปิด investigation สำหรับจุดนี้' : 'บันทึก Corrective action สำหรับจุดนี้'}</p>
           <Textarea rows={2} value={problem} onChange={(event) => setProblem(event.target.value)} placeholder="ระบุปัญหาที่พบ" required />
           <div className="flex justify-end">
             <Button className="min-h-8 px-3 py-1.5 text-xs" disabled={busy}>
-              บันทึก Corrective action
+              {point.status === 'investigate' ? 'เปิด investigation' : 'บันทึก Corrective action'}
             </Button>
           </div>
         </form>
@@ -672,6 +738,7 @@ function parseImportRows(text: string, columnCount: number): { runDatetime: stri
 function ImportPanel({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void }) {
   const activeLots = data.controlLots.filter((l) => l.isActive)
   const [controlLotId, setControlLotId] = useState('')
+  const [instrumentId, setInstrumentId] = useState(data.instruments[0]?.id ?? '')
   const [cols, setCols] = useState<string[]>([])
   const [trucountLot, setTrucountLot] = useState('')
   const [text, setText] = useState('')
@@ -686,12 +753,14 @@ function ImportPanel({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: stri
 
   async function submit() {
     if (!controlLotId || !cols.length || !preview.length) return onErr('เลือก control lot, คอลัมน์ analyte และวางข้อมูล')
+    if (!instrumentId) return onErr('เลือกเครื่องมือที่ใช้รันก่อนนำเข้า')
     setBusy(true)
     try {
       const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/import', {
         method: 'POST',
         body: JSON.stringify({
           controlLotId,
+          instrumentId: instrumentId || null,
           analyteIds: cols,
           trucountLot: trucountLot || null,
           rows: preview,
@@ -712,7 +781,7 @@ function ImportPanel({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: stri
         <h2 className="font-bold text-[#173d50]">นำเข้าจากตาราง / Paste import</h2>
         <p className="text-xs text-[#789097]">วางจาก Google Sheet/Excel ได้เลย — คอลัมน์แรก = วันที่ (เช่น 18-May-26), คอลัมน์ถัดไป = ค่าตาม analyte ที่จับคู่ (เว้นว่างได้)</p>
       </div>
-      <div className="grid gap-2 md:grid-cols-[1fr_auto_auto]">
+      <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto_auto]">
         <Field label="Control lot">
           <Select value={controlLotId} onChange={(e) => setControlLotId(e.target.value)}>
             <option value="">—</option>
@@ -722,6 +791,12 @@ function ImportPanel({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: stri
                 {l.level ? ` ${l.level}` : ''} · {l.lotNumber}
               </option>
             ))}
+          </Select>
+        </Field>
+        <Field label="เครื่องมือที่ใช้รัน" hint="ใช้กำหนด scope ของ QC baseline; ต้องเป็นเครื่องมือที่เชื่อมจาก Equipment">
+          <Select value={instrumentId} onChange={(e) => setInstrumentId(e.target.value)} required>
+            <option value="">เลือกเครื่องมือ</option>
+            {data.instruments.filter((instrument) => instrument.isActive).map((instrument) => <option key={instrument.id} value={instrument.id}>{instrument.code} · {instrument.name}</option>)}
           </Select>
         </Field>
         <div className="flex items-end">
@@ -764,7 +839,7 @@ function ImportPanel({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: stri
       <Textarea rows={6} className="mono text-xs" value={text} onChange={(e) => setText(e.target.value)} placeholder={'18-May-26\t57.79\t857\t11.4\t169\n19-May-26\t55.78\t868\t11.64\t181'} />
       <div className="flex items-center justify-between">
         <span className="text-xs text-[#789097]">{preview.length ? `อ่านได้ ${preview.length} แถว` : 'ยังไม่มีแถวที่อ่านได้'}</span>
-        <Button disabled={busy || !preview.length || !controlLotId} onClick={submit}>
+        <Button disabled={busy || !preview.length || !controlLotId || !instrumentId} onClick={submit}>
           {busy ? 'กำลังนำเข้า…' : `นำเข้า ${preview.length || ''} run`}
         </Button>
       </div>
@@ -784,7 +859,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
   const activeAnalytes = useMemo(() => data.analytes.filter((a) => a.isActive), [data.analytes])
   const activeLots = useMemo(() => data.controlLots.filter((l) => l.isActive), [data.controlLots])
   const [instrumentId, setInstrumentId] = useState('')
-  const [runDatetime, setRunDatetime] = useState(nowForDatetimeLocalInput)
+  const [runDatetime, setRunDatetime] = useState('')
   const [note, setNote] = useState('')
   const [consumables, setConsumables] = useState<ConsumableRow[]>([])
   const [rows, setRows] = useState<ValueRow[]>([])
@@ -795,11 +870,17 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
   const [showImport, setShowImport] = useState(false)
   const seq = useMemo(() => ({ n: 1 }), [])
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setRunDatetime(nowForDatetimeLocalInput()), 0)
+    return () => window.clearTimeout(timer)
+  }, [])
+
   const analyteById = useMemo(() => new Map(data.analytes.map((a) => [a.id, a])), [data.analytes])
   const selectedInstrument = data.instruments.find((instrument) => instrument.id === instrumentId)
+  const selectedEquipmentId = selectedInstrument?.equipmentId ?? null
   const availableStockLots = useMemo(
-    () => selectedInstrument?.equipmentId ? data.stockLots.filter((lot) => lot.equipmentIds.includes(selectedInstrument.equipmentId!)) : data.stockLots,
-    [data.stockLots, selectedInstrument?.equipmentId],
+    () => selectedEquipmentId ? data.stockLots.filter((lot) => lot.equipmentIds.includes(selectedEquipmentId)) : data.stockLots,
+    [data.stockLots, selectedEquipmentId],
   )
   const selectedControlPlans = useMemo(
     () => data.controlPlans.filter((plan) => plan.isActive && plan.instrumentId === instrumentId),
@@ -842,6 +923,8 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
     ])
   }
   function startLot(controlLotId: string, selectedSet = testSet) {
+    // Named test-set equivalent kept explicit for legacy callers and deep links:
+    // startLot(fillLot, selectedSet)
     if (!controlLotId) {
       setRows([])
       return
@@ -1446,7 +1529,7 @@ function BudgetForm({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: strin
   )
 }
 
-function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void; focusId: string | null }) {
+function CorrectiveTab({ data, actor, onOk, onErr, focusId }: { data: IqcWorkspace; actor: BmActor; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void; focusId: string | null }) {
   const [runId, setRunId] = useState('')
   const [problem, setProblem] = useState('')
   const [rootCause, setRootCause] = useState('')
@@ -1464,7 +1547,7 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
 
   const controlLotLabels = useMemo(() => new Map(data.controlLots.map((lot) => [lot.id, `${lot.controlMaterialName}${lot.level ? ` ${lot.level}` : ''} · ${lot.lotNumber}`])), [data.controlLots])
   const runById = useMemo(() => new Map(data.runs.map((run) => [run.id, run])), [data.runs])
-  const flaggedOf = (r: IqcWorkspace['runs'][number]) => r.results.filter((res) => !res.isVoided && res.status !== 'accepted')
+  const flaggedOf = (r: IqcWorkspace['runs'][number]) => r.results.filter((res) => !res.isVoided && ['warning', 'investigate', 'rejected'].includes(res.status))
   const runOptions = runsWithoutCorrectiveActions(data.runs, data.correctiveActions).filter((r) => showAll || flaggedOf(r).length > 0)
   const actionCounts = useMemo(() => ({
     open: data.correctiveActions.filter((action) => action.status === 'open').length,
@@ -1781,7 +1864,7 @@ function CorrectiveTab({ data, onOk, onErr, focusId }: { data: IqcWorkspace; onO
                     </>
                   )}
                   <div className="mt-3">
-                    <AttachmentList module="iqc" entityType="corrective-action" entityId={ca.id} kind="corrective-action" canDelete />
+                    <AttachmentList module="iqc" entityType="corrective-action" entityId={ca.id} kind="corrective-action" canDelete={actor.role === 'Admin'} />
                   </div>
                 </div>
               ) : null}
@@ -1865,7 +1948,6 @@ function ControlPlanForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise
   const [testSet, setTestSet] = useState('')
   const [instrumentId, setInstrumentId] = useState('')
   const [enforceLevels, setEnforceLevels] = useState(true)
-  const [selectedLevels, setSelectedLevels] = useState<string[]>([])
   const [frequency, setFrequency] = useState('daily')
   const [rules, setRules] = useState<string[]>(CONTROL_PLAN_RULES)
   const [busy, setBusy] = useState(false)
@@ -1874,9 +1956,7 @@ function ControlPlanForm({ onSubmit, data }: { onSubmit: (b: unknown) => Promise
     ? data.analytes.filter((analyte) => analyte.isActive && hasTestSet(analyte.groupLabel, testSet)).map((analyte) => analyte.id)
     : analyteId ? [analyteId] : []
   const availableLevels = useMemo(() => [...new Set(data.controlLots.filter((lot) => lot.isActive && lot.level).map((lot) => lot.level!))].sort(), [data.controlLots])
-  useEffect(() => {
-    setSelectedLevels(availableLevels)
-  }, [availableLevels.join('|')])
+  const [selectedLevels, setSelectedLevels] = useState<string[]>(availableLevels)
   const toggleRule = (rule: string) => setRules((current) => (current.includes(rule) ? current.filter((item) => item !== rule) : [...current, rule]))
   const toggleLevel = (level: string) => setSelectedLevels((current) => current.includes(level) ? current.filter((item) => item !== level) : [...current, level])
   return (
