@@ -4,9 +4,11 @@ export function findCorrectiveActionForPoint(
   actions: IqcCorrectiveAction[],
   runId: string,
   analyteId: string,
+  resultId?: string | null,
 ) {
-  return actions.find((action) => action.runId === runId && action.analyteId === analyteId)
-    ?? actions.find((action) => action.runId === runId && action.analyteId === null)
+  return (resultId ? actions.find((action) => action.resultId === resultId) : null)
+    ?? actions.find((action) => action.runId === runId && action.analyteId === analyteId && !action.resultId)
+    ?? actions.find((action) => action.runId === runId && action.analyteId === null && !action.resultId)
     ?? null
 }
 

@@ -34,6 +34,7 @@ import type {
   Distribution,
   UncertaintySource,
 } from '@/lib/iqc/types'
+import { normalizeReviewFindings, validateCorrectiveAction, type CorrectiveActionDraft, type CorrectiveActionFields, type CorrectiveCorrectionOutcome, type CorrectiveErrorType } from '@/lib/corrective-actions'
 import { LAB_LOCK_MIN_POINTS } from '@/lib/iqc/types'
 import { calculateBaselineStats, evaluateVlScope, expectedNormalResult, type BaselineValue, type EvaluationAnalyte, type EvaluationBaseline } from '@/lib/iqc/baseline'
 import { cv, evaluateLatest, evaluateLatestByPolicy, mean, sd, toStat, WESTGARD_RULES, type QcStatus, type WestgardPolicyProfile, type WestgardRule } from '@/lib/iqc/westgard'
@@ -59,6 +60,9 @@ function asString(value: unknown) {
 }
 function nullableString(value: unknown) {
   return typeof value === 'string' ? value : null
+}
+function stringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
 function nullableNumber(value: unknown) {
   return value == null || value === '' ? null : Number(value)
@@ -872,6 +876,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
           : null
         const vlWithoutBaseline = isQuantitativeVlAnalyte(analyte) && resultBaseline?.state !== 'approved'
         return {
+          resultId: asString(value.id),
           analyteId: asString(value.analyte_id),
           analyteCode: analyte?.code ?? '-',
           analyteName: analyte?.name ?? '-',
@@ -893,12 +898,21 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     return {
       id: asString(row.id),
       runId: asString(row.run_id),
+      resultId: nullableString(row.result_id),
       runDatetime: runDatetime.get(asString(row.run_id)) ?? asString(row.created_at),
       analyteId: nullableString(row.analyte_id),
       analyteName: analyte?.name ?? null,
       problem: asString(row.problem),
+      issueTypes: stringArray(row.issue_types),
+      probableErrorType: row.probable_error_type === 'random' || row.probable_error_type === 'systematic' || row.probable_error_type === 'unknown' || row.probable_error_type === 'other' ? row.probable_error_type as CorrectiveErrorType : null,
+      probableErrorNote: nullableString(row.probable_error_note),
+      reviewFindings: normalizeReviewFindings(row.review_findings, 'iqc'),
       rootCause: nullableString(row.root_cause),
+      actionTypes: stringArray(row.action_types),
       actionTaken: nullableString(row.action_taken),
+      correctionOutcome: row.correction_outcome === 'corrected' || row.correction_outcome === 'not-corrected' || row.correction_outcome === 'monitoring' || row.correction_outcome === 'other' ? row.correction_outcome as CorrectiveCorrectionOutcome : null,
+      correctionOutcomeNote: nullableString(row.correction_outcome_note),
+      preventiveAction: nullableString(row.preventive_action),
       status: asString(row.status) === 'closed' ? 'closed' : asString(row.status) === 'awaiting-effectiveness' ? 'awaiting-effectiveness' : 'open',
       ownerId: nullableString(row.owner_id),
       ownerName: row.owner_id ? nameMap.get(asString(row.owner_id)) ?? userNameMap.get(asString(row.owner_id)) ?? null : null,
@@ -2542,23 +2556,72 @@ export async function unlockControlLotStatistics(controlLotId: string, reason: s
 
 export async function createCorrectiveAction(input: {
   runId: string
+  resultId?: string | null
   analyteId?: string | null
   relatedConsumableId?: string | null
   problem: string
+  issueTypes?: string[]
+  probableErrorType?: CorrectiveErrorType | null
+  probableErrorNote?: string | null
+  reviewFindings?: Record<string, unknown> | null
   rootCause?: string | null
+  actionTypes?: string[]
   actionTaken?: string | null
+  correctionOutcome?: CorrectiveCorrectionOutcome | null
+  correctionOutcomeNote?: string | null
+  preventiveAction?: string | null
   ownerId?: string | null
   dueDate?: string | null
 }, actor: BmActor) {
   assertAdmin(actor)
   if (!input.problem.trim()) throw new HttpError(400, 'Problem description is required')
-  const { data, error } = await getAdminClient().from('iqc_corrective_actions').insert({
+  const admin = getAdminClient()
+  if (input.resultId) {
+    const { data: linkedResult, error: linkedResultError } = await admin.from('iqc_result_values').select('run_id,analyte_id').eq('id', input.resultId).maybeSingle()
+    fail(linkedResultError)
+    if (!linkedResult) throw new HttpError(400, 'IQC result not found')
+    const linked = linkedResult as RecordRow
+    if (asString(linked.run_id) !== input.runId) throw new HttpError(400, 'IQC result does not belong to the selected run')
+    if (input.analyteId && asString(linked.analyte_id) !== input.analyteId) throw new HttpError(400, 'IQC result does not belong to the selected analyte')
+  }
+  let existingQuery = admin.from('iqc_corrective_actions').select('id').eq('run_id', input.runId).limit(1)
+  if (input.resultId) existingQuery = existingQuery.eq('result_id', input.resultId)
+  else if (input.analyteId) existingQuery = existingQuery.eq('analyte_id', input.analyteId).is('result_id', null)
+  else existingQuery = existingQuery.is('analyte_id', null).is('result_id', null)
+  {
+    const { data: existing, error: existingError } = await existingQuery.maybeSingle()
+    fail(existingError)
+    if (existing) return getIqcWorkspace(actor)
+  }
+  // Rows created before result_id was introduced were run/analyte-scoped.
+  // Treat that legacy scope as the same context when a graph click supplies
+  // the now-preferred exact result link.
+  if (input.resultId && input.analyteId) {
+    const { data: legacy, error: legacyError } = await admin.from('iqc_corrective_actions').select('id').eq('run_id', input.runId).eq('analyte_id', input.analyteId).is('result_id', null).limit(1).maybeSingle()
+    fail(legacyError)
+    if (legacy) return getIqcWorkspace(actor)
+  }
+  if (input.resultId) {
+    const { data: legacyRun, error: legacyRunError } = await admin.from('iqc_corrective_actions').select('id').eq('run_id', input.runId).is('analyte_id', null).is('result_id', null).limit(1).maybeSingle()
+    fail(legacyRunError)
+    if (legacyRun) return getIqcWorkspace(actor)
+  }
+  const { data, error } = await admin.from('iqc_corrective_actions').insert({
     run_id: input.runId,
+    result_id: input.resultId || null,
     analyte_id: input.analyteId || null,
     related_consumable_id: input.relatedConsumableId || null,
     problem: input.problem.trim(),
+    issue_types: input.issueTypes ?? [],
+    probable_error_type: input.probableErrorType || null,
+    probable_error_note: clean(input.probableErrorNote),
+    review_findings: input.reviewFindings ?? {},
     root_cause: clean(input.rootCause),
+    action_types: input.actionTypes ?? [],
     action_taken: clean(input.actionTaken),
+    correction_outcome: input.correctionOutcome || null,
+    correction_outcome_note: clean(input.correctionOutcomeNote),
+    preventive_action: clean(input.preventiveAction),
     owner_id: input.ownerId || null,
     due_date: input.dueDate || null,
     created_by: actor.id,
@@ -2570,8 +2633,16 @@ export async function createCorrectiveAction(input: {
 
 export async function updateCorrectiveAction(id: string, input: {
   problem?: string
+  issueTypes?: string[]
+  probableErrorType?: CorrectiveErrorType | null
+  probableErrorNote?: string | null
+  reviewFindings?: Record<string, unknown> | null
   rootCause?: string | null
+  actionTypes?: string[]
   actionTaken?: string | null
+  correctionOutcome?: CorrectiveCorrectionOutcome | null
+  correctionOutcomeNote?: string | null
+  preventiveAction?: string | null
   ownerId?: string | null
   dueDate?: string | null
 }, actor: BmActor) {
@@ -2592,8 +2663,16 @@ export async function updateCorrectiveAction(id: string, input: {
     if (!problem) throw new HttpError(400, 'Problem description is required')
     update.problem = problem
   }
+  if (input.issueTypes !== undefined) update.issue_types = input.issueTypes
+  if (input.probableErrorType !== undefined) update.probable_error_type = input.probableErrorType || null
+  if (input.probableErrorNote !== undefined) update.probable_error_note = clean(input.probableErrorNote)
+  if (input.reviewFindings !== undefined) update.review_findings = input.reviewFindings ?? {}
   if (input.rootCause !== undefined) update.root_cause = clean(input.rootCause)
+  if (input.actionTypes !== undefined) update.action_types = input.actionTypes
   if (input.actionTaken !== undefined) update.action_taken = clean(input.actionTaken)
+  if (input.correctionOutcome !== undefined) update.correction_outcome = input.correctionOutcome || null
+  if (input.correctionOutcomeNote !== undefined) update.correction_outcome_note = clean(input.correctionOutcomeNote)
+  if (input.preventiveAction !== undefined) update.preventive_action = clean(input.preventiveAction)
   if (input.ownerId !== undefined) update.owner_id = input.ownerId || null
   if (input.dueDate !== undefined) update.due_date = input.dueDate || null
   if (!Object.keys(update).length) throw new HttpError(400, 'No changes provided')
@@ -2604,26 +2683,55 @@ export async function updateCorrectiveAction(id: string, input: {
   return getIqcWorkspace(actor)
 }
 
-export async function closeCorrectiveAction(id: string, input: { rootCause?: string | null; actionTaken?: string | null; effectivenessOutcome?: 'effective' | 'ineffective' | null; effectivenessNote?: string | null }, actor: BmActor) {
+export async function closeCorrectiveAction(id: string, input: CorrectiveActionFields & { effectivenessOutcome?: 'effective' | 'ineffective' | null; effectivenessNote?: string | null }, actor: BmActor) {
   assertAdmin(actor)
   const admin = getAdminClient()
   const { data: existing, error: existingError } = await admin
     .from('iqc_corrective_actions')
-    .select('root_cause,action_taken,status,owner_id,due_date')
+    .select('problem,issue_types,probable_error_type,probable_error_note,review_findings,root_cause,action_types,action_taken,correction_outcome,correction_outcome_note,preventive_action,status,owner_id,due_date')
     .eq('id', id)
     .maybeSingle()
   fail(existingError)
   if (!existing) throw new HttpError(404, 'Corrective action not found')
   if (asString((existing as RecordRow).status) === 'closed') throw new HttpError(400, 'Corrective action is already closed')
 
-  const rootCause = clean(input.rootCause) ?? clean(nullableString((existing as RecordRow).root_cause))
-  const actionTaken = clean(input.actionTaken) ?? clean(nullableString((existing as RecordRow).action_taken))
-  if (!rootCause || !actionTaken) throw new HttpError(400, 'Root cause and action taken are required before closing')
+  const draft: Partial<CorrectiveActionDraft> = {
+    problem: input.problem ?? asString((existing as RecordRow).problem),
+    issueTypes: input.issueTypes ?? stringArray((existing as RecordRow).issue_types),
+    probableErrorType: input.probableErrorType ?? ((existing as RecordRow).probable_error_type as CorrectiveErrorType | null) ?? undefined,
+    probableErrorNote: input.probableErrorNote ?? nullableString((existing as RecordRow).probable_error_note) ?? '',
+    reviewFindings: input.reviewFindings ?? normalizeReviewFindings((existing as RecordRow).review_findings, 'iqc'),
+    rootCause: input.rootCause ?? nullableString((existing as RecordRow).root_cause) ?? '',
+    actionTypes: input.actionTypes ?? stringArray((existing as RecordRow).action_types),
+    actionTaken: input.actionTaken ?? nullableString((existing as RecordRow).action_taken) ?? '',
+    correctionOutcome: input.correctionOutcome ?? ((existing as RecordRow).correction_outcome as CorrectiveActionDraft['correctionOutcome']),
+    correctionOutcomeNote: input.correctionOutcomeNote ?? nullableString((existing as RecordRow).correction_outcome_note) ?? '',
+    preventiveAction: input.preventiveAction ?? nullableString((existing as RecordRow).preventive_action) ?? '',
+    ownerId: input.ownerId ?? nullableString((existing as RecordRow).owner_id) ?? '',
+    dueDate: input.dueDate ?? nullableString((existing as RecordRow).due_date) ?? '',
+  }
+  const validation = validateCorrectiveAction(draft, 'iqc', 'complete')
+  if (validation.length) throw new HttpError(400, validation.map((issue) => issue.message).join(' | '))
+  const rootCause = clean(draft.rootCause)
+  const actionTaken = clean(draft.actionTaken)
 
   const outcome = input.effectivenessOutcome ?? null
   const note = clean(input.effectivenessNote)
   if (outcome && !note) throw new HttpError(400, 'Effectiveness note is required')
-  const update: Record<string, unknown> = { root_cause: rootCause, action_taken: actionTaken }
+  const update: Record<string, unknown> = {
+    root_cause: rootCause,
+    action_taken: actionTaken,
+    issue_types: draft.issueTypes ?? [],
+    probable_error_type: draft.probableErrorType || null,
+    probable_error_note: clean(draft.probableErrorNote),
+    review_findings: draft.reviewFindings ?? {},
+    action_types: draft.actionTypes ?? [],
+    correction_outcome: draft.correctionOutcome || null,
+    correction_outcome_note: clean(draft.correctionOutcomeNote),
+    preventive_action: clean(draft.preventiveAction),
+    owner_id: draft.ownerId || null,
+    due_date: draft.dueDate || null,
+  }
   if (!outcome) {
     update.status = 'awaiting-effectiveness'
   } else if (outcome === 'effective') {
@@ -2643,7 +2751,7 @@ export async function closeCorrectiveAction(id: string, input: { rootCause?: str
   }
   const { error } = await admin.from('iqc_corrective_actions').update(update).eq('id', id)
   fail(error)
-  await writeAudit(actor, 'iqc.correctiveAction.close', 'iqc-corrective-action', id, input)
+  await writeAudit(actor, 'iqc.correctiveAction.close', 'iqc-corrective-action', id, { ...input })
   return getIqcWorkspace(actor)
 }
 

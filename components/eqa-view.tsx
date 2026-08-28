@@ -35,8 +35,10 @@ export function EqaView({ actor, initialData }: { actor: BmActor; initialData: E
     else if (target.kind === 'round-status') { setTab('rounds'); setFocus({ roundId: target.roundId }) }
     else if (target.kind === 'round-summary') { setTab('rounds'); setFocus({ roundId: target.roundId, open: 'summary' }) }
     else if (target.kind === 'corrective') {
-      const openAction = data.correctiveActions.find((action) => action.roundId === target.roundId && action.status !== 'closed')
-      setTab('corrective'); setFocus({ actionId: openAction?.id })
+      const candidates = data.correctiveActions.filter((action) => action.roundId === target.roundId && (target.resultId ? action.resultId === target.resultId || !action.resultId : true))
+      const linkedAction = candidates.find((action) => action.status !== 'closed') ?? candidates[0]
+      setTab('corrective')
+      setFocus(linkedAction ? { roundId: target.roundId, resultId: linkedAction.resultId ?? target.resultId, actionId: linkedAction.id } : { roundId: target.roundId, resultId: target.resultId, corrective: true })
     } else { setTab('plans'); setFocus(null) }
   }
   const roundReminders = data.rounds.filter((round) => round.reminder).map((round) => ({
@@ -77,7 +79,7 @@ export function EqaView({ actor, initialData }: { actor: BmActor; initialData: E
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
       {tab === 'plans' ? <PlansTab data={data} actor={actor} onOk={ok} onErr={err} /> : null}
       {tab === 'rounds' ? <RoundsTab data={data} actor={actor} focus={focus} onNavigate={openTarget} onOk={ok} onErr={err} /> : null}
-      {tab === 'corrective' ? <CorrectiveTab data={data} actor={actor} onOk={ok} onErr={err} focusId={focus?.actionId ?? null} /> : null}
+      {tab === 'corrective' ? <CorrectiveTab key={`eqa-corrective-${focus?.corrective ? `${focus.roundId ?? ''}-${focus.resultId ?? ''}` : focus?.actionId ?? 'manual'}`} data={data} actor={actor} onOk={ok} onErr={err} focusId={focus?.actionId ?? null} initialContext={focus?.corrective && focus.roundId ? { roundId: focus.roundId, resultId: focus.resultId } : null} /> : null}
       {tab === 'reports' ? <ReportsTab data={data} actor={actor} onNavigate={openTarget} onOk={ok} onErr={err} /> : null}
       {tab === 'manage' && isAdmin ? <ManageTab data={data} actor={actor} onOk={ok} onErr={err} /> : null}
     </div>

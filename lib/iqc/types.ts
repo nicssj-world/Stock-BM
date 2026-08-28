@@ -1,4 +1,5 @@
 import type { AnalyteScale, QcStatus, WestgardPolicyProfile, WestgardRule } from '@/lib/iqc/westgard'
+import type { CorrectiveCorrectionOutcome, CorrectiveErrorType, CorrectiveReviewFindings } from '@/lib/corrective-actions'
 
 export type { AnalyteScale, QcStatus, WestgardPolicyProfile } from '@/lib/iqc/westgard'
 export type IqcPolicyProfile = 'cd4-legacy' | 'vl-standard-v1'
@@ -207,6 +208,7 @@ export interface IqcConsumable {
 }
 
 export interface IqcRunResult {
+  resultId?: string
   analyteId: string
   analyteCode: string
   analyteName: string
@@ -306,12 +308,21 @@ export interface IqcChart {
 export interface IqcCorrectiveAction {
   id: string
   runId: string
+  resultId?: string | null
   runDatetime: string
   analyteId: string | null
   analyteName: string | null
   problem: string
+  issueTypes?: string[]
+  probableErrorType?: CorrectiveErrorType | null
+  probableErrorNote?: string | null
+  reviewFindings?: CorrectiveReviewFindings
   rootCause: string | null
+  actionTypes?: string[]
   actionTaken: string | null
+  correctionOutcome?: CorrectiveCorrectionOutcome | null
+  correctionOutcomeNote?: string | null
+  preventiveAction?: string | null
   status: 'open' | 'awaiting-effectiveness' | 'closed'
   ownerId: string | null
   ownerName: string | null

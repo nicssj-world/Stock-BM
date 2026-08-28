@@ -15,7 +15,7 @@ import { SignaturePad, type SignaturePadHandle } from '@/components/signature-pa
 
 export type Tab = 'plans' | 'rounds' | 'corrective' | 'reports' | 'manage'
 export const TAB_KEYS: Tab[] = ['plans', 'rounds', 'corrective', 'reports', 'manage']
-export type EqaFocus = { roundId?: string; open?: 'receipt' | 'result' | 'summary'; actionId?: string }
+export type EqaFocus = { roundId?: string; resultId?: string; open?: 'receipt' | 'result' | 'summary'; actionId?: string; corrective?: boolean }
 export type NoticeState = { tone: 'success' | 'danger'; text: string } | null
 export type Update = (text: string, data: EqaWorkspace) => void
 

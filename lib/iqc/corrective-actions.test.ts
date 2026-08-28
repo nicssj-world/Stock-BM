@@ -12,6 +12,13 @@ const runLevelAction: IqcCorrectiveAction = {
   rootCause: null,
   actionTaken: null,
   status: 'open',
+  ownerId: null,
+  ownerName: null,
+  dueDate: null,
+  effectivenessOutcome: 'pending',
+  effectivenessNote: null,
+  effectivenessVerifiedByName: null,
+  effectivenessVerifiedAt: null,
   createdByName: 'Lab user',
   createdAt: '2026-07-13T10:05:00.000Z',
   closedByName: null,
@@ -21,6 +28,19 @@ const runLevelAction: IqcCorrectiveAction = {
 describe('findCorrectiveActionForPoint', () => {
   it('links a point to its existing run-level corrective action', () => {
     expect(findCorrectiveActionForPoint([runLevelAction], 'run-1', 'analyte-1')).toBe(runLevelAction)
+  })
+
+  it('prefers an exact result link when a run has multiple analytes or control lots', () => {
+    const other = { ...runLevelAction, id: 'action-2', analyteId: 'analyte-1', resultId: 'result-other' }
+    const exact = { ...runLevelAction, id: 'action-3', analyteId: 'analyte-1', resultId: 'result-exact' }
+
+    expect(findCorrectiveActionForPoint([other, exact], 'run-1', 'analyte-1', 'result-exact')).toBe(exact)
+  })
+
+  it('falls back to legacy run plus analyte scope when resultId is unavailable', () => {
+    const legacyAnalyteAction = { ...runLevelAction, id: 'action-4', analyteId: 'analyte-1' }
+
+    expect(findCorrectiveActionForPoint([legacyAnalyteAction], 'run-1', 'analyte-1', 'old-result-id')).toBe(legacyAnalyteAction)
   })
 })
 

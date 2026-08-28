@@ -1,3 +1,5 @@
+import type { CorrectiveCorrectionOutcome, CorrectiveErrorType, CorrectiveReviewFindings } from '@/lib/corrective-actions'
+
 export type EqaRoundStatus = 'scheduled' | 'received' | 'submitted' | 'evaluated' | 'closed'
 export type EqaOutcome = 'acceptable' | 'warning' | 'unacceptable' | 'not-evaluated'
 export type EqaRoundSummaryOutcome = 'pass' | 'fail' | 'not-evaluated'
@@ -166,8 +168,16 @@ export interface EqaCorrectiveAction {
   resultId: string | null
   resultLabel: string | null
   problem: string
+  issueTypes?: string[]
+  probableErrorType?: CorrectiveErrorType | null
+  probableErrorNote?: string | null
+  reviewFindings?: CorrectiveReviewFindings
   rootCause: string | null
+  actionTypes?: string[]
   actionTaken: string | null
+  correctionOutcome?: CorrectiveCorrectionOutcome | null
+  correctionOutcomeNote?: string | null
+  preventiveAction?: string | null
   status: 'open' | 'closed'
   ownerId: string | null
   ownerName: string | null

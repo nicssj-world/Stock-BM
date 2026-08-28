@@ -99,7 +99,7 @@ export function annualPlanReadiness(items: EqaPlanItem[]) {
 export type EqaReadinessTarget =
   | { kind: 'receipt-field'; roundId: string; field: string }
   | { kind: 'round-results' | 'round-status' | 'round-summary'; roundId: string }
-  | { kind: 'corrective'; roundId: string }
+  | { kind: 'corrective'; roundId: string; resultId?: string }
   | { kind: 'plan-item'; planItemId: string }
 export interface EqaReadinessIssue { message: string; target?: EqaReadinessTarget }
 

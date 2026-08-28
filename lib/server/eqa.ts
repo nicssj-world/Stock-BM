@@ -23,6 +23,7 @@ import type {
   EqaTemperatureCondition,
   EqaWorkspace,
 } from '@/lib/eqa/types'
+import { normalizeReviewFindings, validateCorrectiveAction, type CorrectiveActionDraft, type CorrectiveActionFields, type CorrectiveCorrectionOutcome, type CorrectiveErrorType } from '@/lib/corrective-actions'
 import { EQA_DUE_SOON_DAYS } from '@/lib/eqa/types'
 import { ROUND_STATUS_ORDER, annualPlanReadiness, annualSummaryReadiness, deriveRoundSummaryOutcome, displayRoundLabel, plannedRoundDueDate, plannedRoundLabel, roundReceiptIssues, roundReceiptReadiness } from '@/lib/eqa/rules'
 import type { BmActor } from '@/lib/bm/types'
@@ -80,6 +81,7 @@ function fail(error: { message: string } | null, message = 'EQA database operati
 }
 function asString(value: unknown) { return typeof value === 'string' ? value : '' }
 function nullableString(value: unknown) { return typeof value === 'string' ? value : null }
+function stringArray(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [] }
 function nullableText(value: unknown) { return value == null || value === '' ? null : String(value) }
 function nullableNumber(value: unknown) { return value == null || value === '' ? null : Number(value) }
 function clean(value: string | null | undefined) { return value?.trim() || null }
@@ -264,6 +266,14 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
       id: asString(row.id), roundId: asString(row.round_id), roundLabel: roundMap.get(asString(row.round_id))?.roundLabel ?? '-',
       resultId, resultLabel: result ? `${result.sampleCode ?? '-'} · ${result.analyte}` : null,
       problem: asString(row.problem), rootCause: nullableString(row.root_cause), actionTaken: nullableString(row.action_taken),
+      issueTypes: stringArray(row.issue_types),
+      probableErrorType: row.probable_error_type === 'random' || row.probable_error_type === 'systematic' || row.probable_error_type === 'unknown' || row.probable_error_type === 'other' ? row.probable_error_type as CorrectiveErrorType : null,
+      probableErrorNote: nullableString(row.probable_error_note),
+      reviewFindings: normalizeReviewFindings(row.review_findings, 'eqa'),
+      actionTypes: stringArray(row.action_types),
+      correctionOutcome: row.correction_outcome === 'corrected' || row.correction_outcome === 'not-corrected' || row.correction_outcome === 'monitoring' || row.correction_outcome === 'other' ? row.correction_outcome as CorrectiveCorrectionOutcome : null,
+      correctionOutcomeNote: nullableString(row.correction_outcome_note),
+      preventiveAction: nullableString(row.preventive_action),
       status,
       ownerId: nullableString(row.owner_id), ownerName: row.owner_id ? userNameMap.get(asString(row.owner_id)) ?? null : null,
       dueDate, dueInDays: dueDate && status !== 'closed' ? daysUntil(dueDate, today) : null,
@@ -640,13 +650,35 @@ export async function deleteResult(id: string, actor: BmActor) {
   const roundId = asString((data as RecordRow).round_id); fail((await admin.from('eqa_results').delete().eq('id', id)).error); await syncRoundSummary(admin, roundId); await invalidateResultDocuments(roundId); await writeAudit(actor, 'eqa.result.delete', 'eqa-result', id, { analyte: asString((data as RecordRow).analyte) }); return getEqaWorkspace(actor)
 }
 
-export async function createEqaCorrectiveAction(input: { roundId: string; resultId?: string | null; problem: string; rootCause?: string | null; actionTaken?: string | null; ownerId?: string | null; dueDate?: string | null }, actor: BmActor) {
+export async function createEqaCorrectiveAction(input: { roundId: string; resultId?: string | null; problem: string; issueTypes?: string[]; probableErrorType?: CorrectiveErrorType | null; probableErrorNote?: string | null; reviewFindings?: Record<string, unknown> | null; rootCause?: string | null; actionTypes?: string[]; actionTaken?: string | null; correctionOutcome?: CorrectiveCorrectionOutcome | null; correctionOutcomeNote?: string | null; preventiveAction?: string | null; ownerId?: string | null; dueDate?: string | null }, actor: BmActor) {
   assertOperator(actor); if (!input.problem.trim()) throw new HttpError(400, 'Problem description is required')
-  const { data, error } = await getAdminClient().from('eqa_corrective_actions').insert({ round_id: input.roundId, result_id: input.resultId || null, problem: input.problem.trim(), root_cause: clean(input.rootCause), action_taken: clean(input.actionTaken), owner_id: input.ownerId || null, due_date: input.dueDate || null, created_by: actor.id }).select('id').single(); fail(error)
+  const admin = getAdminClient()
+  if (input.resultId) {
+    const { data: linkedResult, error: linkedResultError } = await admin.from('eqa_results').select('round_id').eq('id', input.resultId).maybeSingle()
+    fail(linkedResultError)
+    if (!linkedResult) throw new HttpError(400, 'EQA result not found')
+    if (asString((linkedResult as RecordRow).round_id) !== input.roundId) throw new HttpError(400, 'EQA result does not belong to the selected round')
+  }
+  let existingQuery = admin.from('eqa_corrective_actions').select('id').eq('round_id', input.roundId).limit(1)
+  if (input.resultId) existingQuery = existingQuery.eq('result_id', input.resultId)
+  else existingQuery = existingQuery.is('result_id', null)
+  {
+    const { data: existing, error: existingError } = await existingQuery.maybeSingle()
+    fail(existingError)
+    if (existing) return getEqaWorkspace(actor)
+  }
+  // A round-level CAPA from the original workflow owns the whole round. Do
+  // not create a second result-level CAPA beside it.
+  if (input.resultId) {
+    const { data: roundAction, error: roundActionError } = await admin.from('eqa_corrective_actions').select('id').eq('round_id', input.roundId).is('result_id', null).limit(1).maybeSingle()
+    fail(roundActionError)
+    if (roundAction) return getEqaWorkspace(actor)
+  }
+  const { data, error } = await admin.from('eqa_corrective_actions').insert({ round_id: input.roundId, result_id: input.resultId || null, problem: input.problem.trim(), issue_types: input.issueTypes ?? [], probable_error_type: input.probableErrorType || null, probable_error_note: clean(input.probableErrorNote), review_findings: input.reviewFindings ?? {}, root_cause: clean(input.rootCause), action_types: input.actionTypes ?? [], action_taken: clean(input.actionTaken), correction_outcome: input.correctionOutcome || null, correction_outcome_note: clean(input.correctionOutcomeNote), preventive_action: clean(input.preventiveAction), owner_id: input.ownerId || null, due_date: input.dueDate || null, created_by: actor.id }).select('id').single(); fail(error)
   const id = asString((data as RecordRow).id); await invalidateRoundDocuments(input.roundId, false); await writeAudit(actor, 'eqa.correctiveAction.create', 'eqa-corrective-action', id, input); return getEqaWorkspace(actor)
 }
 
-export async function updateEqaCorrectiveAction(id: string, input: { problem?: string; rootCause?: string | null; actionTaken?: string | null; ownerId?: string | null; dueDate?: string | null }, actor: BmActor) {
+export async function updateEqaCorrectiveAction(id: string, input: { problem?: string; issueTypes?: string[]; probableErrorType?: CorrectiveErrorType | null; probableErrorNote?: string | null; reviewFindings?: Record<string, unknown> | null; rootCause?: string | null; actionTypes?: string[]; actionTaken?: string | null; correctionOutcome?: CorrectiveCorrectionOutcome | null; correctionOutcomeNote?: string | null; preventiveAction?: string | null; ownerId?: string | null; dueDate?: string | null }, actor: BmActor) {
   assertOperator(actor)
   const admin = getAdminClient()
   const { data: existing, error: existingError } = await admin.from('eqa_corrective_actions').select('status').eq('id', id).maybeSingle()
@@ -657,8 +689,16 @@ export async function updateEqaCorrectiveAction(id: string, input: { problem?: s
   if (input.problem !== undefined) {
     const problem = input.problem.trim(); if (!problem) throw new HttpError(400, 'Problem description is required'); update.problem = problem
   }
+  if (input.issueTypes !== undefined) update.issue_types = input.issueTypes
+  if (input.probableErrorType !== undefined) update.probable_error_type = input.probableErrorType || null
+  if (input.probableErrorNote !== undefined) update.probable_error_note = clean(input.probableErrorNote)
+  if (input.reviewFindings !== undefined) update.review_findings = input.reviewFindings ?? {}
   if (input.rootCause !== undefined) update.root_cause = clean(input.rootCause)
+  if (input.actionTypes !== undefined) update.action_types = input.actionTypes
   if (input.actionTaken !== undefined) update.action_taken = clean(input.actionTaken)
+  if (input.correctionOutcome !== undefined) update.correction_outcome = input.correctionOutcome || null
+  if (input.correctionOutcomeNote !== undefined) update.correction_outcome_note = clean(input.correctionOutcomeNote)
+  if (input.preventiveAction !== undefined) update.preventive_action = clean(input.preventiveAction)
   if (input.ownerId !== undefined) update.owner_id = input.ownerId || null
   if (input.dueDate !== undefined) update.due_date = input.dueDate || null
   if (!Object.keys(update).length) throw new HttpError(400, 'No changes provided')
@@ -667,25 +707,39 @@ export async function updateEqaCorrectiveAction(id: string, input: { problem?: s
   await writeAudit(actor, 'eqa.correctiveAction.update', 'eqa-corrective-action', id, input); return getEqaWorkspace(actor)
 }
 
-export async function closeEqaCorrectiveAction(id: string, input: { rootCause?: string | null; actionTaken?: string | null }, actor: BmActor) {
+export async function closeEqaCorrectiveAction(id: string, input: CorrectiveActionFields, actor: BmActor) {
   assertOperator(actor)
   const admin = getAdminClient()
-  const { data, error } = await admin.from('eqa_corrective_actions').select('round_id,root_cause,action_taken,status').eq('id', id).maybeSingle()
+  const { data, error } = await admin.from('eqa_corrective_actions').select('round_id,problem,issue_types,probable_error_type,probable_error_note,review_findings,root_cause,action_types,action_taken,correction_outcome,correction_outcome_note,preventive_action,owner_id,due_date,status').eq('id', id).maybeSingle()
   fail(error); if (!data) throw new HttpError(404, 'Corrective action not found')
   const row = data as RecordRow
   if (asString(row.status) === 'closed') throw new HttpError(400, 'Corrective action is already closed')
 
-  // Fall back to the value already on the record so closing with an empty
-  // body (as the old UI did) can never blank out root cause / action taken.
-  const rootCause = clean(input.rootCause) ?? clean(nullableString(row.root_cause))
-  const actionTaken = clean(input.actionTaken) ?? clean(nullableString(row.action_taken))
-  if (!rootCause || !actionTaken) throw new HttpError(400, 'ต้องระบุ Root cause และ Action taken ก่อนปิด')
+  const draft: Partial<CorrectiveActionDraft> = {
+    problem: input.problem ?? asString(row.problem),
+    issueTypes: input.issueTypes ?? stringArray(row.issue_types),
+    probableErrorType: input.probableErrorType ?? (row.probable_error_type as CorrectiveErrorType | null) ?? undefined,
+    probableErrorNote: input.probableErrorNote ?? nullableString(row.probable_error_note) ?? '',
+    reviewFindings: input.reviewFindings ?? normalizeReviewFindings(row.review_findings, 'eqa'),
+    rootCause: input.rootCause ?? nullableString(row.root_cause) ?? '',
+    actionTypes: input.actionTypes ?? stringArray(row.action_types),
+    actionTaken: input.actionTaken ?? nullableString(row.action_taken) ?? '',
+    correctionOutcome: input.correctionOutcome ?? (row.correction_outcome as CorrectiveActionDraft['correctionOutcome']),
+    correctionOutcomeNote: input.correctionOutcomeNote ?? nullableString(row.correction_outcome_note) ?? '',
+    preventiveAction: input.preventiveAction ?? nullableString(row.preventive_action) ?? '',
+    ownerId: input.ownerId ?? nullableString(row.owner_id) ?? '',
+    dueDate: input.dueDate ?? nullableString(row.due_date) ?? '',
+  }
+  const validation = validateCorrectiveAction(draft, 'eqa', 'complete')
+  if (validation.length) throw new HttpError(400, validation.map((issue) => issue.message).join(' | '))
+  const rootCause = clean(draft.rootCause)
+  const actionTaken = clean(draft.actionTaken)
 
   fail((await admin.from('eqa_corrective_actions').update({
-    root_cause: rootCause, action_taken: actionTaken, status: 'closed', closed_by: actor.id, closed_at: new Date().toISOString(),
+    root_cause: rootCause, action_taken: actionTaken, issue_types: draft.issueTypes ?? [], probable_error_type: draft.probableErrorType || null, probable_error_note: clean(draft.probableErrorNote), review_findings: draft.reviewFindings ?? {}, action_types: draft.actionTypes ?? [], correction_outcome: draft.correctionOutcome || null, correction_outcome_note: clean(draft.correctionOutcomeNote), preventive_action: clean(draft.preventiveAction), owner_id: draft.ownerId || null, due_date: draft.dueDate || null, status: 'closed', closed_by: actor.id, closed_at: new Date().toISOString(),
   }).eq('id', id)).error)
   await invalidateRoundDocuments(asString(row.round_id), false)
-  await writeAudit(actor, 'eqa.correctiveAction.close', 'eqa-corrective-action', id, input); return getEqaWorkspace(actor)
+  await writeAudit(actor, 'eqa.correctiveAction.close', 'eqa-corrective-action', id, { ...input }); return getEqaWorkspace(actor)
 }
 
 export async function verifyEqaCorrectiveActionEffectiveness(id: string, input: { outcome: 'effective' | 'ineffective'; note: string }, actor: BmActor) {

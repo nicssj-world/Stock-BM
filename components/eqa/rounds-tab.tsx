@@ -290,6 +290,9 @@ function RoundCard({ round, data, actor, focus, onNavigate, onOk, onErr, forceCo
             {round.results.map((result) => {
               const isEditing = editingResult?.id === result.id
               const isLogScale = data.iqcAnalytes.find((analyte) => analyte.id === result.iqcAnalyteId)?.scale === 'log10' || /\b(?:HIV|HBV|HCV)[\w-]*\s*VL\b/i.test(result.analyte)
+              const correctiveAction = data.correctiveActions.find((action) => action.roundId === round.id && action.resultId === result.id)
+                ?? data.correctiveActions.find((action) => action.roundId === round.id && !action.resultId)
+                ?? null
               return (
                 <tr key={result.id} className={isEditing ? 'bg-[#f6fafa]' : undefined}>
                   <td className="p-2 font-semibold">
@@ -324,6 +327,7 @@ function RoundCard({ round, data, actor, focus, onNavigate, onOk, onErr, forceCo
                   <td className="p-2">
                     <div className="flex gap-1">
                       {isEditing ? <><Button className="min-h-7 px-2 py-1 text-xs" disabled={busy} onClick={() => saveResult()}>บันทึก</Button><Button variant="ghost" className="min-h-7 px-2 py-1" title="ยกเลิก" onClick={resetResult}><X className="size-3.5" /></Button></> : <><Button variant="ghost" className="min-h-7 px-2 py-1" title="แก้ไขผล" onClick={() => editResult(result)}><Pencil className="size-3.5" /></Button><Button variant="danger" className="min-h-7 px-2 py-1" onClick={() => removeResult(result)}><Trash2 className="size-3.5" /></Button></>}
+                      {!isEditing && (result.outcome === 'warning' || result.outcome === 'unacceptable') ? <Button type="button" variant="secondary" className="min-h-7 px-2 py-1 text-[11px]" onClick={() => onNavigate({ kind: 'corrective', roundId: round.id, resultId: result.id })}>{correctiveAction ? 'เปิด CAPA เดิม' : 'เปิด CAPA'}</Button> : null}
                     </div>
                   </td>
                 </tr>
