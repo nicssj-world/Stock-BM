@@ -9,9 +9,9 @@ const item: EqaPlanItem = {
 }
 
 const round = {
-  id: 'round', planItemId: 'item', externalSentDate: '2026-01-01', sampleReceivedDate: '2026-01-02', packageCondition: 'acceptable', receivedTemperature: 'refrigerated',
-  sampleCondition: 'acceptable', storageCondition: 'refrigerated', specimenType: 'Plasma', receiverId: 'user-1', analystId: 'user-2', analysisDate: '2026-01-03', submissionDate: '2026-01-04', submissionMethod: 'qcmd.org',
-  results: [{ outcome: 'acceptable' }], summaryOutcome: 'pass', roundLabel: 'C1', status: 'evaluated', documentState: { documentType: 'round-receipt', entityId: 'round', revision: 1, status: 'approved' },
+  id: 'round', planItemId: 'item', externalSentDate: '2026-01-01', sampleReceivedDate: '2026-01-02', packageCondition: 'acceptable', packageNote: null, receivedTemperature: 'refrigerated', receivedTemperatureNote: null,
+  sampleCondition: 'acceptable', sampleConditionNote: null, storageCondition: 'refrigerated', storageTemperatureC: 2, storageNote: null, specimenType: 'Plasma', receiverId: 'user-1', analystId: 'user-2', analysisDate: '2026-01-03', submissionDate: '2026-01-04', submissionMethod: 'qcmd.org',
+  results: [{ sampleCode: 'S1', submittedValue: '120', outcome: 'acceptable' }], summaryOutcome: 'pass', summaryNote: null, roundLabel: 'C1', status: 'evaluated', documentState: { documentType: 'round-receipt', entityId: 'round', revision: 1, status: 'approved' },
 } as unknown as EqaRound
 
 describe('EQA report readiness', () => {
@@ -25,7 +25,7 @@ describe('EQA report readiness', () => {
   })
 
   it('requires closed CAPA for a failed annual-summary round', () => {
-    const failed = { ...round, summaryOutcome: 'fail' as const }
+    const failed = { ...round, summaryOutcome: 'fail' as const, results: [{ sampleCode: 'S1', submittedValue: '120', outcome: 'warning' as const }] } as unknown as EqaRound
     expect(annualSummaryReadiness(item, [failed, round], [])).toContain('C1: ผลไม่ผ่านแต่ยังไม่มี corrective action')
     expect(annualSummaryReadiness(item, [failed, round], [{ id: 'ca', roundId: 'round', status: 'closed' } as never])).toEqual([])
   })
@@ -41,8 +41,8 @@ describe('deriveRoundSummaryOutcome', () => {
     expect(deriveRoundSummaryOutcome(['acceptable', 'unacceptable', 'warning'])).toBe('fail')
   })
 
-  it('passes evaluated samples without an unacceptable outcome', () => {
-    expect(deriveRoundSummaryOutcome(['acceptable', 'warning'])).toBe('pass')
+  it('fails a round when any sample is warning', () => {
+    expect(deriveRoundSummaryOutcome(['acceptable', 'warning'])).toBe('fail')
   })
 })
 
@@ -95,6 +95,11 @@ describe('roundProgress', () => {
     expect(results?.target).toEqual({ kind: 'round-results', roundId: 'round' })
   })
 
+  it('keeps the results step open when a submitted result is missing its code or value', () => {
+    const steps = roundProgress({ ...round, results: [{ sampleCode: '', submittedValue: null }] } as unknown as EqaRound)
+    expect(steps.find((step) => step.key === 'results')?.done).toBe(false)
+  })
+
   it('treats a not-evaluated result as blocking the evaluated step even when status says evaluated', () => {
     const steps = roundProgress({ ...round, results: [{ outcome: 'not-evaluated' }] } as unknown as EqaRound)
     expect(steps.find((step) => step.key === 'evaluated')?.done).toBe(false)
@@ -122,6 +127,16 @@ describe('plannedRoundLabel / plannedRoundDueDate', () => {
 describe('displayRoundLabel', () => {
   it('uses the planned sequence when a provider code duplicates the plan-item name', () => {
     expect(displayRoundLabel({ roundLabel: 'COE#143', planItemName: 'COE#143', sequenceNo: 1, planYear: 2026 })).toBe('ครั้งที่ 1/2569')
+  })
+
+  it('requires conditional receipt details and complete submitted results', () => {
+    const issues = roundReceiptIssues({ ...round, packageCondition: 'unacceptable', packageNote: null, storageTemperatureC: null, results: [{ outcome: 'acceptable', sampleCode: null, submittedValue: null }] } as unknown as EqaRound)
+    expect(issues.map((item) => item.message)).toEqual(expect.arrayContaining([
+      'สภาพห่อตัวอย่างไม่เรียบร้อย แต่ยังไม่ได้ระบุรายละเอียด',
+      'เลือกเก็บแบบแช่เย็น แต่ยังไม่ได้ระบุอุณหภูมิที่เก็บ',
+      'ยังมีผลที่ไม่ได้ระบุรหัสตัวอย่าง',
+      'ยังมีผลที่ไม่ได้ระบุค่าผลที่ส่ง',
+    ]))
   })
 
   it('preserves a distinct manually-entered round label', () => {

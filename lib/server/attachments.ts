@@ -300,3 +300,14 @@ export async function deleteAttachment(
     },
   );
 }
+
+// Internal cleanup used when a parent record is replaced or a signature is
+// revoked. The public delete route intentionally remains Admin-only, while
+// server workflows may remove the exact attachment they own.
+export async function deleteStoredAttachment(id: string): Promise<void> {
+  const admin = getAdminClient();
+  const row = await getAttachmentRow(id);
+  await admin.storage.from(BUCKET).remove([asString(row.storage_path)]);
+  const { error } = await admin.from("bm_attachments").delete().eq("id", id);
+  fail(error);
+}

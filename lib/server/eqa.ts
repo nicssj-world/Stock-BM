@@ -24,12 +24,12 @@ import type {
   EqaWorkspace,
 } from '@/lib/eqa/types'
 import { EQA_DUE_SOON_DAYS } from '@/lib/eqa/types'
-import { ROUND_STATUS_ORDER, annualPlanReadiness, annualSummaryReadiness, deriveRoundSummaryOutcome, displayRoundLabel, plannedRoundDueDate, plannedRoundLabel, roundReceiptReadiness } from '@/lib/eqa/rules'
+import { ROUND_STATUS_ORDER, annualPlanReadiness, annualSummaryReadiness, deriveRoundSummaryOutcome, displayRoundLabel, plannedRoundDueDate, plannedRoundLabel, roundReceiptIssues, roundReceiptReadiness } from '@/lib/eqa/rules'
 import type { BmActor } from '@/lib/bm/types'
 import { daysUntil, todayBangkok } from '@/lib/bm/rules'
 import { writeAudit } from '@/lib/server/audit'
 import { HttpError } from '@/lib/server/errors'
-import { deleteEntityAttachments } from '@/lib/server/attachments'
+import { deleteEntityAttachments, deleteStoredAttachment, uploadAttachment } from '@/lib/server/attachments'
 import { getAdminClient } from '@/lib/supabase/admin'
 
 type RecordRow = Record<string, unknown>
@@ -102,12 +102,12 @@ async function advanceRoundStatus(admin: ReturnType<typeof getAdminClient>, id: 
 const OPEN_STATUSES = new Set<EqaRoundStatus>(['scheduled', 'received'])
 const ASSIGNED_APPROVAL_ROLES: EqaAssignedApprovalRole[] = ['technical-manager', 'quality-manager', 'section-head', 'department-head']
 const REQUIRED_APPROVALS: Record<EqaDocumentType, EqaApprovalRole[]> = {
-  // EQA is managed at laboratory-project level. The technical manager and
-  // section head approve the annual result summary in the portal; quality
-  // manager and department head sign the printed document externally.
-  'annual-plan': ['technical-manager'],
+  // Every signature block printed on the controlled EQA forms is now part of
+  // the same digital sign-off. The round receipt has two blocks on the
+  // official form; the annual plan and annual summary have four.
+  'annual-plan': ['technical-manager', 'quality-manager', 'section-head', 'department-head'],
   'round-receipt': ['analyst', 'technical-manager'],
-  'annual-summary': ['technical-manager', 'section-head'],
+  'annual-summary': ['technical-manager', 'quality-manager', 'section-head', 'department-head'],
 }
 
 function defaultDocumentState(documentType: EqaDocumentType, entityId: string): EqaDocumentState {
@@ -170,6 +170,7 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
     const approval: EqaDocumentApproval = {
       id: asString(row.id), documentType: asString(row.document_type) as EqaDocumentType, entityId: asString(row.entity_id), revision: Number(row.revision),
       approvalRole: asString(row.approval_role) as EqaApprovalRole, approvedById: asString(row.approved_by), approvedByName: userNameMap.get(asString(row.approved_by)) ?? '-', approvedAt: asString(row.approved_at),
+      signerName: nullableString(row.signer_name), signatureAttachmentId: nullableString(row.signature_attachment_id),
     }
     const key = approvalKey(approval.documentType, approval.entityId, approval.revision)
     approvalsByRevision.set(key, [...(approvalsByRevision.get(key) ?? []), approval])
@@ -177,9 +178,10 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
   const stateFor = (type: EqaDocumentType, id: string) => {
     const state = states.get(documentKey(type, id)) ?? defaultDocumentState(type, id)
     const approvals = approvalsByRevision.get(approvalKey(type, id, state.revision)) ?? []
-    const approvedRoles = new Set(approvals.map((approval) => approval.approvalRole))
-    // Reconcile approvals already recorded under an earlier workflow change
-    // so a complete document is never presented as a draft.
+    // A legacy approval without a drawn signature is deliberately not counted
+    // as complete. It remains visible so the signer can replace it on the
+    // current revision without losing the original audit trail.
+    const approvedRoles = new Set(approvals.filter((approval) => approval.signatureAttachmentId).map((approval) => approval.approvalRole))
     const status: EqaDocumentState['status'] = REQUIRED_APPROVALS[type].every((role) => approvedRoles.has(role)) ? 'approved' : 'draft'
     return { ...state, status }
   }
@@ -564,7 +566,12 @@ export async function updateRoundReceipt(id: string, input: EqaRoundReceiptInput
     update.scheme_id = asString((item as RecordRow).scheme_id)
   }
   fail((await admin.from('eqa_rounds').update(update).eq('id', id)).error)
-  await advanceRoundStatus(admin, id, 'received')
+  const savedRound = (await getEqaWorkspace(actor)).rounds.find((round) => round.id === id)
+  // A partial receipt can be saved as a draft, but results should not appear
+  // until the receipt fields themselves are complete. Result-code/value gaps
+  // are intentionally ignored here because they belong to the next step.
+  const receiptReady = savedRound && roundReceiptIssues(savedRound).every((issue) => issue.target?.kind === 'round-results')
+  if (receiptReady) await advanceRoundStatus(admin, id, 'received')
 
   await invalidateRoundDocuments(id)
   // invalidateRoundDocuments only sees the round's *new* plan item -- if this
@@ -589,8 +596,13 @@ export async function confirmRoundEvaluation(id: string, input: { summaryNote?: 
   const { data: round, error: roundError } = await admin.from('eqa_rounds').select('status').eq('id', id).maybeSingle()
   fail(roundError); if (!round) throw new HttpError(404, 'Round not found')
   if (asString((round as RecordRow).status) !== 'submitted') throw new HttpError(400, 'ยืนยันรับผลประเมินได้เฉพาะ round ที่ส่งผลแล้ว')
-  const { data: results, error: resultsError } = await admin.from('eqa_results').select('outcome').eq('round_id', id)
+  const workspaceRound = (await getEqaWorkspace(actor)).rounds.find((item) => item.id === id)
+  if (!workspaceRound) throw new HttpError(404, 'Round not found')
+  const receiptReadiness = roundReceiptReadiness(workspaceRound)
+  if (receiptReadiness.length) throw new HttpError(409, receiptReadiness.join(' | '))
+  const { data: results, error: resultsError } = await admin.from('eqa_results').select('outcome,sample_code,submitted_value').eq('round_id', id)
   fail(resultsError)
+  if ((results as RecordRow[]).some((result) => !asString(result.sample_code).trim() || !asString(result.submitted_value).trim())) throw new HttpError(400, 'กรอกรหัสตัวอย่างและผลที่ส่งให้ครบทุก sample ก่อนบันทึกผลประเมิน')
   const summaryOutcome = deriveRoundSummaryOutcome((results as RecordRow[]).map((result) => asString(result.outcome) as EqaOutcome))
   if (summaryOutcome === 'not-evaluated') throw new HttpError(400, 'กรอก Outcome จากผู้จัด EQA ให้ครบทุก sample ก่อนยืนยันรับผลประเมิน')
   fail((await admin.from('eqa_rounds').update({ summary_outcome: summaryOutcome, summary_note: clean(input.summaryNote), updated_at: new Date().toISOString() }).eq('id', id)).error)
@@ -735,28 +747,61 @@ function documentApprovals(workspace: EqaWorkspace, type: EqaDocumentType, entit
   return workspace.annualSummaries.find((summary) => summary.planItem.id === entityId)?.approvals ?? []
 }
 
-export async function approveEqaDocument(type: EqaDocumentType, entityId: string, role: EqaApprovalRole, actor: BmActor) {
-  assertOperator(actor); if (!REQUIRED_APPROVALS[type].includes(role)) throw new HttpError(400, 'Approval role is not required for this document')
-  const workspace = await getEqaWorkspace(actor); const readiness = documentReadiness(workspace, type, entityId); if (readiness.length) throw new HttpError(409, readiness.join(' | '))
+export async function approveEqaDocument(type: EqaDocumentType, entityId: string, role: EqaApprovalRole, actor: BmActor, input: { signerName: string; signature: File }) {
+  assertOperator(actor)
+  if (!REQUIRED_APPROVALS[type].includes(role)) throw new HttpError(400, 'บทบาทนี้ไม่อยู่ในแบบฟอร์มฉบับนี้')
+  if (!(input.signature instanceof File) || input.signature.type !== 'image/png' || input.signature.size === 0) throw new HttpError(400, 'ลายเซ็นต้องเป็นไฟล์ PNG ที่ไม่ว่าง')
+  if (input.signature.size > 2 * 1024 * 1024) throw new HttpError(400, 'ไฟล์ลายเซ็นใหญ่เกิน 2 MB')
+
+  const workspace = await getEqaWorkspace(actor)
+  const readiness = documentReadiness(workspace, type, entityId)
+  if (readiness.length) throw new HttpError(409, readiness.join(' | '))
+
+  let assignedSignerName: string | null = null
   if (role === 'analyst') {
-    const round = workspace.rounds.find((item) => item.id === entityId); if (!round || (actor.role !== 'Admin' && round.analystId !== actor.id)) throw new HttpError(403, 'Only the assigned analyst or Admin can approve this receipt')
+    const round = workspace.rounds.find((item) => item.id === entityId)
+    if (!round || (actor.role !== 'Admin' && round.analystId !== actor.id)) throw new HttpError(403, 'เฉพาะผู้ตรวจวิเคราะห์ที่ระบุในรอบหรือ Admin เท่านั้นที่ลงนามได้')
+    assignedSignerName = round.analystName
   } else {
-    const assignment = workspace.approverAssignments.find((item) => item.approvalRole === role); if (actor.role !== 'Admin' && (!assignment || assignment.userId !== actor.id)) throw new HttpError(403, 'You are not assigned to this approval role')
+    const assignment = workspace.approverAssignments.find((item) => item.approvalRole === role)
+    // The quality manager, section head, and department head may be external
+    // to this sub-unit. When no account is assigned, the logged-in Staff
+    // records the real signer's typed name and drawn signature on the shared
+    // device.
+    if (assignment && actor.role !== 'Admin' && assignment.userId !== actor.id) throw new HttpError(403, 'คุณไม่ได้รับมอบหมายบทบาทลงนามนี้')
+    assignedSignerName = assignment?.userName ?? null
   }
-  const state = documentState(workspace, type, entityId) ?? defaultDocumentState(type, entityId); const admin = getAdminClient()
-  fail((await admin.from('eqa_document_states').upsert({ document_type: type, entity_id: entityId, revision: state.revision, status: 'draft', updated_at: new Date().toISOString() }, { onConflict: 'document_type,entity_id' })).error)
-  fail((await admin.from('eqa_document_approvals').upsert({ document_type: type, entity_id: entityId, revision: state.revision, approval_role: role, approved_by: actor.id, approved_at: new Date().toISOString() }, { onConflict: 'document_type,entity_id,revision,approval_role' })).error)
-  const approvedRoles = new Set([...documentApprovals(workspace, type, entityId).map((approval) => approval.approvalRole), role])
+  const typedSignerName = input.signerName.trim()
+  const signerName = actor.role !== 'Admin' && assignedSignerName ? assignedSignerName : typedSignerName || assignedSignerName
+  if (!signerName) throw new HttpError(400, 'กรุณากรอกชื่อ-นามสกุลผู้ลงนาม')
+  if (signerName.length > 200) throw new HttpError(400, 'ชื่อผู้ลงนามยาวเกิน 200 ตัวอักษร')
+
+  const state = documentState(workspace, type, entityId) ?? defaultDocumentState(type, entityId)
+  const existing = documentApprovals(workspace, type, entityId).find((approval) => approval.approvalRole === role)
+  if (existing?.signatureAttachmentId) throw new HttpError(409, 'บทบาทนี้ลงนามแล้ว กรุณาถอนลายเซ็นเดิมก่อนลงนามใหม่')
+
+  const admin = getAdminClient()
+  const signature = await uploadAttachment({ module: 'eqa', entityType: 'eqa-document', entityId, kind: `signature:${type}:${state.revision}:${role}`, file: input.signature }, actor)
+  try {
+    fail((await admin.from('eqa_document_states').upsert({ document_type: type, entity_id: entityId, revision: state.revision, status: 'draft', updated_at: new Date().toISOString() }, { onConflict: 'document_type,entity_id' })).error)
+    fail((await admin.from('eqa_document_approvals').upsert({ document_type: type, entity_id: entityId, revision: state.revision, approval_role: role, approved_by: actor.id, approved_at: new Date().toISOString(), signer_name: signerName, signature_attachment_id: signature.id }, { onConflict: 'document_type,entity_id,revision,approval_role' })).error)
+  } catch (error) {
+    try { await deleteStoredAttachment(signature.id) } catch { /* keep the original error */ }
+    throw error
+  }
+
+  const approvedRoles = new Set([...documentApprovals(workspace, type, entityId).filter((approval) => approval.signatureAttachmentId).map((approval) => approval.approvalRole), role])
   const complete = REQUIRED_APPROVALS[type].every((requiredRole) => approvedRoles.has(requiredRole))
   fail((await admin.from('eqa_document_states').update({ status: complete ? 'approved' : 'draft', updated_at: new Date().toISOString() }).eq('document_type', type).eq('entity_id', entityId)).error)
   // The receipt document's two signatures double as the round's workflow gate:
-  // the analyst confirming it means the round has been submitted, and the
-  // technical manager's signature (the one that completes the approval) closes it out.
+  // the analyst signing confirms the submitted result, and the technical
+  // manager's signature (the one that completes the receipt form) closes it.
   if (type === 'round-receipt') {
     if (role === 'analyst') await advanceRoundStatus(admin, entityId, 'submitted')
     else if (role === 'technical-manager' && complete) await advanceRoundStatus(admin, entityId, 'closed')
   }
-  await writeAudit(actor, 'eqa.document.approve', `eqa-${type}`, entityId, { role, revision: state.revision, complete }); return getEqaWorkspace(actor)
+  await writeAudit(actor, 'eqa.document.sign', `eqa-${type}`, entityId, { role, revision: state.revision, signerName, complete, signatureAttachmentId: signature.id })
+  return getEqaWorkspace(actor)
 }
 
 export async function revokeEqaDocumentApproval(type: EqaDocumentType, entityId: string, role: EqaApprovalRole, actor: BmActor) {
@@ -764,6 +809,7 @@ export async function revokeEqaDocumentApproval(type: EqaDocumentType, entityId:
   const approval = documentApprovals(workspace, type, entityId).find((item) => item.approvalRole === role); if (!approval) throw new HttpError(404, 'Approval not found')
   if (approval.approvedById !== actor.id && actor.role !== 'Admin') throw new HttpError(403, 'Only the approver or Admin can revoke this approval')
   const admin = getAdminClient(); fail((await admin.from('eqa_document_approvals').delete().eq('document_type', type).eq('entity_id', entityId).eq('revision', state.revision).eq('approval_role', role)).error)
+  if (approval.signatureAttachmentId) { try { await deleteStoredAttachment(approval.signatureAttachmentId) } catch { /* the approval has already been revoked */ } }
   fail((await admin.from('eqa_document_states').update({ status: 'draft', updated_at: new Date().toISOString() }).eq('document_type', type).eq('entity_id', entityId)).error)
-  await writeAudit(actor, 'eqa.document.approval.revoke', `eqa-${type}`, entityId, { role, revision: state.revision }); return getEqaWorkspace(actor)
+  await writeAudit(actor, 'eqa.document.signature.revoke', `eqa-${type}`, entityId, { role, revision: state.revision }); return getEqaWorkspace(actor)
 }

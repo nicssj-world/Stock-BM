@@ -66,11 +66,14 @@ export function IqcView({ actor, initialData, initialTab = 'enter', initialSetup
   const panels = useMemo(() => {
     const set = new Set<string>()
     data.charts.forEach((c) => parseTestSets(c.groupLabel).forEach((name) => set.add(name)))
-    data.analytes.forEach((a) => parseTestSets(a.groupLabel).forEach((name) => set.add(name)))
+    data.analytes.filter((a) => a.isActive).forEach((a) => parseTestSets(a.groupLabel).forEach((name) => set.add(name)))
     return [...set].sort()
   }, [data])
+  const panelFilterVisible = tab === 'charts' || tab === 'sixsigma' || tab === 'uncertainty'
+  const selectedPanel = panel !== 'all' && panels.includes(panel) ? panel : 'all'
   const scoped = useMemo(() => {
-    const keep = (g: string | null) => panel === 'all' || hasTestSet(g, panel)
+    const activePanel = panelFilterVisible ? selectedPanel : 'all'
+    const keep = (g: string | null) => activePanel === 'all' || hasTestSet(g, activePanel)
     const charts = data.charts.filter((c) => keep(c.groupLabel))
     return {
       ...data,
@@ -88,33 +91,62 @@ export function IqcView({ actor, initialData, initialTab = 'enter', initialSetup
         notEvaluated: charts.filter((c) => c.status === 'not_evaluated').length,
       },
     }
-  }, [data, panel])
+  }, [data, panelFilterVisible, selectedPanel])
   const visibleAlerts = useMemo(() => {
     const activeLotIds = new Set(data.controlLots.filter((lot) => lot.isActive).map((lot) => lot.id))
-    return data.alerts.filter((alert) => alert.kind !== 'lot-expiring' || activeLotIds.has(alert.id.slice('lot:'.length)))
-  }, [data.alerts, data.controlLots])
+    const scopedChartKeys = new Set(scoped.charts.map((chart) => chart.key))
+    const scopedLotIds = new Set(scoped.charts.map((chart) => chart.controlLotId))
+    const scopedAnalyteIds = new Set(scoped.analytes.map((analyte) => analyte.id))
+    const filterAlertsByTestSet = panelFilterVisible && selectedPanel !== 'all'
+    return data.alerts.filter((alert) => {
+      if (alert.kind === 'lot-expiring' && !activeLotIds.has(alert.id.slice('lot:'.length))) return false
+      if (!filterAlertsByTestSet) return true
+      if (alert.kind === 'rejected-trend' || alert.kind === 'investigate-trend') return scopedChartKeys.has(alert.id.slice(alert.kind === 'rejected-trend' ? 'trend:'.length : 'investigate:'.length))
+      if (alert.kind === 'lot-expiring') return scopedLotIds.has(alert.id.slice('lot:'.length))
+      if (alert.kind === 'control-due') {
+        const planId = alert.id.slice('plan:'.length)
+        return data.controlPlans.some((plan) => plan.id === planId && scopedAnalyteIds.has(plan.analyteId))
+      }
+      if (alert.kind === 'capa-overdue') {
+        const actionId = alert.id.slice('capa:'.length)
+        const action = data.correctiveActions.find((item) => item.id === actionId)
+        return !action?.analyteId || scopedAnalyteIds.has(action.analyteId)
+      }
+      return true
+    })
+  }, [data, panelFilterVisible, scoped, selectedPanel])
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-5">
       <PageHeader eyebrow="Internal Quality Control" title="IQC" description="Levey-Jennings, Westgard rules, ควบคุมคุณภาพภายในต่อ analyte / control lot" />
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
 
-      {panels.length > 1 ? (
-        <div className="flex w-full" role="tablist" aria-label="เลือก panel">
-          <div className="inline-flex flex-wrap gap-1 rounded-lg border border-[#0b7f76]/25 bg-[#f1faf9] p-1">
-          {['all', ...panels].map((p) => {
-            const on = panel === p
-            return (
-              <button key={p} type="button" role="tab" aria-selected={on} onClick={() => setPanel(p)} className={`rounded-md px-3.5 py-2 text-sm font-bold transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${on ? 'bg-[#0b7f76] text-white' : 'text-[#3f6470] hover:bg-white'}`}>
-                {p === 'all' ? 'ทั้งหมด' : p}
-              </button>
-            )
-          })}
-          </div>
-        </div>
-      ) : null}
-
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
+
+      {panelFilterVisible && panels.length > 1 ? (
+        <Card className="border-[#d6e2e3] bg-[#fbfefe] p-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div className="flex shrink-0 items-start gap-2">
+              <ListFilter className="mt-0.5 size-4 text-[#0b7f76]" aria-hidden="true" />
+              <div>
+                <p className="text-xs font-bold tracking-[0.12em] text-[#315763] uppercase">ตัวกรองข้อมูล</p>
+                <p className="mt-0.5 text-[11px] text-[#789097]">กรองผลตาม Test set</p>
+              </div>
+            </div>
+            <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-0.5" role="group" aria-label="กรองข้อมูลตาม Test set">
+              {['all', ...panels].map((p) => {
+                const on = selectedPanel === p
+                return (
+                  <button key={p} type="button" aria-pressed={on} onClick={() => setPanel(p)} className={`shrink-0 rounded-md px-3.5 py-2 text-sm font-bold transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${on ? 'bg-[#0b7f76] text-white shadow-sm' : 'text-[#3f6470] hover:bg-white'}`}>
+                    {p === 'all' ? 'ทั้งหมด' : p}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          <p className="mt-2 border-t border-[#e5eeee] pt-2 text-[11px] text-[#789097]">กำลังดู: <span className="font-semibold text-[#58747d]">{selectedPanel === 'all' ? 'ทุก Test set' : selectedPanel}</span> · ตัวกรองนี้ใช้กับ ตรวจสอบผล, Six Sigma และ Uncertainty</p>
+        </Card>
+      ) : null}
 
       {tab !== 'enter' ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Charts" value={scoped.summary.chartCount} />
@@ -2239,17 +2271,23 @@ function AnalyteForm({ onSubmit, onUpdate, onToggle, onDelete, analytes }: { onS
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
           </Field>
           <Field label="Data type">
-            <Select value={form.dataType} onChange={(e) => setForm({ ...form, dataType: e.target.value })}>
+            <Select value={form.dataType} onChange={(e) => setForm({ ...form, dataType: e.target.value, scale: e.target.value === 'qualitative' ? 'linear' : form.scale })}>
               <option value="quantitative">Quantitative</option>
               <option value="qualitative">Qualitative</option>
             </Select>
           </Field>
-          <Field label="Scale">
-            <Select value={form.scale} onChange={(e) => setForm({ ...form, scale: e.target.value })}>
-              <option value="linear">Linear</option>
-              <option value="log10">Log10 (VL)</option>
-            </Select>
-          </Field>
+          {form.dataType === 'qualitative' ? (
+            <Field label="Scale" hint="Qualitative ไม่ใช้ scale">
+              <div className="flex min-h-11 items-center rounded-md border border-[#d9e5e6] bg-[#f3f6f6] px-3 text-sm text-[#8ba0a5]" aria-label="Scale ไม่ใช้กับ Qualitative">ไม่ใช้กับ Qualitative</div>
+            </Field>
+          ) : (
+            <Field label="Scale" hint="Log10 ใช้กับ viral load ที่เป็นตัวเลข">
+              <Select value={form.scale} onChange={(e) => setForm({ ...form, scale: e.target.value })}>
+                <option value="linear">Linear</option>
+                <option value="log10">Log10 (VL)</option>
+              </Select>
+            </Field>
+          )}
           <Field label="Unit">
             <Input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} placeholder="%, cells/µL, IU/mL" />
           </Field>

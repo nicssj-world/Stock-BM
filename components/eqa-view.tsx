@@ -50,15 +50,15 @@ export function EqaView({ actor, initialData }: { actor: BmActor; initialData: E
   const visibleReminders = allReminders.slice(0, 6)
   const tabs = [
     { key: 'plans' as const, label: 'แผนรายปี', icon: CalendarClock },
-    { key: 'rounds' as const, label: 'รอบ / ผล', icon: ClipboardList },
-    { key: 'corrective' as const, label: 'Corrective action', icon: CheckCircle2 },
-    { key: 'reports' as const, label: 'รายงาน', icon: FileText },
+    { key: 'rounds' as const, label: 'รับตัวอย่าง / ลงผล', icon: ClipboardList },
+    { key: 'corrective' as const, label: 'ติดตาม CAPA', icon: CheckCircle2 },
+    { key: 'reports' as const, label: 'รายงาน / ลงนาม', icon: FileText },
     ...(isAdmin ? [{ key: 'manage' as const, label: 'จัดการ', icon: Settings }] : []),
   ]
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-5">
-      <PageHeader eyebrow="External Quality Assessment" title="EQA" description="แผนรายปี การรับตัวอย่าง ผลประเมิน CAPA การอนุมัติ และรายงาน Fm-QP-LAB-19" />
+      <PageHeader eyebrow="External Quality Assessment" title="EQA" description="ทำงานตามลำดับ: วางแผน → รับตัวอย่าง → ลงผล → บันทึกผลประเมิน → ติดตาม CAPA → ลงนามรายงาน" />
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard label="แผนรายปี" value={data.annualPlans.length} />
@@ -73,6 +73,7 @@ export function EqaView({ actor, initialData }: { actor: BmActor; initialData: E
           {allReminders.length > visibleReminders.length ? <StatusBadge tone="neutral" label={`+${allReminders.length - visibleReminders.length} รายการ`} /> : null}
         </Card>
       ) : null}
+      <WorkflowGuide active={tab} onSelect={(next) => { setTab(next); setFocus(null) }} />
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
       {tab === 'plans' ? <PlansTab data={data} actor={actor} onOk={ok} onErr={err} /> : null}
       {tab === 'rounds' ? <RoundsTab data={data} actor={actor} focus={focus} onNavigate={openTarget} onOk={ok} onErr={err} /> : null}
@@ -93,14 +94,31 @@ function PlansTab({ data, actor, onOk, onErr }: { data: EqaWorkspace; actor: BmA
     catch (error) { onErr(error instanceof Error ? error.message : 'สร้างแผนไม่สำเร็จ') } finally { setBusy(false) }
   }
   return <div className="space-y-4">
+    <div className="px-1"><p className="text-xs font-bold text-[#0b7f76]">ขั้นตอนที่ 1 · วางแผนรายปี</p><p className="mt-1 text-sm text-[#6a838c]">กรอกข้อมูลหัวเอกสารและรายการ EQA ให้ครบ แล้วจึงสร้างรอบตามเดือนที่วางแผน</p></div>
     {actor.role === 'Admin' ? <Card className="p-4"><form className="flex max-w-md items-end gap-2" onSubmit={createPlan}><div className="flex-1"><Field label="สร้างแผนปี ค.ศ."><Input type="number" min="2000" max="2200" value={planYear} onChange={(event) => setPlanYear(event.target.value)} /></Field></div><Button disabled={busy}><Plus className="size-4" /> สร้างแผน</Button></form></Card> : null}
     {data.annualPlans.map((plan) => <Card key={plan.id} className="p-4">
       <div className="flex flex-wrap items-start justify-between gap-2"><div><h2 className="text-lg font-bold text-[#173d50]">แผน EQA ประจำปี {plan.planYear + 543}</h2><p className="text-xs text-[#789097]">{plan.workSection} · {plan.departmentName} · {plan.organizationName}</p></div><Link className="inline-flex items-center gap-1 rounded-md border border-[#b8c8cc] bg-white px-3 py-2 text-xs font-bold text-[#173d50]" href={`/eqa/report/annual-plan/${plan.id}?tab=plans`}><Printer className="size-4" /> Fm-QP-LAB-19/01</Link></div>
       <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[900px] text-left text-xs"><thead className="bg-[#f3f8f8] text-[#55727c]"><tr><th className="p-2">ชื่อโครงการ / ชุดตัวอย่าง</th><th className="p-2">Provider</th><th className="p-2">รายการทดสอบ</th><th className="p-2 whitespace-nowrap">ความถี่</th><th className="p-2">เดือน/ผู้รับผิดชอบ</th><th className="p-2">Round</th><th className="p-2 whitespace-nowrap">สถานะ</th>{actor.role === 'Admin' ? <th className="p-2">จัดการ</th> : null}</tr></thead><tbody className="divide-y divide-[#e8eeee]">{plan.items.map((item) => { const itemRounds = data.rounds.filter((round) => round.planItemId === item.id); return <tr key={item.id}><td className="p-2"><p className="font-semibold">{item.projectName}</p><p className="text-[#789097]">{item.sampleSetName}{item.externalCode ? ` (${item.externalCode})` : ''}</p></td><td className="p-2">{item.providerName}</td><td className="p-2">{item.testItem}</td><td className="p-2 whitespace-nowrap">{item.expectedRounds ? `${item.expectedRounds} ครั้ง/ปี` : '-'}</td><td className="p-2">{item.occurrences.map((occurrence) => `${THAI_MONTHS[occurrence.plannedMonth - 1]} ${occurrence.responsibleCode}`).join(', ') || '-'}</td><td className="p-2"><div className="flex flex-wrap items-center gap-1.5"><span>{itemRounds.length}/{item.expectedRounds ?? '-'}</span><GeneratePlannedRoundsButton item={item} planYear={plan.planYear} itemRounds={itemRounds} onOk={onOk} onErr={onErr} /></div></td><td className="p-2 whitespace-nowrap">{data.annualSummaries.find((summary) => summary.planItem.id === item.id)?.readiness.length ? <StatusBadge tone="warning" label="ยังไม่ครบ" /> : <StatusBadge tone="accepted" label="พร้อมสรุป" />}</td>{actor.role === 'Admin' ? <td className="p-2"><div className="flex gap-1"><Button variant="ghost" className="min-h-7 px-2 py-1" onClick={() => setEditing(item)} title="แก้ไขรายการแผน"><Pencil className="size-3.5" /></Button><DeletePlanItemButton item={item} onOk={onOk} onErr={onErr} /></div></td> : null}</tr> })}</tbody></table></div>
+      {actor.role === 'Admin' ? <PlanMetaForm plan={plan} onOk={onOk} onErr={onErr} /> : null}
       {actor.role === 'Admin' ? <PlanItemForm key={editing?.id ?? `new-${plan.id}`} plan={plan} editing={editing?.planId === plan.id ? editing : null} data={data} onCancel={() => setEditing(null)} onOk={(text, next) => { setEditing(null); onOk(text, next) }} onErr={onErr} /> : null}
       <ApprovalPanel actor={actor} data={data} type="annual-plan" entityId={plan.id} state={plan.documentState} approvals={plan.approvals} readiness={plan.readiness.map((message) => ({ message }))} onOk={onOk} onErr={onErr} />
     </Card>)}
     {!data.annualPlans.length ? <Card className="p-8 text-center text-sm text-[#8198a0]">ยังไม่มีแผนรายปี</Card> : null}
+  </div>
+}
+
+function PlanMetaForm({ plan, onOk, onErr }: { plan: EqaAnnualPlan; onOk: Update; onErr: (text: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [form, setForm] = useState({ workSection: plan.workSection, departmentName: plan.departmentName, organizationName: plan.organizationName })
+  async function submit(event: React.FormEvent) {
+    event.preventDefault(); setBusy(true)
+    try { const result = await api<{ eqa: EqaWorkspace }>(`/api/eqa/plans/${plan.id}`, { method: 'PATCH', body: JSON.stringify(form) }); setOpen(false); onOk('บันทึกข้อมูลหัวเอกสารแล้ว', result.eqa) }
+    catch (error) { onErr(error instanceof Error ? error.message : 'บันทึกข้อมูลหัวเอกสารไม่สำเร็จ') } finally { setBusy(false) }
+  }
+  return <div className="mt-3 rounded-lg border border-[#dce7e8] bg-[#f8fbfb] p-3">
+    <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-xs font-bold text-[#315763]">ข้อมูลหัวเอกสาร 19/01 และ 19/04</p><p className="mt-0.5 text-[11px] text-[#789097]">ใช้แสดงชื่อหน่วยงานบนใบรายงานและควรกรอกให้ตรงกับหน่วยงานย่อย</p></div><Button type="button" variant="secondary" className="min-h-9 px-3 text-xs" onClick={() => setOpen((value) => !value)}><Pencil className="size-3.5" />{open ? 'ซ่อน' : 'แก้ไขข้อมูลหัวเอกสาร'}</Button></div>
+    {open ? <form onSubmit={submit} className="mt-3 grid gap-2 md:grid-cols-3"><Field label="งาน/หน่วยงานย่อย"><Input value={form.workSection} onChange={(event) => setForm({ ...form, workSection: event.target.value })} required /></Field><Field label="กลุ่มงาน/ฝ่าย"><Input value={form.departmentName} onChange={(event) => setForm({ ...form, departmentName: event.target.value })} required /></Field><Field label="องค์กร"><Input value={form.organizationName} onChange={(event) => setForm({ ...form, organizationName: event.target.value })} required /></Field><div className="md:col-span-3"><Button disabled={busy}>{busy ? 'กำลังบันทึก…' : 'บันทึกข้อมูลหัวเอกสาร'}</Button></div></form> : null}
   </div>
 }
 
@@ -116,6 +134,25 @@ function DeletePlanItemButton({ item, onOk, onErr }: { item: EqaPlanItem; onOk: 
 // autofill rather than throw.
 function responsibleCodeForUser(users: EqaWorkspace['users'], userId: string): string | undefined {
   return responsibleCodeForDisplayName(users.find((user) => user.id === userId)?.displayName)
+}
+
+function WorkflowGuide({ active, onSelect }: { active: Tab; onSelect: (tab: Tab) => void }) {
+  const steps: { number: string; tab: Tab; label: string; detail: string; icon: typeof CalendarClock }[] = [
+    { number: '1', tab: 'plans', label: 'วางแผนรายปี', detail: 'กรอกข้อมูล 19/01', icon: CalendarClock },
+    { number: '2', tab: 'rounds', label: 'รับตัวอย่าง', detail: 'กรอกแบบ 19/02', icon: ClipboardList },
+    { number: '3', tab: 'rounds', label: 'ลงผลและประเมิน', detail: 'ผลจากผู้จัด EQA', icon: CheckCircle2 },
+    { number: '4', tab: 'corrective', label: 'แก้ไขเมื่อไม่ผ่าน', detail: 'ปิด CAPA ให้ครบ', icon: CheckCircle2 },
+    { number: '5', tab: 'reports', label: 'รายงานและลงนาม', detail: '19/01 · 19/02 · 19/04', icon: FileText },
+  ]
+  return <Card className="p-3 sm:p-4">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <div><p className="text-sm font-bold text-[#173d50]">ลำดับการทำงาน EQA</p><p className="mt-0.5 text-xs text-[#789097]">เลือกขั้นตอนที่ต้องทำ ระบบจะแสดงเฉพาะข้อมูลที่เกี่ยวข้องกับขั้นตอนนั้น</p></div>
+      <span className="rounded-full border border-[#cfe1e0] bg-[#f7fbfa] px-2.5 py-1 text-[11px] font-bold text-[#55727c]">5 ขั้นตอน</span>
+    </div>
+    <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+      {steps.map(({ number, tab, label, detail, icon: Icon }) => <button key={`${number}-${tab}`} type="button" onClick={() => onSelect(tab)} aria-current={active === tab ? 'step' : undefined} className={`flex min-h-16 items-center gap-2 rounded-lg border px-3 py-2 text-left transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${active === tab ? 'border-[#0b7f76] bg-[#eaf7f5] text-[#08766e]' : 'border-[#dce7e8] bg-white text-[#315763] hover:border-[#9fc4c1] hover:bg-[#f7fbfb]'}`}><span className={`flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${active === tab ? 'bg-[#0b7f76] text-white' : 'bg-[#edf4f3] text-[#55727c]'}`}>{number}</span><Icon className="size-4 shrink-0" aria-hidden="true" /><span className="min-w-0"><span className="block text-xs font-bold">{label}</span><span className="mt-0.5 block truncate text-[11px] text-[#789097]">{detail}</span></span></button>)}
+    </div>
+  </Card>
 }
 
 function PlanItemForm({ plan, editing, data, onCancel, onOk, onErr }: { plan: EqaAnnualPlan; editing: EqaPlanItem | null; data: EqaWorkspace; onCancel: () => void; onOk: Update; onErr: (text: string) => void }) {
@@ -160,14 +197,16 @@ function PlanItemForm({ plan, editing, data, onCancel, onOk, onErr }: { plan: Eq
 }
 
 function ReportsTab({ data, actor, onNavigate, onOk, onErr }: { data: EqaWorkspace; actor: BmActor; onNavigate: (target: EqaReadinessTarget) => void; onOk: Update; onErr: (text: string) => void }) {
-  return <div className="space-y-4">{data.annualPlans.map((plan) => <Card key={plan.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="font-bold">ปี {plan.planYear + 543}</h2><p className="text-xs text-[#789097]">รายงานแผน 1 ฉบับ · สรุป {plan.items.length} scheme</p></div><Link href={`/eqa/report/annual-plan/${plan.id}?tab=reports`} className="inline-flex items-center gap-1 rounded-md border border-[#b8c8cc] px-3 py-2 text-xs font-bold"><Printer className="size-4" /> Fm-QP-LAB-19/01</Link></div><div className="mt-3 divide-y divide-[#e3ebec] overflow-hidden rounded-md border border-[#dfe8e9]">{plan.items.map((item) => { const summary = data.annualSummaries.find((record) => record.planItem.id === item.id); return summary ? <SummaryReportCard key={item.id} summary={summary} data={data} actor={actor} onNavigate={onNavigate} onOk={onOk} onErr={onErr} /> : null })}</div></Card>)}{!data.annualPlans.length ? <Card className="p-8 text-center text-sm text-[#8198a0]">ยังไม่มีรายงาน เพราะยังไม่ได้สร้างแผนรายปี</Card> : null}</div>
+  return <div className="space-y-4"><div className="px-1"><p className="text-xs font-bold text-[#0b7f76]">ขั้นตอนที่ 5 · รายงานและลงนาม</p><p className="mt-1 text-sm text-[#6a838c]">ตรวจความพร้อมของข้อมูล เปิดใบรายงาน แล้วลงนามดิจิทัลบนโทรศัพท์เครื่องเดียวกันให้ครบทุกบทบาท</p></div>{data.annualPlans.map((plan) => <Card key={plan.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="font-bold">ปี {plan.planYear + 543}</h2><p className="text-xs text-[#789097]">รายงานแผน 1 ฉบับ · สรุป {plan.items.length} scheme</p></div><Link href={`/eqa/report/annual-plan/${plan.id}?tab=reports`} className="inline-flex items-center gap-1 rounded-md border border-[#b8c8cc] px-3 py-2 text-xs font-bold"><Printer className="size-4" /> Fm-QP-LAB-19/01</Link></div><div className="mt-3 divide-y divide-[#e3ebec] overflow-hidden rounded-md border border-[#dfe8e9]">{plan.items.map((item) => { const summary = data.annualSummaries.find((record) => record.planItem.id === item.id); return summary ? <SummaryReportCard key={item.id} summary={summary} data={data} actor={actor} onNavigate={onNavigate} onOk={onOk} onErr={onErr} /> : null })}</div></Card>)}{!data.annualPlans.length ? <Card className="p-8 text-center text-sm text-[#8198a0]">ยังไม่มีรายงาน เพราะยังไม่ได้สร้างแผนรายปี</Card> : null}</div>
 }
 
 function SummaryReportCard({ summary, data, actor, onNavigate, onOk, onErr }: { summary: EqaAnnualSummary; data: EqaWorkspace; actor: BmActor; onNavigate: (target: EqaReadinessTarget) => void; onOk: Update; onErr: (text: string) => void }) {
   const [expanded, setExpanded] = useState(false)
   const readiness = annualSummaryIssues(summary.planItem, summary.rounds, data.correctiveActions)
   const isReady = readiness.length === 0
-  return <div className="bg-white"><div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3"><div className="min-w-48 flex-1"><p className="font-bold text-[#315763]">{summary.planItem.sampleSetName}</p><p className="text-xs text-[#789097]">{summary.planItem.projectName} · {summary.rounds.length}/{summary.planItem.expectedRounds ?? '-'} รอบ</p></div><div className="text-xs text-[#55727c]">{isReady ? <StatusBadge tone="accepted" label="พร้อมอนุมัติ" /> : <StatusBadge tone="warning" label={`รอดำเนินการ ${readiness.length} รายการ`} />}</div><Link href={`/eqa/report/annual-summary/${summary.planItem.id}?tab=reports`} className="inline-flex items-center gap-1 rounded border border-[#b8c8cc] px-2 py-1.5 text-xs font-bold"><Printer className="size-3.5" /> Fm-QP-LAB-19/04</Link><Button type="button" variant="ghost" className="min-h-8 px-2 text-xs" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}{expanded ? 'ซ่อนรายละเอียด' : 'ตรวจ/อนุมัติ'}</Button></div>{expanded ? <div className="border-t border-[#e3ebec] bg-[#f8fbfb] px-4 py-3"><div className="mb-3 flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#55727c]">รายละเอียดความพร้อมและการอนุมัติ</p><span className="text-xs text-[#789097]">{summary.rounds.length} รอบในรายการนี้</span></div><ApprovalPanel actor={actor} data={data} type="annual-summary" entityId={summary.planItem.id} state={summary.documentState} approvals={summary.approvals} readiness={readiness} onNavigate={onNavigate} onOk={onOk} onErr={onErr} /></div> : null}</div>
+  const statusLabel = !isReady ? `รอดำเนินการ ${readiness.length} รายการ` : summary.documentState.status === 'approved' ? 'ลงนามครบแล้ว' : 'พร้อมลงนาม'
+  const statusTone = !isReady ? 'warning' as const : summary.documentState.status === 'approved' ? 'accepted' as const : 'neutral' as const
+  return <div className="bg-white"><div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3"><div className="min-w-48 flex-1"><p className="font-bold text-[#315763]">{summary.planItem.sampleSetName}</p><p className="text-xs text-[#789097]">{summary.planItem.projectName} · {summary.rounds.length}/{summary.planItem.expectedRounds ?? '-'} รอบ</p></div><div className="text-xs text-[#55727c]"><StatusBadge tone={statusTone} label={statusLabel} /></div><Link href={`/eqa/report/annual-summary/${summary.planItem.id}?tab=reports`} className="inline-flex items-center gap-1 rounded border border-[#b8c8cc] px-2 py-1.5 text-xs font-bold"><Printer className="size-3.5" /> Fm-QP-LAB-19/04</Link><Button type="button" variant="ghost" className="min-h-8 px-2 text-xs" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}{expanded ? 'ซ่อนรายละเอียด' : 'ตรวจความพร้อม/ลงนาม'}</Button></div>{expanded ? <div className="border-t border-[#e3ebec] bg-[#f8fbfb] px-4 py-3"><div className="mb-3 flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#55727c]">รายละเอียดความพร้อมและการลงนาม</p><span className="text-xs text-[#789097]">{summary.rounds.length} รอบในรายการนี้</span></div><ApprovalPanel actor={actor} data={data} type="annual-summary" entityId={summary.planItem.id} state={summary.documentState} approvals={summary.approvals} readiness={readiness} onNavigate={onNavigate} onOk={onOk} onErr={onErr} /></div> : null}</div>
 }
 
 function ManageTab({ data, actor, onOk, onErr }: { data: EqaWorkspace; actor: BmActor; onOk: Update; onErr: (text: string) => void }) {
@@ -221,5 +260,5 @@ function ApproverManager({ data, onOk, onErr }: { data: EqaWorkspace; actor: BmA
   const initial = useMemo(() => Object.fromEntries(APPROVAL_ROLES.map((role) => [role, data.approverAssignments.find((assignment) => assignment.approvalRole === role)?.userId ?? ''])) as Record<EqaAssignedApprovalRole, string>, [data.approverAssignments])
   const [values, setValues] = useState(initial)
   async function save(role: EqaAssignedApprovalRole) { if (!values[role]) return; try { const result = await api<{ eqa: EqaWorkspace }>('/api/eqa/approver-assignments', { method: 'PUT', body: JSON.stringify({ approvalRole: role, userId: values[role] }) }); onOk('กำหนดผู้อนุมัติแล้ว', result.eqa) } catch (error) { onErr(error instanceof Error ? error.message : 'บันทึกไม่สำเร็จ') } }
-  return <Card className="p-4"><h2 className="font-bold">ผู้รับตำแหน่งอนุมัติ</h2><div className="mt-3 space-y-3">{APPROVAL_ROLES.map((role) => <div key={role} className="grid grid-cols-[1fr_auto] items-end gap-2"><Field label={EQA_APPROVAL_ROLE_LABELS[role]}><UserSelect users={data.users} value={values[role]} onChange={(value) => setValues({ ...values, [role]: value })} /></Field><Button variant="secondary" onClick={() => save(role)}>บันทึก</Button></div>)}</div></Card>
+  return <Card className="p-4"><h2 className="font-bold">การกำหนดบัญชีผู้ลงนาม</h2><p className="mt-1 text-xs leading-5 text-[#789097]">กำหนดเฉพาะบทบาทที่มีบัญชีในระบบก็ได้ หากหัวหน้างานหรือผู้จัดการคุณภาพไม่มีบัญชี ให้เว้นว่าง แล้วผู้ปฏิบัติงานใช้เครื่องนี้กรอกชื่อจริงและวาดลายเซ็นแทน</p><div className="mt-3 space-y-3">{APPROVAL_ROLES.map((role) => <div key={role} className="grid grid-cols-[1fr_auto] items-end gap-2"><Field label={EQA_APPROVAL_ROLE_LABELS[role]}><UserSelect users={data.users} value={values[role]} onChange={(value) => setValues({ ...values, [role]: value })} /></Field><Button variant="secondary" onClick={() => save(role)}>บันทึก</Button></div>)}</div></Card>
 }

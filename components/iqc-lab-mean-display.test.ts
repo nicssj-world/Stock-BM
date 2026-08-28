@@ -25,6 +25,8 @@ describe('IQC LAB Mean display', () => {
     expect(chart).toContain('Active Westgard limit')
     expect(chart).toContain('Assigned Mean / SD')
     expect(chart).toContain('LAB Mean / SD')
+    expect(chart).not.toContain('ค่าอ้างอิงจากผู้ผลิต (CoA)')
+    expect(chart).not.toContain('ค่าเฉลี่ยและ SD จากห้องปฏิบัติการ (QC baseline)')
     expect(chart).toContain('chart.labLockedAt')
   })
 

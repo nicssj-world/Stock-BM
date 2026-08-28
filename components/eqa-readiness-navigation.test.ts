@@ -28,19 +28,18 @@ describe('EQA clickable readiness navigation', () => {
   })
 
   it('shows which assigned user must approve each pending signature', () => {
-    expect(shared).toContain('ยังไม่ได้กำหนดผู้อนุมัติ')
+    expect(shared).toContain('ยังไม่มีผู้ลงนามในระบบ')
     expect(shared).toContain('รอ ${')
   })
 
-  it('requires only the technical manager for an online annual-plan approval', () => {
-    expect(server).toContain("'annual-plan': ['technical-manager']")
-    expect(shared).toContain("type === 'annual-plan' ? ['technical-manager']")
+  it('requires all four controlled-document roles for an annual plan', () => {
+    expect(server).toContain("'annual-plan': ['technical-manager', 'quality-manager', 'section-head', 'department-head']")
+    expect(shared).toContain("type === 'round-receipt' ? ['analyst', 'technical-manager'] : APPROVAL_ROLES")
   })
 
-  it('approves an annual summary once the technical manager and section head have confirmed', () => {
-    expect(server).toContain("'annual-summary': ['technical-manager', 'section-head']")
-    expect(server).toContain('Reconcile approvals already recorded under an earlier workflow change')
-    expect(shared).toContain("type === 'annual-summary' ? ['technical-manager', 'section-head']")
+  it('requires all four controlled-document roles for an annual summary', () => {
+    expect(server).toContain("'annual-summary': ['technical-manager', 'quality-manager', 'section-head', 'department-head']")
+    expect(shared).toContain("type === 'round-receipt' ? ['analyst', 'technical-manager'] : APPROVAL_ROLES")
   })
 
   it('hides the add-result form after submission and edits a result in its own row', () => {
@@ -51,21 +50,21 @@ describe('EQA clickable readiness navigation', () => {
   })
 
   it('allows an EQA result to be explicitly linked to the IQC analyte used for Six Sigma bias', () => {
-    expect(roundsTab).toContain('เชื่อมกับ IQC panel (ใช้คำนวณ Bias / Six Sigma)')
+    expect(roundsTab).toContain('เชื่อม EQA รอบนี้กับ IQC panel (ใช้คำนวณ Bias / Six Sigma)')
   })
 
   it('preserves the analyst confirmation when provider evaluation is recorded after submission', () => {
     expect(server).toContain('async function invalidateResultDocuments(roundId: string)')
     expect(server).toContain("ROUND_STATUS_ORDER.indexOf(status) < ROUND_STATUS_ORDER.indexOf('submitted')")
     expect(server).toContain('await invalidateResultDocuments(roundId)')
-    expect(roundsTab).toContain("const analystConfirmed = round.approvals.some((approval) => approval.approvalRole === 'analyst')")
-    expect(roundsTab).toContain("lockedRoles={analystConfirmed ? ['analyst'] : undefined}")
+    expect(roundsTab).toContain("const analystConfirmed = round.approvals.some((approval) => approval.approvalRole === 'analyst' && approval.signatureAttachmentId)")
+    expect(roundsTab).toContain('lockedRoles={lockedApprovalRoles}')
     expect(shared).toContain('!lockedRoles?.includes(role)')
   })
 
   it('lets an Admin complete a configured approver step when no separate portal user exists', () => {
-    expect(shared).toContain("return actor.role === 'Admin' || data.approverAssignments")
-    expect(server).toContain("if (actor.role !== 'Admin' && (!assignment || assignment.userId !== actor.id))")
+    expect(shared).toContain("return actor.role === 'Admin' || !assignment || assignment.userId === actor.id")
+    expect(server).toContain("if (assignment && actor.role !== 'Admin' && assignment.userId !== actor.id)")
   })
 
   it('lets an Admin confirm the analyst step when the analyst has no portal account', () => {

@@ -29,7 +29,7 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId }: { data: Eqa
   const [editingActionId, setEditingActionId] = useState<string | null>(null)
   const [editingAction, setEditingAction] = useState<EqaCorrectiveActionEdit>({ problem: '', rootCause: '', actionTaken: '', ownerId: '', dueDate: '' })
 
-  const roundsNeedingCapa = useMemo(() => data.rounds.filter((round) => round.summaryOutcome === 'fail' || round.results.some((result) => result.outcome === 'unacceptable')), [data.rounds])
+  const roundsNeedingCapa = useMemo(() => data.rounds.filter((round) => round.summaryOutcome === 'fail' || round.results.some((result) => result.outcome === 'warning' || result.outcome === 'unacceptable')), [data.rounds])
   const roundOptions = showAllRounds ? data.rounds : roundsNeedingCapa
   const selectedRound = data.rounds.find((round) => round.id === roundId)
   const actionCounts = useMemo(() => ({
@@ -128,19 +128,20 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId }: { data: Eqa
   function updateQuery(value: string) { setQuery(value); setVisibleActionCount(20) }
 
   return <div className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
+    <div className="lg:col-span-2 px-1"><p className="text-xs font-bold text-[#0b7f76]">ขั้นตอนที่ 4 · ติดตาม corrective action (CAPA)</p><p className="mt-1 text-sm text-[#6a838c]">ใช้เมื่อผลรอบเป็นไม่ผ่าน: ระบุสาเหตุ การแก้ไข ผู้รับผิดชอบ และปิด CAPA ก่อนลงนามสรุปประจำปี</p></div>
     <Card className="space-y-3 p-4">
-      <h2 className="font-bold text-[#173d50]">เปิด corrective action</h2>
+      <h2 className="font-bold text-[#173d50]">เปิดรายการแก้ไข (CAPA)</h2>
       <form className="space-y-3" onSubmit={create}>
         <Field label="Round"><Select value={roundId} onChange={(event) => { setRoundId(event.target.value); setResultId('') }} required><option value="">— เลือก round —</option>{roundOptions.map((round) => <option key={round.id} value={round.id}>{round.planItemName ?? round.schemeName} · {round.roundLabel}</option>)}</Select></Field>
         <label className="flex items-center gap-2 text-xs text-[#58747d]"><input type="checkbox" checked={showAllRounds} onChange={(event) => setShowAllRounds(event.target.checked)} /> แสดงทุก round (รวมที่ผ่านเกณฑ์)</label>
         {!roundOptions.length ? <p className="text-xs text-[#9aafb4]">ไม่มี round ที่ไม่ผ่านเกณฑ์ — ติ๊ก &ldquo;แสดงทุก round&rdquo; เพื่อเปิด CAPA กับ round อื่น</p> : null}
         {selectedRound?.results.length ? <Field label="ผลตัวอย่างที่เกี่ยวข้อง (ถ้ามี)"><Select value={resultId} onChange={(event) => setResultId(event.target.value)}><option value="">— ทั้ง round —</option>{selectedRound.results.map((result) => <option key={result.id} value={result.id}>{result.sampleCode ?? '-'} · {result.analyte}</option>)}</Select></Field> : null}
         <Field label="ปัญหา"><Textarea rows={2} value={problem} onChange={(event) => setProblem(event.target.value)} required /></Field>
-        <Field label="Root cause"><Textarea rows={2} value={rootCause} onChange={(event) => setRootCause(event.target.value)} /></Field>
-        <Field label="Action taken"><Textarea rows={2} value={actionTaken} onChange={(event) => setActionTaken(event.target.value)} /></Field>
+        <Field label="สาเหตุราก (Root cause)" hint="กรอกก่อนปิด CAPA"><Textarea rows={2} value={rootCause} onChange={(event) => setRootCause(event.target.value)} /></Field>
+        <Field label="การแก้ไข (Action taken)" hint="กรอกก่อนปิด CAPA"><Textarea rows={2} value={actionTaken} onChange={(event) => setActionTaken(event.target.value)} /></Field>
         <div className="grid grid-cols-2 gap-2">
           <Field label="ผู้รับผิดชอบ"><Select value={ownerId} onChange={(event) => setOwnerId(event.target.value)}><option value="">— ยังไม่กำหนด —</option>{data.users.map((user) => <option key={user.id} value={user.id}>{user.displayName}</option>)}</Select></Field>
-          <Field label="Due date"><Input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></Field>
+          <Field label="กำหนดเสร็จ (Due date)"><Input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></Field>
         </div>
         <Button disabled={busy}>บันทึก</Button>
       </form>
@@ -149,7 +150,7 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId }: { data: Eqa
       <Card className="space-y-3 p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="font-bold text-[#173d50]">รายการ Corrective action</h2>
+            <h2 className="font-bold text-[#173d50]">รายการแก้ไข (CAPA)</h2>
             <p className="mt-0.5 text-xs text-[#789097]">แสดง {visibleActions.length} จาก {filteredActions.length} รายการที่ตรงเงื่อนไข</p>
           </div>
           <div className="flex flex-wrap gap-1">
@@ -176,7 +177,7 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId }: { data: Eqa
               <button type="button" onClick={() => toggleExpanded(action.id)} aria-expanded={isExpanded} className="min-w-0 flex-1 p-4 text-left focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0b7f76] focus-visible:outline-none">
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-[#315763]">{action.roundLabel}</span>
-                  <StatusBadge tone={action.status === 'closed' ? 'accepted' : 'warning'} label={action.status} />
+                  <StatusBadge tone={action.status === 'closed' ? 'accepted' : 'warning'} label={action.status === 'closed' ? 'ปิดแล้ว' : 'กำลังดำเนินการ'} />
                   {needsCompletion ? <span className="rounded-full border border-[#eed4a6] bg-[#fff9ed] px-2 py-0.5 text-[10px] font-bold text-[#a9700f]">ข้อมูลไม่ครบ</span> : null}
                   <ChevronDown className={`size-4 shrink-0 text-[#789097] transition-transform ${isExpanded ? 'rotate-180' : ''}`} aria-hidden="true" />
                 </div>
@@ -206,11 +207,11 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId }: { data: Eqa
                   <form className="space-y-3" onSubmit={saveEditing}>
                     <p className="text-xs font-bold text-[#315763]">แก้ไข Corrective action</p>
                     <Field label="ปัญหา"><Textarea rows={2} value={editingAction.problem} onChange={(event) => setEditingAction({ ...editingAction, problem: event.target.value })} required /></Field>
-                    <Field label="Root cause"><Textarea rows={2} value={editingAction.rootCause} onChange={(event) => setEditingAction({ ...editingAction, rootCause: event.target.value })} required /></Field>
-                    <Field label="Action taken"><Textarea rows={2} value={editingAction.actionTaken} onChange={(event) => setEditingAction({ ...editingAction, actionTaken: event.target.value })} required /></Field>
+                    <Field label="สาเหตุราก (Root cause)"><Textarea rows={2} value={editingAction.rootCause} onChange={(event) => setEditingAction({ ...editingAction, rootCause: event.target.value })} required /></Field>
+                    <Field label="การแก้ไข (Action taken)"><Textarea rows={2} value={editingAction.actionTaken} onChange={(event) => setEditingAction({ ...editingAction, actionTaken: event.target.value })} required /></Field>
                     <div className="grid gap-2 sm:grid-cols-2">
                       <Field label="ผู้รับผิดชอบ"><Select value={editingAction.ownerId} onChange={(event) => setEditingAction({ ...editingAction, ownerId: event.target.value })}><option value="">— ยังไม่กำหนด —</option>{data.users.map((user) => <option key={user.id} value={user.id}>{user.displayName}</option>)}</Select></Field>
-                      <Field label="Due date"><Input type="date" value={editingAction.dueDate} onChange={(event) => setEditingAction({ ...editingAction, dueDate: event.target.value })} /></Field>
+                      <Field label="กำหนดเสร็จ (Due date)"><Input type="date" value={editingAction.dueDate} onChange={(event) => setEditingAction({ ...editingAction, dueDate: event.target.value })} /></Field>
                     </div>
                     <div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="ghost" disabled={busy} onClick={() => setEditingActionId(null)}>ยกเลิก</Button><Button disabled={busy}>บันทึกการแก้ไข</Button></div>
                   </form>
@@ -222,7 +223,7 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId }: { data: Eqa
                     {action.ownerName || action.dueDate ? <p className="text-xs text-[#789097]">Owner: {action.ownerName ?? '-'} · Due: {formatDate(action.dueDate)}</p> : null}
                     {action.effectivenessNote ? (
                       <p className="text-xs text-[#789097]">
-                        ผลการยืนยันการแก้ไข: {action.effectivenessOutcome} · {action.effectivenessNote}
+                        ผลการยืนยันการแก้ไข: {action.effectivenessOutcome === 'effective' ? 'มีประสิทธิผล' : action.effectivenessOutcome === 'ineffective' ? 'ไม่มีประสิทธิผล' : 'รอยืนยัน'} · {action.effectivenessNote}
                         {action.effectivenessVerifiedByName ? ` · ตรวจโดย ${action.effectivenessVerifiedByName}` : ''}
                         {action.effectivenessVerifiedAt ? ` (${formatDateTime(action.effectivenessVerifiedAt)})` : ''}
                       </p>

@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element -- signed attachment URLs must remain direct for browser print output. */
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 import type { EqaApprovalRole, EqaDocumentApproval } from '@/lib/eqa/types'
@@ -17,7 +18,8 @@ export function EqaApprovalGrid({ roles, approvals }: { roles: EqaApprovalRole[]
   return <div className="approval-grid">{roles.map((role) => {
     const approval = approvals.find((item) => item.approvalRole === role)
     return <div className="approval-block" key={role}>
-      <div className="signature-line">{approval?.approvedByName ?? ''}</div>
+      <div className="signature-line">{approval?.signatureAttachmentId ? <img src={`/api/attachments/${approval.signatureAttachmentId}`} alt={`ลายเซ็น ${approval.signerName ?? EQA_APPROVAL_ROLE_LABELS[role]}`} className="signature-image" /> : approval ? <span className="signature-placeholder">รอลงนามดิจิทัล</span> : null}</div>
+      <div className="signature-signer">{approval?.signerName ?? approval?.approvedByName ?? ''}</div>
       <div className="signature-role">({EQA_APPROVAL_ROLE_LABELS[role]})</div>
       <div className="signature-date">วันที่ {approval ? thaiDateTime(approval.approvedAt) : '........................................'}</div>
     </div>
@@ -51,7 +53,7 @@ export function EqaReportFrame({ backHref, code, orientation, draft, children }:
       .report-sheet>*:not(.draft-watermark,.document-code,.legal-footer){position:relative;z-index:1}
       .approval-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px 70px;margin:22px 28px 0;break-inside:avoid;page-break-inside:avoid}
       .approval-block{text-align:center;min-height:88px}
-      .signature-line{min-height:27px;border-bottom:1px dotted #111;font-size:18px}
+      .signature-line{display:flex;min-height:48px;align-items:center;justify-content:center;border-bottom:1px dotted #111;font-size:18px}.signature-image{display:block;max-width:92%;max-height:42px;object-fit:contain}.signature-placeholder{font-size:13px;color:#777}.signature-signer{min-height:19px;font-size:16px}
       .signature-role{margin-top:2px;font-size:17px}
       .signature-date{margin-top:7px;font-size:16px}
       table{border-collapse:collapse}

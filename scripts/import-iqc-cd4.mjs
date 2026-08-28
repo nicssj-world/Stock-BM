@@ -223,10 +223,10 @@ function evaluateLatest(series, m, s) {
 }
 
 const ANALYTES = [
-  { code: '%CD3', name: '%CD3', is_absolute: false, unit: '%', group_label: 'CD4 Panel' },
-  { code: '%CD4', name: '%CD4', is_absolute: false, unit: '%', group_label: 'CD4 Panel' },
-  { code: 'AbsCD3', name: 'Absolute CD3', is_absolute: true, unit: 'cells/uL', group_label: 'CD4 Panel' },
-  { code: 'AbsCD4', name: 'Absolute CD4', is_absolute: true, unit: 'cells/uL', group_label: 'CD4 Panel' },
+  { code: '%CD3', name: '%CD3', is_absolute: false, unit: '%', group_label: 'CD4 Low Panel | COE Panel' },
+  { code: '%CD4', name: '%CD4', is_absolute: false, unit: '%', group_label: 'CD4 Low Panel | COE Panel' },
+  { code: 'AbsCD3', name: 'Absolute CD3', is_absolute: true, unit: 'cells/uL', group_label: 'CD4 Low Panel' },
+  { code: 'AbsCD4', name: 'Absolute CD4', is_absolute: true, unit: 'cells/uL', group_label: 'CD4 Low Panel' },
 ]
 
 const FILES = [

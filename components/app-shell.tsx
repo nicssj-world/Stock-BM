@@ -84,7 +84,7 @@ export function AppShell({ actor, children }: { actor: BmActor; children: React.
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[272px_minmax(0,1fr)]">
-      <aside className="bg-[#123944] text-white lg:min-h-screen lg:shadow-[12px_0_36px_rgba(8,36,43,0.08)]">
+      <aside className="bg-[#123944] text-white lg:sticky lg:top-0 lg:h-screen lg:self-start lg:overflow-y-auto lg:shadow-[12px_0_36px_rgba(8,36,43,0.08)]">
         <div className="flex items-center justify-between gap-3 px-4 py-4 lg:block lg:px-5 lg:py-6">
           <div className="min-w-0">
             <p className="text-[11px] font-bold tracking-[0.2em] text-[#7ee3d8] uppercase">Chonburi Hospital</p>

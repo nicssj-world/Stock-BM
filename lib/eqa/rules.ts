@@ -11,11 +11,12 @@ export const ROUND_STATUS_ORDER: EqaRoundStatus[] = ['scheduled', 'received', 's
 export function roundStatusIndex(status: EqaRoundStatus) { return ROUND_STATUS_ORDER.indexOf(status) }
 
 // The overall result is not entered separately: it is a faithful summary of
-// the provider's outcome for every sample in the round. A warning remains a
-// passing round, while an unacceptable result requires the round to fail.
+// the provider's outcome for every sample in the round. Any result other than
+// acceptable is treated as a failed round so that warning outcomes cannot be
+// mistaken for a clean EQA pass.
 export function deriveRoundSummaryOutcome(outcomes: EqaOutcome[]): EqaRoundSummaryOutcome {
   if (!outcomes.length || outcomes.includes('not-evaluated')) return 'not-evaluated'
-  return outcomes.includes('unacceptable') ? 'fail' : 'pass'
+  return outcomes.every((outcome) => outcome === 'acceptable') ? 'pass' : 'fail'
 }
 
 // Scheme scope is stored as text so existing data remains compatible. Each
@@ -104,7 +105,8 @@ export interface EqaReadinessIssue { message: string; target?: EqaReadinessTarge
 
 export function roundReceiptIssues(round: Pick<EqaRound,
   | 'id' | 'planItemId' | 'externalSentDate' | 'sampleReceivedDate' | 'packageCondition'
-  | 'receivedTemperature' | 'sampleCondition' | 'storageCondition' | 'specimenType'
+  | 'packageNote' | 'receivedTemperature' | 'receivedTemperatureNote' | 'sampleCondition' | 'sampleConditionNote'
+  | 'storageCondition' | 'storageTemperatureC' | 'storageNote' | 'specimenType'
   | 'receiverId' | 'analystId' | 'analysisDate' | 'submissionDate' | 'submissionMethod' | 'results'
 >): EqaReadinessIssue[] {
   const field = (name: string): EqaReadinessTarget => ({ kind: 'receipt-field', roundId: round.id, field: name })
@@ -113,9 +115,14 @@ export function roundReceiptIssues(round: Pick<EqaRound,
   if (!round.externalSentDate) issues.push({ message: 'ยังไม่มีวันที่องค์กรภายนอกส่งตัวอย่าง', target: field('externalSentDate') })
   if (!round.sampleReceivedDate) issues.push({ message: 'ยังไม่มีวันที่รับตัวอย่าง', target: field('sampleReceivedDate') })
   if (!round.packageCondition) issues.push({ message: 'ยังไม่ได้บันทึกสภาพห่อตัวอย่าง', target: field('packageCondition') })
+  if (round.packageCondition === 'unacceptable' && !round.packageNote) issues.push({ message: 'สภาพห่อตัวอย่างไม่เรียบร้อย แต่ยังไม่ได้ระบุรายละเอียด', target: field('packageNote') })
   if (!round.receivedTemperature) issues.push({ message: 'ยังไม่ได้บันทึกอุณหภูมิขณะรับ', target: field('receivedTemperature') })
+  if (round.receivedTemperature === 'other' && !round.receivedTemperatureNote) issues.push({ message: 'เลือกอุณหภูมิแบบอื่น แต่ยังไม่ได้ระบุรายละเอียด', target: field('receivedTemperatureNote') })
   if (!round.sampleCondition) issues.push({ message: 'ยังไม่ได้บันทึกสภาพตัวอย่าง', target: field('sampleCondition') })
+  if (round.sampleCondition === 'unacceptable' && !round.sampleConditionNote) issues.push({ message: 'สภาพตัวอย่างไม่เรียบร้อย แต่ยังไม่ได้ระบุรายละเอียด', target: field('sampleConditionNote') })
   if (!round.storageCondition) issues.push({ message: 'ยังไม่ได้บันทึกการเก็บตัวอย่าง', target: field('storageCondition') })
+  if (round.storageCondition === 'refrigerated' && round.storageTemperatureC == null) issues.push({ message: 'เลือกเก็บแบบแช่เย็น แต่ยังไม่ได้ระบุอุณหภูมิที่เก็บ', target: field('storageTemperatureC') })
+  if (round.storageCondition === 'other' && !round.storageNote) issues.push({ message: 'เลือกการเก็บตัวอย่างแบบอื่น แต่ยังไม่ได้ระบุรายละเอียด', target: field('storageNote') })
   if (!round.specimenType) issues.push({ message: 'ยังไม่มีชนิดตัวอย่าง', target: field('specimenType') })
   if (!round.receiverId) issues.push({ message: 'ยังไม่ได้ระบุผู้รับตัวอย่าง', target: field('receiverId') })
   if (!round.analystId) issues.push({ message: 'ยังไม่ได้ระบุผู้ตรวจวิเคราะห์', target: field('analystId') })
@@ -123,6 +130,8 @@ export function roundReceiptIssues(round: Pick<EqaRound,
   if (!round.submissionDate) issues.push({ message: 'ยังไม่มีวันที่ส่งผล', target: field('submissionDate') })
   if (!round.submissionMethod) issues.push({ message: 'ยังไม่มีวิธีส่งผล', target: field('submissionMethod') })
   if (!round.results.length) issues.push({ message: 'ยังไม่มีรายการตัวอย่าง/ผลที่ส่ง', target: { kind: 'round-results', roundId: round.id } })
+  if (round.results.some((result) => !result.sampleCode?.trim())) issues.push({ message: 'ยังมีผลที่ไม่ได้ระบุรหัสตัวอย่าง', target: { kind: 'round-results', roundId: round.id } })
+  if (round.results.some((result) => !result.submittedValue?.trim())) issues.push({ message: 'ยังมีผลที่ไม่ได้ระบุค่าผลที่ส่ง', target: { kind: 'round-results', roundId: round.id } })
   return issues
 }
 export function roundReceiptReadiness(round: Parameters<typeof roundReceiptIssues>[0]) {
@@ -137,8 +146,14 @@ export function annualSummaryIssues(item: EqaPlanItem, rounds: EqaRound[], corre
   if (item.expectedRounds != null && rounds.length < item.expectedRounds) issues.push({ message: `ผลยังไม่ครบตามแผน (${rounds.length}/${item.expectedRounds} รอบ)`, target: planItemTarget })
   if (!rounds.length) issues.push({ message: 'ยังไม่มี round ที่ผูกกับรายการแผน', target: planItemTarget })
   for (const round of rounds) {
+    const receiptGaps = roundReceiptIssues(round).filter((issue) => issue.target?.kind !== 'round-results')
+    for (const gap of receiptGaps) issues.push({ message: `${round.roundLabel}: ${gap.message}`, target: gap.target })
     if (round.status !== 'evaluated' && round.status !== 'closed') issues.push({ message: `${round.roundLabel}: สถานะ round ยังไม่เป็น evaluated/closed`, target: { kind: 'round-status', roundId: round.id } })
     if (!round.results.length) issues.push({ message: `${round.roundLabel}: ยังไม่มีผลตัวอย่าง`, target: { kind: 'round-results', roundId: round.id } })
+    if (round.results.some((result) => !result.sampleCode?.trim())) issues.push({ message: `${round.roundLabel}: ยังมีผลที่ไม่ได้ระบุรหัสตัวอย่าง`, target: { kind: 'round-results', roundId: round.id } })
+    if (round.results.some((result) => !result.submittedValue?.trim())) issues.push({ message: `${round.roundLabel}: ยังมีผลที่ไม่ได้ระบุค่าผลที่ส่ง`, target: { kind: 'round-results', roundId: round.id } })
+    const derivedOutcome = deriveRoundSummaryOutcome(round.results.map((result) => result.outcome))
+    if (round.summaryOutcome !== derivedOutcome) issues.push({ message: `${round.roundLabel}: สรุปผลไม่ตรงกับผลประเมินรายตัวอย่าง`, target: { kind: 'round-summary', roundId: round.id } })
     if (round.summaryOutcome === 'not-evaluated') issues.push({ message: `${round.roundLabel}: ยังไม่ได้สรุปผลผ่าน/ไม่ผ่าน`, target: { kind: 'round-summary', roundId: round.id } })
     if (round.results.some((result) => result.outcome === 'not-evaluated')) issues.push({ message: `${round.roundLabel}: ยังมีผลที่ไม่ได้ประเมิน`, target: { kind: 'round-results', roundId: round.id } })
     if (round.summaryOutcome === 'fail') {
@@ -167,14 +182,15 @@ export interface EqaRoundStep {
 export function roundProgress(round: EqaRound): EqaRoundStep[] {
   const receiptIssues = roundReceiptIssues(round).filter((issue) => issue.target?.kind !== 'round-results')
   const hasResults = round.results.length > 0
+  const resultsComplete = hasResults && round.results.every((result) => Boolean(result.sampleCode?.trim()) && Boolean(result.submittedValue?.trim()))
   const evaluated = (round.status === 'evaluated' || round.status === 'closed') && !round.results.some((result) => result.outcome === 'not-evaluated')
-  const summarized = round.summaryOutcome !== 'not-evaluated'
+  const summarized = round.summaryOutcome !== 'not-evaluated' && round.summaryOutcome === deriveRoundSummaryOutcome(round.results.map((result) => result.outcome))
   const approved = round.documentState.status === 'approved'
   return [
-    { key: 'receipt', label: 'แบบรับตัวอย่างครบ', done: receiptIssues.length === 0, target: receiptIssues[0]?.target },
-    { key: 'results', label: 'มีผล', done: hasResults, target: hasResults ? undefined : { kind: 'round-results', roundId: round.id } },
-    { key: 'evaluated', label: 'ประเมินแล้ว', done: evaluated, target: evaluated ? undefined : { kind: 'round-status', roundId: round.id } },
-    { key: 'summary', label: 'สรุปผ่าน/ไม่ผ่าน', done: summarized, target: summarized ? undefined : { kind: 'round-summary', roundId: round.id } },
-    { key: 'approved', label: 'อนุมัติครบ 2 ราย', done: approved },
+    { key: 'receipt', label: 'รับตัวอย่างครบ', done: receiptIssues.length === 0, target: receiptIssues[0]?.target },
+    { key: 'results', label: 'ลงผลที่ส่งแล้ว', done: resultsComplete, target: resultsComplete ? undefined : { kind: 'round-results', roundId: round.id } },
+    { key: 'evaluated', label: 'บันทึกผลประเมินแล้ว', done: evaluated, target: evaluated ? undefined : { kind: 'round-status', roundId: round.id } },
+    { key: 'summary', label: 'ระบบสรุปผลแล้ว', done: summarized, target: summarized ? undefined : { kind: 'round-summary', roundId: round.id } },
+    { key: 'approved', label: 'ลงนามครบ', done: approved },
   ]
 }

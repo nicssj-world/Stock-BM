@@ -90,6 +90,12 @@ function isBelowLodResult(value: string | null | undefined, limit: number | null
   const match = actual.match(/^<\s*(\d+(?:\.\d+)?)\s*(?:copies\/?ml|iu\/?ml)?$/i)
   return Boolean(match && (limit == null || Number(match[1]) === limit))
 }
+function evaluateVlNormalResult(analyte: IqcAnalyte | undefined, value: string | null | undefined): QcStatus | null {
+  if (!isBelowLodNormal(analyte)) return null
+  const actual = clean(value)
+  if (!actual) return 'not_evaluated'
+  return isBelowLodResult(actual, belowLodLimit(analyte)) ? 'accepted' : 'rejected'
+}
 function assertAdmin(actor: BmActor) {
   // Staff and Admin intentionally share full IQC access. Assistant remains HPV-only,
   // and must be blocked here too so direct API calls cannot bypass the page/nav guard.
@@ -272,6 +278,14 @@ function isVlAnalyte(analyte: Pick<IqcAnalyte, 'code'> | undefined) {
   return Boolean(analyte && /-VL\b/i.test(analyte.code))
 }
 
+function isQuantitativeVlAnalyte(analyte: Pick<IqcAnalyte, 'code' | 'dataType'> | undefined) {
+  return Boolean(analyte && analyte.dataType === 'quantitative' && isVlAnalyte(analyte))
+}
+
+function isNormalControlLevel(level: unknown) {
+  return typeof level === 'string' && level.trim().toLowerCase() === 'normal'
+}
+
 function isCd4Analyte(analyte: Pick<IqcAnalyte, 'code'> | undefined) {
   return Boolean(analyte && CD4_ANALYTE_CODES.has(analyte.code))
 }
@@ -310,20 +324,22 @@ function buildSetupHealth(input: {
   teaSpecs: IqcTeaSpec[]
   uncertaintyBudgets: IqcUncertaintyBudget[]
 }): IqcSetupHealth {
-  const vlAnalytes = input.analytes.filter((analyte) => isVlAnalyte(analyte))
+  const vlAnalytes = input.analytes.filter((analyte) => isQuantitativeVlAnalyte(analyte))
   const activeLots = input.controlLots.filter((lot) => lot.isActive)
+  const baselineLots = activeLots.filter((lot) => !isNormalControlLevel(lot.level))
+  const baselineApplicable = vlAnalytes.length > 0
   const approvedBaselineScopes = new Set(input.baselines.filter((baseline) => baseline.state === 'approved').map((baseline) => `${baseline.controlLotId}:${baseline.analyteId}:${baseline.instrumentId}`))
   const chartReviewScopes = input.charts
-    .filter((chart) => isVlAnalyte(input.analytes.find((analyte) => analyte.id === chart.analyteId)) && chart.n >= 20)
+    .filter((chart) => isQuantitativeVlAnalyte(input.analytes.find((analyte) => analyte.id === chart.analyteId)) && chart.n >= 20)
     .map((chart) => `${chart.controlLotId}:${chart.analyteId}:${chart.instrumentId ?? ''}`)
   const observedReviewScopes = [...(input.observedVlScopes ?? new Set<string>())]
-  const expectedReviewScopes = activeLots.flatMap((lot) => input.instruments.flatMap((instrument) => vlAnalytes.map((analyte) => `${lot.id}:${analyte.id}:${instrument.id}`)))
+  const expectedReviewScopes = baselineLots.flatMap((lot) => input.instruments.flatMap((instrument) => vlAnalytes.map((analyte) => `${lot.id}:${analyte.id}:${instrument.id}`)))
   const baselineReviewCount = new Set([...expectedReviewScopes, ...chartReviewScopes, ...observedReviewScopes]
     .filter((scope) => !approvedBaselineScopes.has(scope))).size
-  const vlPlanCount = input.controlPlans.filter((plan) => isVlAnalyte(input.analytes.find((analyte) => analyte.id === plan.analyteId)) && plan.isActive).length
+  const activePlanCount = input.controlPlans.filter((plan) => plan.isActive).length
   const quantitativeVlCount = vlAnalytes.filter((analyte) => analyte.dataType === 'quantitative').length
-  const teaCount = input.teaSpecs.filter((tea) => isVlAnalyte(input.analytes.find((analyte) => analyte.id === tea.analyteId))).length
-  const uncertaintyCount = input.uncertaintyBudgets.filter((budget) => isVlAnalyte(input.analytes.find((analyte) => analyte.id === budget.analyteId))).length
+  const teaCount = input.teaSpecs.filter((tea) => isQuantitativeVlAnalyte(input.analytes.find((analyte) => analyte.id === tea.analyteId))).length
+  const uncertaintyCount = input.uncertaintyBudgets.filter((budget) => isQuantitativeVlAnalyte(input.analytes.find((analyte) => analyte.id === budget.analyteId))).length
   const tasks: IqcSetupHealth['tasks'] = [
     {
       key: 'equipment',
@@ -333,6 +349,15 @@ function buildSetupHealth(input: {
       state: input.instruments.length ? 'complete' : 'blocked',
       count: input.instruments.length,
       nextAction: input.instruments.length ? 'ตรวจสอบเครื่องมือที่เชื่อมแล้ว' : 'เชื่อมเครื่องมือจาก Equipment',
+    },
+    {
+      key: 'analyte',
+      dependencies: [],
+      label: 'เพิ่ม analyte / ชุดทดสอบ',
+      description: 'เพิ่ม assay และจัดกลุ่ม test set ก่อนกำหนดการรัน',
+      state: input.analytes.some((analyte) => analyte.isActive) ? 'complete' : 'attention',
+      count: input.analytes.filter((analyte) => analyte.isActive).length,
+      nextAction: input.analytes.some((analyte) => analyte.isActive) ? 'ตรวจสอบ analyte ที่ใช้งานอยู่' : 'เพิ่ม analyte',
     },
     {
       key: 'lot',
@@ -347,22 +372,22 @@ function buildSetupHealth(input: {
       key: 'baseline',
       dependencies: [
         { label: 'มีเครื่องมือที่เชื่อมจาก Equipment', done: input.instruments.length > 0 },
-        { label: 'มี Control lot ที่ยังใช้งานอยู่', done: activeLots.length > 0 },
+        { label: 'มี Control lot สำหรับ VL quantitative', done: !baselineApplicable || baselineLots.length > 0 },
       ],
       label: 'ตั้งค่าค่าอ้างอิงและ QC baseline',
       description: 'ทบทวนผลจริงก่อนใช้เป็นเกณฑ์ตัดสิน VL',
-      state: !activeLots.length || !input.instruments.length ? 'blocked' : baselineReviewCount ? 'attention' : 'complete',
+      state: !input.instruments.length ? 'blocked' : !baselineApplicable ? 'complete' : !baselineLots.length ? 'blocked' : baselineReviewCount ? 'attention' : 'complete',
       count: baselineReviewCount || quantitativeVlCount,
-      nextAction: baselineReviewCount ? `ทบทวน ${baselineReviewCount} ระดับที่มีข้อมูลพร้อม` : 'ตรวจสอบ baseline ที่อนุมัติแล้ว',
+      nextAction: baselineReviewCount ? `ทบทวน ${baselineReviewCount} ระดับที่มีข้อมูลพร้อม` : !baselineApplicable ? 'ไม่ต้องตั้งค่า baseline สำหรับ VL Normal' : !baselineLots.length ? 'เพิ่ม Control lot สำหรับ VL quantitative' : 'ตรวจสอบ baseline ที่อนุมัติแล้ว',
     },
     {
       key: 'plan',
       dependencies: [{ label: 'มีเครื่องมือที่เชื่อมจาก Equipment', done: input.instruments.length > 0 }],
       label: 'กำหนดการรัน',
       description: 'กำหนดว่าเครื่องนี้ต้องรัน control อะไรและใช้ policy ใด',
-      state: input.instruments.length && vlPlanCount ? 'complete' : input.instruments.length ? 'attention' : 'blocked',
-      count: vlPlanCount,
-      nextAction: vlPlanCount ? 'ตรวจสอบชุดการรัน' : 'สร้างกำหนดการรันสำหรับ VL',
+      state: input.instruments.length && activePlanCount ? 'complete' : input.instruments.length ? 'attention' : 'blocked',
+      count: activePlanCount,
+      nextAction: activePlanCount ? 'ตรวจสอบชุดการรัน' : 'สร้างกำหนดการรัน',
     },
     {
       key: 'advanced',
@@ -646,7 +671,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     const baseline = instrumentId ? approvedBaselineByScope.get(`${controlLotId}:${analyteId}:${instrumentId}`) ?? null : null
     const labStatisticsLocked = hasLockedLabStats(spec)
     const useVlBaseline = isVlAnalyte(analyte) && baseline?.state === 'approved'
-    const vlWithoutBaseline = isVlAnalyte(analyte) && !useVlBaseline
+    const vlWithoutBaseline = isQuantitativeVlAnalyte(analyte) && !useVlBaseline
     const { meanValue, sdValue } = useVlBaseline
       ? { meanValue: baseline?.mean ?? null, sdValue: baseline?.sd ?? null }
       : vlWithoutBaseline
@@ -842,10 +867,10 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
       results: (valuesByRun.get(id) ?? []).map((value) => {
         const analyte = analyteMap.get(asString(value.analyte_id))
         const resultInstrumentId = runInstrument.get(id)
-        const resultBaseline = resultInstrumentId
+        const resultBaseline = isQuantitativeVlAnalyte(analyte) && resultInstrumentId
           ? approvedBaselineByScope.get(`${asString(value.control_lot_id)}:${asString(value.analyte_id)}:${resultInstrumentId}`) ?? null
           : null
-        const vlWithoutBaseline = isVlAnalyte(analyte) && resultBaseline?.state !== 'approved'
+        const vlWithoutBaseline = isQuantitativeVlAnalyte(analyte) && resultBaseline?.state !== 'approved'
         return {
           analyteId: asString(value.analyte_id),
           analyteCode: analyte?.code ?? '-',
@@ -915,7 +940,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   }
 
   const observedVlScopes = new Set(valueRows
-    .filter((row) => !Boolean(row.is_voided) && isVlAnalyte(analyteMap.get(asString(row.analyte_id))))
+    .filter((row) => !Boolean(row.is_voided) && isQuantitativeVlAnalyte(analyteMap.get(asString(row.analyte_id))))
     .map((row) => `${asString(row.control_lot_id)}:${asString(row.analyte_id)}:${runInstrument.get(asString(row.run_id)) ?? ''}`))
   const setupHealth = buildSetupHealth({ analytes, instruments: activeLinkedInstruments, controlLots, baselines, charts, observedVlScopes, controlPlans, teaSpecs, uncertaintyBudgets })
 
@@ -967,7 +992,16 @@ export async function getIqcSetupHealth(actor: BmActor): Promise<IqcSetupHealth>
 export async function resolveActiveIqcBaseline(actor: BmActor, input: Pick<IqcBaselineReviewInput, 'controlLotId' | 'analyteId' | 'instrumentId'>): Promise<IqcBaseline | null> {
   if (actor.role === 'Assistant') throw new HttpError(403, 'IQC permission required')
   await assertLinkedIqcInstrument(input.instrumentId)
-  const { data, error } = await getAdminClient()
+  const admin = getAdminClient()
+  const { data: analyteRow, error: analyteError } = await admin
+    .from('iqc_analytes')
+    .select('code,data_type')
+    .eq('id', input.analyteId)
+    .maybeSingle()
+  fail(analyteError)
+  const analyte = analyteRow as RecordRow | null
+  if (!isQuantitativeVlAnalyte(analyte ? { code: asString(analyte.code), dataType: asString(analyte.data_type) as IqcAnalyte['dataType'] } : undefined)) return null
+  const { data, error } = await admin
     .from('iqc_baselines')
     .select('*')
     .eq('control_lot_id', input.controlLotId)
@@ -1038,7 +1072,9 @@ export async function getIqcBaselineReview(actor: BmActor, input: IqcBaselineRev
   if (!instrumentRow) throw new HttpError(404, 'ไม่พบเครื่องมือที่เลือก')
   await assertLinkedIqcInstrument(input.instrumentId)
   const analyte = mapAnalyte(analyteRow as RecordRow)
-  if (!isVlAnalyte(analyte)) throw new HttpError(400, 'Baseline review นี้รองรับเฉพาะ VL')
+  if (!isQuantitativeVlAnalyte(analyte)) throw new HttpError(400, 'Baseline review รองรับเฉพาะ VL แบบ quantitative')
+  const material = (lotRow as RecordRow).iqc_control_materials as RecordRow | null
+  if (isNormalControlLevel(material?.level)) throw new HttpError(400, 'Control lot ระดับ Normal ไม่ต้องตั้งค่า baseline')
   const spec = specRow ? mapSpec(specRow as RecordRow) : undefined
   const instrument = instrumentRow as RecordRow
   const plan = planRow as RecordRow | null
@@ -1110,7 +1146,6 @@ export async function getIqcBaselineReview(actor: BmActor, input: IqcBaselineRev
   else if (analyte.dataType === 'qualitative' && !includedValues.length) blockedReason = 'ยังไม่มีผล non-void ของเครื่องมือนี้สำหรับ seed expected result'
   else if (analyte.dataType === 'qualitative' && !expectedQualitative) blockedReason = 'ยังไม่มี expected result'
   if (analyte.dataType === 'qualitative' && !qualitativeValues.length && !blockedReason) blockedReason = 'qualitative baseline needs at least one observed non-void result'
-  const material = (lotRow as RecordRow).iqc_control_materials as RecordRow | null
   return {
     controlLotId: input.controlLotId,
     analyteId: input.analyteId,
@@ -1220,7 +1255,7 @@ export async function createAnalyte(input: {
     code: input.code.trim(),
     name: input.name.trim(),
     data_type: input.dataType,
-    scale: input.scale,
+    scale: input.dataType === 'qualitative' ? 'linear' : input.scale,
     is_absolute: Boolean(input.isAbsolute),
     unit: clean(input.unit),
     group_label: normalizeTestSets(input.groupLabel),
@@ -1242,16 +1277,24 @@ export async function updateAnalyte(id: string, input: {
   isActive?: boolean
 }, actor: BmActor) {
   assertAdmin(actor)
+  const admin = getAdminClient()
   const payload: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  let targetDataType = input.dataType
+  if (targetDataType === undefined && input.scale !== undefined) {
+    const { data: existing, error } = await admin.from('iqc_analytes').select('data_type').eq('id', id).maybeSingle()
+    fail(error)
+    const existingDataType = asString((existing as RecordRow | null)?.data_type)
+    targetDataType = existingDataType === 'qualitative' || existingDataType === 'quantitative' ? existingDataType : undefined
+  }
   if (input.code !== undefined) payload.code = input.code.trim()
   if (input.name !== undefined) payload.name = input.name.trim()
   if (input.dataType !== undefined) payload.data_type = input.dataType
-  if (input.scale !== undefined) payload.scale = input.scale
+  if (input.scale !== undefined || targetDataType === 'qualitative') payload.scale = targetDataType === 'qualitative' ? 'linear' : input.scale
   if (input.isAbsolute !== undefined) payload.is_absolute = Boolean(input.isAbsolute)
   if (input.unit !== undefined) payload.unit = clean(input.unit)
   if (input.groupLabel !== undefined) payload.group_label = normalizeTestSets(input.groupLabel)
   if (input.isActive !== undefined) payload.is_active = input.isActive
-  const { error } = await getAdminClient().from('iqc_analytes').update(payload).eq('id', id)
+  const { error } = await admin.from('iqc_analytes').update(payload).eq('id', id)
   fail(error)
   await writeAudit(actor, 'iqc.analyte.update', 'iqc-analyte', id, input)
   return getIqcWorkspace(actor)
@@ -1764,17 +1807,21 @@ export async function createRun(input: {
       const key = `${value.controlLotId}:${value.analyteId}`
       const spec = specByKey.get(key)
       const plan = controlPlanFor(plans, value.analyteId, effectiveInstrumentId)
-      const baseline = baselineByKey.get(`${value.controlLotId}:${value.analyteId}:${effectiveInstrumentId}`)
+      const baseline = isQuantitativeVlAnalyte(analyte)
+        ? baselineByKey.get(`${value.controlLotId}:${value.analyteId}:${effectiveInstrumentId}`)
+        : null
       const profile = policyProfileFor(analyte, plan)
       if (analyte?.dataType === 'qualitative') {
         const expected = baseline?.expectedQualitative ?? spec?.expectedQualitative
         const actual = clean(value.qualitativeValue)
-        const status: QcStatus = isVlAnalyte(analyte) && baseline?.state !== 'approved'
+        const status: QcStatus = !actual
+          ? 'not_evaluated'
+          : isBelowLodNormal(analyte)
+          ? (isBelowLodResult(actual, belowLodLimit(analyte)) ? 'accepted' : 'rejected')
+          : isVlAnalyte(analyte) && baseline?.state !== 'approved'
           ? 'not_evaluated'
           : baseline?.state === 'approved'
           ? (expected && actual ? (expected.trim().toLowerCase() === actual.toLowerCase() ? 'accepted' : 'rejected') : 'not_evaluated')
-          : isBelowLodNormal(analyte)
-          ? (isBelowLodResult(actual, belowLodLimit(analyte)) ? 'accepted' : 'rejected')
           : expected && actual && expected.trim().toLowerCase() !== actual.toLowerCase() ? 'rejected' : 'accepted'
         return {
           run_id: runId,
@@ -1788,7 +1835,7 @@ export async function createRun(input: {
           status,
           evaluation_baseline_id: baseline?.id ?? null,
           evaluation_policy_profile: isVlAnalyte(analyte) ? profile : null,
-          evaluated_at: baseline ? new Date().toISOString() : null,
+          evaluated_at: baseline || isBelowLodNormal(analyte) ? new Date().toISOString() : null,
         }
       }
       const numeric = value.numericValue ?? null
@@ -2196,7 +2243,7 @@ async function buildVlEvaluationPayload(controlLotId: string, override?: VlBasel
       .filter(Boolean),
   )
 
-  const analytes = ((analyteRows ?? []) as RecordRow[]).map(mapAnalyte)
+  const analytes = ((analyteRows ?? []) as RecordRow[]).map(mapAnalyte).filter((analyte) => isVlAnalyte(analyte))
   const analyteMap = new Map(analytes.map((analyte) => [analyte.id, analyte]))
   const plans = (planRows ?? []) as RecordRow[]
   const values = ((valueRows ?? []) as RecordRow[])
@@ -2243,10 +2290,10 @@ async function buildVlEvaluationPayload(controlLotId: string, override?: VlBasel
     const instrumentId = instrumentKey === 'unassigned' ? null : instrumentKey
     const baselines = new Map<string, EvaluationBaseline>()
     for (const analyte of analytes) {
-      const isOverride = instrumentId === override?.instrumentId && analyte.id === override.analyteId
+      const isOverride = isQuantitativeVlAnalyte(analyte) && instrumentId === override?.instrumentId && analyte.id === override.analyteId
       const baseline = isOverride
         ? { id: null, mean: override?.mean ?? null, sd: override?.sd ?? null, expectedQualitative: override?.expectedQualitative ?? null }
-        : instrumentId ? baselineByScope.get(`${instrumentId}:${analyte.id}`) ?? null : null
+        : isQuantitativeVlAnalyte(analyte) && instrumentId ? baselineByScope.get(`${instrumentId}:${analyte.id}`) ?? null : null
       const plan = plans.find((item) => asString(item.analyte_id) === analyte.id && asString(item.instrument_id) === instrumentId)
       if (baseline) {
         baselines.set(analyte.id, {
@@ -2260,7 +2307,12 @@ async function buildVlEvaluationPayload(controlLotId: string, override?: VlBasel
         })
       }
     }
-    const includedResultIds = new Set(items.filter((item) => !excludedResultIds.has(item.value.resultId)).map((item) => item.value.resultId))
+    // VL Normal is qualitative and has no baseline candidate/exclusion list.
+    // Keep it in the lot recalculation payload so the database transaction can
+    // preserve its direct Not detected/LOD evaluation.
+    const includedResultIds = new Set(items
+      .filter((item) => isBelowLodNormal(analyteMap.get(item.value.analyteId)) || !excludedResultIds.has(item.value.resultId))
+      .map((item) => item.value.resultId))
     const evaluated = evaluateVlScope({
       values: items.map((item) => item.value),
       analytes: new Map(analytes.map((analyte) => [analyte.id, { id: analyte.id, code: analyte.code, dataType: analyte.dataType, panel: analyte.groupLabel }])),
@@ -2268,9 +2320,11 @@ async function buildVlEvaluationPayload(controlLotId: string, override?: VlBasel
       includedResultIds,
     })
     for (const item of items) {
+      const analyte = analyteMap.get(item.value.analyteId)
       const evaluation = evaluated.get(item.value.resultId)
       const baseline = baselines.get(item.value.analyteId)
-      const status = baseline && evaluation ? evaluation.status : 'not_evaluated'
+      const normalStatus = evaluateVlNormalResult(analyte, item.value.qualitativeValue)
+      const status = baseline && evaluation ? evaluation.status : normalStatus ?? 'not_evaluated'
       evaluations.push({
         resultId: item.value.resultId,
         analyteId: item.value.analyteId,

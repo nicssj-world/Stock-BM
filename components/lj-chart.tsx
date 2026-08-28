@@ -80,16 +80,16 @@ export function LjChart({
       tone: 'border-[#c7e2dc] bg-[#eef9f6] text-[#08766e]',
     },
     assigned: {
-      cardLabel: 'ค่าอ้างอิงจากผู้ผลิต (CoA) · Assigned Mean / SD',
-      label: 'ค่าอ้างอิงจากผู้ผลิต (CoA) · Assigned Mean/SD',
+      cardLabel: 'Assigned Mean / SD',
+      label: 'Assigned Mean/SD',
       mean: chart.assignedMean,
       sd: chart.assignedSd,
       detail: 'ค่าจากผู้ผลิต / certificate',
       tone: 'border-[#dbe7e8] bg-[#fbfefe] text-[#789097]',
     },
     lab: {
-      cardLabel: 'ค่าเฉลี่ยและ SD จากห้องปฏิบัติการ (QC baseline) · LAB Mean / SD',
-      label: 'ค่าเฉลี่ยและ SD จากห้องปฏิบัติการ (QC baseline) · LAB Mean/SD',
+      cardLabel: 'LAB Mean / SD',
+      label: 'LAB Mean/SD',
       // Before the lock the running value stands in, so the card stops reading
       // as "never calculated" once the analyte has enough points.
       mean: chart.labMean ?? chart.runningLabMean,

@@ -78,6 +78,8 @@ export interface EqaDocumentApproval {
   approvedById: string
   approvedByName: string
   approvedAt: string
+  signerName: string | null
+  signatureAttachmentId: string | null
 }
 
 export interface EqaApproverAssignment {

@@ -43,6 +43,13 @@ describe('EQA print reports', () => {
     expect(receipt).toContain('.review-heading>div{border-left:1px solid #111}')
   })
 
+  it('prints the stored digital signature image and signer identity instead of stamping the account name on the line', () => {
+    expect(frame).toContain('signatureAttachmentId')
+    expect(frame).toContain('/api/attachments/${approval.signatureAttachmentId}')
+    expect(frame).toContain('signature-signer')
+    expect(receipt).toContain('className="review-signature"')
+  })
+
   it('deduplicates annual-summary sample codes and prints each result with its analyte', () => {
     expect(summary).toContain('function uniqueSampleCodes')
     expect(summary).toContain('function resultLabels')
@@ -51,7 +58,7 @@ describe('EQA print reports', () => {
 
   it('keeps each annual-summary report compact until its approval details are opened', () => {
     expect(eqaView).toContain('const [expanded, setExpanded] = useState(false)')
-    expect(eqaView).toContain("expanded ? 'ซ่อนรายละเอียด' : 'ตรวจ/อนุมัติ'")
+    expect(eqaView).toContain("expanded ? 'ซ่อนรายละเอียด' : 'ตรวจความพร้อม/ลงนาม'")
     expect(eqaView).toContain('รอดำเนินการ ${readiness.length} รายการ')
   })
 })
