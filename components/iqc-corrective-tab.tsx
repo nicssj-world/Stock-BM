@@ -161,13 +161,24 @@ export function StructuredCorrectiveTab({ data, actor, onOk, onErr, focusId, ini
     awaitingEffectiveness: data.correctiveActions.filter((action) => action.status === 'awaiting-effectiveness').length,
     closed: data.correctiveActions.filter((action) => action.status === 'closed').length,
   }), [data.correctiveActions])
-  const effectiveActionFilter = focusFilterOverride && focusId && actionFilter === 'active' ? 'all' : actionFilter
+  const focusedAction = useMemo(
+    () => (focusId ? data.correctiveActions.find((action) => action.id === focusId) ?? null : null),
+    [data.correctiveActions, focusId],
+  )
+  const showingFocusedHistory = Boolean(
+    focusFilterOverride
+    && focusId
+    && actionFilter === 'active'
+    && focusedAction?.status === 'closed',
+  )
   const filteredActions = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
     return data.correctiveActions.filter((action) => {
-      const statusMatches = effectiveActionFilter === 'all'
-        || (effectiveActionFilter === 'active' && action.status !== 'closed')
-        || action.status === effectiveActionFilter
+      const statusMatches = showingFocusedHistory
+        ? action.id === focusId
+        : actionFilter === 'all'
+          || (actionFilter === 'active' && action.status !== 'closed')
+          || action.status === actionFilter
       const run = runById.get(action.runId)
       const result = action.resultId ? run?.results.find((item) => item.resultId === action.resultId) : null
       const textMatches = !normalizedQuery || [action.problem, action.analyteName, action.ownerName, action.createdByName, result?.analyteName, result?.analyteCode]
@@ -175,7 +186,7 @@ export function StructuredCorrectiveTab({ data, actor, onOk, onErr, focusId, ini
         .some((value) => value.toLocaleLowerCase().includes(normalizedQuery))
       return statusMatches && textMatches
     })
-  }, [data.correctiveActions, effectiveActionFilter, query, runById])
+  }, [actionFilter, data.correctiveActions, focusId, query, runById, showingFocusedHistory])
   const focusedActionIndex = effectiveFocusId ? filteredActions.findIndex((action) => action.id === effectiveFocusId) : -1
   const visibleActions = filteredActions.slice(0, Math.max(visibleActionCount, focusedActionIndex + 1))
 
@@ -341,7 +352,7 @@ export function StructuredCorrectiveTab({ data, actor, onOk, onErr, focusId, ini
                 ['awaiting-effectiveness', `รอยืนยันผลการแก้ไข ${actionCounts.awaitingEffectiveness}`],
                 ['closed', `Closed ${actionCounts.closed}`],
                 ['all', `ทั้งหมด ${data.correctiveActions.length}`],
-              ] as [IqcCorrectiveActionFilter, string][]).map(([value, label]) => <button key={value} type="button" aria-pressed={effectiveActionFilter === value} onClick={() => selectActionFilter(value)} className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${effectiveActionFilter === value ? 'border-[#0b7f76] bg-[#e6f5f2] text-[#08766e]' : 'border-[#d6e2e3] bg-white text-[#58747d] hover:bg-[#f3f9f9]'}`}>{label}</button>)}
+              ] as [IqcCorrectiveActionFilter, string][]).map(([value, label]) => <button key={value} type="button" aria-pressed={!showingFocusedHistory && actionFilter === value} onClick={() => selectActionFilter(value)} className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${!showingFocusedHistory && actionFilter === value ? 'border-[#0b7f76] bg-[#e6f5f2] text-[#08766e]' : 'border-[#d6e2e3] bg-white text-[#58747d] hover:bg-[#f3f9f9]'}`}>{label}</button>)}
             </div>
           </div>
           <Input value={query} onChange={(event) => updateQuery(event.target.value)} placeholder="ค้นหาปัญหา, analyte, ผู้รับผิดชอบ หรือผู้บันทึก" aria-label="ค้นหา corrective action" />
