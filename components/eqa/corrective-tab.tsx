@@ -37,6 +37,20 @@ function resultLabel(action: EqaCorrectiveAction) {
   return action.resultLabel ?? 'ทั้ง round'
 }
 
+function flaggedResults(round: EqaWorkspace['rounds'][number]) {
+  return round.results.filter((result) => result.outcome === 'warning' || result.outcome === 'unacceptable')
+}
+
+function resultsWithoutCorrectiveAction(round: EqaWorkspace['rounds'][number], actions: EqaCorrectiveAction[]) {
+  return flaggedResults(round).filter((result) => !actions.some((action) => action.roundId === round.id && (action.resultId === result.id || action.resultId === null)))
+}
+
+function roundNeedsCorrectiveAction(round: EqaWorkspace['rounds'][number], actions: EqaCorrectiveAction[]) {
+  const flagged = flaggedResults(round)
+  if (flagged.length) return resultsWithoutCorrectiveAction(round, actions).length > 0
+  return round.summaryOutcome === 'fail' && !actions.some((action) => action.roundId === round.id && action.resultId === null)
+}
+
 function actionToDraft(action: EqaCorrectiveAction): Partial<CorrectiveActionDraft> {
   return {
     problem: action.problem,
@@ -100,16 +114,34 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
   const [editingActionId, setEditingActionId] = useState<string | null>(null)
   const [focusFilterOverride, setFocusFilterOverride] = useState(Boolean(focusId))
 
-  const roundsNeedingCapa = useMemo(() => data.rounds.filter((round) => round.summaryOutcome === 'fail' || round.results.some((result) => result.outcome === 'warning' || result.outcome === 'unacceptable')), [data.rounds])
-  const roundOptions = useMemo(() => {
-    if (showAllRounds) return data.rounds
-    const selected = data.rounds.find((round) => round.id === roundId)
-    return selected && !roundsNeedingCapa.some((round) => round.id === selected.id) ? [selected, ...roundsNeedingCapa] : roundsNeedingCapa
-  }, [data.rounds, roundId, roundsNeedingCapa, showAllRounds])
-  const selectedRound = data.rounds.find((round) => round.id === roundId) ?? null
-  const selectedResult = selectedRound?.results.find((result) => result.id === resultId) ?? null
-  const contextAction = data.correctiveActions.find((action) => action.roundId === roundId && (resultId ? action.resultId === resultId || !action.resultId : !action.resultId)) ?? null
   const directContextLocked = Boolean(initialContext?.resultId)
+  const rawSelectedRound = data.rounds.find((round) => round.id === roundId) ?? null
+  const rawSelectedRoundHasClosedOnlyFindings = Boolean(
+    rawSelectedRound
+    && flaggedResults(rawSelectedRound).length > 0
+    && !roundNeedsCorrectiveAction(rawSelectedRound, data.correctiveActions),
+  )
+  const effectiveRoundId = rawSelectedRoundHasClosedOnlyFindings && !directContextLocked ? '' : roundId
+  const effectiveResultId = effectiveRoundId === roundId ? resultId : ''
+  const selectedRound = data.rounds.find((round) => round.id === effectiveRoundId) ?? null
+  const selectedResult = selectedRound?.results.find((result) => result.id === effectiveResultId) ?? null
+  const roundsNeedingCapa = useMemo(() => data.rounds.filter((round) => roundNeedsCorrectiveAction(round, data.correctiveActions)), [data.correctiveActions, data.rounds])
+  const selectableRounds = useMemo(() => data.rounds.filter((round) => roundNeedsCorrectiveAction(round, data.correctiveActions) || (round.summaryOutcome !== 'fail' && !flaggedResults(round).length)), [data.correctiveActions, data.rounds])
+  const selectableResults = selectedRound
+    ? flaggedResults(selectedRound).length > 0
+      ? resultsWithoutCorrectiveAction(selectedRound, data.correctiveActions)
+      : selectedRound.results
+    : []
+  const resultOptions = directContextLocked && selectedResult && !selectableResults.some((result) => result.id === selectedResult.id)
+    ? [selectedResult, ...selectableResults]
+    : selectableResults
+  const roundOptions = showAllRounds
+    ? selectableRounds
+    : [
+        ...(selectedRound && (!rawSelectedRoundHasClosedOnlyFindings || directContextLocked) && !roundsNeedingCapa.some((round) => round.id === selectedRound.id) ? [selectedRound] : []),
+        ...roundsNeedingCapa,
+      ]
+  const contextAction = data.correctiveActions.find((action) => action.roundId === effectiveRoundId && (effectiveResultId ? action.resultId === effectiveResultId || !action.resultId : !action.resultId)) ?? null
   const effectiveFocusId = focusId ?? localFocusId
   const actionCounts = useMemo(() => ({
     open: data.correctiveActions.filter((action) => action.status === 'open').length,
@@ -125,6 +157,7 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
     && actionFilter === 'active'
     && focusedAction?.status === 'closed',
   )
+
   const filteredActions = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
     return data.correctiveActions.filter((action) => {
@@ -162,15 +195,15 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
     : selectedRound?.summaryOutcome === 'fail' ? `EQA ${selectedRound.roundLabel} สรุปผลจากระบบไม่ผ่านเกณฑ์` : ''
 
   async function create(value: CorrectiveActionDraft) {
-    if (!roundId) return onErr('เลือก Round ก่อนบันทึก')
+    if (!effectiveRoundId) return onErr('เลือก Round ก่อนบันทึก')
     if (contextAction) return onErr('บริบทนี้มี Corrective Action แล้ว ให้เปิดรายการเดิมเพื่อแก้ไข')
     setBusy(true)
     try {
       const result = await api<{ eqa: EqaWorkspace }>('/api/eqa/corrective-actions', {
         method: 'POST',
-        body: JSON.stringify({ roundId, resultId: resultId || null, ...draftPayload(value) }),
+        body: JSON.stringify({ roundId: effectiveRoundId, resultId: effectiveResultId || null, ...draftPayload(value) }),
       })
-      const created = result.eqa.correctiveActions.find((action) => action.roundId === roundId && (resultId ? action.resultId === resultId || !action.resultId : !action.resultId)) ?? null
+      const created = result.eqa.correctiveActions.find((action) => action.roundId === effectiveRoundId && (effectiveResultId ? action.resultId === effectiveResultId || !action.resultId : !action.resultId)) ?? null
       onOk('เปิด Corrective Action แล้ว', result.eqa)
       if (created) {
         setLocalFocusId(created.id)
@@ -256,25 +289,25 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
       <p className="mt-1 text-sm text-[#6a838c]">เริ่มจากผล EQA ที่ Warning/Unacceptable แล้วบันทึกสาเหตุ การแก้ไข ผลการแก้ไข และการป้องกันเกิดซ้ำ</p>
     </div>
     <CorrectiveActionForm
-      key={`eqa-create-${createVersion}-${roundId}-${resultId}`}
+      key={`eqa-create-${createVersion}-${effectiveRoundId}-${effectiveResultId}`}
       idPrefix="eqa-corrective-create"
       module="eqa"
       mode="create"
       context={<div className="space-y-2 rounded-md border border-[#dce7e8] bg-white p-3">
         <label className="block text-xs font-semibold text-[#58747d]">Round ที่พบปัญหา
-           <select className="mt-1 min-h-11 w-full rounded-md border border-[#cfdee0] bg-white px-3 py-2 text-sm text-[#173d50] outline-none focus:border-[#0b7f76] focus:ring-3 focus:ring-[#0b7f76]/10" value={roundId} onChange={(event) => { setRoundId(event.target.value); setResultId('') }} required disabled={directContextLocked}>
+           <select className="mt-1 min-h-11 w-full rounded-md border border-[#cfdee0] bg-white px-3 py-2 text-sm text-[#173d50] outline-none focus:border-[#0b7f76] focus:ring-3 focus:ring-[#0b7f76]/10" value={effectiveRoundId} onChange={(event) => { setRoundId(event.target.value); setResultId('') }} required disabled={directContextLocked}>
             <option value="">— เลือก round —</option>
             {roundOptions.map((round) => <option key={round.id} value={round.id}>{round.planItemName ?? round.schemeName} · {round.roundLabel}</option>)}
           </select>
         </label>
          <label className="flex min-h-11 items-center gap-2 text-xs text-[#58747d]"><input type="checkbox" checked={showAllRounds} onChange={(event) => setShowAllRounds(event.target.checked)} disabled={directContextLocked} /> แสดงทุก round (รวมที่ผ่านเกณฑ์)</label>
         {selectedRound?.results.length ? <label className="block text-xs font-semibold text-[#58747d]">ผลตัวอย่างที่เกี่ยวข้อง (ถ้ามี)
-           <select className="mt-1 min-h-11 w-full rounded-md border border-[#cfdee0] bg-white px-3 py-2 text-sm text-[#173d50] outline-none focus:border-[#0b7f76] focus:ring-3 focus:ring-[#0b7f76]/10" value={resultId} onChange={(event) => setResultId(event.target.value)} disabled={directContextLocked}>
+           <select className="mt-1 min-h-11 w-full rounded-md border border-[#cfdee0] bg-white px-3 py-2 text-sm text-[#173d50] outline-none focus:border-[#0b7f76] focus:ring-3 focus:ring-[#0b7f76]/10" value={effectiveResultId} onChange={(event) => setResultId(event.target.value)} disabled={directContextLocked}>
             <option value="">— ทั้ง round —</option>
-            {selectedRound.results.map((result) => <option key={result.id} value={result.id}>{result.sampleCode ?? '-'} · {result.analyte} · {result.outcome}</option>)}
+            {resultOptions.map((result) => <option key={result.id} value={result.id}>{result.sampleCode ?? '-'} · {result.analyte} · {result.outcome}</option>)}
           </select>
         </label> : null}
-        {contextSummary(selectedRound, resultId || null, data.correctiveActions)}
+        {contextSummary(selectedRound, effectiveResultId || null, data.correctiveActions)}
       </div>}
        systemSignals={systemSignals}
        suggestedIssueTypes={suggestedIssueTypes}

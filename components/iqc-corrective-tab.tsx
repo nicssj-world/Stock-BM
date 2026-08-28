@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ClipboardList, Trash2 } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { IqcCorrectiveAction, IqcRun, IqcRunResult, IqcWorkspace } from '@/lib/iqc/types'
+import { findCorrectiveActionForPoint } from '@/lib/iqc/corrective-actions'
 import {
   hasStructuredCorrectiveDetails,
   type CorrectiveActionDraft,
@@ -71,6 +72,10 @@ function flaggedOf(run: IqcRun) {
   return run.results.filter((result) => !result.isVoided && ['warning', 'investigate', 'rejected'].includes(result.status))
 }
 
+function flaggedWithoutCorrectiveAction(run: IqcRun, actions: IqcCorrectiveAction[]) {
+  return flaggedOf(run).filter((result) => !findCorrectiveActionForPoint(actions, run.id, result.analyteId, result.resultId))
+}
+
 function qcTone(status: IqcRunResult['status']) {
   if (status === 'rejected') return 'rejected' as const
   if (status === 'investigate') return 'investigate' as const
@@ -93,12 +98,13 @@ function contextSummary(
   result: IqcRunResult | null,
   controlLotLabel: string,
   linked: IqcCorrectiveAction | null,
+  availableResults?: IqcRunResult[],
 ) {
   return (
     <div className="space-y-1 px-1 text-xs text-[#55727c]">
       {run ? <p>Run: <span className="font-semibold text-[#173d50]">{formatDateTime(run.runDatetime)}</span>{run.instrumentName ? ` · ${run.instrumentName}` : ''}</p> : <p className="text-[#9aafb4]">เลือก Run เพื่อโหลดบริบท</p>}
       {result ? <p>ผลที่เกี่ยวข้อง: <span className="font-semibold text-[#173d50]">{result.analyteName} · {controlLotLabel || result.controlLotId}</span> · {resultText(result)} <StatusBadge tone={qcTone(result.status)} label={qcLabel(result.status)} /></p> : null}
-      {!result && run ? <p>ผลผิดปกติใน Run: <span className="font-semibold text-[#173d50]">{flaggedOf(run).map(resultText).join(' | ') || 'ไม่มีผลที่ถูก flag'}</span></p> : null}
+      {!result && run ? <p>ผลผิดปกติใน Run: <span className="font-semibold text-[#173d50]">{(availableResults ?? flaggedOf(run)).map(resultText).join(' | ') || 'ไม่มีผลที่ถูก flag'}</span></p> : null}
       {linked ? <p className="font-semibold text-[#a9700f]">มี Corrective Action เดิมสำหรับบริบทนี้แล้ว</p> : null}
     </div>
   )
@@ -141,21 +147,47 @@ export function StructuredCorrectiveTab({ data, actor, onOk, onErr, focusId, ini
 
   const controlLotLabels = useMemo(() => new Map(data.controlLots.map((lot) => [lot.id, `${lot.controlMaterialName}${lot.level ? ` ${lot.level}` : ''} · ${lot.lotNumber}`])), [data.controlLots])
   const runById = useMemo(() => new Map(data.runs.map((run) => [run.id, run])), [data.runs])
-  const selectedRun = data.runs.find((run) => run.id === runId) ?? null
-  const selectedResult = selectedRun?.results.find((result) => result.resultId === resultId) ?? null
+  const directContextLocked = Boolean(initialContext?.resultId)
+  const rawSelectedRun = data.runs.find((run) => run.id === runId) ?? null
+  const rawSelectedRunHasClosedOnlyFlags = Boolean(
+    rawSelectedRun
+    && flaggedOf(rawSelectedRun).length > 0
+    && flaggedWithoutCorrectiveAction(rawSelectedRun, data.correctiveActions).length === 0,
+  )
+  const effectiveRunId = rawSelectedRunHasClosedOnlyFlags && !directContextLocked ? '' : runId
+  const effectiveResultId = effectiveRunId === runId ? resultId : ''
+  const selectedRun = data.runs.find((run) => run.id === effectiveRunId) ?? null
+  const selectedResult = selectedRun?.results.find((result) => result.resultId === effectiveResultId) ?? null
   const selectedAnalyteId = selectedResult?.analyteId ?? initialContext?.analyteId ?? null
   const selectedControlLotId = selectedResult?.controlLotId ?? initialContext?.controlLotId ?? null
-  const directContextLocked = Boolean(initialContext?.resultId)
-  const contextAction = data.correctiveActions.find((action) => action.resultId && action.resultId === resultId)
-    ?? data.correctiveActions.find((action) => action.runId === runId && !action.resultId && action.analyteId === selectedAnalyteId)
-    ?? data.correctiveActions.find((action) => action.runId === runId && !action.resultId && action.analyteId === null)
+  const contextAction = data.correctiveActions.find((action) => action.resultId && action.resultId === effectiveResultId)
+    ?? data.correctiveActions.find((action) => action.runId === effectiveRunId && !action.resultId && action.analyteId === selectedAnalyteId)
+    ?? data.correctiveActions.find((action) => action.runId === effectiveRunId && !action.resultId && action.analyteId === null)
     ?? null
   const effectiveFocusId = focusId ?? localFocusId
 
-  const flaggedRuns = data.runs.filter((run) => flaggedOf(run).length > 0)
+  const actionableFlaggedRuns = useMemo(
+    () => data.runs.filter((run) => flaggedWithoutCorrectiveAction(run, data.correctiveActions).length > 0),
+    [data.correctiveActions, data.runs],
+  )
+  const selectableRuns = useMemo(
+    () => data.runs.filter((run) => flaggedOf(run).length === 0 || flaggedWithoutCorrectiveAction(run, data.correctiveActions).length > 0),
+    [data.correctiveActions, data.runs],
+  )
+  const selectableResults = selectedRun
+    ? flaggedOf(selectedRun).length > 0
+      ? flaggedWithoutCorrectiveAction(selectedRun, data.correctiveActions)
+      : selectedRun.results.filter((result) => !result.isVoided)
+    : []
+  const resultOptions = directContextLocked && selectedResult && !selectableResults.some((result) => result.resultId === selectedResult.resultId)
+    ? [selectedResult, ...selectableResults]
+    : selectableResults
   const runOptions = showAllRuns
-    ? data.runs
-    : [...(selectedRun && !flaggedRuns.some((run) => run.id === selectedRun.id) ? [selectedRun] : []), ...flaggedRuns]
+    ? selectableRuns
+    : [
+        ...(selectedRun && (!rawSelectedRunHasClosedOnlyFlags || directContextLocked) && !actionableFlaggedRuns.some((run) => run.id === selectedRun.id) ? [selectedRun] : []),
+        ...actionableFlaggedRuns,
+      ]
   const actionCounts = useMemo(() => ({
     open: data.correctiveActions.filter((action) => action.status === 'open').length,
     awaitingEffectiveness: data.correctiveActions.filter((action) => action.status === 'awaiting-effectiveness').length,
@@ -206,22 +238,27 @@ export function StructuredCorrectiveTab({ data, actor, onOk, onErr, focusId, ini
     : selectedRun && flaggedOf(selectedRun).length ? `IQC Run วันที่ ${formatDateTime(selectedRun.runDatetime)} พบผลผิดปกติ ${flaggedOf(selectedRun).length} รายการ` : ''
 
   function runOptionLabel(run: IqcRun) {
-    const flags = flaggedOf(run)
-    const summary = flags.length ? summarizeResults(flags, controlLotLabels, true) : summarizeResults(run.results, controlLotLabels, false)
+    const flags = flaggedWithoutCorrectiveAction(run, data.correctiveActions)
+    const hasFlaggedResults = flaggedOf(run).length > 0
+    const summary = flags.length
+      ? summarizeResults(flags, controlLotLabels, true)
+      : hasFlaggedResults
+        ? 'มี Corrective Action แล้ว'
+        : summarizeResults(run.results, controlLotLabels, false)
     return `${formatDateTime(run.runDatetime)}${run.instrumentName ? ` · ${run.instrumentName}` : ''}${summary ? ` · ${summary}` : ''}`
   }
 
   async function create(value: CorrectiveActionDraft) {
-    if (!runId) return onErr('เลือก Run ก่อนบันทึก')
+    if (!effectiveRunId) return onErr('เลือก Run ก่อนบันทึก')
     if (contextAction) return onErr('บริบทนี้มี Corrective Action แล้ว ให้เปิดรายการเดิมเพื่อแก้ไข')
     setBusy(true)
     try {
       const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/corrective-actions', {
         method: 'POST',
-        body: JSON.stringify({ runId, resultId: resultId || null, analyteId: selectedAnalyteId, relatedConsumableId: null, ...draftPayload(value) }),
+        body: JSON.stringify({ runId: effectiveRunId, resultId: effectiveResultId || null, analyteId: selectedAnalyteId, relatedConsumableId: null, ...draftPayload(value) }),
       })
-      const created = result.iqc.correctiveActions.find((action) => resultId ? action.resultId === resultId : action.runId === runId && !action.resultId && action.analyteId === selectedAnalyteId)
-        ?? (resultId ? result.iqc.correctiveActions.find((action) => action.runId === runId && !action.resultId && (action.analyteId === selectedAnalyteId || action.analyteId === null)) : null)
+      const created = result.iqc.correctiveActions.find((action) => effectiveResultId ? action.resultId === effectiveResultId : action.runId === effectiveRunId && !action.resultId && action.analyteId === selectedAnalyteId)
+        ?? (effectiveResultId ? result.iqc.correctiveActions.find((action) => action.runId === effectiveRunId && !action.resultId && (action.analyteId === selectedAnalyteId || action.analyteId === null)) : null)
         ?? null
       onOk('เปิด Corrective Action แล้ว', result.iqc)
       if (created) {
@@ -311,25 +348,25 @@ export function StructuredCorrectiveTab({ data, actor, onOk, onErr, focusId, ini
         <p className="mt-1 text-sm text-[#6a838c]">เริ่มจากจุดผิดปกติในกราฟ IQC ระบบเติมบริบทให้ แล้วบันทึกการสอบทวน สาเหตุ การแก้ไข และการป้องกันเกิดซ้ำ</p>
       </div>
       <CorrectiveActionForm
-        key={`iqc-create-${createVersion}-${runId}-${resultId}`}
+        key={`iqc-create-${createVersion}-${effectiveRunId}-${effectiveResultId}`}
         idPrefix="iqc-corrective-create"
         module="iqc"
         mode="create"
         context={<div className="space-y-2 rounded-md border border-[#dce7e8] bg-white p-3">
           <label className="block text-xs font-semibold text-[#58747d]">Run ที่พบปัญหา
-            <Select value={runId} onChange={(event) => { setRunId(event.target.value); setResultId('') }} required disabled={directContextLocked}>
+            <Select value={effectiveRunId} onChange={(event) => { setRunId(event.target.value); setResultId('') }} required disabled={directContextLocked}>
               <option value="">— เลือก Run —</option>
               {runOptions.map((run) => <option key={run.id} value={run.id}>{runOptionLabel(run)}</option>)}
             </Select>
           </label>
           <label className="flex min-h-11 items-center gap-2 text-xs text-[#58747d]"><input type="checkbox" checked={showAllRuns} onChange={(event) => setShowAllRuns(event.target.checked)} disabled={directContextLocked} /> แสดงทุก Run (รวมที่ปกติ)</label>
-          {selectedRun?.results.length ? <label className="block text-xs font-semibold text-[#58747d]">ผลจาก Run ที่เกี่ยวข้อง (ถ้ามี)
-            <Select value={resultId} onChange={(event) => setResultId(event.target.value)} disabled={directContextLocked}>
-              <option value="">— ทั้ง Run —</option>
-              {selectedRun.results.map((result) => <option key={result.resultId ?? `${result.analyteId}-${result.controlLotId}`} value={result.resultId ?? ''}>{resultText(result)} · {qcLabel(result.status)}</option>)}
-            </Select>
+              {selectedRun?.results.length ? <label className="block text-xs font-semibold text-[#58747d]">ผลจาก Run ที่เกี่ยวข้อง (ถ้ามี)
+                <Select value={effectiveResultId} onChange={(event) => setResultId(event.target.value)} disabled={directContextLocked}>
+                  <option value="">— ทั้ง Run —</option>
+                  {resultOptions.map((result) => <option key={result.resultId ?? `${result.analyteId}-${result.controlLotId}`} value={result.resultId ?? ''}>{resultText(result)} · {qcLabel(result.status)}</option>)}
+                </Select>
           </label> : null}
-          {contextSummary(selectedRun, selectedResult, selectedControlLotId ? controlLotLabels.get(selectedControlLotId) ?? selectedControlLotId : '', contextAction)}
+          {contextSummary(selectedRun, selectedResult, selectedControlLotId ? controlLotLabels.get(selectedControlLotId) ?? selectedControlLotId : '', contextAction, selectableResults)}
         </div>}
         systemSignals={systemSignals}
         suggestedIssueTypes={suggestedIssueTypes}
