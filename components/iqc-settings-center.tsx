@@ -5,6 +5,7 @@ import Link from 'next/link'
 import {
   ArrowRight,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   CircleAlert,
   CircleOff,
@@ -40,6 +41,7 @@ const RULE_HELP: Record<string, { group: string; label: string; description: str
 }
 
 const ALL_RULES = Object.keys(RULE_HELP)
+const CONTROL_LOTS_PER_PAGE = 15
 
 function fmt(value: number | null) {
   return value == null ? '—' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format(value)
@@ -436,11 +438,19 @@ function ControlLotTask({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (text
   const [stockLotId, setStockLotId] = useState('')
   const [equipmentId, setEquipmentId] = useState('')
   const [editingLotId, setEditingLotId] = useState<string | null>(null)
+  const [showInactiveLots, setShowInactiveLots] = useState(false)
+  const [lotPage, setLotPage] = useState(1)
   const [busy, setBusy] = useState(false)
 
   const stockLots = equipmentId ? data.stockLots.filter((lot) => lot.equipmentIds.includes(equipmentId)) : data.stockLots
   const editingLot = editingLotId ? data.controlLots.find((lot) => lot.id === editingLotId) : undefined
   const availableMaterials = data.controlMaterials.filter((material) => material.isActive || material.id === editingLot?.controlMaterialId)
+  const activeControlLots = data.controlLots.filter((lot) => lot.isActive)
+  const inactiveControlLots = data.controlLots.filter((lot) => !lot.isActive)
+  const visibleControlLots = showInactiveLots ? data.controlLots : activeControlLots
+  const lotPageCount = Math.max(1, Math.ceil(visibleControlLots.length / CONTROL_LOTS_PER_PAGE))
+  const currentLotPage = Math.min(lotPage, lotPageCount)
+  const paginatedControlLots = visibleControlLots.slice((currentLotPage - 1) * CONTROL_LOTS_PER_PAGE, currentLotPage * CONTROL_LOTS_PER_PAGE)
 
   function resetLotForm() {
     setEditingLotId(null)
@@ -530,30 +540,43 @@ function ControlLotTask({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (text
             <h4 className="font-bold text-[#173d50]">Control lot ที่มีอยู่</h4>
             <p className="mt-0.5 text-xs text-[#789097]">รายการทั้งหมดที่ระบบใช้เลือกในงาน IQC</p>
           </div>
-          <span className="mono text-xs text-[#789097]">{data.controlLots.length} รายการ</span>
-        </div>
-        {data.controlLots.length ? (
-          <div className="overflow-x-auto rounded-md border border-[#e1ebec]">
-            <table className="w-full min-w-[760px] text-left text-xs">
-              <thead className="bg-[#f7fbfb] text-[#789097]">
-                <tr><th className="px-3 py-2">Material</th><th className="px-3 py-2">ระดับ</th><th className="px-3 py-2">Control lot</th><th className="px-3 py-2">Expiry</th><th className="px-3 py-2">Stock</th><th className="px-3 py-2">สถานะ</th><th className="px-3 py-2">จัดการ</th></tr>
-              </thead>
-              <tbody className="divide-y divide-[#edf2f2] text-[#3f5c64]">
-                {data.controlLots.map((lot) => (
-                  <tr key={lot.id} className={lot.isActive ? '' : 'bg-[#fbfcfc] text-[#91a3a7]'}>
-                    <td className="px-3 py-2.5 font-semibold text-[#315763]">{lot.controlMaterialName}</td>
-                    <td className="px-3 py-2.5">{lot.level ?? '—'}</td>
-                    <td className="mono px-3 py-2.5 font-semibold">{lot.lotNumber}</td>
-                    <td className="px-3 py-2.5">{lot.expiryDate ? formatDate(lot.expiryDate) : '—'}</td>
-                    <td className="px-3 py-2.5">{lot.stockLotId ? <span className="text-[#2f7d44]">เชื่อมแล้ว</span> : <span className="text-[#789097]">กรอกเอง</span>}</td>
-                    <td className="px-3 py-2.5"><StatusBadge tone={lot.isActive ? 'accepted' : 'not_evaluated'} label={lot.isActive ? 'ใช้งาน' : 'ปิดใช้งาน'} /></td>
-                    <td className="px-3 py-2.5"><Button type="button" variant="ghost" className="min-h-8 gap-1 px-2 py-1 text-xs" disabled={busy} onClick={() => startEditingLot(lot)}><Pencil className="size-3.5" aria-hidden="true" />แก้ไข</Button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <span className="mono text-xs text-[#789097]">{showInactiveLots ? `${data.controlLots.length} รายการ` : `${activeControlLots.length} รายการใช้งาน`}</span>
+            {inactiveControlLots.length ? <Button type="button" variant="ghost" className="min-h-8 px-2 py-1 text-xs" onClick={() => { setShowInactiveLots((value) => !value); setLotPage(1) }}>{showInactiveLots ? 'ซ่อน lot ที่ปิดใช้งาน' : `แสดง lot ที่ปิดใช้งาน (${inactiveControlLots.length})`}</Button> : null}
           </div>
-        ) : <Notice tone="info">ยังไม่มี Control lot — เพิ่มรายการแรกได้จากฟอร์มด้านบน</Notice>}
+        </div>
+        {visibleControlLots.length ? (
+          <>
+            <div className="overflow-x-auto rounded-md border border-[#e1ebec]">
+              <table className="w-full min-w-[760px] text-left text-xs">
+                <thead className="bg-[#f7fbfb] text-[#789097]">
+                  <tr><th className="px-3 py-2">Material</th><th className="px-3 py-2">ระดับ</th><th className="px-3 py-2">Control lot</th><th className="px-3 py-2">Expiry</th><th className="px-3 py-2">Stock</th><th className="px-3 py-2">สถานะ</th><th className="px-3 py-2">จัดการ</th></tr>
+                </thead>
+                <tbody className="divide-y divide-[#edf2f2] text-[#3f5c64]">
+                  {paginatedControlLots.map((lot) => (
+                    <tr key={lot.id} className={lot.isActive ? '' : 'bg-[#fbfcfc] text-[#91a3a7]'}>
+                      <td className="px-3 py-2.5 font-semibold text-[#315763]">{lot.controlMaterialName}</td>
+                      <td className="px-3 py-2.5">{lot.level ?? '—'}</td>
+                      <td className="mono px-3 py-2.5 font-semibold">{lot.lotNumber}</td>
+                      <td className="px-3 py-2.5">{lot.expiryDate ? formatDate(lot.expiryDate) : '—'}</td>
+                      <td className="px-3 py-2.5">{lot.stockLotId ? <span className="text-[#2f7d44]">เชื่อมแล้ว</span> : <span className="text-[#789097]">กรอกเอง</span>}</td>
+                      <td className="px-3 py-2.5"><StatusBadge tone={lot.isActive ? 'accepted' : 'not_evaluated'} label={lot.isActive ? 'ใช้งาน' : 'ปิดใช้งาน'} /></td>
+                      <td className="px-3 py-2.5"><Button type="button" variant="ghost" className="min-h-8 gap-1 px-2 py-1 text-xs" disabled={busy} onClick={() => startEditingLot(lot)}><Pencil className="size-3.5" aria-hidden="true" />แก้ไข</Button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {lotPageCount > 1 ? <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#789097]">
+              <span>แสดง {(currentLotPage - 1) * CONTROL_LOTS_PER_PAGE + 1}–{Math.min(currentLotPage * CONTROL_LOTS_PER_PAGE, visibleControlLots.length)} จาก {visibleControlLots.length} รายการ</span>
+              <div className="flex items-center gap-1">
+                <Button type="button" variant="ghost" className="min-h-8 gap-1 px-2 py-1 text-xs" disabled={currentLotPage === 1} onClick={() => setLotPage((page) => Math.max(1, page - 1))}><ChevronLeft className="size-3.5" aria-hidden="true" />ก่อนหน้า</Button>
+                <span className="px-2">หน้า {currentLotPage} / {lotPageCount}</span>
+                <Button type="button" variant="ghost" className="min-h-8 gap-1 px-2 py-1 text-xs" disabled={currentLotPage === lotPageCount} onClick={() => setLotPage((page) => Math.min(lotPageCount, page + 1))}>ถัดไป<ChevronRight className="size-3.5" aria-hidden="true" /></Button>
+              </div>
+            </div> : null}
+          </>
+        ) : data.controlLots.length ? <Notice tone="info">ไม่มี Control lot ที่ใช้งานอยู่ — กดปุ่มแสดง lot ที่ปิดใช้งานเพื่อดูรายการทั้งหมด</Notice> : <Notice tone="info">ยังไม่มี Control lot — เพิ่มรายการแรกได้จากฟอร์มด้านบน</Notice>}
       </div>
     </Card>
   )
