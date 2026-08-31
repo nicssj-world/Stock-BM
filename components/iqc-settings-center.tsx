@@ -13,6 +13,7 @@ import {
   FlaskConical,
   Layers3,
   LockKeyhole,
+  Pencil,
   ShieldCheck,
   SlidersHorizontal,
   Wrench,
@@ -22,6 +23,7 @@ import type { IqcBaselineReview, IqcBaselineReviewInput, IqcWorkspace, QcStatus 
 import { getIqcBaselineAnalytesForLot, getIqcBaselineScope } from '@/lib/iqc/baseline-scope'
 import { getIqcControlPlanScope } from '@/lib/iqc/control-plan-scope'
 import { parseTestSets } from '@/lib/iqc/test-sets'
+import { formatDate } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, Select, StatusBadge, type StatusTone, Textarea } from '@/components/ui'
 import { ManagedList } from '@/components/managed-list'
 
@@ -433,9 +435,39 @@ function ControlLotTask({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (text
   const [expiryDate, setExpiryDate] = useState('')
   const [stockLotId, setStockLotId] = useState('')
   const [equipmentId, setEquipmentId] = useState('')
+  const [editingLotId, setEditingLotId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const stockLots = equipmentId ? data.stockLots.filter((lot) => lot.equipmentIds.includes(equipmentId)) : data.stockLots
+  const editingLot = editingLotId ? data.controlLots.find((lot) => lot.id === editingLotId) : undefined
+  const availableMaterials = data.controlMaterials.filter((material) => material.isActive || material.id === editingLot?.controlMaterialId)
+
+  function resetLotForm() {
+    setEditingLotId(null)
+    setCreateMaterial(false)
+    setExistingMaterialId(data.controlMaterials.find((material) => material.isActive)?.id ?? '')
+    setMaterialName('')
+    setLevel('HPC/LPC')
+    setManufacturer('Roche')
+    setLotNumber('')
+    setExpiryDate('')
+    setStockLotId('')
+    setEquipmentId('')
+  }
+
+  function startEditingLot(lot: IqcWorkspace['controlLots'][number]) {
+    setEditingLotId(lot.id)
+    setCreateMaterial(false)
+    setExistingMaterialId(lot.controlMaterialId)
+    setMaterialName('')
+    setLevel(lot.level ?? 'HPC/LPC')
+    setManufacturer('Roche')
+    setLotNumber(lot.lotNumber)
+    setExpiryDate(lot.expiryDate ?? '')
+    setStockLotId(lot.stockLotId ?? '')
+    setEquipmentId('')
+  }
+
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!createMaterial && !existingMaterialId) return onErr('เลือก Material หรือเลือกเพิ่ม Material ใหม่ก่อน')
@@ -452,11 +484,15 @@ function ControlLotTask({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (text
       }
       if (!controlMaterialId) throw new Error('สร้าง Material แล้วแต่ไม่พบรายการใหม่')
       const stockLot = data.stockLots.find((lot) => lot.id === stockLotId)
-      const lotResult = await api<{ iqc: IqcWorkspace }>('/api/iqc/lots', { method: 'POST', body: JSON.stringify({ controlMaterialId, lotNumber: lotNumber.trim() || stockLot?.lotNumber, expiryDate: expiryDate || stockLot?.expiryDate || null, stockLotId: stockLotId || null }) })
-      onOk('เพิ่ม Control lot และบันทึกความเชื่อมโยงกับ Stock แล้ว', lotResult.iqc)
-      setLotNumber('')
-      setExpiryDate('')
-      setStockLotId('')
+      const lotPayload = { controlMaterialId, lotNumber: lotNumber.trim() || stockLot?.lotNumber, expiryDate: expiryDate || stockLot?.expiryDate || null, stockLotId: stockLotId || null }
+      if (editingLotId) {
+        const lotResult = await api<{ iqc: IqcWorkspace }>(`/api/iqc/lots/${editingLotId}`, { method: 'PATCH', body: JSON.stringify(lotPayload) })
+        onOk('แก้ไข Control lot และการเชื่อมโยงกับ Stock แล้ว', lotResult.iqc)
+      } else {
+        const lotResult = await api<{ iqc: IqcWorkspace }>('/api/iqc/lots', { method: 'POST', body: JSON.stringify(lotPayload) })
+        onOk('เพิ่ม Control lot และบันทึกความเชื่อมโยงกับ Stock แล้ว', lotResult.iqc)
+      }
+      resetLotForm()
     } catch (error) {
       onErr(error instanceof Error ? error.message : 'เพิ่ม Control lot ไม่สำเร็จ')
     } finally {
@@ -466,14 +502,14 @@ function ControlLotTask({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (text
 
   return (
     <Card className="space-y-4 p-5">
-      <div><h3 className="font-bold text-[#173d50]">เพิ่ม Control lot</h3><p className="mt-1 text-sm text-[#6e878e]">รวม Material, เลข lot, expiry และ link ไป Stock ใน flow เดียว</p></div>
+      <div><h3 className="font-bold text-[#173d50]">{editingLotId ? 'แก้ไข Control lot' : 'เพิ่ม Control lot'}</h3><p className="mt-1 text-sm text-[#6e878e]">รวม Material, เลข lot, expiry และ link ไป Stock ใน flow เดียว</p></div>
       <form className="space-y-4" onSubmit={submit}>
         <div className="grid gap-3 md:grid-cols-3">
           <Field label="Material" hint="ใช้จัดกลุ่ม Control และระดับที่ต้องรัน">
             <Select value={createMaterial ? '__new__' : existingMaterialId} onChange={(event) => { const value = event.target.value; setCreateMaterial(value === '__new__'); if (value !== '__new__') setExistingMaterialId(value) }}>
               <option value="">เลือก Material ที่มีอยู่</option>
-              {data.controlMaterials.filter((material) => material.isActive).map((material) => <option key={material.id} value={material.id}>{material.name}{material.level ? ` · ${material.level}` : ''}</option>)}
-              <option value="__new__">+ เพิ่ม Material ใหม่</option>
+              {availableMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}{material.level ? ` · ${material.level}` : ''}</option>)}
+              <option value="__new__" disabled={Boolean(editingLotId)}>+ เพิ่ม Material ใหม่</option>
             </Select>
           </Field>
           {createMaterial ? <Field label="ชื่อ Material ใหม่" hint="เช่น HIV-VL Control"><Input value={materialName} onChange={(event) => setMaterialName(event.target.value)} aria-describedby="iqc-material-help" required /></Field> : <div className="hidden md:block" />}
@@ -486,8 +522,39 @@ function ControlLotTask({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (text
           <Field label="เครื่องมือสำหรับกรอง Stock" hint="เหตุผลของ stock linkage: แสดงเฉพาะ lot ที่ใช้กับเครื่องมือนี้"><Select value={equipmentId} onChange={(event) => setEquipmentId(event.target.value)}><option value="">ทุกเครื่องมือ</option>{data.instruments.filter((instrument) => instrument.isActive && instrument.equipmentId).map((instrument) => <option key={instrument.id} value={instrument.equipmentId!}>{instrument.code} · {instrument.name}</option>)}</Select></Field>
         </div>
         <Field label="เชื่อมกับ Stock lot (ถ้ามี)" hint="link นี้ช่วยให้เลข lot และ expiry สอดคล้องกับคลัง และป้องกันการลบ lot ที่ถูกใช้"><Select value={stockLotId} onChange={(event) => { const value = event.target.value; const stockLot = data.stockLots.find((lot) => lot.id === value); setStockLotId(value); if (stockLot) { setLotNumber(stockLot.lotNumber); setExpiryDate(stockLot.expiryDate ?? '') } }}><option value="">ไม่เชื่อม / กรอกเอง</option>{stockLots.map((lot) => <option key={lot.id} value={lot.id}>{lot.itemCode} · {lot.itemName} · LOT {lot.lotNumber}{lot.expiryDate ? ` · exp ${lot.expiryDate}` : ''}</option>)}</Select></Field>
-        <div className="flex flex-wrap items-center gap-3"><Button disabled={busy}>{busy ? 'กำลังบันทึก…' : 'บันทึกและไปขั้นถัดไป'}</Button><span role="status" className="text-xs text-[#789097]">ระบบจะตรวจ dependency และ link stock ก่อนบันทึก</span></div>
+        <div className="flex flex-wrap items-center gap-3"><Button disabled={busy}>{busy ? 'กำลังบันทึก…' : editingLotId ? 'บันทึกการแก้ไข' : 'บันทึกและไปขั้นถัดไป'}</Button>{editingLotId ? <Button type="button" variant="ghost" disabled={busy} onClick={resetLotForm}>ยกเลิก</Button> : null}<span role="status" className="text-xs text-[#789097]">ระบบจะตรวจ dependency และ link stock ก่อนบันทึก</span></div>
       </form>
+      <div className="space-y-2 border-t border-[#e1ebec] pt-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div>
+            <h4 className="font-bold text-[#173d50]">Control lot ที่มีอยู่</h4>
+            <p className="mt-0.5 text-xs text-[#789097]">รายการทั้งหมดที่ระบบใช้เลือกในงาน IQC</p>
+          </div>
+          <span className="mono text-xs text-[#789097]">{data.controlLots.length} รายการ</span>
+        </div>
+        {data.controlLots.length ? (
+          <div className="overflow-x-auto rounded-md border border-[#e1ebec]">
+            <table className="w-full min-w-[760px] text-left text-xs">
+              <thead className="bg-[#f7fbfb] text-[#789097]">
+                <tr><th className="px-3 py-2">Material</th><th className="px-3 py-2">ระดับ</th><th className="px-3 py-2">Control lot</th><th className="px-3 py-2">Expiry</th><th className="px-3 py-2">Stock</th><th className="px-3 py-2">สถานะ</th><th className="px-3 py-2">จัดการ</th></tr>
+              </thead>
+              <tbody className="divide-y divide-[#edf2f2] text-[#3f5c64]">
+                {data.controlLots.map((lot) => (
+                  <tr key={lot.id} className={lot.isActive ? '' : 'bg-[#fbfcfc] text-[#91a3a7]'}>
+                    <td className="px-3 py-2.5 font-semibold text-[#315763]">{lot.controlMaterialName}</td>
+                    <td className="px-3 py-2.5">{lot.level ?? '—'}</td>
+                    <td className="mono px-3 py-2.5 font-semibold">{lot.lotNumber}</td>
+                    <td className="px-3 py-2.5">{lot.expiryDate ? formatDate(lot.expiryDate) : '—'}</td>
+                    <td className="px-3 py-2.5">{lot.stockLotId ? <span className="text-[#2f7d44]">เชื่อมแล้ว</span> : <span className="text-[#789097]">กรอกเอง</span>}</td>
+                    <td className="px-3 py-2.5"><StatusBadge tone={lot.isActive ? 'accepted' : 'not_evaluated'} label={lot.isActive ? 'ใช้งาน' : 'ปิดใช้งาน'} /></td>
+                    <td className="px-3 py-2.5"><Button type="button" variant="ghost" className="min-h-8 gap-1 px-2 py-1 text-xs" disabled={busy} onClick={() => startEditingLot(lot)}><Pencil className="size-3.5" aria-hidden="true" />แก้ไข</Button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <Notice tone="info">ยังไม่มี Control lot — เพิ่มรายการแรกได้จากฟอร์มด้านบน</Notice>}
+      </div>
     </Card>
   )
 }
