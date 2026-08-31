@@ -25,7 +25,7 @@ import { parseTestSets } from '@/lib/iqc/test-sets'
 import { api, Button, Card, Field, Input, Notice, Select, StatusBadge, type StatusTone, Textarea } from '@/components/ui'
 import { ManagedList } from '@/components/managed-list'
 
-type SetupKey = 'equipment' | 'analyte' | 'lot' | 'baseline' | 'plan' | 'advanced'
+type SetupKey = 'equipment' | 'analyte' | 'lot' | 'spec' | 'baseline' | 'plan' | 'advanced'
 type ReviewFilter = 'all' | 'included' | 'excluded' | 'void'
 
 const RULE_HELP: Record<string, { group: string; label: string; description: string }> = {
@@ -67,6 +67,7 @@ function TaskIcon({ taskKey }: { taskKey: SetupKey }) {
   if (taskKey === 'equipment') return <Wrench className="size-5" aria-hidden="true" />
   if (taskKey === 'analyte') return <FlaskConical className="size-5" aria-hidden="true" />
   if (taskKey === 'lot') return <Layers3 className="size-5" aria-hidden="true" />
+  if (taskKey === 'spec') return <SlidersHorizontal className="size-5" aria-hidden="true" />
   if (taskKey === 'baseline') return <ClipboardCheck className="size-5" aria-hidden="true" />
   if (taskKey === 'plan') return <SlidersHorizontal className="size-5" aria-hidden="true" />
   return <Database className="size-5" aria-hidden="true" />
@@ -105,10 +106,18 @@ function isSetupKey(value: string | null | undefined): value is SetupKey {
 }
 
 function defaultSetupHealth(data: IqcWorkspace) {
+  const activeLots = data.controlLots.filter((lot) => lot.isActive)
+  const cd4QuantitativeAnalytes = data.analytes.filter((analyte) => analyte.isActive && analyte.dataType === 'quantitative' && !/-VL\b/i.test(analyte.code))
+  const requiredAssignedSpecKeys = new Set(activeLots.flatMap((lot) => cd4QuantitativeAnalytes.map((analyte) => `${lot.id}:${analyte.id}`)))
+  const configuredAssignedSpecKeys = new Set(data.specs
+    .filter((spec) => requiredAssignedSpecKeys.has(`${spec.controlLotId}:${spec.analyteId}`) && spec.assignedMean != null && spec.assignedSd != null && spec.assignedSd > 0)
+    .map((spec) => `${spec.controlLotId}:${spec.analyteId}`))
+  const missingAssignedSpecCount = [...requiredAssignedSpecKeys].filter((key) => !configuredAssignedSpecKeys.has(key)).length
   const tasks = [
       { key: 'equipment' as const, label: 'เชื่อมเครื่องมือ', description: 'ใช้ Equipment เป็นแหล่งข้อมูลหลักของเครื่องมือ IQC', state: data.instruments.length ? 'complete' as const : 'blocked' as const, count: data.instruments.length, nextAction: 'ตรวจสอบเครื่องมือ', dependencies: [] },
       { key: 'analyte' as const, label: 'เพิ่ม analyte / ชุดทดสอบ', description: 'เพิ่ม assay และจัดกลุ่ม test set ก่อนกำหนดการรัน', state: data.analytes.some((analyte) => analyte.isActive) ? 'complete' as const : 'attention' as const, count: data.analytes.filter((analyte) => analyte.isActive).length, nextAction: data.analytes.some((analyte) => analyte.isActive) ? 'ตรวจสอบ analyte ที่ใช้งานอยู่' : 'เพิ่ม analyte', dependencies: [] },
       { key: 'lot' as const, label: 'เพิ่ม Control lot', description: 'ผูก Material, lot และ stock ในงานเดียว', state: data.instruments.length > 0 && data.controlLots.length > 0 ? 'complete' as const : 'blocked' as const, count: data.controlLots.length, nextAction: 'เพิ่ม lot', dependencies: [{ label: 'มีเครื่องมือที่เชื่อมจาก Equipment', done: data.instruments.length > 0 }] },
+      { key: 'spec' as const, label: 'กำหนด Mean/SD จากผู้ผลิต', description: 'กรอก Assigned mean และ SD ของ Control สำหรับ CD4 ก่อนบันทึกผล', state: !cd4QuantitativeAnalytes.length ? 'complete' as const : !activeLots.length ? 'blocked' as const : missingAssignedSpecCount ? 'attention' as const : 'complete' as const, count: missingAssignedSpecCount || configuredAssignedSpecKeys.size, nextAction: missingAssignedSpecCount ? `กรอก Mean/SD อีก ${missingAssignedSpecCount} รายการ` : 'ตรวจสอบ Mean/SD ที่บันทึกแล้ว', dependencies: [{ label: 'มี CD4 quantitative analyte', done: cd4QuantitativeAnalytes.length > 0 }, { label: 'มี Control lot', done: activeLots.length > 0 }] },
       { key: 'baseline' as const, label: 'ตั้งค่าค่าอ้างอิงและ QC baseline', description: 'ทบทวนผลจริงก่อนใช้เป็นเกณฑ์ตัดสิน VL', state: 'attention' as const, count: data.charts.length, nextAction: 'ทบทวน baseline', dependencies: [{ label: 'มีเครื่องมือที่เชื่อมจาก Equipment', done: data.instruments.length > 0 }, { label: 'มี Control lot', done: data.controlLots.length > 0 }] },
       { key: 'plan' as const, label: 'กำหนดการรัน', description: 'กำหนดว่าเครื่องนี้ต้องรัน control อะไรและใช้ policy ใด', state: data.controlPlans.length ? 'complete' as const : 'attention' as const, count: data.controlPlans.length, nextAction: 'กำหนดการรัน', dependencies: [{ label: 'มีเครื่องมือที่เชื่อมจาก Equipment', done: data.instruments.length > 0 }] },
       { key: 'advanced' as const, label: 'เกณฑ์เพิ่มเติม', description: 'TEa, Six Sigma และ Uncertainty สำหรับการทบทวนเชิงลึก', state: 'attention' as const, count: data.teaSpecs.length + data.uncertaintyBudgets.length, nextAction: 'เปิด advanced', dependencies: [{ label: 'มี VL analyte ในระบบ', done: data.analytes.some((analyte) => /-VL\b/i.test(analyte.code)) }] },
@@ -189,7 +198,7 @@ export function IqcSettingsCenter({ data, actor, initialSetup, initialInstrument
         </div>
       </Card>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
         {health.tasks.map((task) => <TaskCard key={task.key} task={task} selected={task.key === taskKey} panelId="iqc-setup-panel" onSelect={() => selectTask(task.key)} />)}
       </div>
 
@@ -197,6 +206,7 @@ export function IqcSettingsCenter({ data, actor, initialSetup, initialInstrument
         {taskKey === 'equipment' ? <EquipmentTask data={data} /> : null}
         {taskKey === 'analyte' ? <AnalyteTask data={data} onOk={onOk} onErr={onErr} /> : null}
         {taskKey === 'lot' ? <ControlLotTask data={data} onOk={onOk} onErr={onErr} /> : null}
+        {taskKey === 'spec' ? <AssignedSpecTask data={data} onOk={onOk} onErr={onErr} /> : null}
         {taskKey === 'baseline' ? (
           <BaselineTask data={data} actor={actor} instrumentId={instrumentId} lotId={lotId} analyteId={analyteId} vlAnalytes={vlAnalytes} baselineEligibleInstrumentIds={baselineEligibleInstrumentIds} onSelect={selectBaseline} onOk={onOk} onErr={onErr} />
         ) : null}
@@ -478,6 +488,114 @@ function ControlLotTask({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (text
         <Field label="เชื่อมกับ Stock lot (ถ้ามี)" hint="link นี้ช่วยให้เลข lot และ expiry สอดคล้องกับคลัง และป้องกันการลบ lot ที่ถูกใช้"><Select value={stockLotId} onChange={(event) => { const value = event.target.value; const stockLot = data.stockLots.find((lot) => lot.id === value); setStockLotId(value); if (stockLot) { setLotNumber(stockLot.lotNumber); setExpiryDate(stockLot.expiryDate ?? '') } }}><option value="">ไม่เชื่อม / กรอกเอง</option>{stockLots.map((lot) => <option key={lot.id} value={lot.id}>{lot.itemCode} · {lot.itemName} · LOT {lot.lotNumber}{lot.expiryDate ? ` · exp ${lot.expiryDate}` : ''}</option>)}</Select></Field>
         <div className="flex flex-wrap items-center gap-3"><Button disabled={busy}>{busy ? 'กำลังบันทึก…' : 'บันทึกและไปขั้นถัดไป'}</Button><span role="status" className="text-xs text-[#789097]">ระบบจะตรวจ dependency และ link stock ก่อนบันทึก</span></div>
       </form>
+    </Card>
+  )
+}
+
+function AssignedSpecTask({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (text: string, data: IqcWorkspace) => void; onErr: (text: string) => void }) {
+  const activeLots = data.controlLots.filter((lot) => lot.isActive)
+  const cd4Analytes = data.analytes.filter((analyte) => analyte.isActive && analyte.dataType === 'quantitative' && !/-VL\b/i.test(analyte.code))
+  const initialControlLotId = activeLots[0]?.id ?? ''
+  const initialAnalyteId = cd4Analytes[0]?.id ?? ''
+  const initialSpec = data.specs.find((spec) => spec.controlLotId === initialControlLotId && spec.analyteId === initialAnalyteId)
+  const [controlLotId, setControlLotId] = useState(initialControlLotId)
+  const [analyteId, setAnalyteId] = useState(initialAnalyteId)
+  const [assignedMean, setAssignedMean] = useState(initialSpec?.assignedMean == null ? '' : String(initialSpec.assignedMean))
+  const [assignedSd, setAssignedSd] = useState(initialSpec?.assignedSd == null ? '' : String(initialSpec.assignedSd))
+  const [changeReason, setChangeReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const currentSpec = data.specs.find((spec) => spec.controlLotId === controlLotId && spec.analyteId === analyteId)
+
+  function selectScope(nextControlLotId: string, nextAnalyteId: string) {
+    const spec = data.specs.find((item) => item.controlLotId === nextControlLotId && item.analyteId === nextAnalyteId)
+    setControlLotId(nextControlLotId)
+    setAnalyteId(nextAnalyteId)
+    setAssignedMean(spec?.assignedMean == null ? '' : String(spec.assignedMean))
+    setAssignedSd(spec?.assignedSd == null ? '' : String(spec.assignedSd))
+    setChangeReason('')
+  }
+
+  function selectLot(nextId: string) {
+    selectScope(nextId, analyteId)
+  }
+
+  function selectAnalyte(nextId: string) {
+    selectScope(controlLotId, nextId)
+  }
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!controlLotId || !analyteId) return onErr('เลือก Control lot และ analyte ก่อนบันทึก')
+    const mean = Number(assignedMean)
+    const sd = Number(assignedSd)
+    if (!assignedMean.trim() || !Number.isFinite(mean)) return onErr('กรอก Assigned mean ให้เป็นตัวเลข')
+    if (!assignedSd.trim() || !Number.isFinite(sd) || sd <= 0) return onErr('กรอก Assigned SD ให้เป็นตัวเลขที่มากกว่า 0')
+    if (currentSpec && (currentSpec.assignedMean !== mean || currentSpec.assignedSd !== sd) && !changeReason.trim()) return onErr('ระบุเหตุผลเมื่อแก้ไข Mean/SD เดิม')
+    setBusy(true)
+    try {
+      const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/specs', {
+        method: 'POST',
+        body: JSON.stringify({ controlLotId, analyteId, assignedMean: mean, assignedSd: sd, expectedQualitative: currentSpec?.expectedQualitative ?? null, changeReason: changeReason.trim() || null }),
+      })
+      onOk('บันทึก Mean/SD จากผู้ผลิตสำหรับ CD4 แล้ว', result.iqc)
+      setChangeReason('')
+    } catch (error) {
+      onErr(error instanceof Error ? error.message : 'บันทึก Mean/SD ไม่สำเร็จ')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card className="space-y-4 p-5">
+      <div>
+        <h3 className="font-bold text-[#173d50]">Mean/SD จากผู้ผลิต (CD4)</h3>
+        <p className="mt-1 text-sm text-[#6e878e]">กรอกค่า Assigned mean และ Assigned SD ตาม certificate ของผู้ผลิต ค่านี้จะใช้เป็นเกณฑ์อ้างอิงในการประเมินผล IQC ของ CD4</p>
+      </div>
+      {!activeLots.length || !cd4Analytes.length ? <Notice tone="warning">ต้องมี CD4 quantitative analyte และ Control lot ที่เปิดใช้งานก่อน</Notice> : null}
+      <form className="space-y-4" onSubmit={submit}>
+        <div className="grid gap-3 md:grid-cols-4">
+          <Field label="Control lot">
+            <Select value={controlLotId} onChange={(event) => selectLot(event.target.value)} disabled={!activeLots.length} required>
+              <option value="">เลือก Control lot</option>
+              {activeLots.map((lot) => <option key={lot.id} value={lot.id}>{lot.controlMaterialName}{lot.level ? ` · ${lot.level}` : ''} · {lot.lotNumber}</option>)}
+            </Select>
+          </Field>
+          <Field label="Analyte / CD4">
+            <Select value={analyteId} onChange={(event) => selectAnalyte(event.target.value)} disabled={!cd4Analytes.length} required>
+              <option value="">เลือก analyte</option>
+              {cd4Analytes.map((analyte) => <option key={analyte.id} value={analyte.id}>{analyte.code} · {analyte.name}</option>)}
+            </Select>
+          </Field>
+          <Field label="Assigned mean" hint="ค่ากลางจาก certificate ผู้ผลิต">
+            <Input className="mono" type="number" step="any" value={assignedMean} onChange={(event) => setAssignedMean(event.target.value)} disabled={!activeLots.length || !cd4Analytes.length} required />
+          </Field>
+          <Field label="Assigned SD" hint="ต้องมากกว่า 0">
+            <Input className="mono" type="number" step="any" min="0" value={assignedSd} onChange={(event) => setAssignedSd(event.target.value)} disabled={!activeLots.length || !cd4Analytes.length} required />
+          </Field>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <Field label="เหตุผลแก้ไข (กรณีแก้ค่าที่มีอยู่แล้ว)" hint="ระบบจะบันทึกไว้ใน audit trail">
+            <Input value={changeReason} onChange={(event) => setChangeReason(event.target.value)} placeholder="เช่น แก้ตาม certificate ผู้ผลิตฉบับใหม่" disabled={!activeLots.length || !cd4Analytes.length} />
+          </Field>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button disabled={busy || !activeLots.length || !cd4Analytes.length}>{busy ? 'กำลังบันทึก…' : 'บันทึก Mean/SD'}</Button>
+          <span className="text-xs text-[#789097]">ถ้าเป็นการแก้ไขค่าเดิม ต้องระบุเหตุผล</span>
+        </div>
+      </form>
+      {controlLotId && cd4Analytes.length ? (
+        <div className="border-t border-[#e1ebec] pt-4">
+          <p className="text-xs font-semibold text-[#58747d]">ค่าที่บันทึกของ Control lot นี้</p>
+          <div className="mt-2 divide-y divide-[#edf2f2] rounded-md border border-[#e1ebec] bg-white text-xs">
+            {data.specs.filter((spec) => spec.controlLotId === controlLotId && cd4Analytes.some((analyte) => analyte.id === spec.analyteId)).map((spec) => {
+              const analyte = cd4Analytes.find((item) => item.id === spec.analyteId)
+              return <div key={spec.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"><span className="font-semibold text-[#315763]">{analyte?.code ?? spec.analyteId}</span><span className="mono text-[#58747d]">Mean {fmt(spec.assignedMean)} · SD {fmt(spec.assignedSd)}</span></div>
+            })}
+            {!data.specs.some((spec) => spec.controlLotId === controlLotId && cd4Analytes.some((analyte) => analyte.id === spec.analyteId)) ? <p className="px-3 py-3 text-center text-[#9aafb4]">ยังไม่มีค่า Mean/SD</p> : null}
+          </div>
+        </div>
+      ) : null}
     </Card>
   )
 }

@@ -321,6 +321,7 @@ function buildSetupHealth(input: {
   analytes: IqcAnalyte[]
   instruments: IqcInstrument[]
   controlLots: IqcControlLot[]
+  specs: IqcSpec[]
   baselines: IqcBaseline[]
   charts: IqcChart[]
   observedVlScopes?: Set<string>
@@ -341,6 +342,12 @@ function buildSetupHealth(input: {
   const baselineReviewCount = new Set([...expectedReviewScopes, ...chartReviewScopes, ...observedReviewScopes]
     .filter((scope) => !approvedBaselineScopes.has(scope))).size
   const activePlanCount = input.controlPlans.filter((plan) => plan.isActive).length
+  const cd4QuantitativeAnalytes = input.analytes.filter((analyte) => analyte.isActive && analyte.dataType === 'quantitative' && !isVlAnalyte(analyte))
+  const requiredAssignedSpecKeys = new Set(activeLots.flatMap((lot) => cd4QuantitativeAnalytes.map((analyte) => `${lot.id}:${analyte.id}`)))
+  const configuredAssignedSpecKeys = new Set(input.specs
+    .filter((spec) => requiredAssignedSpecKeys.has(`${spec.controlLotId}:${spec.analyteId}`) && spec.assignedMean != null && spec.assignedSd != null && spec.assignedSd > 0)
+    .map((spec) => `${spec.controlLotId}:${spec.analyteId}`))
+  const missingAssignedSpecCount = [...requiredAssignedSpecKeys].filter((key) => !configuredAssignedSpecKeys.has(key)).length
   const quantitativeVlCount = vlAnalytes.filter((analyte) => analyte.dataType === 'quantitative').length
   const teaCount = input.teaSpecs.filter((tea) => isQuantitativeVlAnalyte(input.analytes.find((analyte) => analyte.id === tea.analyteId))).length
   const uncertaintyCount = input.uncertaintyBudgets.filter((budget) => isQuantitativeVlAnalyte(input.analytes.find((analyte) => analyte.id === budget.analyteId))).length
@@ -371,6 +378,18 @@ function buildSetupHealth(input: {
       state: !input.instruments.length ? 'blocked' : activeLots.length ? 'complete' : 'blocked',
       count: activeLots.length,
       nextAction: activeLots.length ? 'ตรวจสอบ lot ที่ใช้งานอยู่' : 'เพิ่ม control lot ที่ยังใช้งานได้',
+    },
+    {
+      key: 'spec',
+      dependencies: [
+        { label: 'มี CD4 quantitative analyte', done: cd4QuantitativeAnalytes.length > 0 },
+        { label: 'มี Control lot', done: activeLots.length > 0 },
+      ],
+      label: 'กำหนด Mean/SD จากผู้ผลิต',
+      description: 'กรอก Assigned mean และ SD ของ Control สำหรับ CD4 ก่อนบันทึกผล',
+      state: !cd4QuantitativeAnalytes.length ? 'complete' : !activeLots.length ? 'blocked' : missingAssignedSpecCount ? 'attention' : 'complete',
+      count: missingAssignedSpecCount || configuredAssignedSpecKeys.size,
+      nextAction: missingAssignedSpecCount ? `กรอก Mean/SD อีก ${missingAssignedSpecCount} รายการ` : 'ตรวจสอบ Mean/SD ที่บันทึกแล้ว',
     },
     {
       key: 'baseline',
@@ -956,7 +975,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   const observedVlScopes = new Set(valueRows
     .filter((row) => !Boolean(row.is_voided) && isQuantitativeVlAnalyte(analyteMap.get(asString(row.analyte_id))))
     .map((row) => `${asString(row.control_lot_id)}:${asString(row.analyte_id)}:${runInstrument.get(asString(row.run_id)) ?? ''}`))
-  const setupHealth = buildSetupHealth({ analytes, instruments: activeLinkedInstruments, controlLots, baselines, charts, observedVlScopes, controlPlans, teaSpecs, uncertaintyBudgets })
+  const setupHealth = buildSetupHealth({ analytes, instruments: activeLinkedInstruments, controlLots, specs, baselines, charts, observedVlScopes, controlPlans, teaSpecs, uncertaintyBudgets })
 
   return {
     analytes,
@@ -995,6 +1014,7 @@ export async function getIqcSetupHealth(actor: BmActor): Promise<IqcSetupHealth>
     analytes: workspace.analytes,
     instruments: workspace.instruments,
     controlLots: workspace.controlLots,
+    specs: workspace.specs,
     baselines: workspace.baselines ?? [],
     charts: workspace.charts,
     controlPlans: workspace.controlPlans,

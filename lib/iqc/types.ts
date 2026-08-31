@@ -182,7 +182,7 @@ export interface IqcBaselineReviewInput {
 }
 
 export interface IqcSetupTask {
-  key: 'equipment' | 'analyte' | 'lot' | 'baseline' | 'plan' | 'advanced'
+  key: 'equipment' | 'analyte' | 'lot' | 'spec' | 'baseline' | 'plan' | 'advanced'
   label: string
   description: string
   state: IqcSetupTaskState
