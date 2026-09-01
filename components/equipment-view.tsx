@@ -48,7 +48,7 @@ import type {
   EquipmentWorkspace,
 } from "@/lib/equipment/types";
 import { AttachmentList } from "@/components/attachments";
-import { FacsMaintenance } from "@/components/facs-maintenance";
+import { RoutineMaintenance } from "@/components/routine-maintenance";
 import {
   api,
   Button,
@@ -877,7 +877,7 @@ function Registry({
                 </div>
               </div>
           </Card>
-          {selected.code.toUpperCase() === "FACSLYRIC" || selected.name.toLowerCase().includes("facslyric") ? <FacsMaintenance actor={actor} /> : null}
+          <RoutineMaintenance actor={actor} equipmentId={selected.id} />
           <section aria-label="รายละเอียดเครื่องมือเพิ่มเติม" className="space-y-4">
               <Card className="overflow-hidden">
             <div className="flex items-center gap-3 border-b border-[#e1eaeb] bg-[#f7fbfb] px-4 py-3">

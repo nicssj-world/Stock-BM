@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import Link from "next/link";
 import {
   CheckCircle2,
   FileUp,
@@ -155,6 +156,12 @@ export function EquipmentPublicForm({
                 {context.equipment.model ?? "-"} ·{" "}
                 {equipmentStatusLabel(context.equipment.status)}
               </p>
+              <Link
+                href={`/equipment/routine/${token}`}
+                className="mt-3 inline-flex min-h-9 items-center rounded-md border border-[#7ee3d8]/45 bg-white/10 px-3 text-xs font-bold text-[#d9fffa] transition hover:bg-white/20"
+              >
+                Routine Maintenance · ต้อง Login ก่อนบันทึก
+              </Link>
             </div>
           </div>
         </header>
