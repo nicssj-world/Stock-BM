@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   Trash2,
   Unlock,
+  Wrench,
   X,
 } from "lucide-react"
 import type { BmActor } from "@/lib/bm/types"
@@ -261,7 +262,10 @@ export function RoutineMaintenance({
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
           <Link className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[#c9dadd] bg-white px-3 text-[#0b7f76] hover:bg-[#f4fbfa]" href={`/equipment/routine/report?equipmentId=${data.equipment.id}${selectedForm ? `&formId=${selectedForm.id}` : ""}`}><FileText className="size-3.5" /> รายงาน</Link>
-          {!token ? <Link className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[#c9dadd] bg-white px-3 text-[#0b7f76] hover:bg-[#f4fbfa]" href={`/service/equipment/${data.equipment.qrToken}`} target="_blank" rel="noreferrer"><QrCode className="size-3.5" /> QR</Link> : null}
+          {!token ? <>
+            <Link className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[#9ed8d1] bg-[#f3fbfa] px-3 text-[#0b7f76] hover:bg-[#e8f7f4]" href={`/equipment/routine/${data.equipment.qrToken}`} target="_blank" rel="noreferrer" aria-label={`เปิด QR Routine Maintenance ของ ${data.equipment.name}`}><QrCode className="size-3.5" /> QR Routine</Link>
+            <Link className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[#c9dadd] bg-white px-3 text-[#58747d] hover:bg-[#f4fbfa]" href={`/service/equipment/${data.equipment.qrToken}`} target="_blank" rel="noreferrer" aria-label={`เปิด QR ฟอร์มช่างของ ${data.equipment.name}`}><Wrench className="size-3.5" /> QR ช่าง</Link>
+          </> : null}
           {isAdmin && !token ? <Button type="button" className="min-h-9" onClick={openCreate}><Plus className="size-4" /> เพิ่มฟอร์ม</Button> : null}
         </div>
       </div>

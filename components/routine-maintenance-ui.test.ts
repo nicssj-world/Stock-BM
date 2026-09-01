@@ -26,6 +26,13 @@ describe('generic routine maintenance UI', () => {
     expect(qrPage).toContain('RoutineMaintenance')
   })
 
+  it('keeps Routine and technician QR destinations separate', () => {
+    expect(routine).toContain('equipment/routine/${data.equipment.qrToken}')
+    expect(routine).toContain('service/equipment/${data.equipment.qrToken}')
+    expect(routine).toContain('QR Routine')
+    expect(routine).toContain('QR ช่าง')
+  })
+
   it('renders a generic printable report with equipment and form filters', () => {
     expect(report).toContain('name="equipmentId"')
     expect(report).toContain('name="formId"')

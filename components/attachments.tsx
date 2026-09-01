@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import Image from 'next/image'
 import { Download, Eye, FileUp, Loader2, Paperclip, Trash2, X } from 'lucide-react'
 import { api } from '@/components/ui'
 
@@ -8,6 +9,7 @@ type AttachmentModule = 'iqc' | 'eqa' | 'stock' | 'env' | 'lotverif' | 'hpv' | '
 
 interface Attachment {
   id: string
+  kind: string
   fileName: string
   contentType: string | null
   sizeBytes: number | null
@@ -28,6 +30,12 @@ function previewKind(item: Attachment) {
   return null
 }
 
+function attachmentLabel(item: Attachment) {
+  if (item.kind === 'technician-signature') return 'ลายเซ็นช่าง'
+  if (item.kind === 'receiver-signature') return 'ลายเซ็นผู้รับงาน'
+  return item.fileName
+}
+
 export function AttachmentList({
   module,
   entityType,
@@ -35,6 +43,9 @@ export function AttachmentList({
   kind,
   canDelete = false,
   canUpload = true,
+  inlineImages = false,
+  initialItems,
+  excludeKinds = [],
   accept,
   label = 'ไฟล์แนบ / Attachments',
   onChanged,
@@ -45,15 +56,19 @@ export function AttachmentList({
   kind: string
   canDelete?: boolean
   canUpload?: boolean
+  inlineImages?: boolean
+  initialItems?: Attachment[]
+  excludeKinds?: string[]
   accept?: string
   label?: string
   onChanged?: () => void | Promise<void>
 }) {
-  const [items, setItems] = useState<Attachment[] | null>(null)
+  const [items, setItems] = useState<Attachment[] | null>(initialItems ?? null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [preview, setPreview] = useState<Attachment | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const visibleItems = items?.filter((item) => !excludeKinds.includes(item.kind))
 
   async function refresh() {
     try {
@@ -147,21 +162,49 @@ export function AttachmentList({
         </label> : null}
       </div>
       {error ? <p className="mt-2 text-xs text-[#c02a37]" role="alert">{error}</p> : null}
-      <ul className="mt-2 space-y-1">
+      {inlineImages ? <p className="mt-1 pl-5 text-[11px] leading-5 text-[#789097]">ภาพลายเซ็นและรูปประกอบแสดงตัวอย่างไว้ด้านล่างแล้ว</p> : null}
+      <ul className={inlineImages ? 'mt-3 grid gap-2 sm:grid-cols-2' : 'mt-2 space-y-1'}>
         {items === null ? <li className="text-xs text-[#789097]" role="status">กำลังโหลดไฟล์แนบ…</li> : null}
-        {items?.map((item) => (
-          <li key={item.id} className="flex items-center justify-between gap-2 rounded border border-[#e9eff0] bg-white px-2 py-1 text-xs">
-            <span className="min-w-0 truncate text-[#315763]">{item.fileName} <span className="text-[#9aafb4]">{humanSize(item.sizeBytes)}</span></span>
-            <span className="flex shrink-0 items-center gap-1">
-              {previewKind(item) ? <button type="button" onClick={() => setPreview(item)} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded p-1 text-[#0b7f76] hover:bg-[#eef6f5]" aria-label={`ดู ${item.fileName}`} title="ดูไฟล์ในหน้านี้"><Eye className="size-3.5" /></button> : null}
-              <a href={`/api/attachments/${item.id}`} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded p-1 text-[#0b7f76] hover:bg-[#eef6f5]" aria-label={`ดาวน์โหลด ${item.fileName}`}><Download className="size-3.5" /></a>
-              {canDelete ? <button type="button" onClick={() => remove(item.id)} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded p-1 text-[#c02a37] hover:bg-[#fff0f1]" aria-label={`ลบ ${item.fileName}`}><Trash2 className="size-3.5" /></button> : null}
+        {visibleItems?.map((item) => {
+          const kind = previewKind(item)
+          const label = attachmentLabel(item)
+          const actions = (
+            <span className="flex shrink-0 items-center gap-0.5">
+              {kind ? <button type="button" onClick={() => setPreview(item)} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded p-1 text-[#0b7f76] transition hover:bg-[#eef6f5] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0b7f76]" aria-label={`ดู ${label}`} title="ดูไฟล์ในหน้านี้"><Eye className="size-3.5" /></button> : null}
+              <a href={`/api/attachments/${item.id}`} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded p-1 text-[#0b7f76] transition hover:bg-[#eef6f5] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0b7f76]" aria-label={`ดาวน์โหลด ${label}`}><Download className="size-3.5" /></a>
+              {canDelete ? <button type="button" onClick={() => remove(item.id)} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded p-1 text-[#c02a37] transition hover:bg-[#fff0f1] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c02a37]" aria-label={`ลบ ${label}`}><Trash2 className="size-3.5" /></button> : null}
             </span>
-          </li>
-        ))}
-        {items && !items.length ? <li className="text-xs text-[#9aafb4]">ยังไม่มีไฟล์แนบ</li> : null}
+          )
+
+          if (inlineImages && kind === 'image') {
+            return (
+              <li key={item.id} className="overflow-hidden rounded-lg border border-[#dce8e9] bg-white">
+                <a href={`/api/attachments/${item.id}`} target="_blank" rel="noreferrer" className="group block focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#0b7f76]" aria-label={`เปิดภาพ ${label}`}>
+                  <div className="flex h-28 items-center justify-center bg-[#f1faf8] px-4 py-2 sm:h-32">
+                    <Image loading="lazy" src={`/api/attachments/${item.id}`} alt={`${label} — ${item.fileName}`} width={320} height={128} unoptimized className="max-h-full max-w-full object-contain transition duration-200 group-hover:scale-[1.02]" />
+                  </div>
+                </a>
+                <div className="flex min-h-[68px] items-center justify-between gap-2 border-t border-[#edf2f2] px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-bold text-[#315763]">{label}</p>
+                    <p className="truncate text-[11px] text-[#9aafb4]">{item.fileName}{humanSize(item.sizeBytes) ? ` · ${humanSize(item.sizeBytes)}` : ''}</p>
+                  </div>
+                  {actions}
+                </div>
+              </li>
+            )
+          }
+
+          return (
+            <li key={item.id} className="flex items-center justify-between gap-2 rounded border border-[#e9eff0] bg-white px-2 py-1 text-xs">
+              <span className="min-w-0 truncate text-[#315763]">{label}{label !== item.fileName ? ` · ${item.fileName}` : ''} <span className="text-[#9aafb4]">{humanSize(item.sizeBytes)}</span></span>
+              {actions}
+            </li>
+          )
+        })}
+        {visibleItems && !visibleItems.length ? <li className="text-xs text-[#9aafb4]">ยังไม่มีไฟล์แนบ</li> : null}
       </ul>
-      {preview ? <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-3 sm:p-6" role="presentation" onMouseDown={() => setPreview(null)}><section role="dialog" aria-modal="true" aria-label={`ตัวอย่างไฟล์ ${preview.fileName}`} className="flex h-[min(880px,calc(100dvh-1.5rem))] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-[#c9dadd] bg-white shadow-2xl" onMouseDown={(event) => event.stopPropagation()}><header className="flex shrink-0 items-center justify-between gap-2 border-b border-[#e3ebec] bg-[#f6fafa] px-3 py-2.5 sm:px-4"><p className="min-w-0 truncate text-sm font-semibold text-[#315763]">ดูไฟล์: {preview.fileName}</p><button type="button" autoFocus onClick={() => setPreview(null)} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded p-1 text-[#55727c] hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0b7f76]" aria-label="ปิดตัวอย่างไฟล์"><X className="size-5" /></button></header><div className="min-h-0 flex-1 bg-[#f6f9f9]">{previewKind(preview) === 'image' ? <img src={`/api/attachments/${preview.id}`} alt={preview.fileName} className="h-full w-full object-contain" /> : <iframe title={preview.fileName} src={`/api/attachments/${preview.id}`} className="h-full w-full bg-white" />}</div></section></div> : null}
+      {preview ? <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-3 sm:p-6" role="presentation" onMouseDown={() => setPreview(null)}><section role="dialog" aria-modal="true" aria-label={`ตัวอย่างไฟล์ ${preview.fileName}`} className="flex h-[min(880px,calc(100dvh-1.5rem))] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-[#c9dadd] bg-white shadow-2xl" onMouseDown={(event) => event.stopPropagation()}><header className="flex shrink-0 items-center justify-between gap-2 border-b border-[#e3ebec] bg-[#f6fafa] px-3 py-2.5 sm:px-4"><p className="min-w-0 truncate text-sm font-semibold text-[#315763]">ดูไฟล์: {preview.fileName}</p><button type="button" autoFocus onClick={() => setPreview(null)} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded p-1 text-[#55727c] hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0b7f76]" aria-label="ปิดตัวอย่างไฟล์"><X className="size-5" /></button></header><div className="relative min-h-0 flex-1 bg-[#f6f9f9]">{previewKind(preview) === 'image' ? <Image src={`/api/attachments/${preview.id}`} alt={preview.fileName} fill sizes="100vw" unoptimized className="object-contain" /> : <iframe title={preview.fileName} src={`/api/attachments/${preview.id}`} className="h-full w-full bg-white" />}</div></section></div> : null}
     </div>
   )
 }

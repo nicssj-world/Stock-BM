@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import NextImage from "next/image";
 import { useSearchParams } from "next/navigation";
 import {
   Activity,
@@ -29,7 +30,7 @@ import {
   X,
 } from "lucide-react";
 import type { BmActor } from "@/lib/bm/types";
-import { formatDate, todayBangkok } from "@/lib/bm/rules";
+import { formatDate, formatDateTime, todayBangkok } from "@/lib/bm/rules";
 import {
   EQUIPMENT_EVENT_LABELS,
   EQUIPMENT_PLAN_TYPES,
@@ -38,6 +39,7 @@ import {
   equipmentDueMonthInput,
   formatEquipmentDueMonth,
 } from "@/lib/equipment/rules";
+import { equipmentClassificationOptions } from "@/lib/equipment/classifications";
 import type {
   Equipment,
   EquipmentEventType,
@@ -80,9 +82,11 @@ const tabs = [
 export function EquipmentView({
   actor,
   initialData,
+  historyPrintedAt,
 }: {
   actor: BmActor;
   initialData: EquipmentWorkspace;
+  historyPrintedAt?: string;
 }) {
   const searchParams = useSearchParams();
   const requestedView = searchParams.get("view");
@@ -174,6 +178,7 @@ export function EquipmentView({
           workspace={workspace}
           busy={busy}
           mutate={mutate}
+          printedAt={historyPrintedAt}
         />
       ) : null}
       {tab === "pending" ? (
@@ -349,6 +354,7 @@ function Registry({
 }) {
   const requestedEquipment = useSearchParams().get("equipment");
   const [search, setSearch] = useState("");
+  const [classification, setClassification] = useState("");
   const [selectedId, setSelectedId] = useState(
     requestedEquipment &&
       workspace.equipment.some((item) => item.id === requestedEquipment)
@@ -364,17 +370,21 @@ function Registry({
     null,
   );
   const [isEquipmentFormOpen, setEquipmentFormOpen] = useState(false);
-  const filtered = workspace.equipment.filter((item) =>
-    [
+  const classificationOptions = equipmentClassificationOptions(
+    workspace.equipment.map((item) => item.category),
+  );
+  const filtered = workspace.equipment.filter((item) => {
+    if (classification && item.category !== classification) return false;
+    const query = search.trim().toLowerCase();
+    if (!query) return true;
+    return [
       item.code,
       item.name,
       item.serialNumber,
       item.assetNumber,
       item.location,
-    ].some((value) =>
-      value?.toLowerCase().includes(search.trim().toLowerCase()),
-    ),
-  );
+    ].some((value) => value?.toLowerCase().includes(query));
+  });
   const selected =
     workspace.equipment.find((item) => item.id === selectedId) ??
     filtered[0] ??
@@ -605,13 +615,20 @@ function Registry({
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                 />
               </Field>
-              <Field label="ประเภท">
-                <Input
+              <Field label="ประเภท / Classification">
+                <Select
                   value={form.category}
                   onChange={(e) =>
                     setForm({ ...form, category: e.target.value })
                   }
-                />
+                >
+                  <option value="">ยังไม่ระบุ</option>
+                  {classificationOptions.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </Select>
               </Field>
               <Field label="ผู้ผลิต">
                 <Input
@@ -736,22 +753,62 @@ function Registry({
           </>
         ) : null}
         <Card className="overflow-hidden">
-          <div className="relative border-b border-[#e1eaeb] p-3">
-            <Search className="absolute top-5 left-6 size-4 text-[#8ba0a5]" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-              placeholder="ค้นหารหัส ชื่อ Serial หรือสถานที่"
-            />
+          <div className="border-b border-[#e1eaeb] p-3">
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,0.65fr)]">
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold text-[#58747d]">
+                  ค้นหาเครื่องมือ
+                </span>
+                <span className="relative block">
+                  <Search className="absolute top-3.5 left-3 size-4 text-[#8ba0a5]" />
+                  <Input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="pl-9"
+                    placeholder="รหัส ชื่อ Serial หรือสถานที่"
+                  />
+                </span>
+              </label>
+              <Field label="Classification">
+                <Select
+                  value={classification}
+                  onChange={(e) => setClassification(e.target.value)}
+                  aria-label="กรองตาม Classification"
+                >
+                  <option value="">ทุก Classification</option>
+                  {classificationOptions.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#789097]">
+              <span>
+                แสดง {filtered.length} จาก {workspace.equipment.length} เครื่องมือ
+              </span>
+              {search || classification ? (
+                <button
+                  type="button"
+                  className="cursor-pointer font-bold text-[#0b7f76] underline decoration-[#9ed8d1] underline-offset-2 hover:text-[#075f5a]"
+                  onClick={() => {
+                    setSearch("");
+                    setClassification("");
+                  }}
+                >
+                  ล้างตัวกรอง
+                </button>
+              ) : null}
+            </div>
           </div>
           <div className="max-h-[620px] divide-y divide-[#edf2f2] overflow-y-auto">
-            {filtered.map((item) => (
+            {filtered.length ? filtered.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => selectEquipment(item.id)}
-                className={`flex w-full items-center gap-3 px-4 py-3 text-left ${selected?.id === item.id ? "bg-[#eaf7f5]" : "hover:bg-[#f8fbfb]"}`}
+                className={`flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left ${selected?.id === item.id ? "bg-[#eaf7f5]" : "hover:bg-[#f8fbfb]"}`}
               >
                 <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-[#e8f4f3] text-[#0b7f76]">
                   <Stethoscope className="size-5" />
@@ -767,7 +824,21 @@ function Registry({
                 </div>
                 <EquipmentStatusBadge status={item.status} />
               </button>
-            ))}
+            )) : (
+              <div className="px-4 py-8 text-center text-sm text-[#789097]">
+                <p>ไม่พบเครื่องมือที่ตรงกับตัวกรอง</p>
+                <button
+                  type="button"
+                  className="mt-2 cursor-pointer font-bold text-[#0b7f76] underline underline-offset-2 hover:text-[#075f5a]"
+                  onClick={() => {
+                    setSearch("");
+                    setClassification("");
+                  }}
+                >
+                  ล้างตัวกรอง
+                </button>
+              </div>
+            )}
           </div>
         </Card>
       </div>
@@ -1386,32 +1457,68 @@ function WorkHistory({
   workspace,
   busy,
   mutate,
+  printedAt,
 }: {
   actor: BmActor;
   workspace: EquipmentWorkspace;
   busy: boolean;
   mutate: Mutate;
+  printedAt?: string;
 }) {
   const [form, setForm] = useState(emptyRecord);
-  const [search, setSearch] = useState("");
+  const [isFormOpen, setFormOpen] = useState(false);
+  const [historyEquipmentId, setHistoryEquipmentId] = useState("");
+  const [historyEventType, setHistoryEventType] = useState("");
+  const [historyFrom, setHistoryFrom] = useState("");
+  const [historyTo, setHistoryTo] = useState("");
+  const [historySearch, setHistorySearch] = useState("");
   const [selectedTechnicianId, setSelectedTechnicianId] = useState("");
   const equipmentMap = new Map(
     workspace.equipment.map((item) => [item.id, item]),
   );
+  const normalizedHistorySearch = historySearch.trim().toLowerCase();
   const approved = workspace.records
     .filter(
       (record) => record.status === "approved" || record.status === "voided",
     )
-    .filter((record) =>
-      [
-        equipmentMap.get(record.equipmentId)?.code,
-        record.technicianName,
-        record.company,
-        EQUIPMENT_EVENT_LABELS[record.eventType],
-      ].some((value) =>
-        value?.toLowerCase().includes(search.trim().toLowerCase()),
-      ),
+    .filter(
+      (record) =>
+        !historyEquipmentId || record.equipmentId === historyEquipmentId,
+    )
+    .filter(
+      (record) => !historyEventType || record.eventType === historyEventType,
+    )
+    .filter((record) => !historyFrom || record.performedOn >= historyFrom)
+    .filter((record) => !historyTo || record.performedOn <= historyTo)
+    .filter(
+      (record) =>
+        !normalizedHistorySearch ||
+        [
+          equipmentMap.get(record.equipmentId)?.code,
+          equipmentMap.get(record.equipmentId)?.name,
+          record.technicianName,
+          record.company,
+          record.otherEventLabel,
+          EQUIPMENT_EVENT_LABELS[record.eventType],
+        ].some((value) =>
+          value?.toLowerCase().includes(normalizedHistorySearch),
+        ),
     );
+  const hasHistoryFilters = Boolean(
+    historyEquipmentId ||
+      historyEventType ||
+      historyFrom ||
+      historyTo ||
+      historySearch,
+  );
+  const reportParams = new URLSearchParams();
+  if (historyEquipmentId) reportParams.set("equipmentId", historyEquipmentId);
+  if (historyEventType) reportParams.set("eventType", historyEventType);
+  if (historyFrom) reportParams.set("from", historyFrom);
+  if (historyTo) reportParams.set("to", historyTo);
+  const reportHref = reportParams.toString()
+    ? `/equipment/report?${reportParams.toString()}`
+    : "/equipment/report";
   const plans = workspace.plans.filter(
     (plan) => plan.equipmentId === form.equipmentId && plan.isActive,
   );
@@ -1451,16 +1558,234 @@ function WorkHistory({
     if (ok) {
       setForm(emptyRecord);
       setSelectedTechnicianId("");
+      setFormOpen(false);
     }
   }
   return (
-    <div className="grid gap-4 2xl:grid-cols-[420px_minmax(0,1fr)]">
-      <Card className="p-4">
-        <h2 className="font-bold text-[#173d50]">บันทึกงานภายใน</h2>
-        <p className="mt-1 text-xs text-[#789097]">
-          รายการจาก Staff จะเป็นประวัติทางการทันที
-        </p>
-        <form onSubmit={save} className="mt-4 space-y-3">
+    <div className="space-y-4">
+      <Card className="overflow-hidden">
+        <div className="border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-4 sm:px-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="font-bold text-[#173d50]">ประวัติงานทางการ</h2>
+                <span className="inline-flex items-center rounded-full border border-[#cfe4e1] bg-[#f1faf8] px-2 py-0.5 text-[11px] font-bold text-[#0b7f76]">
+                  {approved.length} รายการ
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-[#789097]">
+                เอกสารประวัติงานที่อนุมัติแล้ว พร้อมลายเซ็นและข้อมูลตรวจรับ
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="min-h-9 px-2.5 py-1 text-xs"
+                onClick={() => setFormOpen(true)}
+              >
+                <Plus className="size-3.5" aria-hidden="true" />
+                บันทึกงานภายใน
+              </Button>
+              {hasHistoryFilters ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="min-h-9 px-2 py-1 text-xs"
+                  onClick={() => {
+                    setHistoryEquipmentId("");
+                    setHistoryEventType("");
+                    setHistoryFrom("");
+                    setHistoryTo("");
+                    setHistorySearch("");
+                  }}
+                >
+                  ล้างตัวกรอง
+                </Button>
+              ) : null}
+              <Link href={reportHref} aria-label="พิมพ์รายงานประวัติงาน">
+                <span
+                  title="พิมพ์รายงานประวัติงาน"
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[#c9dadd] bg-white px-3.5 py-2 text-sm font-semibold text-[#244854] transition hover:border-[#7fa9ad] hover:bg-[#f7fbfb] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0b7f76]"
+                >
+                  <Printer className="size-4" aria-hidden="true" />
+                </span>
+              </Link>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+            <label htmlFor="equipment-history-equipment" className="block min-w-0">
+              <span className="mb-1 block text-[11px] font-semibold text-[#58747d]">
+                เครื่องมือ
+              </span>
+              <Select
+                id="equipment-history-equipment"
+                aria-label="เครื่องมือ"
+                value={historyEquipmentId}
+                onChange={(event) => setHistoryEquipmentId(event.target.value)}
+                className="min-h-9 px-2 py-1.5 text-xs"
+              >
+                <option value="">ทุกเครื่องมือ</option>
+                {workspace.equipment.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.code} · {item.name}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <label htmlFor="equipment-history-event" className="block min-w-0">
+              <span className="mb-1 block text-[11px] font-semibold text-[#58747d]">
+                ประเภทงาน
+              </span>
+              <Select
+                id="equipment-history-event"
+                aria-label="ประเภทงาน"
+                value={historyEventType}
+                onChange={(event) => setHistoryEventType(event.target.value)}
+                className="min-h-9 px-2 py-1.5 text-xs"
+              >
+                <option value="">ทุกประเภทงาน</option>
+                {Object.entries(EQUIPMENT_EVENT_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <label htmlFor="equipment-history-from" className="block min-w-0">
+              <span className="mb-1 block text-[11px] font-semibold text-[#58747d]">
+                ตั้งแต่วันที่
+              </span>
+              <Input
+                id="equipment-history-from"
+                aria-label="ตั้งแต่วันที่"
+                type="date"
+                value={historyFrom}
+                onChange={(event) => setHistoryFrom(event.target.value)}
+                className="min-h-9 px-2 py-1.5 text-xs"
+              />
+            </label>
+            <label htmlFor="equipment-history-to" className="block min-w-0">
+              <span className="mb-1 block text-[11px] font-semibold text-[#58747d]">
+                ถึงวันที่
+              </span>
+              <Input
+                id="equipment-history-to"
+                aria-label="ถึงวันที่"
+                type="date"
+                value={historyTo}
+                onChange={(event) => setHistoryTo(event.target.value)}
+                className="min-h-9 px-2 py-1.5 text-xs"
+              />
+            </label>
+            <label htmlFor="equipment-history-search" className="block min-w-0 sm:col-span-2 xl:col-span-1">
+              <span className="mb-1 block text-[11px] font-semibold text-[#58747d]">
+                ค้นหาประวัติงาน
+              </span>
+              <span className="relative block">
+                <Search
+                  className="pointer-events-none absolute top-2.5 left-3 size-4 text-[#8ba0a5]"
+                  aria-hidden="true"
+                />
+                <Input
+                  id="equipment-history-search"
+                  aria-label="ค้นหาประวัติงาน"
+                  value={historySearch}
+                  onChange={(event) => setHistorySearch(event.target.value)}
+                  className="min-h-9 pl-9 py-1.5 text-xs"
+                  placeholder="รหัส ชื่อช่าง บริษัท หรือประเภทงาน"
+                />
+              </span>
+            </label>
+          </div>
+          <div className="mt-3 grid gap-1 border-t border-[#e7eeee] pt-2 text-[11px] text-[#68828a] sm:grid-cols-2">
+            <span>
+              ช่วงวันที่: {historyFrom ? formatDate(historyFrom) : "เริ่มต้น"} –{" "}
+              {historyTo ? formatDate(historyTo) : "ปัจจุบัน"}
+            </span>
+            <span className="sm:text-right">
+              พิมพ์เมื่อ: {printedAt ?? "—"}
+            </span>
+          </div>
+        </div>
+        <div className="space-y-3 bg-[#edf4f2] p-3 sm:p-4">
+          {approved.map((record, index) => (
+            <OfficialRecordCard
+              key={record.id}
+              record={record}
+              equipment={equipmentMap.get(record.equipmentId)}
+              index={index}
+              canDelete={actor.role === "Admin"}
+              actions={
+                record.status === "approved" ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="min-h-7 px-2 py-1 text-[11px]"
+                    disabled={busy}
+                    onClick={() => {
+                      const reason = window.prompt("เหตุผลที่ void รายการนี้");
+                      if (reason)
+                        void mutate(
+                          `/api/equipment/records/${record.id}`,
+                          {
+                            method: "PATCH",
+                            body: JSON.stringify({ action: "void", reason }),
+                          },
+                          "Void รายการแล้ว",
+                        );
+                    }}
+                  >
+                    Void
+                  </Button>
+                ) : null
+              }
+            />
+          ))}
+          {!approved.length ? (
+            <div className="rounded-lg border border-dashed border-[#cfe0df] bg-white">
+              <Empty text="ยังไม่มีประวัติงานที่ตรงกับตัวกรอง" />
+            </div>
+          ) : null}
+        </div>
+      </Card>
+      {isFormOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-3 sm:p-6"
+          role="presentation"
+          onMouseDown={() => setFormOpen(false)}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="internal-record-dialog-title"
+            className="flex h-[min(900px,calc(100dvh-1.5rem))] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-[#c9dadd] bg-white shadow-2xl"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setFormOpen(false);
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className="flex shrink-0 items-start justify-between gap-3 border-b border-[#e3ebec] bg-[#f6fafa] px-4 py-3 sm:px-5">
+              <div>
+                <h2 id="internal-record-dialog-title" className="font-bold text-[#173d50]">
+                  บันทึกงานภายใน
+                </h2>
+                <p className="mt-1 text-xs text-[#789097]">
+                  รายการจาก Staff จะเป็นประวัติทางการทันที
+                </p>
+              </div>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setFormOpen(false)}
+                className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-[#55727c] hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0b7f76]"
+                aria-label="ปิดแบบฟอร์มบันทึกงานภายใน"
+              >
+                <X className="size-5" />
+              </button>
+            </header>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+              <form onSubmit={save} className="space-y-3">
           <Field label="เครื่องมือ *">
             <Select
               required
@@ -1707,76 +2032,220 @@ function WorkHistory({
           <Button disabled={busy || !form.equipmentId}>
             <ShieldCheck className="size-4" /> บันทึกประวัติ
           </Button>
-        </form>
-      </Card>
-      <Card className="overflow-hidden">
-        <div className="flex flex-col gap-2 border-b border-[#e1eaeb] bg-[#fbfdfd] p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="font-bold text-[#173d50]">ประวัติงานทางการ</h2>
-            <p className="text-xs text-[#789097]">Approved และ Voided</p>
-          </div>
-          <div className="flex gap-2">
-            <div className="relative">
-              <Search className="absolute top-2.5 left-3 size-4 text-[#8ba0a5]" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
-                placeholder="ค้นหาประวัติ"
-              />
+              </form>
             </div>
-            <Link href="/equipment/report">
-              <Button variant="secondary">
-                <Printer className="size-4" />
-              </Button>
-            </Link>
-          </div>
+          </section>
         </div>
-        <div className="divide-y divide-[#edf2f2]">
-          {approved.map((record) => (
-            <div key={record.id} className="space-y-3 p-4">
-              <ServiceRow
-                record={record}
-                equipment={equipmentMap.get(record.equipmentId)}
-                actions={
-                  record.status === "approved" ? (
-                    <Button
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() => {
-                        const reason = window.prompt(
-                          "เหตุผลที่ void รายการนี้",
-                        );
-                        if (reason)
-                          void mutate(
-                            `/api/equipment/records/${record.id}`,
-                            {
-                              method: "PATCH",
-                              body: JSON.stringify({ action: "void", reason }),
-                            },
-                            "Void รายการแล้ว",
-                          );
-                      }}
+      ) : null}
+    </div>
+  );
+}
+
+type EquipmentRecordAttachment = EquipmentServiceRecord["attachments"][number];
+
+const signatureKinds = new Set(["technician-signature", "receiver-signature"]);
+
+function isSignatureAttachment(item: EquipmentRecordAttachment) {
+  return signatureKinds.has(item.kind);
+}
+
+function isImageAttachment(item: EquipmentRecordAttachment) {
+  return (
+    item.contentType?.startsWith("image/") === true ||
+    /\.(png|jpe?g|gif|webp)$/i.test(item.fileName)
+  );
+}
+
+function recordEventLabel(record: EquipmentServiceRecord) {
+  return record.eventType === "other" && record.otherEventLabel
+    ? record.otherEventLabel
+    : EQUIPMENT_EVENT_LABELS[record.eventType];
+}
+
+function OfficialRecordCard({
+  record,
+  equipment,
+  index,
+  actions,
+  canDelete,
+}: {
+  record: EquipmentServiceRecord;
+  equipment?: Equipment;
+  index: number;
+  actions?: React.ReactNode;
+  canDelete: boolean;
+}) {
+  const equipmentPhoto = equipment?.photos[0];
+  const serviceFiles = record.attachments.filter(
+    (item) => !isSignatureAttachment(item),
+  );
+  const signatureByKind = new Map(
+    record.attachments
+      .filter(isSignatureAttachment)
+      .map((item) => [item.kind, item]),
+  );
+  const statusLabel =
+    record.status === "voided" ? "VOIDED" : record.outcome.toUpperCase();
+  const statusClass =
+    record.status === "voided" || record.outcome === "fail"
+      ? "bg-[#fff1f2] text-[#b33b46]"
+      : record.outcome === "conditional"
+        ? "bg-[#fff8e8] text-[#a76511]"
+        : "bg-[#eef9f1] text-[#2f7d44]";
+  const signatureSlots = [
+    {
+      kind: "receiver-signature",
+      label: "ลายเซ็นผู้รับงาน",
+    },
+    {
+      kind: "technician-signature",
+      label: "ลายเซ็นช่าง",
+    },
+  ];
+
+  return (
+    <article className="overflow-hidden rounded-lg border border-[#cfdee0] bg-white">
+      <div className="flex items-center gap-2.5 border-b border-[#e7eeee] bg-[#f8fbfb] px-3 py-2.5 sm:px-4">
+        {equipmentPhoto ? (
+          <div className="relative size-[54px] shrink-0 overflow-hidden rounded-md border border-[#cfdee0] bg-[#edf5f4]">
+            <NextImage
+              src={`/api/attachments/${equipmentPhoto.id}`}
+              alt={`รูป ${equipment?.name ?? "เครื่องมือ"}`}
+              fill
+              sizes="54px"
+              unoptimized
+              className="object-cover"
+            />
+          </div>
+        ) : (
+          <div className="grid size-[54px] shrink-0 place-items-center rounded-md border border-[#dbe7e7] bg-[#f2f8f7] text-center text-[10px] text-[#789097]">
+            ไม่มีรูป
+          </div>
+        )}
+        <span className="mono shrink-0 text-[11px] font-bold text-[#0b7f76]">
+          {String(index + 1).padStart(2, "0")}
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-sm font-semibold text-[#173d50]">
+            {equipment?.code ?? "-"} · {equipment?.name ?? "-"}
+          </h3>
+          <p className="truncate text-[11px] text-[#68828a]">
+            {recordEventLabel(record)} · {formatDate(record.performedOn)} ·{" "}
+            {record.company ?? "-"} / {record.technicianName}
+          </p>
+          <p className="truncate text-[11px] text-[#789097]">
+            ไฟล์แนบ: {serviceFiles.map((item) => item.fileName).join(", ") || "-"}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <span
+            className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusClass}`}
+          >
+            {statusLabel}
+          </span>
+          {actions}
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-x-5 gap-y-1 border-b border-[#e7eeee] px-3 py-1.5 text-[11px] text-[#58747d] sm:px-4">
+        <span>รุ่น: {equipment?.model ?? "-"}</span>
+        <span>S/N: {equipment?.serialNumber ?? "-"}</span>
+        <span>สถานะหลังงาน: {equipmentStatusLabel(record.returnStatus)}</span>
+      </div>
+      <div className="grid gap-x-5 gap-y-4 border-b border-[#e7eeee] p-3 sm:grid-cols-2 sm:p-4">
+        <OfficialDetail label="อาการ/ปัญหา" value={record.reportedProblem} />
+        <OfficialDetail label="ผลตรวจสอบ" value={record.findings} />
+        <OfficialDetail label="งานที่ดำเนินการ" value={record.actionTaken} />
+        <OfficialDetail label="อะไหล่ที่เปลี่ยน" value={record.partsReplaced} />
+      </div>
+      <div className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-end sm:justify-between sm:px-4">
+        <div className="space-y-0.5 text-[11px] leading-5 text-[#58747d]">
+          <p>เลขที่ใบงาน: {record.jobNumber ?? "-"}</p>
+          <p>ผู้รับงาน: {record.receiverName ?? "-"}</p>
+          <p>
+            ตรวจรับเมื่อ: {record.reviewedAt ? formatDateTime(record.reviewedAt) : "-"}
+          </p>
+        </div>
+        <div className="grid w-full max-w-[280px] grid-cols-2 gap-4 self-end">
+          {signatureSlots.map(({ kind, label }) => {
+            const item = signatureByKind.get(kind);
+            return (
+              <figure key={kind} className="min-w-0 text-center">
+                <div className="relative flex h-12 items-center justify-center border-b border-[#789097]">
+                  {item && isImageAttachment(item) ? (
+                    <a
+                      href={`/api/attachments/${item.id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="absolute inset-0 flex items-center justify-center rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0b7f76]"
+                      aria-label={`เปิด${label}`}
                     >
-                      Void
-                    </Button>
-                  ) : null
-                }
-              />
-              <AttachmentList
-                module="equipment"
-                entityType="equipment-service-record"
-                entityId={record.id}
-                kind="service-file"
-                canDelete={actor.role === "Admin"}
-                accept="image/jpeg,image/png,image/webp,application/pdf"
-                label="เอกสารงาน / Service files"
-              />
-            </div>
-          ))}
-          {!approved.length ? <Empty text="ยังไม่มีประวัติงาน" /> : null}
+                      <NextImage
+                        src={`/api/attachments/${item.id}`}
+                        alt={label}
+                        fill
+                        sizes="140px"
+                        unoptimized
+                        className="object-contain"
+                      />
+                    </a>
+                  ) : item ? (
+                    <a
+                      href={`/api/attachments/${item.id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="truncate px-1 text-[10px] font-semibold text-[#0b7f76] underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0b7f76]"
+                    >
+                      {item.fileName}
+                    </a>
+                  ) : (
+                    <span className="text-[10px] text-[#a0b1b4]">ยังไม่มีลายเซ็น</span>
+                  )}
+                </div>
+                <figcaption className="mt-1 truncate text-[10px] text-[#55727c]">
+                  {label}
+                </figcaption>
+              </figure>
+            );
+          })}
         </div>
-      </Card>
+      </div>
+      <details className="border-t border-[#e7eeee] bg-[#fbfdfd]">
+        <summary className="cursor-pointer px-3 py-2 text-[11px] font-semibold text-[#55727c] underline-offset-2 hover:text-[#0b7f76] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#0b7f76] sm:px-4">
+          จัดการไฟล์แนบเพิ่มเติม ({serviceFiles.length})
+        </summary>
+        <div className="px-3 pb-3 sm:px-4">
+          <AttachmentList
+            module="equipment"
+            entityType="equipment-service-record"
+            entityId={record.id}
+            kind="service-file"
+            canDelete={canDelete}
+            excludeKinds={["technician-signature", "receiver-signature"]}
+            initialItems={record.attachments}
+            accept="image/jpeg,image/png,image/webp,application/pdf"
+            label="เอกสารงาน / Service files"
+          />
+        </div>
+      </details>
+    </article>
+  );
+}
+
+function OfficialDetail({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | null | undefined;
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-semibold tracking-[0.05em] text-[#789097]">
+        {label}
+      </p>
+      <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-[#315763]">
+        {value || "-"}
+      </p>
     </div>
   );
 }

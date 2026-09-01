@@ -35,6 +35,14 @@ describe("equipment interface", () => {
     expect(view).toContain("locationId: item.locationId");
   });
 
+  it("uses the shared classification vocabulary in the form and registry filter", () => {
+    expect(view).toContain('import { equipmentClassificationOptions } from "@/lib/equipment/classifications";');
+    expect(view).toContain('label="ประเภท / Classification"');
+    expect(view).toContain('value={classification}');
+    expect(view).toContain('ทุก Classification');
+    expect(view).toContain('ล้างตัวกรอง');
+  });
+
   it("keeps equipment details visible and opens the add form only on demand", () => {
     expect(view).not.toContain("equipmentCardOpen");
     expect(view).toContain('id="selected-equipment-details"');
