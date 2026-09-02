@@ -8,7 +8,7 @@ import { readJson, respond } from "@/lib/server/route";
 import { equipmentRecordSchema } from "../route";
 
 const schema = z.object({
-  action: z.enum(["approve", "reject", "void"]),
+  action: z.enum(["approve", "reject", "void", "resubmit"]),
   reason: z.string().trim().max(2000).nullable().optional(),
 });
 export async function PATCH(

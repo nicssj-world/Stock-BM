@@ -34,7 +34,7 @@ export function EquipmentQrSheet({
         <PageHeader
           eyebrow="Equipment"
           title="พิมพ์ QR เครื่องมือ"
-          description="สแกน QR เพื่อเปิดฟอร์มช่างบนโทรศัพท์โดยไม่ต้องล็อกอิน"
+          description="พิมพ์ QR ช่างและ QR Routine Maintenance แยกตามเครื่องมือ"
           actions={
             <div className="flex gap-2">
               <Link href="/equipment">
@@ -103,19 +103,30 @@ export function EquipmentQrSheet({
               <p className="mono mt-1 text-sm font-bold text-[#315763]">
                 {item.code}
               </p>
-              <div className="mx-auto mt-3 w-fit">
-                {origin ? (
-                  <QrCode
-                    value={`${origin}/service/equipment/${item.qrToken}`}
-                    size={180}
-                  />
-                ) : (
-                  <div className="size-[180px]" />
-                )}
+              <div className="mx-auto mt-3 flex w-full max-w-[220px] flex-col gap-4">
+                <div className="flex flex-col items-center rounded-lg border border-[#d7e3e5] bg-[#f8fbfa] p-3">
+                  <p className="mb-1 text-[11px] font-bold text-[#0b7f76]">QR ช่าง</p>
+                  {origin ? (
+                    <a href={`/service/equipment/${item.qrToken}`} target="_blank" rel="noreferrer" title={`เปิด QR ช่างของ ${item.name}`}>
+                      <QrCode value={`${origin}/service/equipment/${item.qrToken}`} size={180} />
+                    </a>
+                  ) : (
+                    <div className="size-[180px]" />
+                  )}
+                  <p className="mt-1 text-[10px] leading-4 text-[#58747d]">ซ่อม / PM / Calibration</p>
+                </div>
+                <div className="flex flex-col items-center rounded-lg border border-[#d7e3e5] bg-[#f8fbfa] p-3">
+                  <p className="mb-1 text-[11px] font-bold text-[#0b7f76]">QR Routine</p>
+                  {origin ? (
+                    <a href={`/equipment/routine/${item.qrToken}`} target="_blank" rel="noreferrer" title={`เปิด QR Routine ของ ${item.name}`}>
+                      <QrCode value={`${origin}/equipment/routine/${item.qrToken}`} size={180} />
+                    </a>
+                  ) : (
+                    <div className="size-[180px]" />
+                  )}
+                  <p className="mt-1 text-[10px] leading-4 text-[#58747d]">Checklist Routine</p>
+                </div>
               </div>
-              <p className="mt-2 text-xs text-[#58747d]">
-                สแกนเพื่อบันทึกซ่อม / PM / Calibration
-              </p>
               <p className="mt-1 text-[10px] text-[#8ba0a5]">
                 {item.model ?? "-"} · S/N {item.serialNumber ?? "-"}
               </p>

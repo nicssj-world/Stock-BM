@@ -21,7 +21,16 @@ BM_SUPABASE_SERVICE_ROLE_KEY=
 LINE_CHANNEL_ACCESS_TOKEN=
 LINE_GROUP_ID=
 LINE_CHANNEL_SECRET=
+PORTAL_EQUIPMENT_API_URL=
+PORTAL_PUBLIC_BASE_URL=
+STOCK_BM_INTEGRATION_TOKEN=
 ```
+
+`PORTAL_EQUIPMENT_API_URL`, `PORTAL_PUBLIC_BASE_URL` และ `STOCK_BM_INTEGRATION_TOKEN`
+ใช้สำหรับดึงข้อมูลเครื่องมือจาก Portal แบบ server-to-server เท่านั้น ห้ามใส่เป็น
+`NEXT_PUBLIC_*` หรือส่งค่า token ไปยัง browser ผู้ใช้กรอกรหัส LAB เช่น
+`LAB-BM-15-002` ใน Stock-BM แล้วระบบจะค้นหารหัสเดียวกันใน Portal และเพิ่มหรืออัปเดต
+เฉพาะรายการนั้น โดยสถานที่ใช้งานภายใน Stock-BM จะไม่ถูกเขียนทับ
 
 `LINE_CHANNEL_ACCESS_TOKEN` และ `LINE_GROUP_ID` ใช้เฉพาะฝั่ง server สำหรับ HIV LAB Alert ห้ามใส่ค่าเหล่านี้ในตัวแปร `NEXT_PUBLIC_*` หรือส่งให้ browser และต้องเชิญ LINE Official Account เข้า group เป้าหมายก่อนส่งข้อความ ส่วน `LINE_CHANNEL_SECRET` ใช้ตรวจสอบลายเซ็นของ LINE Webhook ที่ `/api/line/webhook` และต้องเก็บเป็น server secret เช่นกัน
 
@@ -46,6 +55,12 @@ supabase/migrations/202606120001_bm_stock_v1.sql
 ```
 
 Migration นี้สร้างตาราง `bm_*` แยกจาก `nipt_stock_*` แต่ผูกบัญชีผู้ใช้กับ `nipt_users`
+
+สำหรับการดึงเครื่องมือจาก Portal ให้ apply migration ของ **Stock-BM เท่านั้น** ต่อจาก
+migration หลักตามลำดับนี้: `20260901150000_portal_equipment_sync.sql`,
+`20260902012011_equipment_portal_photo_sync.sql` และ
+`20260902015245_lab_code_equipment_lookup.sql` ส่วน Portal ใช้เพียง route อ่านข้อมูล
+`/api/integrations/stock-bm/equipment` และไม่ต้องเพิ่ม migration สำหรับการค้นหาด้วยรหัส LAB
 
 ## Bootstrap Admin
 

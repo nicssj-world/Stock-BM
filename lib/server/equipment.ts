@@ -14,11 +14,13 @@ import type {
   EquipmentIntervalUnit,
   EquipmentModuleLink,
   EquipmentOutcome,
+  EquipmentPortalPmCal,
   EquipmentPlan,
   EquipmentPlanType,
   EquipmentRecordStatus,
   EquipmentScheduleBasis,
   EquipmentServiceRecord,
+  EquipmentSnapshot,
   EquipmentStatus,
   EquipmentTechnician,
   EquipmentWorkspace,
@@ -27,11 +29,14 @@ import type {
 import {
   deleteAttachment,
   deletePublicEquipmentAttachments,
+  deleteStoredAttachment,
+  uploadAttachment,
   uploadPublicEquipmentAttachment,
 } from "@/lib/server/attachments";
 import { writeAudit, writeSystemAudit } from "@/lib/server/audit";
 import { HttpError } from "@/lib/server/errors";
 import { getAdminClient } from "@/lib/supabase/admin";
+import { getEquipmentSyncOverview } from "@/lib/server/equipment-sync";
 
 type RecordRow = Record<string, unknown>;
 
@@ -40,6 +45,18 @@ function asString(value: unknown) {
 }
 function nullableString(value: unknown) {
   return typeof value === "string" && value ? value : null;
+}
+
+function portalEquipmentUrl(id: string) {
+  const base = process.env.PORTAL_PUBLIC_BASE_URL?.trim();
+  if (!base || !id) return null;
+  try {
+    const url = new URL("/staff/equipment", base);
+    url.searchParams.set("equipment", id);
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 function clean(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -112,6 +129,56 @@ async function assertEquipmentAndPlan(
   if (!plan) throw new HttpError(400, "แผนงานไม่ตรงกับเครื่องมือ");
 }
 
+async function assertPortalPlan(
+  equipmentId: string,
+  portalPlanId?: string | null,
+) {
+  if (!portalPlanId) return;
+  const { data, error } = await getAdminClient()
+    .from("bm_equipment_portal_pmcal")
+    .select("portal_plan_id")
+    .eq("equipment_id", equipmentId)
+    .eq("portal_plan_id", portalPlanId)
+    .maybeSingle();
+  fail(error);
+  if (!data) throw new HttpError(400, "แผน PM/CAL จาก Portal ไม่ตรงกับเครื่องมือ");
+}
+
+async function assertLocalPlanAllowed(equipmentId: string) {
+  const { data, error } = await getAdminClient()
+    .from("bm_equipment")
+    .select("portal_equipment_id")
+    .eq("id", equipmentId)
+    .maybeSingle();
+  fail(error);
+  if (!data) throw new HttpError(404, "ไม่พบเครื่องมือ");
+  if (nullableString((data as RecordRow).portal_equipment_id))
+    throw new HttpError(409, "เครื่องมือจาก Portal ใช้แผน PM/CAL จาก Portal แบบอ่านอย่างเดียว");
+}
+
+async function assertPlanIsLocal(planId: string) {
+  const { data, error } = await getAdminClient()
+    .from("bm_equipment_plans")
+    .select("equipment_id")
+    .eq("id", planId)
+    .maybeSingle();
+  fail(error);
+  if (!data) throw new HttpError(404, "ไม่พบแผนงาน");
+  await assertLocalPlanAllowed(asString((data as RecordRow).equipment_id));
+}
+
+async function assertEquipmentMasterEditable(id: string) {
+  const { data, error } = await getAdminClient()
+    .from("bm_equipment")
+    .select("portal_equipment_id")
+    .eq("id", id)
+    .maybeSingle();
+  fail(error);
+  if (!data) throw new HttpError(404, "ไม่พบเครื่องมือ");
+  if (nullableString((data as RecordRow).portal_equipment_id))
+    throw new HttpError(409, "ข้อมูลหลักของเครื่องมือมาจาก Portal และแก้ไขได้ที่ Portal เท่านั้น");
+}
+
 function mapAttachment(row: RecordRow): EquipmentAttachment {
   return {
     id: asString(row.id),
@@ -148,6 +215,16 @@ function mapEquipment(
     installedOn: nullableString(row.installed_on),
     warrantyUntil: nullableString(row.warranty_until),
     status: asString(row.status) as EquipmentStatus,
+    portalEquipmentId: nullableString(row.portal_equipment_id),
+    portalDepartmentCode: nullableString(row.portal_department_code),
+    portalDepartmentName: nullableString(row.portal_department_name),
+    portalStatus: nullableString(row.portal_status),
+    portalLocation: nullableString(row.portal_location),
+    portalUpdatedAt: nullableString(row.portal_updated_at),
+    portalUrl: portalEquipmentUrl(nullableString(row.portal_equipment_id) ?? ""),
+    lastSyncedAt: nullableString(row.last_synced_at),
+    syncState: asString(row.sync_state) as Equipment["syncState"],
+    archivedAt: nullableString(row.archived_at),
     qrToken: asString(row.qr_token),
     note: nullableString(row.note),
     createdAt: asString(row.created_at),
@@ -186,6 +263,7 @@ function mapRecord(
     id: asString(row.id),
     equipmentId: asString(row.equipment_id),
     planId: nullableString(row.plan_id),
+    portalPlanId: nullableString(row.portal_plan_id),
     eventType: asString(row.event_type) as EquipmentEventType,
     otherEventLabel: nullableString(row.other_event_label),
     qualificationStage: nullableString(row.qualification_stage) as
@@ -215,7 +293,31 @@ function mapRecord(
     reviewedAt: nullableString(row.reviewed_at),
     rejectionReason: nullableString(row.rejection_reason),
     voidReason: nullableString(row.void_reason),
+    equipmentSnapshot: row.equipment_snapshot && typeof row.equipment_snapshot === "object"
+      ? (row.equipment_snapshot as EquipmentSnapshot)
+      : null,
     attachments,
+  };
+}
+
+function mapPortalPmCal(row: RecordRow): EquipmentPortalPmCal {
+  return {
+    id: asString(row.id),
+    equipmentId: asString(row.equipment_id),
+    portalPlanId: asString(row.portal_plan_id),
+    fiscalYear: row.fiscal_year == null ? null : Number(row.fiscal_year),
+    calendarMonth: row.calendar_month == null ? null : Number(row.calendar_month),
+    calType: row.cal_type === "PM" || row.cal_type === "CAL" ? row.cal_type : null,
+    dueDate: nullableString(row.due_date),
+    provider: nullableString(row.provider),
+    plannedCost: row.planned_cost == null ? null : Number(row.planned_cost),
+    recordStatus: nullableString(row.record_status),
+    version: row.version == null ? null : Number(row.version),
+    completedDate: nullableString(row.completed_date),
+    result: nullableString(row.result),
+    certificateNo: nullableString(row.certificate_no),
+    portalUpdatedAt: nullableString(row.portal_updated_at),
+    updatedAt: asString(row.updated_at),
   };
 }
 
@@ -238,6 +340,7 @@ export async function getEquipmentWorkspace(
   const [
     equipmentResult,
     planResult,
+    portalPmCalResult,
     recordResult,
     linkResult,
     iqcResult,
@@ -249,6 +352,11 @@ export async function getEquipmentWorkspace(
   ] = await Promise.all([
     admin.from("bm_equipment").select("*").order("code"),
     admin.from("bm_equipment_plans").select("*").order("next_due_on"),
+    admin
+      .from("bm_equipment_portal_pmcal")
+      .select("*")
+      .order("fiscal_year", { ascending: false })
+      .order("calendar_month"),
     admin
       .from("bm_equipment_service_records")
       .select("*")
@@ -284,6 +392,7 @@ export async function getEquipmentWorkspace(
   [
     equipmentResult.error,
     planResult.error,
+    portalPmCalResult.error,
     recordResult.error,
     linkResult.error,
     iqcResult.error,
@@ -329,6 +438,9 @@ export async function getEquipmentWorkspace(
     ),
   );
   const plans = ((planResult.data ?? []) as RecordRow[]).map(mapPlan);
+  const portalPmCal = ((portalPmCalResult.data ?? []) as RecordRow[]).map(
+    mapPortalPmCal,
+  );
   const records = ((recordResult.data ?? []) as RecordRow[]).map((row) =>
     mapRecord(row, attachmentsByEntity.get(asString(row.id)) ?? [], names),
   );
@@ -369,9 +481,11 @@ export async function getEquipmentWorkspace(
         (linkModule === "iqc" ? iqcMap : eqaMap).get(entityId) ?? "ไม่พบรายการ",
     };
   });
+  const sync = await getEquipmentSyncOverview();
   return {
     equipment,
     plans,
+    portalPmCal,
     records,
     links,
     technicians,
@@ -379,6 +493,7 @@ export async function getEquipmentWorkspace(
     eqaSchemes,
     locations,
     dashboard: summarizeDashboard(equipment, plans, records),
+    sync,
   };
 }
 
@@ -515,6 +630,7 @@ export async function updateEquipment(
   actor: BmActor,
 ) {
   assertAdmin(actor);
+  await assertEquipmentMasterEditable(id);
   const { error } = await getAdminClient()
     .from("bm_equipment")
     .update({
@@ -530,6 +646,7 @@ export async function updateEquipment(
 
 export async function deleteEquipment(id: string, actor: BmActor) {
   assertAdmin(actor);
+  await assertEquipmentMasterEditable(id);
   const admin = getAdminClient();
   const [planResult, recordResult] = await Promise.all([
     admin
@@ -562,6 +679,45 @@ export async function deleteEquipment(id: string, actor: BmActor) {
   const { error } = await admin.from("bm_equipment").delete().eq("id", id);
   fail(error);
   await writeAudit(actor, "equipment.delete", "equipment", id, {});
+  return getEquipmentWorkspace(actor);
+}
+
+export async function updateEquipmentLocation(
+  id: string,
+  locationId: string | null,
+  actor: BmActor,
+) {
+  assertAccess(actor);
+  const admin = getAdminClient();
+  let location: RecordRow | null = null;
+  if (locationId) {
+    const { data, error } = await admin
+      .from("bm_stock_locations")
+      .select("id,code,name")
+      .eq("id", locationId)
+      .maybeSingle();
+    fail(error);
+    location = data as RecordRow | null;
+    if (!location) throw new HttpError(400, "ไม่พบ Location คลังน้ำยาที่เลือก");
+  }
+  const { data, error } = await admin
+    .from("bm_equipment")
+    .update({
+      location_id: locationId,
+      location: location
+        ? `${asString(location.code)} · ${asString(location.name)}`
+        : null,
+      updated_by: actor.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+  fail(error);
+  if (!data) throw new HttpError(404, "ไม่พบเครื่องมือ");
+  await writeAudit(actor, "equipment.location.update", "equipment", id, {
+    locationId,
+  });
   return getEquipmentWorkspace(actor);
 }
 
@@ -616,6 +772,7 @@ export async function createEquipmentPlan(
 ) {
   assertAdmin(actor);
   await assertEquipmentAndPlan(input.equipmentId);
+  await assertLocalPlanAllowed(input.equipmentId);
   const { data, error } = await getAdminClient()
     .from("bm_equipment_plans")
     .insert({
@@ -642,6 +799,7 @@ export async function updateEquipmentPlan(
 ) {
   assertAdmin(actor);
   await assertEquipmentAndPlan(input.equipmentId);
+  await assertLocalPlanAllowed(input.equipmentId);
   const { error } = await getAdminClient()
     .from("bm_equipment_plans")
     .update({
@@ -658,6 +816,7 @@ export async function updateEquipmentPlan(
 }
 export async function deleteEquipmentPlan(id: string, actor: BmActor) {
   assertAdmin(actor);
+  await assertPlanIsLocal(id);
   const { count, error: countError } = await getAdminClient()
     .from("bm_equipment_service_records")
     .select("id", { count: "exact", head: true })
@@ -677,6 +836,7 @@ export async function deleteEquipmentPlan(id: string, actor: BmActor) {
 export interface EquipmentRecordInput {
   equipmentId: string;
   planId?: string | null;
+  portalPlanId?: string | null;
   eventType: EquipmentEventType;
   otherEventLabel?: string | null;
   qualificationStage?: "IQ" | "OQ" | "PQ" | null;
@@ -700,6 +860,7 @@ function recordPayload(input: EquipmentRecordInput) {
   return {
     equipment_id: input.equipmentId,
     plan_id: clean(input.planId),
+    portal_plan_id: clean(input.portalPlanId),
     event_type: input.eventType,
     other_event_label: clean(input.otherEventLabel),
     qualification_stage: clean(input.qualificationStage),
@@ -721,12 +882,66 @@ function recordPayload(input: EquipmentRecordInput) {
   };
 }
 
+async function getEquipmentSnapshot(equipmentId: string): Promise<EquipmentSnapshot> {
+  const { data, error } = await getAdminClient()
+    .from("bm_equipment")
+    .select(
+      "id,code,name,manufacturer,model,serial_number,asset_number,location_id,location,portal_equipment_id,portal_department_code,portal_department_name,portal_status,portal_location",
+    )
+    .eq("id", equipmentId)
+    .maybeSingle();
+  fail(error);
+  if (!data) throw new HttpError(404, "ไม่พบเครื่องมือ");
+  const row = data as RecordRow;
+  return {
+    portalEquipmentId: nullableString(row.portal_equipment_id),
+    portalDepartmentCode: nullableString(row.portal_department_code),
+    portalDepartmentName: nullableString(row.portal_department_name),
+    code: asString(row.code),
+    name: asString(row.name),
+    manufacturer: nullableString(row.manufacturer),
+    model: nullableString(row.model),
+    serialNumber: nullableString(row.serial_number),
+    assetNumber: nullableString(row.asset_number),
+    portalStatus: nullableString(row.portal_status),
+    portalLocation: nullableString(row.portal_location),
+    locationId: nullableString(row.location_id),
+    location: nullableString(row.location),
+    capturedAt: new Date().toISOString(),
+  };
+}
+
+const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024;
+const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
+
+async function assertSignatureFile(file: File, label: string) {
+  if (!(file instanceof File) || file.size === 0)
+    throw new HttpError(400, `${label} is required`);
+  if (file.type !== "image/png" || file.size > MAX_SIGNATURE_BYTES)
+    throw new HttpError(400, `${label} must be a PNG file no larger than 2MB`);
+  const header = new Uint8Array(await file.slice(0, PNG_SIGNATURE.length).arrayBuffer());
+  if (!PNG_SIGNATURE.every((value, index) => header[index] === value))
+    throw new HttpError(400, `${label} is not a valid PNG image`);
+}
+
+export interface InternalEquipmentSignatures {
+  technicianSignature: File;
+  receiverSignature: File;
+}
+
 export async function createInternalEquipmentRecord(
   input: EquipmentRecordInput,
   actor: BmActor,
+  signatures: InternalEquipmentSignatures,
 ) {
   assertAccess(actor);
   await assertEquipmentAndPlan(input.equipmentId, input.planId);
+  await assertPortalPlan(input.equipmentId, input.portalPlanId);
+  if (!input.receiverName?.trim())
+    throw new HttpError(400, "กรุณาระบุชื่อผู้รับงานก่อนบันทึกประวัติ");
+  const snapshot = await getEquipmentSnapshot(input.equipmentId);
+  await assertSignatureFile(signatures.technicianSignature, "Technician signature");
+  await assertSignatureFile(signatures.receiverSignature, "Receiver signature");
   const admin = getAdminClient();
   const { data, error } = await admin
     .from("bm_equipment_service_records")
@@ -735,24 +950,50 @@ export async function createInternalEquipmentRecord(
       status: "pending",
       source: "internal",
       created_by: actor.id,
+      equipment_snapshot: snapshot,
     })
     .select("id")
     .single();
   fail(error);
   const id = asString((data as RecordRow).id);
-  const { error: approveError } = await admin.rpc(
-    "approve_equipment_service_record",
-    { p_record_id: id, p_reviewer: actor.id },
-  );
-  fail(approveError);
-  await writeAudit(
-    actor,
-    "equipment.record.create",
-    "equipment-service-record",
-    id,
-    { ...input },
-  );
-  return getEquipmentWorkspace(actor);
+  const uploaded: string[] = [];
+  try {
+    for (const [kind, file] of [
+      ["technician-signature", signatures.technicianSignature],
+      ["receiver-signature", signatures.receiverSignature],
+    ] as const) {
+      const attachment = await uploadAttachment(
+        {
+          module: "equipment",
+          entityType: "equipment-service-record",
+          entityId: id,
+          kind,
+          file,
+        },
+        actor,
+      );
+      uploaded.push(attachment.id);
+    }
+    await writeAudit(
+      actor,
+      "equipment.record.create",
+      "equipment-service-record",
+      id,
+      { ...input, status: "pending", signatures: ["technician", "receiver"] },
+    );
+    return getEquipmentWorkspace(actor);
+  } catch (error) {
+    for (const attachmentId of uploaded) {
+      try {
+        await deleteStoredAttachment(attachmentId);
+      } catch {
+        // Keep the original failure visible. A later cleanup can remove an
+        // orphaned object if storage or the database is temporarily down.
+      }
+    }
+    await admin.from("bm_equipment_service_records").delete().eq("id", id);
+    throw error;
+  }
 }
 
 export async function updatePendingEquipmentRecord(
@@ -762,6 +1003,7 @@ export async function updatePendingEquipmentRecord(
 ) {
   assertAccess(actor);
   await assertEquipmentAndPlan(input.equipmentId, input.planId);
+  await assertPortalPlan(input.equipmentId, input.portalPlanId);
   const { data, error } = await getAdminClient()
     .from("bm_equipment_service_records")
     .update({ ...recordPayload(input), updated_at: new Date().toISOString() })
@@ -783,13 +1025,35 @@ export async function updatePendingEquipmentRecord(
 
 export async function reviewEquipmentRecord(
   id: string,
-  action: "approve" | "reject" | "void",
+  action: "approve" | "reject" | "void" | "resubmit",
   reason: string | null,
   actor: BmActor,
 ) {
   assertAccess(actor);
   const admin = getAdminClient();
   if (action === "approve") {
+    const { data: record, error: recordError } = await admin
+      .from("bm_equipment_service_records")
+      .select("source")
+      .eq("id", id)
+      .maybeSingle();
+    fail(recordError);
+    if (!record) throw new HttpError(404, "ไม่พบประวัติงาน");
+    if (asString((record as RecordRow).source) === "internal") {
+      const { data: signatures, error: signatureError } = await admin
+        .from("bm_attachments")
+        .select("kind")
+        .eq("module", "equipment")
+        .eq("entity_type", "equipment-service-record")
+        .eq("entity_id", id)
+        .in("kind", ["technician-signature", "receiver-signature"]);
+      fail(signatureError);
+      const kinds = new Set(
+        ((signatures ?? []) as RecordRow[]).map((item) => asString(item.kind)),
+      );
+      if (!kinds.has("technician-signature") || !kinds.has("receiver-signature"))
+        throw new HttpError(409, "ประวัติงานภายในต้องมีลายเซ็นช่างและผู้รับงานก่อนตรวจรับ");
+    }
     const { error } = await admin.rpc("approve_equipment_service_record", {
       p_record_id: id,
       p_reviewer: actor.id,
@@ -812,7 +1076,7 @@ export async function reviewEquipmentRecord(
       .maybeSingle();
     fail(error);
     if (!data) throw new HttpError(409, "รายการนี้ไม่ได้อยู่ในสถานะรอตรวจรับ");
-  } else {
+  } else if (action === "void") {
     if (!reason?.trim()) throw new HttpError(400, "กรุณาระบุเหตุผลที่ void");
     const { data, error } = await admin
       .from("bm_equipment_service_records")
@@ -829,6 +1093,22 @@ export async function reviewEquipmentRecord(
       .maybeSingle();
     fail(error);
     if (!data) throw new HttpError(409, "Void ได้เฉพาะประวัติที่อนุมัติแล้ว");
+  } else {
+    const { data, error } = await admin
+      .from("bm_equipment_service_records")
+      .update({
+        status: "pending",
+        rejection_reason: null,
+        reviewed_by: null,
+        reviewed_at: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .eq("status", "rejected")
+      .select("id")
+      .maybeSingle();
+    fail(error);
+    if (!data) throw new HttpError(409, "ส่งกลับตรวจใหม่ได้เฉพาะรายการที่ถูกปฏิเสธ");
   }
   await writeAudit(
     actor,
@@ -1201,6 +1481,7 @@ export async function submitPublicEquipmentRecord(
     nextRecommendedOn: clean(nextRecommendedOn),
   };
   await assertEquipmentAndPlan(input.equipmentId, input.planId);
+  const snapshot = await getEquipmentSnapshot(equipmentId);
   const { data, error } = await admin
     .from("bm_equipment_service_records")
     .insert({
@@ -1209,6 +1490,7 @@ export async function submitPublicEquipmentRecord(
       source: "public_qr",
       idempotency_key: idempotencyKey,
       created_by: null,
+      equipment_snapshot: snapshot,
     })
     .select("id")
     .single();

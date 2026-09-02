@@ -1,12 +1,17 @@
 import { z } from "zod";
 import { requireActor } from "@/lib/server/auth";
-import { createInternalEquipmentRecord } from "@/lib/server/equipment";
-import { readJson, respond } from "@/lib/server/route";
+import {
+  createInternalEquipmentRecord,
+  type InternalEquipmentSignatures,
+} from "@/lib/server/equipment";
+import { HttpError } from "@/lib/server/errors";
+import { respond } from "@/lib/server/route";
 
 export const equipmentRecordSchema = z
   .object({
     equipmentId: z.string().uuid(),
     planId: z.string().uuid().nullable().optional(),
+    portalPlanId: z.string().uuid().nullable().optional(),
     eventType: z.enum([
       "pm",
       "repair",
@@ -44,11 +49,59 @@ export const equipmentRecordSchema = z
     (data) => data.eventType !== "other" || Boolean(data.otherEventLabel),
     { message: "กรุณาระบุประเภทงานอื่น" },
   );
+
+const NULLABLE_FORM_FIELDS = [
+  "planId",
+  "portalPlanId",
+  "otherEventLabel",
+  "qualificationStage",
+  "reportedProblem",
+  "findings",
+  "partsReplaced",
+  "jobNumber",
+  "company",
+  "technicianContact",
+  "downtimeFrom",
+  "downtimeUntil",
+  "nextRecommendedOn",
+] as const;
+
+export async function readEquipmentRecordForm(request: Request): Promise<{
+  input: z.infer<typeof equipmentRecordSchema>;
+  signatures: InternalEquipmentSignatures;
+}> {
+  const form = await request.formData();
+  const values: Record<string, unknown> = {};
+  for (const [key, value] of form.entries()) {
+    if (!(value instanceof File)) values[key] = String(value);
+  }
+  for (const key of NULLABLE_FORM_FIELDS) {
+    if (values[key] === "") values[key] = null;
+  }
+  const technicianSignature = form.get("technicianSignature");
+  const receiverSignature = form.get("receiverSignature");
+  if (!(technicianSignature instanceof File) || !(receiverSignature instanceof File))
+    throw new HttpError(400, "กรุณาลงลายเซ็นช่างและผู้รับงานให้ครบ");
+  const input = equipmentRecordSchema.parse(values);
+  if (!input.receiverName?.trim())
+    throw new HttpError(400, "กรุณาระบุชื่อผู้รับงาน");
+  return {
+    input,
+    signatures: { technicianSignature, receiverSignature },
+  };
+}
+
 export async function POST(request: Request) {
-  return respond(async () => ({
-    workspace: await createInternalEquipmentRecord(
-      await readJson(request, equipmentRecordSchema),
-      await requireActor(),
-    ),
-  }));
+  return respond(async () => {
+    if (!request.headers.get("content-type")?.includes("multipart/form-data"))
+      throw new HttpError(415, "แบบฟอร์มบันทึกงานต้องส่งเป็น multipart พร้อมลายเซ็น");
+    const parsed = await readEquipmentRecordForm(request);
+    return {
+      workspace: await createInternalEquipmentRecord(
+        parsed.input,
+        await requireActor(),
+        parsed.signatures,
+      ),
+    };
+  });
 }

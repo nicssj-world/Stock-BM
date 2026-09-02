@@ -94,6 +94,11 @@ export type RoutineMaintenanceOccurrence = {
   shifted: boolean
 }
 
+export type RoutineReviewPeriod = {
+  frequency: RoutineFrequency
+  period: string
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000
 
 function parseDate(value: string) {
@@ -180,6 +185,33 @@ export function routinePeriodBounds(frequency: RoutineFrequency, period: string)
   const start = `${period.slice(0, 4)}-01-01`
   const nextYear = `${String(Number(period.slice(0, 4)) + 1).padStart(4, '0')}-01-01`
   return { from: start, to: addRoutineDays(nextYear, -1) }
+}
+
+function nextRoutineReviewPeriod(period: string, kind: 'month' | 'year') {
+  if (kind === 'month') return monthlyAnchorDate(`${period}-01`, 1).slice(0, 7)
+  return String(Number(period) + 1).padStart(4, '0')
+}
+
+/**
+ * Returns every calendar period that a form can be reviewed through today.
+ * Review is a period-level action, so it must remain available even when a
+ * period has no logged occurrence yet (for example, an empty August record).
+ */
+export function routineReviewPeriods(form: RoutineMaintenanceForm, today: string): RoutineReviewPeriod[] {
+  const periods = new Map<string, RoutineReviewPeriod>()
+  for (const version of form.versions) {
+    const kind = routinePeriodKind(version.frequency)
+    const first = routinePeriodFor(version.frequency, version.startsOn)
+    const last = routinePeriodFor(version.frequency, today)
+    if (first > last) continue
+    let period = first
+    for (let index = 0; period <= last && index < 2400; index += 1) {
+      const key = `${version.frequency}:${period}`
+      periods.set(key, { frequency: version.frequency, period })
+      period = nextRoutineReviewPeriod(period, kind)
+    }
+  }
+  return [...periods.values()].sort((a, b) => b.period.localeCompare(a.period) || a.frequency.localeCompare(b.frequency))
 }
 
 export function frequencyLabel(frequency: RoutineFrequency) {

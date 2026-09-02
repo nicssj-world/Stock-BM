@@ -7,6 +7,8 @@ const routine = readFileSync(join(process.cwd(), 'components/routine-maintenance
 const publicForm = readFileSync(join(process.cwd(), 'components/equipment-public-form.tsx'), 'utf8')
 const report = readFileSync(join(process.cwd(), 'app/(protected)/equipment/routine/report/page.tsx'), 'utf8')
 const qrPage = readFileSync(join(process.cwd(), 'app/(protected)/equipment/routine/[token]/page.tsx'), 'utf8')
+const routineQrPage = readFileSync(join(process.cwd(), 'app/(protected)/equipment/routine/qr/[token]/page.tsx'), 'utf8')
+const routineQrSheet = readFileSync(join(process.cwd(), 'components/routine-qr-sheet.tsx'), 'utf8')
 
 describe('generic routine maintenance UI', () => {
   it('mounts the routine workspace for every selected equipment item', () => {
@@ -27,10 +29,16 @@ describe('generic routine maintenance UI', () => {
   })
 
   it('keeps Routine and technician QR destinations separate', () => {
-    expect(routine).toContain('equipment/routine/${data.equipment.qrToken}')
+    expect(routine).toContain('equipment/routine/qr/${data.equipment.qrToken}')
     expect(routine).toContain('service/equipment/${data.equipment.qrToken}')
     expect(routine).toContain('QR Routine')
     expect(routine).toContain('QR ช่าง')
+  })
+
+  it('renders a real printable QR that points to the protected routine form', () => {
+    expect(routineQrPage).toContain('RoutineQrSheet')
+    expect(routineQrSheet).toContain('new URL(`/equipment/routine/${encodeURIComponent(equipment.qrToken)}`, origin)')
+    expect(routineQrSheet).toContain('<QrCode value={routineUrl}')
   })
 
   it('renders a generic printable report with equipment and form filters', () => {

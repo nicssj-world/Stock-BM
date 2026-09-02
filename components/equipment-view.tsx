@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import NextImage from "next/image";
 import { useSearchParams } from "next/navigation";
@@ -12,7 +12,6 @@ import {
   ExternalLink,
   FileClock,
   History,
-  Image as ImageIcon,
   Link2,
   Plus,
   Pencil,
@@ -26,7 +25,6 @@ import {
   Stethoscope,
   Trash2,
   UserRound,
-  Wrench,
   X,
 } from "lucide-react";
 import type { BmActor } from "@/lib/bm/types";
@@ -51,6 +49,7 @@ import type {
 } from "@/lib/equipment/types";
 import { AttachmentList } from "@/components/attachments";
 import { RoutineMaintenance } from "@/components/routine-maintenance";
+import { SignaturePad, type SignaturePadHandle } from "@/components/signature-pad";
 import {
   api,
   Button,
@@ -73,7 +72,7 @@ type NoticeState = {
 } | null;
 const tabs = [
   { key: "overview" as const, label: "ภาพรวม", icon: Activity },
-  { key: "registry" as const, label: "ทะเบียนเครื่องมือ", icon: Stethoscope },
+  { key: "registry" as const, label: "เครื่องมือของหน่วยงาน", icon: Stethoscope },
   { key: "plans" as const, label: "แผนงาน", icon: CalendarClock },
   { key: "history" as const, label: "ประวัติงาน", icon: History },
   { key: "pending" as const, label: "รอตรวจรับ", icon: ClipboardCheck },
@@ -320,20 +319,103 @@ function AttentionCard({
   );
 }
 
-const emptyEquipmentForm = {
-  code: "",
-  name: "",
-  category: "",
-  manufacturer: "",
-  model: "",
-  serialNumber: "",
-  assetNumber: "",
-  locationId: "",
-  installedOn: "",
-  warrantyUntil: "",
-  status: "active" as EquipmentStatus,
-  note: "",
-};
+function SyncControl({
+  actor,
+  workspace,
+  busy,
+  mutate,
+}: {
+  actor: BmActor;
+  workspace: EquipmentWorkspace;
+  busy: boolean;
+  mutate: Mutate;
+}) {
+  const [labCode, setLabCode] = useState("");
+  const lastRun = workspace.sync.lastRun;
+  const linkedCount = workspace.equipment.filter(
+    (item) => item.portalEquipmentId,
+  ).length;
+  async function lookup(event: React.FormEvent) {
+    event.preventDefault();
+    const code = labCode.trim();
+    if (!code) return;
+    const ok = await mutate(
+      "/api/equipment/sync",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ labCode: code }),
+      },
+      "ดึงข้อมูลเครื่องมือจาก Portal สำเร็จ",
+    );
+    if (ok) setLabCode("");
+  }
+  return (
+    <Card className="overflow-hidden border-[#cfe4e1]">
+      <div className="flex flex-col gap-4 bg-[#f1faf8] p-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-[#d9f1ed] text-[#0b7f76]">
+            <RefreshCw className="size-5" aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="font-bold text-[#173d50]">เครื่องมือของหน่วยงาน</h2>
+            <p className="mt-1 text-xs leading-5 text-[#58747d]">
+              ข้อมูลหลักจาก Portal · แสดงเฉพาะ งานอณูชีววิทยา และงานตรวจพิเศษและห้องปฏิบัติการตรวจต่อ
+            </p>
+          </div>
+        </div>
+        <form onSubmit={lookup} className="flex w-full flex-col gap-2 sm:max-w-md sm:flex-row">
+          <Input
+            value={labCode}
+            onChange={(event) => setLabCode(event.target.value.toUpperCase())}
+            placeholder="LAB-BM-15-002"
+            aria-label="รหัส LAB จาก Portal"
+            disabled={busy || actor.role === "Assistant"}
+            className="min-h-10 flex-1 font-mono text-sm"
+          />
+          <Button
+            type="submit"
+            variant="secondary"
+            disabled={busy || actor.role === "Assistant" || !labCode.trim()}
+          >
+            <RefreshCw className={`size-4 ${busy ? "animate-spin" : ""}`} aria-hidden="true" />
+            ดึงข้อมูลจาก Portal
+          </Button>
+        </form>
+      </div>
+      <div className="grid gap-3 border-t border-[#dcebea] p-4 text-xs text-[#58747d] sm:grid-cols-3">
+        <div>
+          <p className="font-semibold text-[#8ba0a5]">รายการที่เชื่อมแล้ว</p>
+          <p className="mono mt-1 text-base font-bold text-[#173d50]">{linkedCount}</p>
+        </div>
+        <div>
+          <p className="font-semibold text-[#8ba0a5]">Sync ล่าสุด</p>
+          <p className="mt-1 font-semibold text-[#315763]">
+            {lastRun?.finishedAt ? formatDateTime(lastRun.finishedAt) : "ยังไม่เคย Sync"}
+          </p>
+        </div>
+        <div>
+          <p className="font-semibold text-[#8ba0a5]">สถานะ</p>
+          <p className="mt-1 font-semibold text-[#315763]">
+            {lastRun?.status === "succeeded"
+              ? `สำเร็จ · ${lastRun.sourceCount} รายการ`
+              : lastRun?.status === "failed"
+                ? "ไม่สำเร็จ · ข้อมูลเดิมยังคงอยู่"
+                : lastRun?.status === "running"
+                  ? "กำลังดำเนินการ"
+                  : "รอ Sync ครั้งแรก"}
+          </p>
+        </div>
+      </div>
+      {lastRun?.status === "failed" && lastRun.errorMessage ? (
+        <div className="border-t border-[#f0d7d9] bg-[#fff7f7] px-4 py-2 text-xs text-[#a83541]">
+          {lastRun.errorMessage}
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
 const emptyTechnicianForm = {
   technicianName: "",
   company: "",
@@ -361,15 +443,12 @@ function Registry({
       ? requestedEquipment
       : (workspace.equipment[0]?.id ?? ""),
   );
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState(emptyEquipmentForm);
   const [linkModule, setLinkModule] = useState<"iqc" | "eqa">("iqc");
   const [linkEntity, setLinkEntity] = useState("");
   const [technicianForm, setTechnicianForm] = useState(emptyTechnicianForm);
   const [editingTechnicianId, setEditingTechnicianId] = useState<string | null>(
     null,
   );
-  const [isEquipmentFormOpen, setEquipmentFormOpen] = useState(false);
   const classificationOptions = equipmentClassificationOptions(
     workspace.equipment.map((item) => item.category),
   );
@@ -394,59 +473,6 @@ function Registry({
     setTechnicianForm(emptyTechnicianForm);
     setEditingTechnicianId(null);
     setLinkEntity("");
-  }
-  function edit(item: Equipment) {
-    setEditingId(item.id);
-    setEquipmentFormOpen(true);
-    setForm({
-      code: item.code,
-      name: item.name,
-      category: item.category ?? "",
-      manufacturer: item.manufacturer ?? "",
-      model: item.model ?? "",
-      serialNumber: item.serialNumber ?? "",
-      assetNumber: item.assetNumber ?? "",
-      locationId: item.locationId ?? "",
-      installedOn: item.installedOn ?? "",
-      warrantyUntil: item.warrantyUntil ?? "",
-      status: item.status,
-      note: item.note ?? "",
-    });
-  }
-  async function save(event: React.FormEvent) {
-    event.preventDefault();
-    const url = editingId
-      ? `/api/equipment/items/${editingId}`
-      : "/api/equipment/items";
-    const payload = {
-      ...form,
-      locationId: form.locationId || null,
-      installedOn: form.installedOn || null,
-      warrantyUntil: form.warrantyUntil || null,
-    };
-    const ok = await mutate(
-      url,
-      { method: editingId ? "PATCH" : "POST", body: JSON.stringify(payload) },
-      editingId ? "แก้ไขเครื่องมือแล้ว" : "เพิ่มเครื่องมือแล้ว",
-    );
-    if (ok) {
-      setEditingId(null);
-      setForm(emptyEquipmentForm);
-      setEquipmentFormOpen(false);
-    }
-  }
-  async function remove(item: Equipment) {
-    if (
-      !window.confirm(
-        `ลบเครื่องมือ ${item.code}? ถ้ามีแผนหรือประวัติ ระบบจะไม่อนุญาตให้ลบ`,
-      )
-    )
-      return;
-    await mutate(
-      `/api/equipment/items/${item.id}`,
-      { method: "DELETE" },
-      `ลบ ${item.code} แล้ว`,
-    );
   }
   async function rotate(item: Equipment) {
     if (
@@ -547,211 +573,21 @@ function Registry({
         (technician) => technician.equipmentId === selected.id,
       )
     : [];
+  async function saveLocalLocation(locationId: string) {
+    if (!selected) return;
+    await mutate(
+      `/api/equipment/items/${selected.id}/location`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ locationId: locationId || null }),
+      },
+      "บันทึกสถานที่ใช้งานใน Stock-BM แล้ว",
+    );
+  }
   return (
     <div className="grid gap-4 2xl:grid-cols-[400px_minmax(0,1fr)]">
       <div className="space-y-4">
-        {actor.role === "Admin" ? (
-          <>
-            <Button
-              type="button"
-              className="w-full justify-center py-3"
-              onClick={() => {
-                setEditingId(null);
-                setForm(emptyEquipmentForm);
-                setEquipmentFormOpen(true);
-              }}
-            >
-              <Plus className="size-4" /> เพิ่มเครื่องมือ
-            </Button>
-            {isEquipmentFormOpen ? (
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="equipment-form-title"
-                className="fixed inset-0 z-50 overflow-y-auto bg-[#08242b]/45 p-3 sm:p-6"
-                onMouseDown={(event) => {
-                  if (event.target === event.currentTarget) {
-                    setEquipmentFormOpen(false);
-                    setEditingId(null);
-                    setForm(emptyEquipmentForm);
-                  }
-                }}
-              >
-                <Card className="mx-auto my-4 w-full max-w-3xl p-4 shadow-[0_24px_64px_rgba(8,36,43,0.3)] sm:my-8 sm:p-6">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="mono text-xs font-bold tracking-[.14em] text-[#0b7f76]">
-                        EQUIPMENT REGISTRY
-                      </p>
-                      <h2 id="equipment-form-title" className="mt-1 font-bold text-[#173d50]">
-                        {editingId ? "แก้ไขเครื่องมือ" : "เพิ่มเครื่องมือ"}
-                      </h2>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      aria-label="ปิดฟอร์ม"
-                      onClick={() => {
-                        setEquipmentFormOpen(false);
-                        setEditingId(null);
-                        setForm(emptyEquipmentForm);
-                      }}
-                    >
-                      <X className="size-4" /> ปิด
-                    </Button>
-                  </div>
-            <form onSubmit={save} className="mt-5 grid gap-3 sm:grid-cols-2">
-              <Field label="รหัสเครื่องมือ *">
-                <Input
-                  required
-                  value={form.code}
-                  onChange={(e) => setForm({ ...form, code: e.target.value })}
-                />
-              </Field>
-              <Field label="ชื่อเครื่องมือ *">
-                <Input
-                  required
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                />
-              </Field>
-              <Field label="ประเภท / Classification">
-                <Select
-                  value={form.category}
-                  onChange={(e) =>
-                    setForm({ ...form, category: e.target.value })
-                  }
-                >
-                  <option value="">ยังไม่ระบุ</option>
-                  {classificationOptions.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="ผู้ผลิต">
-                <Input
-                  value={form.manufacturer}
-                  onChange={(e) =>
-                    setForm({ ...form, manufacturer: e.target.value })
-                  }
-                />
-              </Field>
-              <Field label="รุ่น">
-                <Input
-                  value={form.model}
-                  onChange={(e) => setForm({ ...form, model: e.target.value })}
-                />
-              </Field>
-              <Field label="Serial No.">
-                <Input
-                  value={form.serialNumber}
-                  onChange={(e) =>
-                    setForm({ ...form, serialNumber: e.target.value })
-                  }
-                />
-              </Field>
-              <Field label="Asset No.">
-                <Input
-                  value={form.assetNumber}
-                  onChange={(e) =>
-                    setForm({ ...form, assetNumber: e.target.value })
-                  }
-                  placeholder="เว้นว่างได้ หรือใส่ -"
-                />
-              </Field>
-              <Field label="สถานที่ (Location คลังน้ำยา)">
-                <Select
-                  value={form.locationId}
-                  onChange={(e) =>
-                    setForm({ ...form, locationId: e.target.value })
-                  }
-                >
-                  <option value="">ไม่ระบุสถานที่</option>
-                  {workspace.locations.map((location) => (
-                    <option
-                      key={location.id}
-                      value={location.id}
-                      disabled={!location.isActive && location.id !== form.locationId}
-                    >
-                      {location.code} · {location.name}
-                      {location.storageCondition ? ` · ${location.storageCondition}` : ""}
-                      {!location.isActive ? " (ปิดใช้งาน)" : ""}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="วันที่ติดตั้ง">
-                <Input
-                  type="date"
-                  value={form.installedOn}
-                  onChange={(e) =>
-                    setForm({ ...form, installedOn: e.target.value })
-                  }
-                />
-              </Field>
-              <Field label="หมดประกัน">
-                <Input
-                  type="date"
-                  value={form.warrantyUntil}
-                  onChange={(e) =>
-                    setForm({ ...form, warrantyUntil: e.target.value })
-                  }
-                />
-              </Field>
-              <Field label="สถานะ">
-                <Select
-                  value={form.status}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      status: e.target.value as EquipmentStatus,
-                    })
-                  }
-                >
-                  {(
-                    [
-                      "active",
-                      "maintenance",
-                      "out_of_service",
-                      "decommissioned",
-                    ] as const
-                  ).map((status) => (
-                    <option key={status} value={status}>
-                      {equipmentStatusLabel(status)}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="หมายเหตุ">
-                <Textarea
-                  value={form.note}
-                  onChange={(e) => setForm({ ...form, note: e.target.value })}
-                />
-              </Field>
-              <div className="flex gap-2 sm:col-span-2">
-                <Button disabled={busy}>
-                  {editingId ? "บันทึกการแก้ไข" : "เพิ่มเครื่องมือ"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => {
-                    setEquipmentFormOpen(false);
-                    setEditingId(null);
-                    setForm(emptyEquipmentForm);
-                  }}
-                >
-                  ยกเลิก
-                </Button>
-              </div>
-            </form>
-                </Card>
-              </div>
-            ) : null}
-          </>
-        ) : null}
+        <SyncControl actor={actor} workspace={workspace} busy={busy} mutate={mutate} />
         <Card className="overflow-hidden">
           <div className="border-b border-[#e1eaeb] p-3">
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,0.65fr)]">
@@ -845,7 +681,7 @@ function Registry({
       {selected ? (
         <div className="space-y-4">
           <Card className="overflow-hidden">
-            <div className="bg-[linear-gradient(120deg,#123944,#0b6f69)] p-5 text-white">
+            <div className="bg-[#123944] p-5 text-white">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="mono text-xs font-bold tracking-[.16em] text-[#8fe5dc]">
@@ -853,12 +689,20 @@ function Registry({
                   </p>
                   <h2 className="mt-2 text-2xl font-bold">{selected.name}</h2>
                   <p className="mt-2 text-sm text-[#c5dfe3]">
-                    {selected.manufacturer ?? "-"} · {selected.model ?? "-"} ·{" "}
-                    {selected.location ?? "-"}
+                    {selected.manufacturer ?? "-"} · {selected.model ?? "-"}
+                  </p>
+                  <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[#b7d7dc]">
+                    <span>{selected.portalDepartmentName ?? "ยังไม่ระบุหน่วยงานจาก Portal"}</span>
+                    {selected.portalDepartmentCode ? (
+                      <span className="mono rounded bg-white/10 px-1.5 py-0.5">{selected.portalDepartmentCode}</span>
+                    ) : null}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <EquipmentStatusBadge status={selected.status} />
+                  {selected.portalStatus ? (
+                    <StatusBadge tone="neutral" label={`Portal: ${selected.portalStatus}`} />
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -911,6 +755,31 @@ function Registry({
                   <Info label="ประเภท" value={selected.category} />
                   <Info label="หมายเหตุ" value={selected.note} />
                 </div>
+                <div className="grid gap-3 border-t border-[#edf2f2] p-4 sm:grid-cols-2">
+                  <Field
+                    label="สถานที่ใช้งานภายใน Stock-BM"
+                    hint="ข้อมูลนี้เป็นของ Stock-BM และ Sync จาก Portal จะไม่เขียนทับ"
+                  >
+                    <Select
+                      value={selected.locationId ?? ""}
+                      disabled={busy}
+                      onChange={(event) => void saveLocalLocation(event.target.value)}
+                    >
+                      <option value="">ยังไม่ระบุสถานที่</option>
+                      {workspace.locations.map((location) => (
+                        <option key={location.id} value={location.id}>
+                          {location.code} · {location.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <div>
+                    <p className="mb-1 text-xs font-semibold text-[#58747d]">สถานที่จาก Portal</p>
+                    <p className="min-h-11 rounded-md border border-dashed border-[#c9dadd] bg-[#f7fbfb] px-3 py-2 text-sm text-[#55727c]">
+                      {selected.portalLocation ?? "ยังไม่ระบุ"}
+                    </p>
+                  </div>
+                </div>
                 <div className="flex flex-wrap gap-2 border-t border-[#edf2f2] p-4">
                   <a
                     href={`/service/equipment/${selected.qrToken}`}
@@ -921,29 +790,21 @@ function Registry({
                       <ExternalLink className="size-4" /> เปิดฟอร์มช่าง
                     </Button>
                   </a>
+                  {selected.portalUrl ? (
+                    <a href={selected.portalUrl} target="_blank" rel="noreferrer">
+                      <Button variant="secondary">
+                        <ExternalLink className="size-4" /> เปิดรายละเอียด Portal
+                      </Button>
+                    </a>
+                  ) : null}
                   {actor.role === "Admin" ? (
-                    <>
-                      <Button
-                        variant="secondary"
-                        onClick={() => edit(selected)}
-                      >
-                        <Settings2 className="size-4" /> แก้ไข
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        disabled={busy}
-                        onClick={() => void rotate(selected)}
-                      >
-                        <RefreshCw className="size-4" /> เปลี่ยน QR
-                      </Button>
-                      <Button
-                        variant="danger"
-                        disabled={busy}
-                        onClick={() => void remove(selected)}
-                      >
-                        <Trash2 className="size-4" /> ลบ
-                      </Button>
-                    </>
+                    <Button
+                      variant="secondary"
+                      disabled={busy}
+                      onClick={() => void rotate(selected)}
+                    >
+                      <RefreshCw className="size-4" /> เปลี่ยน QR ของ Stock-BM
+                    </Button>
                   ) : null}
                 </div>
               </div>
@@ -1183,6 +1044,14 @@ function Plans({
   const equipmentMap = new Map(
     workspace.equipment.map((item) => [item.id, item]),
   );
+  const portalEquipmentIds = new Set(
+    workspace.equipment
+      .filter((item) => item.portalEquipmentId)
+      .map((item) => item.id),
+  );
+  const localPlans = workspace.plans.filter(
+    (plan) => !portalEquipmentIds.has(plan.equipmentId),
+  );
   async function save(e: React.FormEvent) {
     e.preventDefault();
     const ok = await mutate(
@@ -1211,7 +1080,11 @@ function Plans({
               >
                 <option value="">เลือกเครื่องมือ</option>
                 {workspace.equipment
-                  .filter((item) => item.status !== "decommissioned")
+                  .filter(
+                    (item) =>
+                      item.status !== "decommissioned" &&
+                      !item.portalEquipmentId,
+                  )
                   .map((item) => (
                     <option key={item.id} value={item.id}>
                       {item.code} · {item.name}
@@ -1351,13 +1224,49 @@ function Plans({
           </form>
         </Card>
       ) : null}
+      <Card className="overflow-hidden border-[#cfe4e1]">
+        <div className="border-b border-[#dcebea] bg-[#f1faf8] px-4 py-3">
+          <div className="flex items-center gap-2">
+            <CalendarClock className="size-4 text-[#0b7f76]" aria-hidden="true" />
+            <h2 className="font-bold text-[#173d50]">PM / Calibration จาก Portal</h2>
+          </div>
+          <p className="mt-1 text-xs text-[#58747d]">
+            ข้อมูล Cache แบบอ่านอย่างเดียว · แก้ไขรายละเอียดและเอกสารที่ Portal
+          </p>
+        </div>
+        <div className="divide-y divide-[#edf2f2]">
+          {workspace.portalPmCal.map((item) => (
+            <div
+              key={item.portalPlanId}
+              className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-[#173d50]">
+                  {equipmentMap.get(item.equipmentId)?.code ?? "-"} · {item.calType ?? "PM/CAL"}
+                </p>
+                <p className="mt-1 text-xs text-[#58747d]">
+                  รอบ {item.fiscalYear ?? "-"}/{item.calendarMonth ?? "-"} · ครบกำหนด {item.dueDate ? formatDate(item.dueDate) : "-"}
+                  {item.provider ? ` · ${item.provider}` : ""}
+                </p>
+              </div>
+              <StatusBadge
+                tone={item.recordStatus === "active" ? "accepted" : "neutral"}
+                label={item.recordStatus ?? "ไม่ระบุสถานะ"}
+              />
+            </div>
+          ))}
+          {!workspace.portalPmCal.length ? (
+            <Empty text="ยังไม่มีข้อมูล PM/CAL จาก Portal ใน Cache" />
+          ) : null}
+        </div>
+      </Card>
       <Card className="overflow-hidden">
         <div className="border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3">
           <h2 className="font-bold text-[#173d50]">แผนงานทั้งหมด</h2>
           <p className="mt-1 text-xs text-[#789097]">เรียงตามเดือนครบกำหนด</p>
         </div>
         <div className="divide-y divide-[#edf2f2]">
-          {workspace.plans.map((plan) => (
+          {localPlans.map((plan) => (
             <div
               key={plan.id}
               className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center"
@@ -1423,7 +1332,7 @@ function Plans({
               ) : null}
             </div>
           ))}
-          {!workspace.plans.length ? <Empty text="ยังไม่มีแผนงาน" /> : null}
+          {!localPlans.length ? <Empty text="ไม่มีแผนงานภายในที่ต้องดูแล" /> : null}
         </div>
       </Card>
     </div>
@@ -1433,6 +1342,7 @@ function Plans({
 const emptyRecord = {
   equipmentId: "",
   planId: "",
+  portalPlanId: "",
   eventType: "pm" as EquipmentEventType,
   otherEventLabel: "",
   qualificationStage: "",
@@ -1473,13 +1383,29 @@ function WorkHistory({
   const [historyTo, setHistoryTo] = useState("");
   const [historySearch, setHistorySearch] = useState("");
   const [selectedTechnicianId, setSelectedTechnicianId] = useState("");
+  const technicianSignatureRef = useRef<SignaturePadHandle | null>(null);
+  const receiverSignatureRef = useRef<SignaturePadHandle | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [reasonDialog, setReasonDialog] = useState<{
+    record: EquipmentServiceRecord;
+    action: "void";
+  } | null>(null);
+  const onTechnicianSignatureReady = useCallback((handle: SignaturePadHandle) => {
+    technicianSignatureRef.current = handle;
+  }, []);
+  const onReceiverSignatureReady = useCallback((handle: SignaturePadHandle) => {
+    receiverSignatureRef.current = handle;
+  }, []);
   const equipmentMap = new Map(
     workspace.equipment.map((item) => [item.id, item]),
   );
   const normalizedHistorySearch = historySearch.trim().toLowerCase();
   const approved = workspace.records
     .filter(
-      (record) => record.status === "approved" || record.status === "voided",
+      (record) =>
+        record.status === "approved" ||
+        record.status === "voided" ||
+        record.status === "rejected",
     )
     .filter(
       (record) =>
@@ -1522,6 +1448,9 @@ function WorkHistory({
   const plans = workspace.plans.filter(
     (plan) => plan.equipmentId === form.equipmentId && plan.isActive,
   );
+  const portalPlans = workspace.portalPmCal.filter(
+    (plan) => plan.equipmentId === form.equipmentId && plan.recordStatus === "active",
+  );
   const technicians = workspace.technicians.filter(
     (technician) => technician.equipmentId === form.equipmentId,
   );
@@ -1537,9 +1466,21 @@ function WorkHistory({
   }
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    setFormError(null);
+    if (!form.receiverName.trim()) {
+      setFormError("กรุณาระบุชื่อผู้รับงาน");
+      return;
+    }
+    const technicianSignature = await technicianSignatureRef.current?.toFile();
+    const receiverSignature = await receiverSignatureRef.current?.toFile();
+    if (!technicianSignature || !receiverSignature) {
+      setFormError("กรุณาลงลายเซ็นช่างและผู้รับงานให้ครบ");
+      return;
+    }
     const payload = {
       ...form,
       planId: form.planId || null,
+      portalPlanId: form.portalPlanId || null,
       otherEventLabel: form.otherEventLabel || null,
       qualificationStage: form.qualificationStage || null,
       nextRecommendedOn: form.nextRecommendedOn || null,
@@ -1550,14 +1491,20 @@ function WorkHistory({
         ? new Date(form.downtimeUntil).toISOString()
         : null,
     };
+    const body = new FormData();
+    for (const [key, value] of Object.entries(payload))
+      body.append(key, value == null ? "" : String(value));
+    body.append("technicianSignature", technicianSignature);
+    body.append("receiverSignature", receiverSignature);
     const ok = await mutate(
       "/api/equipment/records",
-      { method: "POST", body: JSON.stringify(payload) },
+      { method: "POST", body },
       "บันทึกประวัติงานแล้ว",
     );
     if (ok) {
       setForm(emptyRecord);
       setSelectedTechnicianId("");
+      setFormError(null);
       setFormOpen(false);
     }
   }
@@ -1582,7 +1529,10 @@ function WorkHistory({
                 type="button"
                 variant="secondary"
                 className="min-h-9 px-2.5 py-1 text-xs"
-                onClick={() => setFormOpen(true)}
+                onClick={() => {
+                  setFormError(null);
+                  setFormOpen(true);
+                }}
               >
                 <Plus className="size-3.5" aria-hidden="true" />
                 บันทึกงานภายใน
@@ -1717,28 +1667,39 @@ function WorkHistory({
               index={index}
               canDelete={actor.role === "Admin"}
               actions={
-                record.status === "approved" ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="min-h-7 px-2 py-1 text-[11px]"
-                    disabled={busy}
-                    onClick={() => {
-                      const reason = window.prompt("เหตุผลที่ void รายการนี้");
-                      if (reason)
+                <>
+                  {record.status === "approved" ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="min-h-7 px-2 py-1 text-[11px]"
+                      disabled={busy}
+                      onClick={() => setReasonDialog({ record, action: "void" })}
+                    >
+                      Void
+                    </Button>
+                  ) : null}
+                  {record.status === "rejected" ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="min-h-7 px-2 py-1 text-[11px]"
+                      disabled={busy}
+                      onClick={() =>
                         void mutate(
                           `/api/equipment/records/${record.id}`,
                           {
                             method: "PATCH",
-                            body: JSON.stringify({ action: "void", reason }),
+                            body: JSON.stringify({ action: "resubmit" }),
                           },
-                          "Void รายการแล้ว",
-                        );
-                    }}
-                  >
-                    Void
-                  </Button>
-                ) : null
+                          "ส่งรายการกลับเข้าคิวตรวจรับแล้ว",
+                        )
+                      }
+                    >
+                      ส่งกลับตรวจใหม่
+                    </Button>
+                  ) : null}
+                </>
               }
             />
           ))}
@@ -1771,7 +1732,7 @@ function WorkHistory({
                   บันทึกงานภายใน
                 </h2>
                 <p className="mt-1 text-xs text-[#789097]">
-                  รายการจาก Staff จะเป็นประวัติทางการทันที
+                  บันทึกแล้วจะอยู่สถานะรอตรวจรับจนกว่าจะผ่านผู้ตรวจ
                 </p>
               </div>
               <button
@@ -1796,6 +1757,7 @@ function WorkHistory({
                   ...form,
                   equipmentId: e.target.value,
                   planId: "",
+                  portalPlanId: "",
                   technicianName: "",
                   company: "",
                   technicianContact: "",
@@ -1825,6 +1787,24 @@ function WorkHistory({
               ))}
             </Select>
           </Field>
+          {portalPlans.length ? (
+            <Field
+              label="อ้างอิง PM/CAL จาก Portal"
+              hint="ลิงก์อ้างอิงเท่านั้น ระบบไม่สร้างแผนซ้ำใน Stock-BM"
+            >
+              <Select
+                value={form.portalPlanId}
+                onChange={(e) => setForm({ ...form, portalPlanId: e.target.value })}
+              >
+                <option value="">ไม่อ้างอิง PM/CAL จาก Portal</option>
+                {portalPlans.map((plan) => (
+                  <option key={plan.portalPlanId} value={plan.portalPlanId}>
+                    {plan.calType ?? "PM/CAL"} · {plan.fiscalYear ?? "-"}/{plan.calendarMonth ?? "-"}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
           <div className="rounded-xl border border-[#cfe4e1] bg-[#f1faf8] p-3">
             <Field label="เลือกช่างจากทะเบียนเครื่องมือนี้">
               <Select
@@ -1959,8 +1939,9 @@ function WorkHistory({
                 }
               />
             </Field>
-            <Field label="ผู้รับงาน">
+            <Field label="ผู้รับงาน *">
               <Input
+                required
                 value={form.receiverName}
                 onChange={(e) =>
                   setForm({ ...form, receiverName: e.target.value })
@@ -2029,6 +2010,21 @@ function WorkHistory({
               </Select>
             </Field>
           </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <SignaturePad
+              label="ลายเซ็นช่าง *"
+              onReady={onTechnicianSignatureReady}
+            />
+            <SignaturePad
+              label="ลายเซ็นผู้รับงาน *"
+              onReady={onReceiverSignatureReady}
+            />
+          </div>
+          {formError ? (
+            <p className="rounded-md border border-[#efc7cc] bg-[#fff5f6] px-3 py-2 text-xs text-[#a83541]" role="alert">
+              {formError}
+            </p>
+          ) : null}
           <Button disabled={busy || !form.equipmentId}>
             <ShieldCheck className="size-4" /> บันทึกประวัติ
           </Button>
@@ -2036,6 +2032,27 @@ function WorkHistory({
             </div>
           </section>
         </div>
+      ) : null}
+      {reasonDialog ? (
+        <ReasonDialog
+          title="Void ประวัติงาน"
+          description="การ Void จะเก็บรายการเดิมไว้และต้องระบุเหตุผล"
+          submitLabel="ยืนยัน Void"
+          busy={busy}
+          onCancel={() => setReasonDialog(null)}
+          onSubmit={async (reason) => {
+            const ok = await mutate(
+              `/api/equipment/records/${reasonDialog.record.id}`,
+              {
+                method: "PATCH",
+                body: JSON.stringify({ action: "void", reason }),
+              },
+              "Void รายการแล้ว",
+            );
+            if (ok) setReasonDialog(null);
+            return ok;
+          }}
+        />
       ) : null}
     </div>
   );
@@ -2076,6 +2093,11 @@ function OfficialRecordCard({
   canDelete: boolean;
 }) {
   const equipmentPhoto = equipment?.photos[0];
+  const snapshot = record.equipmentSnapshot;
+  const equipmentCode = snapshot?.code ?? equipment?.code ?? "-";
+  const equipmentName = snapshot?.name ?? equipment?.name ?? "-";
+  const equipmentModel = snapshot?.model ?? equipment?.model ?? null;
+  const equipmentSerial = snapshot?.serialNumber ?? equipment?.serialNumber ?? null;
   const serviceFiles = record.attachments.filter(
     (item) => !isSignatureAttachment(item),
   );
@@ -2085,21 +2107,27 @@ function OfficialRecordCard({
       .map((item) => [item.kind, item]),
   );
   const statusLabel =
-    record.status === "voided" ? "VOIDED" : record.outcome.toUpperCase();
+    record.status === "voided"
+      ? "VOIDED"
+      : record.status === "pending"
+        ? "รอตรวจรับ"
+        : record.status === "rejected"
+          ? "REJECTED"
+          : record.outcome.toUpperCase();
   const statusClass =
-    record.status === "voided" || record.outcome === "fail"
+    record.status === "voided" || record.status === "rejected" || record.outcome === "fail"
       ? "bg-[#fff1f2] text-[#b33b46]"
       : record.outcome === "conditional"
         ? "bg-[#fff8e8] text-[#a76511]"
         : "bg-[#eef9f1] text-[#2f7d44]";
   const signatureSlots = [
     {
-      kind: "receiver-signature",
-      label: "ลายเซ็นผู้รับงาน",
-    },
-    {
       kind: "technician-signature",
       label: "ลายเซ็นช่าง",
+    },
+    {
+      kind: "receiver-signature",
+      label: "ลายเซ็นผู้รับงาน",
     },
   ];
 
@@ -2110,7 +2138,7 @@ function OfficialRecordCard({
           <div className="relative size-[54px] shrink-0 overflow-hidden rounded-md border border-[#cfdee0] bg-[#edf5f4]">
             <NextImage
               src={`/api/attachments/${equipmentPhoto.id}`}
-              alt={`รูป ${equipment?.name ?? "เครื่องมือ"}`}
+              alt={`รูป ${equipmentName}`}
               fill
               sizes="54px"
               unoptimized
@@ -2127,7 +2155,7 @@ function OfficialRecordCard({
         </span>
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-sm font-semibold text-[#173d50]">
-            {equipment?.code ?? "-"} · {equipment?.name ?? "-"}
+            {equipmentCode} · {equipmentName}
           </h3>
           <p className="truncate text-[11px] text-[#68828a]">
             {recordEventLabel(record)} · {formatDate(record.performedOn)} ·{" "}
@@ -2147,10 +2175,20 @@ function OfficialRecordCard({
         </div>
       </div>
       <div className="flex flex-wrap gap-x-5 gap-y-1 border-b border-[#e7eeee] px-3 py-1.5 text-[11px] text-[#58747d] sm:px-4">
-        <span>รุ่น: {equipment?.model ?? "-"}</span>
-        <span>S/N: {equipment?.serialNumber ?? "-"}</span>
+        <span>รุ่น: {equipmentModel ?? "-"}</span>
+        <span>S/N: {equipmentSerial ?? "-"}</span>
         <span>สถานะหลังงาน: {equipmentStatusLabel(record.returnStatus)}</span>
       </div>
+      {record.status === "rejected" && record.rejectionReason ? (
+        <div className="border-b border-[#efc7cc] bg-[#fff5f6] px-3 py-2 text-xs text-[#a83541] sm:px-4">
+          เหตุผลที่ปฏิเสธ: {record.rejectionReason}
+        </div>
+      ) : null}
+      {record.status === "voided" && record.voidReason ? (
+        <div className="border-b border-[#efc7cc] bg-[#fff5f6] px-3 py-2 text-xs text-[#a83541] sm:px-4">
+          เหตุผลที่ Void: {record.voidReason}
+        </div>
+      ) : null}
       <div className="grid gap-x-5 gap-y-4 border-b border-[#e7eeee] p-3 sm:grid-cols-2 sm:p-4">
         <OfficialDetail label="อาการ/ปัญหา" value={record.reportedProblem} />
         <OfficialDetail label="ผลตรวจสอบ" value={record.findings} />
@@ -2250,6 +2288,83 @@ function OfficialDetail({
   );
 }
 
+function ReasonDialog({
+  title,
+  description,
+  submitLabel,
+  busy,
+  onCancel,
+  onSubmit,
+}: {
+  title: string;
+  description: string;
+  submitLabel: string;
+  busy: boolean;
+  onCancel: () => void;
+  onSubmit: (reason: string) => Promise<boolean>;
+}) {
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!reason.trim()) {
+      setError("กรุณาระบุเหตุผล");
+      return;
+    }
+    const ok = await onSubmit(reason.trim());
+    if (!ok) setError("ดำเนินการไม่สำเร็จ กรุณาลองใหม่");
+  }
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-3 sm:p-6"
+      role="presentation"
+      onMouseDown={onCancel}
+    >
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="equipment-reason-dialog-title"
+        className="w-full max-w-lg rounded-lg border border-[#c9dadd] bg-white p-4 shadow-2xl sm:p-5"
+        onSubmit={submit}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 id="equipment-reason-dialog-title" className="font-bold text-[#173d50]">{title}</h2>
+            <p className="mt-1 text-xs leading-5 text-[#789097]">{description}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[#55727c] hover:bg-[#f1f7f6]"
+            aria-label="ปิด"
+          >
+            <X className="size-5" aria-hidden="true" />
+          </button>
+        </div>
+        <Field label="เหตุผล *">
+          <Textarea
+            autoFocus
+            required
+            value={reason}
+            onChange={(event) => {
+              setReason(event.target.value);
+              setError(null);
+            }}
+            rows={4}
+            maxLength={2000}
+          />
+        </Field>
+        {error ? <p className="mt-2 text-xs text-[#a83541]" role="alert">{error}</p> : null}
+        <div className="mt-4 flex justify-end gap-2">
+          <Button type="button" variant="ghost" disabled={busy} onClick={onCancel}>ยกเลิก</Button>
+          <Button type="submit" variant="danger" disabled={busy || !reason.trim()}>{submitLabel}</Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function Pending({
   workspace,
   busy,
@@ -2265,65 +2380,23 @@ function Pending({
   const pending = workspace.records.filter(
     (record) => record.status === "pending",
   );
+  const [rejectRecord, setRejectRecord] = useState<EquipmentServiceRecord | null>(null);
   async function review(
     record: EquipmentServiceRecord,
     action: "approve" | "reject",
   ) {
-    const reason =
-      action === "reject" ? window.prompt("ระบุเหตุผลที่ปฏิเสธ") : null;
-    if (action === "reject" && !reason) return;
-    if (
-      !window.confirm(
-        action === "approve"
-          ? `ยืนยันตรวจรับงานของ ${record.technicianName}?`
-          : "ยืนยันปฏิเสธรายการนี้?",
-      )
-    )
+    if (action === "reject") {
+      setRejectRecord(record);
       return;
+    }
     await mutate(
       `/api/equipment/records/${record.id}`,
-      { method: "PATCH", body: JSON.stringify({ action, reason }) },
-      action === "approve" ? "ตรวจรับและบันทึกประวัติแล้ว" : "ปฏิเสธรายการแล้ว",
-    );
-  }
-  async function edit(record: EquipmentServiceRecord) {
-    const actionTaken = window.prompt("งานที่ดำเนินการ", record.actionTaken);
-    if (!actionTaken?.trim()) return;
-    const findings = window.prompt("ผลตรวจสอบ", record.findings ?? "");
-    if (findings === null) return;
-    const jobNumber = window.prompt("เลขที่ใบงาน", record.jobNumber ?? "");
-    if (jobNumber === null) return;
-    await mutate(
-      `/api/equipment/records/${record.id}`,
-      {
-        method: "PUT",
-        body: JSON.stringify({
-          equipmentId: record.equipmentId,
-          planId: record.planId,
-          eventType: record.eventType,
-          otherEventLabel: record.otherEventLabel,
-          qualificationStage: record.qualificationStage,
-          performedOn: record.performedOn,
-          reportedProblem: record.reportedProblem,
-          findings,
-          actionTaken,
-          partsReplaced: record.partsReplaced,
-          jobNumber,
-          company: record.company,
-          technicianName: record.technicianName,
-          technicianContact: record.technicianContact,
-          receiverName: record.receiverName,
-          downtimeFrom: record.downtimeFrom,
-          downtimeUntil: record.downtimeUntil,
-          outcome: record.outcome,
-          returnStatus: record.returnStatus,
-          nextRecommendedOn: record.nextRecommendedOn,
-        }),
-      },
-      "แก้ไขข้อมูลก่อนตรวจรับแล้ว",
+      { method: "PATCH", body: JSON.stringify({ action }) },
+      "ตรวจรับและบันทึกประวัติแล้ว",
     );
   }
   return (
+    <>
     <Card className="overflow-hidden">
       <div className="border-b border-[#eed4a6] bg-[#fff9ed] px-4 py-3">
         <h2 className="font-bold text-[#8f5919]">รายการจากช่างที่รอตรวจรับ</h2>
@@ -2332,98 +2405,62 @@ function Pending({
         </p>
       </div>
       <div className="divide-y divide-[#edf2f2]">
-        {pending.map((record) => (
-          <div key={record.id} className="p-4">
-            <ServiceRow
+        {pending.map((record, index) => (
+            <OfficialRecordCard
+              key={record.id}
               record={record}
               equipment={equipmentMap.get(record.equipmentId)}
+              index={index}
+              canDelete={false}
+              actions={
+                <div className="flex gap-1">
+                  <Button
+                    type="button"
+                    variant="danger"
+                    disabled={busy}
+                    onClick={() => void review(record, "reject")}
+                  >
+                    ปฏิเสธ
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void review(record, "approve")}
+                  >
+                    <ClipboardCheck className="size-4" aria-hidden="true" /> ตรวจรับ
+                  </Button>
+                </div>
+              }
             />
-            <div className="mt-3 grid gap-3 rounded-lg border border-[#e4ecec] bg-[#fbfdfd] p-3 sm:grid-cols-3">
-              <Info label="งานที่ทำ" value={record.actionTaken} />
-              <Info label="ผลตรวจสอบ" value={record.findings} />
-              <Info label="ผู้รับงาน" value={record.receiverName} />
-            </div>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              {record.attachments.map((item) => (
-                <a
-                  key={item.id}
-                  href={`/api/attachments/${item.id}`}
-                  target="_blank"
-                  className="flex items-center gap-2 rounded border border-[#dce8e9] px-3 py-2 text-xs font-semibold text-[#0b7f76]"
-                >
-                  <ImageIcon className="size-4" />{" "}
-                  {item.kind === "technician-signature"
-                    ? "ลายเซ็นช่าง"
-                    : item.kind === "receiver-signature"
-                      ? "ลายเซ็นผู้รับงาน"
-                      : item.fileName}
-                </a>
-              ))}
-            </div>
-            <div className="mt-3 flex flex-wrap justify-end gap-2">
-              <Button
-                variant="secondary"
-                disabled={busy}
-                onClick={() => void edit(record)}
-              >
-                แก้ไขข้อมูล
-              </Button>
-              <Button
-                variant="danger"
-                disabled={busy}
-                onClick={() => void review(record, "reject")}
-              >
-                ปฏิเสธ
-              </Button>
-              <Button
-                disabled={busy}
-                onClick={() => void review(record, "approve")}
-              >
-                <ClipboardCheck className="size-4" /> ตรวจรับ
-              </Button>
-            </div>
-          </div>
         ))}
         {!pending.length ? <Empty text="ไม่มีรายการรอตรวจรับ" /> : null}
       </div>
     </Card>
+    {rejectRecord ? (
+      <ReasonDialog
+        title="ปฏิเสธประวัติงาน"
+        description="ระบุจุดที่ต้องแก้ไข ผู้บันทึกจะส่งรายการกลับเข้าคิวตรวจใหม่ได้"
+        submitLabel="ยืนยันปฏิเสธ"
+        busy={busy}
+        onCancel={() => setRejectRecord(null)}
+        onSubmit={async (reason) => {
+          const ok = await mutate(
+            `/api/equipment/records/${rejectRecord.id}`,
+            {
+              method: "PATCH",
+              body: JSON.stringify({ action: "reject", reason }),
+            },
+            "ปฏิเสธรายการแล้ว",
+          );
+          if (ok) setRejectRecord(null);
+          return ok;
+        }}
+      />
+    ) : null}
+    </>
   );
 }
 
-function ServiceRow({
-  record,
-  equipment,
-  actions,
-}: {
-  record: EquipmentServiceRecord;
-  equipment?: Equipment;
-  actions?: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-      <div className="grid size-11 shrink-0 place-items-center rounded-lg bg-[#e8f4f3] text-[#0b7f76]">
-        <Wrench className="size-5" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <strong className="text-sm text-[#173d50]">
-            {equipment?.code ?? "-"} ·{" "}
-            {EQUIPMENT_EVENT_LABELS[record.eventType]}
-          </strong>
-          <RecordStatusBadge record={record} />
-        </div>
-        <p className="mt-1 text-xs text-[#789097]">
-          {formatDate(record.performedOn)} · {record.technicianName}
-          {record.company ? ` · ${record.company}` : ""}
-        </p>
-        <p className="mt-1 line-clamp-2 text-xs text-[#55727c]">
-          {record.actionTaken}
-        </p>
-      </div>
-      {actions}
-    </div>
-  );
-}
 function DueBadge({ plan }: { plan: EquipmentPlan }) {
   return plan.dueState === "overdue" ? (
     <StatusBadge tone="rejected" label="เกินกำหนด" />
@@ -2446,30 +2483,6 @@ function EquipmentStatusBadge({ status }: { status: EquipmentStatus }) {
               : "neutral"
       }
       label={equipmentStatusLabel(status)}
-    />
-  );
-}
-function RecordStatusBadge({ record }: { record: EquipmentServiceRecord }) {
-  return (
-    <StatusBadge
-      tone={
-        record.status === "approved"
-          ? "accepted"
-          : record.status === "pending"
-            ? "warning"
-            : record.status === "rejected"
-              ? "rejected"
-              : "neutral"
-      }
-      label={
-        record.status === "pending"
-          ? "รอตรวจรับ"
-          : record.status === "approved"
-            ? "อนุมัติแล้ว"
-            : record.status === "rejected"
-              ? "ปฏิเสธ"
-              : "Voided"
-      }
     />
   );
 }

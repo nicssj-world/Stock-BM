@@ -29,12 +29,14 @@ import {
   routineOccurrenceForPlannedDate,
   routinePeriodFor,
   routinePeriodKind,
+  routineReviewPeriods,
   type RoutineFrequency,
   type RoutineMaintenanceEntry,
   type RoutineMaintenanceForm,
   type RoutineMaintenanceOccurrence,
   type RoutineMaintenanceReview,
   type RoutineMaintenanceWorkspace,
+  type RoutineReviewPeriod,
   type RoutineTaskResult,
   type RoutineTaskState,
 } from "@/lib/equipment/routine-maintenance"
@@ -93,6 +95,20 @@ function occurrenceLocked(formId: string, frequency: RoutineFrequency, plannedOn
   return reviews.some((review) => review.formId === formId && review.frequency === frequency && review.period === routinePeriodFor(frequency, plannedOn))
 }
 
+function reviewPeriodLabel(frequency: RoutineFrequency, period: string) {
+  if (routinePeriodKind(frequency) === "year") return `ปี ${Number(period) + 543}`
+  return new Intl.DateTimeFormat("th-TH", { month: "long", year: "numeric", timeZone: "Asia/Bangkok" }).format(new Date(`${period}-01T00:00:00+07:00`))
+}
+
+function availableReviewPeriods(form: RoutineMaintenanceForm, today: string, reviews: RoutineMaintenanceReview[]) {
+  const periods = new Map<string, RoutineReviewPeriod>()
+  for (const period of routineReviewPeriods(form, today)) periods.set(`${period.frequency}:${period.period}`, period)
+  for (const review of reviews.filter((item) => item.formId === form.id)) {
+    periods.set(`${review.frequency}:${review.period}`, { frequency: review.frequency, period: review.period })
+  }
+  return [...periods.values()].sort((a, b) => b.period.localeCompare(a.period) || a.frequency.localeCompare(b.frequency))
+}
+
 export function RoutineMaintenance({
   actor,
   equipmentId,
@@ -113,6 +129,8 @@ export function RoutineMaintenance({
   const [showHistory, setShowHistory] = useState(false)
   const [showReview, setShowReview] = useState(false)
   const [showHolidays, setShowHolidays] = useState(false)
+  const [reviewFrequencySelection, setReviewFrequencySelection] = useState<RoutineFrequency | "">("")
+  const [reviewPeriodSelection, setReviewPeriodSelection] = useState("")
   const [builderOpen, setBuilderOpen] = useState(false)
   const [draft, setDraft] = useState<Draft>(emptyDraft(""))
   const [logTarget, setLogTarget] = useState<{ form: RoutineMaintenanceForm; occurrence: RoutineMaintenanceOccurrence } | null>(null)
@@ -162,8 +180,17 @@ export function RoutineMaintenance({
   const currentVersion = selectedForm && data ? currentRoutineVersion(selectedForm, data.today) : null
   const currentVersionOccurrence = currentVersion && data ? occurrences.find((occurrence) => occurrence.versionId === currentVersion.id && occurrence.scheduledOn === data.today) : null
   const currentPeriodDate = currentVersionOccurrence?.plannedOn ?? data?.today ?? ""
-  const currentPeriod = currentVersion && currentPeriodDate ? routinePeriodFor(currentVersion.frequency, currentPeriodDate) : ""
   const currentLocked = Boolean(currentVersion && selectedForm && currentPeriodDate && occurrenceLocked(selectedForm.id, currentVersion.frequency, currentPeriodDate, data?.reviews ?? []))
+  const reviewPeriods = selectedForm && data ? availableReviewPeriods(selectedForm, data.today, data.reviews) : []
+  const reviewFrequencies = [...new Set(reviewPeriods.map((item) => item.frequency))]
+  const effectiveReviewFrequency: RoutineFrequency | "" = reviewFrequencySelection !== "" && reviewFrequencies.includes(reviewFrequencySelection)
+    ? reviewFrequencySelection
+    : currentVersion?.frequency ?? reviewFrequencies[0] ?? ""
+  const selectedReviewPeriods = reviewPeriods.filter((item) => item.frequency === effectiveReviewFrequency)
+  const effectiveReviewPeriod = selectedReviewPeriods.some((item) => item.period === reviewPeriodSelection)
+    ? reviewPeriodSelection
+    : selectedReviewPeriods[0]?.period ?? ""
+  const selectedReviewLocked = Boolean(selectedForm && effectiveReviewFrequency && effectiveReviewPeriod && data?.reviews.some((reviewItem) => reviewItem.formId === selectedForm.id && reviewItem.frequency === effectiveReviewFrequency && reviewItem.period === effectiveReviewPeriod))
   const reviewerName = selectedForm && data ? data.users.find((user) => user.id === selectedForm.reviewerId)?.displayName ?? "ยังไม่กำหนด" : "ยังไม่กำหนด"
   const todayOccurrence = occurrences.find((occurrence) => occurrence.scheduledOn === data?.today)
   const nextOccurrence = occurrences.find((occurrence) => occurrence.scheduledOn >= (data?.today ?? ""))
@@ -240,8 +267,8 @@ export function RoutineMaintenance({
   }
 
   async function review() {
-    if (!selectedForm || !currentVersion || !currentPeriod) return
-    await submit(endpointForInternal(endpoint, token), { action: "review", formId: selectedForm.id, frequency: currentVersion.frequency, period: currentPeriod }, "ล็อกงวด Review แล้ว")
+    if (!selectedForm || !effectiveReviewFrequency || !effectiveReviewPeriod) return
+    await submit(endpointForInternal(endpoint, token), { action: "review", formId: selectedForm.id, frequency: effectiveReviewFrequency, period: effectiveReviewPeriod }, "ล็อกงวด Review แล้ว")
   }
 
   async function unlock(reviewItem: RoutineMaintenanceReview) {
@@ -263,7 +290,7 @@ export function RoutineMaintenance({
         <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
           <Link className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[#c9dadd] bg-white px-3 text-[#0b7f76] hover:bg-[#f4fbfa]" href={`/equipment/routine/report?equipmentId=${data.equipment.id}${selectedForm ? `&formId=${selectedForm.id}` : ""}`}><FileText className="size-3.5" /> รายงาน</Link>
           {!token ? <>
-            <Link className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[#9ed8d1] bg-[#f3fbfa] px-3 text-[#0b7f76] hover:bg-[#e8f7f4]" href={`/equipment/routine/${data.equipment.qrToken}`} target="_blank" rel="noreferrer" aria-label={`เปิด QR Routine Maintenance ของ ${data.equipment.name}`}><QrCode className="size-3.5" /> QR Routine</Link>
+            <Link className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[#9ed8d1] bg-[#f3fbfa] px-3 text-[#0b7f76] hover:bg-[#e8f7f4]" href={`/equipment/routine/qr/${data.equipment.qrToken}`} target="_blank" rel="noreferrer" aria-label={`เปิด QR Routine Maintenance ของ ${data.equipment.name}`}><QrCode className="size-3.5" /> QR Routine</Link>
             <Link className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[#c9dadd] bg-white px-3 text-[#58747d] hover:bg-[#f4fbfa]" href={`/service/equipment/${data.equipment.qrToken}`} target="_blank" rel="noreferrer" aria-label={`เปิด QR ฟอร์มช่างของ ${data.equipment.name}`}><Wrench className="size-3.5" /> QR ช่าง</Link>
           </> : null}
           {isAdmin && !token ? <Button type="button" className="min-h-9" onClick={openCreate}><Plus className="size-4" /> เพิ่มฟอร์ม</Button> : null}
@@ -301,7 +328,7 @@ export function RoutineMaintenance({
         <Card className="p-0">
           <button type="button" className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-bold text-[#315763] hover:bg-[#f6faf9]" onClick={() => setShowReview((value) => !value)}><span className="flex items-center gap-2"><ShieldCheck className="size-4 text-[#0b7f76]" /> Review & lock</span><span className="text-xs text-[#789097]">{showReview ? "ซ่อน" : "แสดง"}</span></button>
         </Card>
-        {showReview ? <Card className="p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h4 className="font-bold text-[#173d50]">Review & lock ต่อฟอร์ม</h4><p className="mt-1 text-xs text-[#58747d]">{currentVersion ? `${frequencyLabel(currentVersion.frequency)} ล็อกเป็น${routinePeriodKind(currentVersion.frequency) === "month" ? "รายเดือน" : "รายปี"} · ${currentPeriod}` : "ยังไม่มีรอบ"}</p></div><div className="flex flex-wrap items-center gap-2">{selectedForm.reviewerId === actor.id && currentVersion && !currentLocked ? <Button type="button" variant="secondary" disabled={busy} onClick={() => void review()}><Lock className="size-4" /> Lock {currentPeriod}</Button> : null}{currentLocked ? <span className="inline-flex items-center gap-1 rounded-full bg-[#e8f7f4] px-2 py-1 text-xs font-bold text-[#0b7f76]"><Lock className="size-3" /> Locked</span> : null}</div></div><p className="mt-3 text-xs text-[#789097]">ผู้ตรวจที่กำหนด: {reviewerName}{selectedForm.reviewerId !== actor.id ? " · เฉพาะผู้ตรวจที่กำหนดเท่านั้นที่ Lock ได้" : ""}</p>{isAdmin && data.reviews.filter((reviewItem) => reviewItem.formId === selectedForm.id).length ? <div className="mt-4 border-t border-[#e6eeee] pt-3"><p className="mb-2 text-xs font-bold text-[#58747d]">งวดที่ Lock แล้ว</p><div className="flex flex-wrap gap-2">{data.reviews.filter((reviewItem) => reviewItem.formId === selectedForm.id).slice(0, 12).map((reviewItem) => <span key={reviewItem.id} className="inline-flex items-center gap-1 rounded border border-[#dbe6e6] bg-[#fbfdfd] px-2 py-1 text-xs text-[#58747d]">{reviewItem.frequency} · {reviewItem.period}<button type="button" disabled={busy} className="ml-1 text-[#a83541] hover:underline" onClick={() => void unlock(reviewItem)} aria-label={`ปลดล็อก ${reviewItem.period}`}><Unlock className="size-3" /></button></span>)}</div></div> : null}</Card> : null}
+        {showReview ? <Card className="p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h4 className="font-bold text-[#173d50]">Review & lock ต่อฟอร์ม</h4><p className="mt-1 text-xs text-[#58747d]">{effectiveReviewFrequency && effectiveReviewPeriod ? `${frequencyLabel(effectiveReviewFrequency)} ล็อกเป็น${routinePeriodKind(effectiveReviewFrequency) === "month" ? "รายเดือน" : "รายปี"} · ${reviewPeriodLabel(effectiveReviewFrequency, effectiveReviewPeriod)}` : "ยังไม่มีรอบ"}</p></div><div className="flex flex-wrap items-center gap-2">{selectedForm.reviewerId === actor.id && effectiveReviewFrequency && effectiveReviewPeriod && !selectedReviewLocked ? <Button type="button" variant="secondary" disabled={busy} onClick={() => void review()}><Lock className="size-4" /> Lock {reviewPeriodLabel(effectiveReviewFrequency, effectiveReviewPeriod)}</Button> : null}{selectedReviewLocked ? <span className="inline-flex items-center gap-1 rounded-full bg-[#e8f7f4] px-2 py-1 text-xs font-bold text-[#0b7f76]"><Lock className="size-3" /> Locked</span> : null}</div></div><div className="mt-4 grid gap-3 sm:grid-cols-2"><Field label="รอบที่ต้องการ Lock"><Select value={effectiveReviewFrequency} disabled={!reviewFrequencies.length} onChange={(event) => { setReviewFrequencySelection(event.target.value as RoutineFrequency); setReviewPeriodSelection("") }}><option value="">— เลือกรอบ —</option>{reviewFrequencies.map((frequency) => <option key={frequency} value={frequency}>{frequencyLabel(frequency)}</option>)}</Select></Field><Field label="งวดที่ต้องการ Lock"><Select value={effectiveReviewPeriod} disabled={!selectedReviewPeriods.length} onChange={(event) => setReviewPeriodSelection(event.target.value)}><option value="">— เลือกงวด —</option>{selectedReviewPeriods.map((item) => <option key={`${item.frequency}:${item.period}`} value={item.period}>{reviewPeriodLabel(item.frequency, item.period)} ({item.period})</option>)}</Select></Field></div><p className="mt-3 text-xs text-[#789097]">เลือกได้ทั้งงวดปัจจุบันและงวดที่ผ่านมา เช่น สิงหาคม เพื่อปิด Review ย้อนหลัง · ผู้ตรวจที่กำหนด: {reviewerName}{selectedForm.reviewerId !== actor.id ? " · เฉพาะผู้ตรวจที่กำหนดเท่านั้นที่ Lock ได้" : ""}</p>{isAdmin && data.reviews.filter((reviewItem) => reviewItem.formId === selectedForm.id).length ? <div className="mt-4 border-t border-[#e6eeee] pt-3"><p className="mb-2 text-xs font-bold text-[#58747d]">งวดที่ Lock แล้ว</p><div className="flex flex-wrap gap-2">{data.reviews.filter((reviewItem) => reviewItem.formId === selectedForm.id).slice(0, 12).map((reviewItem) => <span key={reviewItem.id} className="inline-flex items-center gap-1 rounded border border-[#dbe6e6] bg-[#fbfdfd] px-2 py-1 text-xs text-[#58747d]">{reviewItem.frequency} · {reviewItem.period}<button type="button" disabled={busy} className="ml-1 text-[#a83541] hover:underline" onClick={() => void unlock(reviewItem)} aria-label={`ปลดล็อก ${reviewItem.period}`}><Unlock className="size-3" /></button></span>)}</div></div> : null}</Card> : null}
 
         <Card className="p-0">
           <button type="button" className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-bold text-[#315763] hover:bg-[#f6faf9]" onClick={() => setShowHolidays((value) => !value)}><span>วันยกเว้นของฟอร์ม</span><span className="text-xs text-[#789097]">{showHolidays ? "ซ่อน" : `แสดง (${data.holidays.filter((holiday) => holiday.formId === selectedForm.id).length})`}</span></button>

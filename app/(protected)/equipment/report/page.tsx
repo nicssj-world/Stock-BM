@@ -141,6 +141,12 @@ export default async function EquipmentReportPage({
         </div>
         {records.map((record, index) => {
           const equipment = equipmentMap.get(record.equipmentId);
+          const snapshot = record.equipmentSnapshot;
+          const displayCode = snapshot?.code ?? equipment?.code ?? "-";
+          const displayName = snapshot?.name ?? equipment?.name ?? "เครื่องมือ";
+          const displayModel = snapshot?.model ?? equipment?.model ?? null;
+          const displaySerial =
+            snapshot?.serialNumber ?? equipment?.serialNumber ?? null;
           const equipmentPhoto = equipment?.photos[0];
           const signatures = record.attachments.filter((item) =>
             item.kind.includes("signature"),
@@ -153,7 +159,7 @@ export default async function EquipmentReportPage({
                   <img
                     className="equipment-photo"
                     src={signatureUrls.get(equipmentPhoto.id)}
-                    alt={`รูป ${equipment?.name ?? "เครื่องมือ"}`}
+                    alt={`รูป ${displayName}`}
                   />
                 ) : null}
                 <span className="number">
@@ -161,7 +167,7 @@ export default async function EquipmentReportPage({
                 </span>
                 <div>
                   <h2>
-                    {equipment?.code} · {equipment?.name}
+                    {displayCode} · {displayName}
                   </h2>
                   <p>
                     {EQUIPMENT_EVENT_LABELS[record.eventType]} ·{" "}
@@ -181,8 +187,8 @@ export default async function EquipmentReportPage({
                 </span>
               </div>
               <div className="equipment-line">
-                <span>รุ่น: {equipment?.model ?? "-"}</span>
-                <span>S/N: {equipment?.serialNumber ?? "-"}</span>
+                  <span>รุ่น: {displayModel ?? "-"}</span>
+                  <span>S/N: {displaySerial ?? "-"}</span>
                 <span>
                   สถานะหลังงาน: {equipmentStatusLabel(record.returnStatus)}
                 </span>

@@ -4,6 +4,7 @@ import {
   routineOccurrenceForPlannedDate,
   routinePeriodBounds,
   routinePeriodFor,
+  routineReviewPeriods,
   type RoutineMaintenanceVersion,
 } from './routine-maintenance'
 
@@ -87,6 +88,26 @@ describe('generic routine maintenance schedule', () => {
     expect(routinePeriodFor('yearly', '2026-08-31')).toBe('2026')
     expect(routinePeriodBounds('daily', '2026-02')).toEqual({ from: '2026-02-01', to: '2026-02-28' })
     expect(routinePeriodBounds('yearly', '2024')).toEqual({ from: '2024-01-01', to: '2024-12-31' })
+  })
+
+  it('keeps previous and current calendar periods available for review lock', () => {
+    const periods = routineReviewPeriods(
+      {
+        id: 'form-1',
+        equipmentId: 'equipment-1',
+        name: 'Daily',
+        active: true,
+        reviewerId: null,
+        versions: [version('daily', '2026-07-15')],
+      },
+      '2026-09-02',
+    )
+
+    expect(periods).toEqual([
+      { frequency: 'daily', period: '2026-09' },
+      { frequency: 'daily', period: '2026-08' },
+      { frequency: 'daily', period: '2026-07' },
+    ])
   })
 
   it('resolves a logged date with the exact calculated shifted date', () => {
