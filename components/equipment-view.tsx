@@ -72,7 +72,7 @@ type NoticeState = {
 } | null;
 const tabs = [
   { key: "overview" as const, label: "ภาพรวม", icon: Activity },
-  { key: "registry" as const, label: "เครื่องมือของหน่วยงาน", icon: Stethoscope },
+  { key: "registry" as const, label: "เครื่องมือ", icon: Stethoscope },
   { key: "plans" as const, label: "แผนงาน", icon: CalendarClock },
   { key: "history" as const, label: "ประวัติงาน", icon: History },
   { key: "pending" as const, label: "รอตรวจรับ", icon: ClipboardCheck },
@@ -358,7 +358,7 @@ function SyncControl({
             <RefreshCw className="size-5" aria-hidden="true" />
           </span>
           <div>
-            <h2 className="font-bold text-[#173d50]">เครื่องมือของหน่วยงาน</h2>
+            <h2 className="font-bold text-[#173d50]">เครื่องมือ</h2>
             <p className="mt-1 text-xs leading-5 text-[#58747d]">
               ข้อมูลหลักจาก Portal · แสดงเฉพาะ งานอณูชีววิทยา และงานตรวจพิเศษและห้องปฏิบัติการตรวจต่อ
             </p>

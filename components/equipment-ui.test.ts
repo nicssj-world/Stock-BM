@@ -24,7 +24,7 @@ describe("equipment interface", () => {
   it("provides the five planned work areas and Portal sync controls", () => {
     for (const tab of ["overview", "registry", "plans", "history", "pending"])
       expect(view).toContain(`key: "${tab}"`);
-    expect(view).toContain("เครื่องมือของหน่วยงาน");
+    expect(view).toContain("เครื่องมือ");
     expect(view).toContain("ดึงข้อมูลจาก Portal");
     expect(view).toContain('"/api/equipment/sync"');
     expect(view).toContain("สร้าง QR token ใหม่");

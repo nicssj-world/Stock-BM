@@ -74,13 +74,13 @@ function integrationUrl() {
   const direct = process.env.PORTAL_EQUIPMENT_API_URL?.trim()
   if (direct) return direct
   const base = process.env.PORTAL_PUBLIC_BASE_URL?.trim()
-  if (!base) throw new HttpError(503, 'ยังไม่ได้ตั้งค่า URL ของ Portal สำหรับ Sync')
+  if (!base) throw new HttpError(503, 'ยังไม่ได้ตั้งค่า PORTAL_EQUIPMENT_API_URL หรือ PORTAL_PUBLIC_BASE_URL ใน Stock-BM')
   return `${base.replace(/\/$/, '')}/api/integrations/stock-bm/equipment`
 }
 
 async function fetchPortalPage(page: number, labCode?: string) {
   const token = process.env.STOCK_BM_INTEGRATION_TOKEN?.trim()
-  if (!token) throw new HttpError(503, 'ยังไม่ได้ตั้งค่า Token สำหรับเชื่อมต่อ Portal')
+  if (!token) throw new HttpError(503, 'ยังไม่ได้ตั้งค่า STOCK_BM_INTEGRATION_TOKEN ใน Stock-BM')
   const url = new URL(integrationUrl())
   url.searchParams.set('page', String(page))
   url.searchParams.set('pageSize', String(PAGE_SIZE))
