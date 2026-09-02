@@ -78,6 +78,15 @@ const tabs = [
   { key: "pending" as const, label: "รอตรวจรับ", icon: ClipboardCheck },
 ];
 
+function equipmentPrimaryName(
+  item: Pick<Equipment, "name" | "manufacturer" | "model">,
+) {
+  const identity = [item.manufacturer, item.model]
+    .flatMap((value) => (value?.trim() ? [value.trim()] : []))
+    .join(" · ");
+  return identity || item.name;
+}
+
 export function EquipmentView({
   actor,
   initialData,
@@ -467,6 +476,8 @@ function Registry({
     return [
       item.code,
       item.name,
+      item.manufacturer,
+      item.model,
       item.serialNumber,
       item.assetNumber,
       item.location,
@@ -659,11 +670,10 @@ function Registry({
                 </div>
                 <div className="min-w-0 flex-1">
                   <strong className="block truncate text-sm text-[#173d50]">
-                    {item.code} · {item.name}
+                    {item.code} · {equipmentPrimaryName(item)}
                   </strong>
-                  <p className="mt-1 truncate text-xs text-[#789097]">
-                    {item.model ?? item.category ?? "-"} ·{" "}
-                    {item.location ?? "-"}
+                  <p className="mt-1 truncate text-xs text-[#789097]" title={item.name}>
+                    ประเภทเครื่องมือ: {item.name} · {item.location ?? "-"}
                   </p>
                 </div>
                 <EquipmentStatusBadge status={item.status} />
@@ -695,9 +705,11 @@ function Registry({
                   <p className="mono text-xs font-bold tracking-[.16em] text-[#8fe5dc]">
                     {selected.code}
                   </p>
-                  <h2 className="mt-2 text-2xl font-bold">{selected.name}</h2>
-                  <p className="mt-2 text-sm text-[#c5dfe3]">
-                    {selected.manufacturer ?? "-"} · {selected.model ?? "-"}
+                  <h2 className="mt-2 text-2xl font-bold leading-tight">
+                    {equipmentPrimaryName(selected)}
+                  </h2>
+                  <p className="mt-2 max-w-3xl text-sm leading-5 text-[#c5dfe3]">
+                    ประเภทเครื่องมือ: {selected.name}
                   </p>
                   <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[#b7d7dc]">
                     <span>{selected.portalDepartmentName ?? "ยังไม่ระบุหน่วยงานจาก Portal"}</span>
@@ -721,7 +733,7 @@ function Registry({
                   <img
                     key={photo.id}
                     src={`/api/attachments/${photo.id}`}
-                    alt={`รูป ${selected.name}`}
+                    alt={`รูป ${equipmentPrimaryName(selected)}`}
                     className="aspect-[4/3] w-full rounded-xl border border-[#d9e5e5] bg-white object-cover"
                   />
                 ))}
@@ -1095,7 +1107,7 @@ function Plans({
                   )
                   .map((item) => (
                     <option key={item.id} value={item.id}>
-                      {item.code} · {item.name}
+                      {item.code} · {equipmentPrimaryName(item)}
                     </option>
                   ))}
               </Select>
@@ -1586,7 +1598,7 @@ function WorkHistory({
                 <option value="">ทุกเครื่องมือ</option>
                 {workspace.equipment.map((item) => (
                   <option key={item.id} value={item.id}>
-                    {item.code} · {item.name}
+                    {item.code} · {equipmentPrimaryName(item)}
                   </option>
                 ))}
               </Select>
@@ -1777,7 +1789,7 @@ function WorkHistory({
                 .filter((item) => item.status !== "decommissioned")
                 .map((item) => (
                   <option key={item.id} value={item.id}>
-                    {item.code} · {item.name}
+                    {item.code} · {equipmentPrimaryName(item)}
                   </option>
                 ))}
             </Select>
@@ -2104,8 +2116,15 @@ function OfficialRecordCard({
   const snapshot = record.equipmentSnapshot;
   const equipmentCode = snapshot?.code ?? equipment?.code ?? "-";
   const equipmentName = snapshot?.name ?? equipment?.name ?? "-";
+  const equipmentManufacturer =
+    snapshot?.manufacturer ?? equipment?.manufacturer ?? null;
   const equipmentModel = snapshot?.model ?? equipment?.model ?? null;
   const equipmentSerial = snapshot?.serialNumber ?? equipment?.serialNumber ?? null;
+  const equipmentPrimary = equipmentPrimaryName({
+    name: equipmentName,
+    manufacturer: equipmentManufacturer,
+    model: equipmentModel,
+  });
   const serviceFiles = record.attachments.filter(
     (item) => !isSignatureAttachment(item),
   );
@@ -2146,7 +2165,7 @@ function OfficialRecordCard({
           <div className="relative size-[54px] shrink-0 overflow-hidden rounded-md border border-[#cfdee0] bg-[#edf5f4]">
             <NextImage
               src={`/api/attachments/${equipmentPhoto.id}`}
-              alt={`รูป ${equipmentName}`}
+              alt={`รูป ${equipmentPrimary}`}
               fill
               sizes="54px"
               unoptimized
@@ -2163,7 +2182,7 @@ function OfficialRecordCard({
         </span>
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-sm font-semibold text-[#173d50]">
-            {equipmentCode} · {equipmentName}
+            {equipmentCode} · {equipmentPrimary}
           </h3>
           <p className="truncate text-[11px] text-[#68828a]">
             {recordEventLabel(record)} · {formatDate(record.performedOn)} ·{" "}

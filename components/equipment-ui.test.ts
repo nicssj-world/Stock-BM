@@ -61,6 +61,15 @@ describe("equipment interface", () => {
     expect(view).toContain('"/api/equipment/workspace"');
   });
 
+  it("prioritizes the manufacturer and model as the equipment identity", () => {
+    expect(view).toContain("function equipmentPrimaryName(");
+    expect(view).toContain("{item.code} · {equipmentPrimaryName(item)}");
+    expect(view).toContain("ประเภทเครื่องมือ: {item.name}");
+    expect(view).toContain("ประเภทเครื่องมือ: {selected.name}");
+    expect(view).toContain("const equipmentPrimary = equipmentPrimaryName({");
+    expect(view).toContain("{equipmentCode} · {equipmentPrimary}");
+  });
+
   it("hides IQC and EQA items already linked to the selected equipment", () => {
     expect(view).toContain("const linkedEntityIds = new Set(");
     expect(view).toContain("links.filter((link) => link.module === linkModule)");
