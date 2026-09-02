@@ -399,7 +399,11 @@ function SyncControl({
           <p className="font-semibold text-[#8ba0a5]">สถานะ</p>
           <p className="mt-1 font-semibold text-[#315763]">
             {lastRun?.status === "succeeded"
-              ? `สำเร็จ · ${lastRun.sourceCount} รายการ`
+              ? lastRun.createdCount > 0
+                ? "เพิ่มเครื่องมือสำเร็จ"
+                : lastRun.updatedCount > 0
+                  ? "อัปเดตข้อมูลสำเร็จ"
+                  : "Sync สำเร็จ"
               : lastRun?.status === "failed"
                 ? "ไม่สำเร็จ · ข้อมูลเดิมยังคงอยู่"
                 : lastRun?.status === "running"
