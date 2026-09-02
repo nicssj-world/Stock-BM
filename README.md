@@ -59,7 +59,8 @@ Migration นี้สร้างตาราง `bm_*` แยกจาก `nip
 สำหรับการดึงเครื่องมือจาก Portal ให้ apply migration ของ **Stock-BM เท่านั้น** ต่อจาก
 migration หลักตามลำดับนี้: `20260901150000_portal_equipment_sync.sql`,
 `20260902012011_equipment_portal_photo_sync.sql` และ
-`20260902015245_lab_code_equipment_lookup.sql` ส่วน Portal ใช้เพียง route อ่านข้อมูล
+`20260902015245_lab_code_equipment_lookup.sql`,
+`20260902051127_fix_lab_code_uuid_lookup.sql` ส่วน Portal ใช้เพียง route อ่านข้อมูล
 `/api/integrations/stock-bm/equipment` และไม่ต้องเพิ่ม migration สำหรับการค้นหาด้วยรหัส LAB
 
 ## Bootstrap Admin

@@ -280,8 +280,22 @@ async function getLocalEquipmentIdByLabCode(labCode: string) {
     .ilike('code', labCode)
     .order('id', { ascending: true })
   if (error) throw new HttpError(500, 'ค้นหาเครื่องมือ Stock-BM จากรหัส LAB ไม่สำเร็จ')
-  if ((data ?? []).length > 1) throw new HttpError(409, `รหัส ${labCode} ซ้ำใน Stock-BM`) 
+  if ((data ?? []).length > 1) throw new HttpError(409, `รหัส ${labCode} ซ้ำใน Stock-BM`)
   return data?.[0] ? asString((data[0] as RecordRow).id) : null
+}
+
+async function getLocalEquipmentIdByPortalId(portalEquipmentId: string) {
+  const { data, error } = await getAdminClient()
+    .from('bm_equipment')
+    .select('id')
+    .eq('portal_equipment_id', portalEquipmentId)
+    .maybeSingle()
+  if (error) throw new HttpError(500, 'ตรวจสอบรายการเครื่องมือที่เชื่อมกับ Portal ไม่สำเร็จ')
+  return data ? asString((data as RecordRow).id) : null
+}
+
+function isUuidMinAggregateError(error: { message?: string } | null) {
+  return /function\s+min\(uuid\)\s+does not exist/i.test(error?.message ?? '')
 }
 
 function asString(value: unknown) {
@@ -423,25 +437,90 @@ export async function syncEquipmentByLabCode(actor: BmActor, requestedLabCode: s
   if (runError || !run) throw new HttpError(500, 'เริ่มรายการดึงข้อมูลเครื่องมือไม่สำเร็จ')
   const runId = asString((run as RecordRow).id)
   const stagedPhotoPaths: string[] = []
+  let compatibilityCreatedEquipmentId: string | null = null
+  let compatibilityPortalEquipmentId: string | null = null
 
   try {
     const portal = await fetchPortalEquipmentByLabCode(labCode)
     const localEquipmentId = await getLocalEquipmentIdByLabCode(labCode)
     const photo = await stagePortalPhoto(portal, runId, stagedPhotoPaths)
-    const { data: result, error } = await admin.rpc('sync_bm_equipment_by_lab_code', {
+    const portalPayload = portalPayloadWithoutPhotoUrl(portal)
+    const portalPhoto = photo ? {
+      storage_path: photo.storagePath,
+      file_name: photo.fileName,
+      content_type: photo.contentType,
+      size_bytes: photo.sizeBytes,
+    } : null
+    let syncResponse = await admin.rpc('sync_bm_equipment_by_lab_code', {
       p_sync_run_id: runId,
       p_actor: actor.id,
-      p_portal: portalPayloadWithoutPhotoUrl(portal),
+      p_portal: portalPayload,
       p_local_equipment_id: localEquipmentId,
-      p_portal_photo: photo ? {
-        storage_path: photo.storagePath,
-        file_name: photo.fileName,
-        content_type: photo.contentType,
-        size_bytes: photo.sizeBytes,
-      } : null,
+      p_portal_photo: portalPhoto,
     })
-    if (error) throw new HttpError(500, 'บันทึกเครื่องมือจาก Portal ลง Stock-BM ไม่สำเร็จ')
-    const counts = (result ?? {}) as Record<string, unknown>
+
+    // Older production databases have the first version of this RPC, which
+    // used min(uuid) while looking up a new code. Seed the validated target
+    // through the existing upsert function and retry only for that known
+    // compatibility error. The follow-up migration removes this fallback.
+    if (syncResponse.error && !localEquipmentId && isUuidMinAggregateError(syncResponse.error)) {
+      const existingPortalEquipmentId = await getLocalEquipmentIdByPortalId(portal.portal_equipment_id)
+      const { data: targetValue, error: targetError } = await admin.rpc('upsert_bm_portal_equipment', {
+        p_portal: portalPayload,
+        p_local_equipment_id: null,
+        p_actor: actor.id,
+      })
+      const targetId = asString(targetValue)
+      if (targetError || !targetId) {
+        console.error('Equipment sync compatibility upsert failed', {
+          labCode,
+          code: targetError?.code,
+          message: targetError?.message,
+        })
+        throw new HttpError(500, 'เตรียมรายการเครื่องมือใหม่สำหรับ Sync ไม่สำเร็จ')
+      }
+      if (!existingPortalEquipmentId) {
+        compatibilityCreatedEquipmentId = targetId
+        compatibilityPortalEquipmentId = portal.portal_equipment_id
+      }
+      syncResponse = await admin.rpc('sync_bm_equipment_by_lab_code', {
+        p_sync_run_id: runId,
+        p_actor: actor.id,
+        p_portal: portalPayload,
+        p_local_equipment_id: targetId,
+        p_portal_photo: portalPhoto,
+      })
+    }
+
+    if (syncResponse.error) {
+      console.error('Equipment sync RPC failed', {
+        labCode,
+        code: syncResponse.error.code,
+        message: syncResponse.error.message,
+        details: syncResponse.error.details,
+        hint: syncResponse.error.hint,
+      })
+      throw new HttpError(500, 'บันทึกเครื่องมือจาก Portal ลง Stock-BM ไม่สำเร็จ')
+    }
+
+    const counts = (syncResponse.data ?? {}) as Record<string, unknown>
+    if (compatibilityCreatedEquipmentId) {
+      // The compatibility retry passes an explicit local target to the old
+      // RPC, so correct the audit counters back to “created”.
+      const { error: countError } = await admin
+        .from('bm_equipment_sync_runs')
+        .update({ created_count: 1, updated_count: 0 })
+        .eq('id', runId)
+      if (countError) {
+        console.error('Equipment sync count correction failed', {
+          runId,
+          code: countError.code,
+          message: countError.message,
+        })
+      }
+      counts.created_count = 1
+      counts.updated_count = 0
+    }
     const replacedPhotoPaths = Array.isArray(counts.replaced_photo_paths)
       ? counts.replaced_photo_paths.map(String).filter((path) => !stagedPhotoPaths.includes(path))
       : []
@@ -459,6 +538,20 @@ export async function syncEquipmentByLabCode(actor: BmActor, requestedLabCode: s
     return { runId, counts }
   } catch (error) {
     await removeStoredPaths(stagedPhotoPaths)
+    if (compatibilityCreatedEquipmentId && compatibilityPortalEquipmentId) {
+      const { error: cleanupError } = await admin
+        .from('bm_equipment')
+        .delete()
+        .eq('id', compatibilityCreatedEquipmentId)
+        .eq('portal_equipment_id', compatibilityPortalEquipmentId)
+      if (cleanupError) {
+        console.error('Equipment sync compatibility cleanup failed', {
+          labCode,
+          code: cleanupError.code,
+          message: cleanupError.message,
+        })
+      }
+    }
     await admin.from('bm_equipment_sync_runs').update({
       status: 'failed',
       finished_at: new Date().toISOString(),

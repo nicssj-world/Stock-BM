@@ -106,6 +106,9 @@ export function EquipmentView({
       setNotice({ tone: "success", text: success });
       return true;
     } catch (error) {
+      // Pull the failed run back into the status card so a previous success
+      // is not left visible after a new Sync attempt fails.
+      await refreshWorkspace()
       setNotice({
         tone: "danger",
         text: error instanceof Error ? error.message : "บันทึกไม่สำเร็จ",
