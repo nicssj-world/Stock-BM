@@ -39,11 +39,17 @@ describe("equipment interface", () => {
   });
 
   it("uses the shared classification vocabulary in the form and registry filter", () => {
-    expect(view).toContain('import { equipmentClassificationOptions } from "@/lib/equipment/classifications";');
+    expect(view).toContain('from "@/lib/equipment/classifications";');
+    expect(view).toContain("matchesEquipmentClassification");
     expect(view).toContain('label="Classification"');
     expect(view).toContain('value={classification}');
     expect(view).toContain('ทุก Classification');
     expect(view).toContain('ล้างตัวกรอง');
+  });
+
+  it("keeps the selected detail inside the active equipment filter", () => {
+    expect(view).toContain("filtered.find((item) => item.id === selectedId)");
+    expect(view).toContain("item.category,");
   });
 
   it("keeps Portal master data read-only while exposing local equipment details", () => {

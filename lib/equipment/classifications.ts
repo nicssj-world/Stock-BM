@@ -34,3 +34,25 @@ export function equipmentClassificationOptions(values: readonly (string | null |
     .filter((value): value is string => Boolean(value))
   return [...new Set([...EQUIPMENT_CLASSIFICATIONS, ...legacyValues])]
 }
+
+const CLASSIFICATION_ALIASES: Record<string, readonly string[]> = {
+  bsc: ["bsc", "biosafety cabinet"],
+}
+
+function normalizeClassification(value: string | null | undefined) {
+  return value?.trim().toLocaleLowerCase() ?? ""
+}
+
+/** Match the selected classification against the category and equipment type. */
+export function matchesEquipmentClassification(
+  selected: string,
+  values: readonly (string | null | undefined)[],
+) {
+  const needle = normalizeClassification(selected)
+  if (!needle) return true
+  const aliases = CLASSIFICATION_ALIASES[needle] ?? [needle]
+  return values.some((value) => {
+    const candidate = normalizeClassification(value)
+    return candidate.length > 0 && aliases.some((alias) => candidate.includes(alias))
+  })
+}

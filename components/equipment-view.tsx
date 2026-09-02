@@ -37,7 +37,10 @@ import {
   equipmentDueMonthInput,
   formatEquipmentDueMonth,
 } from "@/lib/equipment/rules";
-import { equipmentClassificationOptions } from "@/lib/equipment/classifications";
+import {
+  equipmentClassificationOptions,
+  matchesEquipmentClassification,
+} from "@/lib/equipment/classifications";
 import type {
   Equipment,
   EquipmentEventType,
@@ -467,15 +470,25 @@ function Registry({
     null,
   );
   const classificationOptions = equipmentClassificationOptions(
-    workspace.equipment.map((item) => item.category),
+    workspace.equipment.flatMap((item) => [
+      item.category,
+      ...(item.category?.trim() ? [] : [item.name]),
+    ]),
   );
   const filtered = workspace.equipment.filter((item) => {
-    if (classification && item.category !== classification) return false;
+    if (
+      !matchesEquipmentClassification(classification, [
+        item.category,
+        item.name,
+      ])
+    )
+      return false;
     const query = search.trim().toLowerCase();
     if (!query) return true;
     return [
       item.code,
       item.name,
+      item.category,
       item.manufacturer,
       item.model,
       item.serialNumber,
@@ -484,7 +497,7 @@ function Registry({
     ].some((value) => value?.toLowerCase().includes(query));
   });
   const selected =
-    workspace.equipment.find((item) => item.id === selectedId) ??
+    filtered.find((item) => item.id === selectedId) ??
     filtered[0] ??
     null;
   function selectEquipment(id: string) {
