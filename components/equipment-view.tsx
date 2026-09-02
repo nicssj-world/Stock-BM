@@ -352,8 +352,8 @@ function SyncControl({
   }
   return (
     <Card className="overflow-hidden border-[#cfe4e1]">
-      <div className="flex flex-col gap-4 bg-[#f1faf8] p-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex gap-3">
+      <div className="flex flex-col gap-4 bg-[#f1faf8] p-4">
+        <div className="flex min-w-0 gap-3">
           <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-[#d9f1ed] text-[#0b7f76]">
             <RefreshCw className="size-5" aria-hidden="true" />
           </span>
@@ -364,7 +364,7 @@ function SyncControl({
             </p>
           </div>
         </div>
-        <form onSubmit={lookup} className="flex w-full flex-col gap-2 sm:max-w-md sm:flex-row">
+        <form onSubmit={lookup} className="flex w-full min-w-0 flex-col gap-2 sm:flex-row">
           <Input
             value={labCode}
             onChange={(event) => setLabCode(event.target.value.toUpperCase())}
@@ -376,6 +376,7 @@ function SyncControl({
           <Button
             type="submit"
             variant="secondary"
+            className="shrink-0 whitespace-nowrap"
             disabled={busy || actor.role === "Assistant" || !labCode.trim()}
           >
             <RefreshCw className={`size-4 ${busy ? "animate-spin" : ""}`} aria-hidden="true" />
@@ -409,7 +410,7 @@ function SyncControl({
       </div>
       {lastRun?.status === "failed" && lastRun.errorMessage ? (
         <div className="border-t border-[#f0d7d9] bg-[#fff7f7] px-4 py-2 text-xs text-[#a83541]">
-          {lastRun.errorMessage}
+          <span className="font-semibold">ผลจากการ Sync ครั้งล่าสุด:</span> {lastRun.errorMessage}
         </div>
       ) : null}
     </Card>
