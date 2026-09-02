@@ -346,10 +346,23 @@ function SyncControl({
   mutate: Mutate;
 }) {
   const [labCode, setLabCode] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
   const lastRun = workspace.sync.lastRun;
   const linkedCount = workspace.equipment.filter(
     (item) => item.portalEquipmentId,
   ).length;
+  const syncStatus =
+    lastRun?.status === "succeeded"
+      ? lastRun.createdCount > 0
+        ? "เพิ่มเครื่องมือสำเร็จ"
+        : lastRun.updatedCount > 0
+          ? "อัปเดตข้อมูลสำเร็จ"
+          : "Sync สำเร็จ"
+      : lastRun?.status === "failed"
+        ? "ไม่สำเร็จ · ข้อมูลเดิมยังคงอยู่"
+        : lastRun?.status === "running"
+          ? "กำลังดำเนินการ"
+          : "รอ Sync ครั้งแรก";
   async function lookup(event: React.FormEvent) {
     event.preventDefault();
     const code = labCode.trim();
@@ -363,76 +376,122 @@ function SyncControl({
       },
       "ดึงข้อมูลเครื่องมือจาก Portal สำเร็จ",
     );
-    if (ok) setLabCode("");
+    if (ok) {
+      setLabCode("");
+      setIsOpen(false);
+    }
   }
   return (
-    <Card className="overflow-hidden border-[#cfe4e1]">
-      <div className="flex flex-col gap-4 bg-[#f1faf8] p-4 sm:p-5 lg:flex-row lg:items-end lg:justify-between">
-        <div className="flex min-w-0 gap-3 lg:max-w-xl">
-          <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-[#d9f1ed] text-[#0b7f76]">
-            <RefreshCw className="size-5" aria-hidden="true" />
-          </span>
-          <div>
-            <h2 className="font-bold text-[#173d50]">เชื่อมข้อมูลเครื่องมือ</h2>
-            <p className="mt-1 text-xs leading-5 text-[#58747d]">
-              ข้อมูลหลักจาก Portal · แสดงเฉพาะ งานอณูชีววิทยา และงานตรวจพิเศษและห้องปฏิบัติการตรวจต่อ
-            </p>
-          </div>
-        </div>
-        <form onSubmit={lookup} className="flex w-full min-w-0 flex-col gap-2 sm:flex-row lg:max-w-xl">
-          <Input
-            value={labCode}
-            onChange={(event) => setLabCode(event.target.value.toUpperCase())}
-            placeholder="LAB-BM-15-002"
-            aria-label="รหัส LAB จาก Portal"
-            disabled={busy || actor.role === "Assistant"}
-            className="min-h-10 flex-1 font-mono text-sm"
-          />
-          <Button
-            type="submit"
-            variant="secondary"
-            className="shrink-0 whitespace-nowrap"
-            disabled={busy || actor.role === "Assistant" || !labCode.trim()}
+    <>
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        {lastRun?.finishedAt ? (
+          <p className="text-xs text-[#789097]">
+            Sync ล่าสุด: <span className="font-semibold text-[#55727c]">{formatDateTime(lastRun.finishedAt)}</span>
+          </p>
+        ) : null}
+        <Button
+          type="button"
+          variant="secondary"
+          className="min-h-10"
+          disabled={actor.role === "Assistant"}
+          aria-haspopup="dialog"
+          onClick={() => setIsOpen(true)}
+        >
+          <RefreshCw className="size-4" aria-hidden="true" />
+          เชื่อมข้อมูลเครื่องมือ
+        </Button>
+      </div>
+      {isOpen ? (
+        <div
+          className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/55 p-3 sm:p-6"
+          role="presentation"
+          onMouseDown={() => setIsOpen(false)}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="equipment-sync-dialog-title"
+            className="mx-auto my-4 w-full max-w-2xl overflow-hidden rounded-lg border border-[#c9dadd] bg-white shadow-2xl sm:my-8"
+            onMouseDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setIsOpen(false);
+            }}
           >
-            <RefreshCw className={`size-4 ${busy ? "animate-spin" : ""}`} aria-hidden="true" />
-            ดึงข้อมูลจาก Portal
-          </Button>
-        </form>
-      </div>
-      <div className="grid gap-0 border-t border-[#dcebea] text-xs text-[#58747d] sm:grid-cols-3">
-        <div className="border-b border-[#edf2f2] px-4 py-3 sm:border-b-0 sm:border-r">
-          <p className="font-semibold text-[#8ba0a5]">รายการที่เชื่อมแล้ว</p>
-          <p className="mono mt-1 text-base font-bold text-[#173d50]">{linkedCount}</p>
-        </div>
-        <div className="border-b border-[#edf2f2] px-4 py-3 sm:border-b-0 sm:border-r">
-          <p className="font-semibold text-[#8ba0a5]">Sync ล่าสุด</p>
-          <p className="mt-1 font-semibold text-[#315763]">
-            {lastRun?.finishedAt ? formatDateTime(lastRun.finishedAt) : "ยังไม่เคย Sync"}
-          </p>
-        </div>
-        <div className="px-4 py-3">
-          <p className="font-semibold text-[#8ba0a5]">สถานะ</p>
-          <p className="mt-1 font-semibold text-[#315763]">
-            {lastRun?.status === "succeeded"
-              ? lastRun.createdCount > 0
-                ? "เพิ่มเครื่องมือสำเร็จ"
-                : lastRun.updatedCount > 0
-                  ? "อัปเดตข้อมูลสำเร็จ"
-                  : "Sync สำเร็จ"
-              : lastRun?.status === "failed"
-                ? "ไม่สำเร็จ · ข้อมูลเดิมยังคงอยู่"
-                : lastRun?.status === "running"
-                  ? "กำลังดำเนินการ"
-                  : "รอ Sync ครั้งแรก"}
-          </p>
-        </div>
-      </div>
-      {lastRun?.status === "failed" && lastRun.errorMessage ? (
-        <div className="border-t border-[#f0d7d9] bg-[#fff7f7] px-4 py-2 text-xs text-[#a83541]">
-          <span className="font-semibold">ผลจากการ Sync ครั้งล่าสุด:</span> {lastRun.errorMessage}
+            <header className="flex items-start justify-between gap-3 border-b border-[#e3ebec] bg-[#f6fafa] px-4 py-3 sm:px-5">
+              <div>
+                <h2 id="equipment-sync-dialog-title" className="font-bold text-[#173d50]">
+                  เชื่อมข้อมูลเครื่องมือ
+                </h2>
+                <p className="mt-1 text-xs leading-5 text-[#789097]">
+                  ใช้รหัส LAB เพื่อดึงข้อมูลเครื่องมือจาก Portal เข้ามาใน Stock-BM
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="ปิดหน้าต่างเชื่อมข้อมูล"
+                className="grid size-9 shrink-0 cursor-pointer place-items-center rounded-md text-[#55727c] transition hover:bg-[#e9f3f2] hover:text-[#173d50] focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none"
+                onClick={() => setIsOpen(false)}
+              >
+                <X className="size-4" aria-hidden="true" />
+              </button>
+            </header>
+            <div className="space-y-4 p-4 sm:p-5">
+              <div className="rounded-md border border-[#cfe4e1] bg-[#f1faf8] px-3 py-2.5">
+                <p className="text-xs font-semibold text-[#315763]">ขอบเขตการเชื่อมต่อ</p>
+                <p className="mt-1 text-xs leading-5 text-[#58747d]">
+                  ข้อมูลหลักจาก Portal · เฉพาะ งานอณูชีววิทยา และงานตรวจพิเศษและห้องปฏิบัติการตรวจต่อ
+                </p>
+              </div>
+              <form onSubmit={lookup} className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                <div className="min-w-0 flex-1">
+                  <Field label="รหัส LAB จาก Portal">
+                    <Input
+                      autoFocus
+                      value={labCode}
+                      onChange={(event) => setLabCode(event.target.value.toUpperCase())}
+                      placeholder="LAB-BM-15-002"
+                      aria-label="รหัส LAB จาก Portal"
+                      disabled={busy || actor.role === "Assistant"}
+                      className="font-mono text-sm"
+                    />
+                  </Field>
+                </div>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  className="shrink-0 whitespace-nowrap"
+                  disabled={busy || actor.role === "Assistant" || !labCode.trim()}
+                >
+                  <RefreshCw className={`size-4 ${busy ? "animate-spin" : ""}`} aria-hidden="true" />
+                  ดึงข้อมูลจาก Portal
+                </Button>
+              </form>
+              <div className="grid gap-0 rounded-md border border-[#e3ebec] text-xs text-[#58747d] sm:grid-cols-3">
+                <div className="border-b border-[#edf2f2] px-4 py-3 sm:border-b-0 sm:border-r">
+                  <p className="font-semibold text-[#8ba0a5]">รายการที่เชื่อมแล้ว</p>
+                  <p className="mono mt-1 text-base font-bold text-[#173d50]">{linkedCount}</p>
+                </div>
+                <div className="border-b border-[#edf2f2] px-4 py-3 sm:border-b-0 sm:border-r">
+                  <p className="font-semibold text-[#8ba0a5]">Sync ล่าสุด</p>
+                  <p className="mt-1 font-semibold text-[#315763]">
+                    {lastRun?.finishedAt ? formatDateTime(lastRun.finishedAt) : "ยังไม่เคย Sync"}
+                  </p>
+                </div>
+                <div className="px-4 py-3">
+                  <p className="font-semibold text-[#8ba0a5]">สถานะ</p>
+                  <p className="mt-1 font-semibold text-[#315763]">{syncStatus}</p>
+                </div>
+              </div>
+              {lastRun?.status === "failed" && lastRun.errorMessage ? (
+                <div className="border-t border-[#f0d7d9] bg-[#fff7f7] px-3 py-2 text-xs text-[#a83541]">
+                  <span className="font-semibold">ผลจากการ Sync ครั้งล่าสุด:</span> {lastRun.errorMessage}
+                </div>
+              ) : null}
+            </div>
+          </section>
         </div>
       ) : null}
-    </Card>
+    </>
   );
 }
 
@@ -619,7 +678,7 @@ function Registry({
   return (
     <div className="space-y-4">
       <SyncControl actor={actor} workspace={workspace} busy={busy} mutate={mutate} />
-      <div className="grid items-start gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+      <div className="grid items-start gap-4 xl:grid-cols-[400px_minmax(0,1fr)]">
         <Card className="overflow-hidden xl:sticky xl:top-4">
           <div className="border-b border-[#e1eaeb] bg-[#fbfdfd] p-4">
             <div className="flex items-start justify-between gap-3">
@@ -685,16 +744,25 @@ function Registry({
                 key={item.id}
                 type="button"
                 onClick={() => selectEquipment(item.id)}
-                className={`group flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors ${selected?.id === item.id ? "bg-[#eaf7f5]" : "hover:bg-[#f8fbfb]"}`}
+                className={`group flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left transition-colors ${selected?.id === item.id ? "bg-[#eaf7f5]" : "hover:bg-[#f8fbfb]"}`}
               >
                 <div className={`grid size-10 shrink-0 place-items-center rounded-lg text-[#0b7f76] transition-colors ${selected?.id === item.id ? "bg-[#d5efeb]" : "bg-[#e8f4f3] group-hover:bg-[#dff1ef]"}`}>
                   <Stethoscope className="size-5" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <strong className="block truncate text-sm text-[#173d50]">
-                    {item.code} · {equipmentPrimaryName(item)}
+                  <p className="mono text-[10px] font-bold tracking-[.08em] text-[#0b7f76]">
+                    {item.code}
+                  </p>
+                  <strong
+                    className="mt-1 block whitespace-normal break-words text-sm font-semibold leading-5 text-[#173d50]"
+                    title={equipmentPrimaryName(item)}
+                  >
+                    {equipmentPrimaryName(item)}
                   </strong>
-                  <p className="mt-1 truncate text-xs text-[#789097]" title={item.name}>
+                  <p
+                    className="mt-1 line-clamp-2 text-xs leading-4 text-[#789097]"
+                    title={`${item.name} · ${item.location ?? "-"}`}
+                  >
                     ประเภทเครื่องมือ: {item.name} · {item.location ?? "-"}
                   </p>
                 </div>
@@ -747,44 +815,44 @@ function Registry({
                 </div>
               </div>
             </div>
-            <div className="grid gap-4 border-b border-[#edf2f2] p-4 sm:p-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(18rem,0.75fr)]">
-              <div className="min-w-0">
-                {selected.photos.length ? (
-                  <div className={selected.photos.length > 1 ? "grid gap-3 sm:grid-cols-2" : "grid gap-3"}>
-                    {selected.photos.map((photo) => (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        key={photo.id}
-                        src={`/api/attachments/${photo.id}`}
-                        alt={`รูป ${equipmentPrimaryName(selected)}`}
-                        className="aspect-[16/10] w-full rounded-xl border border-[#d9e5e5] bg-white object-cover"
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="grid min-h-56 place-items-center rounded-xl border border-dashed border-[#c9dadd] bg-[#f7fbfb] px-4 text-center">
-                    <div>
-                      <Stethoscope className="mx-auto size-8 text-[#8ba0a5]" aria-hidden="true" />
-                      <p className="mt-2 text-sm font-semibold text-[#55727c]">ยังไม่มีรูปเครื่องมือ</p>
-                      <p className="mt-1 text-xs text-[#8ba0a5]">แนบรูปเพื่อให้ทีมระบุเครื่องมือได้เร็วขึ้น</p>
-                    </div>
-                  </div>
-                )}
-                <div className="mt-4">
-                  <AttachmentList
-                    module="equipment"
-                    entityType="equipment"
-                    entityId={selected.id}
-                    kind="equipment-photo"
-                    canDelete={actor.role === "Admin"}
-                    canUpload={actor.role === "Admin"}
-                    accept="image/jpeg,image/png,image/webp"
-                    label="รูปเครื่องมือ"
-                    onChanged={onAttachmentsChanged}
+            {selected.photos.length ? (
+              <div className="grid grid-cols-2 gap-3 border-b border-[#edf2f2] p-4 sm:grid-cols-3">
+                {selected.photos.map((photo) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={photo.id}
+                    src={`/api/attachments/${photo.id}`}
+                    alt={`รูป ${equipmentPrimaryName(selected)}`}
+                    className="aspect-[4/3] w-full rounded-xl border border-[#d9e5e5] bg-white object-cover"
                   />
+                ))}
+              </div>
+            ) : (
+              <div className="border-b border-[#edf2f2] p-4">
+                <div className="grid min-h-48 place-items-center rounded-xl border border-dashed border-[#c9dadd] bg-[#f7fbfb] px-4 text-center">
+                  <div>
+                    <Stethoscope className="mx-auto size-8 text-[#8ba0a5]" aria-hidden="true" />
+                    <p className="mt-2 text-sm font-semibold text-[#55727c]">ยังไม่มีรูปเครื่องมือ</p>
+                    <p className="mt-1 text-xs text-[#8ba0a5]">แนบรูปเพื่อให้ทีมระบุเครื่องมือได้เร็วขึ้น</p>
+                  </div>
                 </div>
               </div>
-              <div className="grid content-start gap-3 sm:grid-cols-2 lg:grid-cols-1">
+            )}
+            <div className="border-b border-[#edf2f2] p-4">
+              <AttachmentList
+                module="equipment"
+                entityType="equipment"
+                entityId={selected.id}
+                kind="equipment-photo"
+                canDelete={actor.role === "Admin"}
+                canUpload={actor.role === "Admin"}
+                accept="image/jpeg,image/png,image/webp"
+                label="รูปเครื่องมือ"
+                onChanged={onAttachmentsChanged}
+              />
+            </div>
+            <div id="selected-equipment-details">
+              <div className="grid gap-3 p-4 sm:grid-cols-3">
                 <Info label="Serial No." value={selected.serialNumber} />
                 <Info label="Asset No." value={selected.assetNumber} />
                 <Info
@@ -803,39 +871,35 @@ function Registry({
                       : null
                   }
                 />
+                <Info label="ประเภท / Classification" value={selected.category} />
+                <Info label="หมายเหตุ" value={selected.note} />
               </div>
-            </div>
-            <div id="selected-equipment-details">
-                <div className="grid gap-3 border-b border-[#edf2f2] p-4 sm:grid-cols-2">
-                  <Info label="ประเภท / Classification" value={selected.category} />
-                  <Info label="หมายเหตุ" value={selected.note} />
-                </div>
-                <div className="grid gap-3 p-4 sm:grid-cols-2">
-                  <Field
-                    label="สถานที่ใช้งานภายใน Stock-BM"
-                    hint="ข้อมูลนี้เป็นของ Stock-BM และ Sync จาก Portal จะไม่เขียนทับ"
+              <div className="grid gap-3 border-t border-[#edf2f2] p-4 sm:grid-cols-2">
+                <Field
+                  label="สถานที่ใช้งานภายใน Stock-BM"
+                  hint="ข้อมูลนี้เป็นของ Stock-BM และ Sync จาก Portal จะไม่เขียนทับ"
+                >
+                  <Select
+                    value={selected.locationId ?? ""}
+                    disabled={busy}
+                    onChange={(event) => void saveLocalLocation(event.target.value)}
                   >
-                    <Select
-                      value={selected.locationId ?? ""}
-                      disabled={busy}
-                      onChange={(event) => void saveLocalLocation(event.target.value)}
-                    >
-                      <option value="">ยังไม่ระบุสถานที่</option>
-                      {workspace.locations.map((location) => (
-                        <option key={location.id} value={location.id}>
-                          {location.code} · {location.name}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                  <div>
-                    <p className="mb-1 text-xs font-semibold text-[#58747d]">สถานที่จาก Portal</p>
-                    <p className="min-h-11 rounded-md border border-dashed border-[#c9dadd] bg-[#f7fbfb] px-3 py-2 text-sm text-[#55727c]">
-                      {selected.portalLocation ?? "ยังไม่ระบุ"}
-                    </p>
-                  </div>
+                    <option value="">ยังไม่ระบุสถานที่</option>
+                    {workspace.locations.map((location) => (
+                      <option key={location.id} value={location.id}>
+                        {location.code} · {location.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <div>
+                  <p className="mb-1 text-xs font-semibold text-[#58747d]">สถานที่จาก Portal</p>
+                  <p className="min-h-11 rounded-md border border-dashed border-[#c9dadd] bg-[#f7fbfb] px-3 py-2 text-sm text-[#55727c]">
+                    {selected.portalLocation ?? "ยังไม่ระบุ"}
+                  </p>
                 </div>
-                <div className="flex flex-wrap gap-2 border-t border-[#edf2f2] p-4">
+              </div>
+              <div className="flex flex-wrap gap-2 border-t border-[#edf2f2] p-4">
                   <a
                     href={`/service/equipment/${selected.qrToken}`}
                     target="_blank"

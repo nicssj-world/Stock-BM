@@ -53,10 +53,17 @@ describe("equipment interface", () => {
   });
 
   it("uses a responsive catalog rail and detail workspace", () => {
-    expect(view).toContain("xl:grid-cols-[360px_minmax(0,1fr)]");
+    expect(view).toContain("xl:grid-cols-[400px_minmax(0,1fr)]");
     expect(view).toContain("xl:sticky xl:top-4");
-    expect(view).toContain("lg:grid-cols-[minmax(0,1.25fr)_minmax(18rem,0.75fr)]");
+    expect(view).toContain("grid grid-cols-2 gap-3 border-b border-[#edf2f2] p-4 sm:grid-cols-3");
     expect(view).toContain("ยังไม่มีรูปเครื่องมือ");
+  });
+
+  it("keeps the infrequent Portal connection workflow behind a dialog", () => {
+    expect(view).toContain('aria-haspopup="dialog"');
+    expect(view).toContain('aria-labelledby="equipment-sync-dialog-title"');
+    expect(view).toContain('aria-label="ปิดหน้าต่างเชื่อมข้อมูล"');
+    expect(view).toContain("setIsOpen(false)");
   });
 
   it("keeps Portal master data read-only while exposing local equipment details", () => {
@@ -76,7 +83,9 @@ describe("equipment interface", () => {
 
   it("prioritizes the manufacturer and model as the equipment identity", () => {
     expect(view).toContain("function equipmentPrimaryName(");
-    expect(view).toContain("{item.code} · {equipmentPrimaryName(item)}");
+    expect(view).toContain("{item.code}");
+    expect(view).toContain("{equipmentPrimaryName(item)}");
+    expect(view).toContain("whitespace-normal break-words");
     expect(view).toContain("ประเภทเครื่องมือ: {item.name}");
     expect(view).toContain("ประเภทเครื่องมือ: {selected.name}");
     expect(view).toContain("const equipmentPrimary = equipmentPrimaryName({");
