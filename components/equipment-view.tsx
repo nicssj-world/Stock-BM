@@ -367,19 +367,19 @@ function SyncControl({
   }
   return (
     <Card className="overflow-hidden border-[#cfe4e1]">
-      <div className="flex flex-col gap-4 bg-[#f1faf8] p-4">
-        <div className="flex min-w-0 gap-3">
+      <div className="flex flex-col gap-4 bg-[#f1faf8] p-4 sm:p-5 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex min-w-0 gap-3 lg:max-w-xl">
           <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-[#d9f1ed] text-[#0b7f76]">
             <RefreshCw className="size-5" aria-hidden="true" />
           </span>
           <div>
-            <h2 className="font-bold text-[#173d50]">เครื่องมือ</h2>
+            <h2 className="font-bold text-[#173d50]">เชื่อมข้อมูลเครื่องมือ</h2>
             <p className="mt-1 text-xs leading-5 text-[#58747d]">
               ข้อมูลหลักจาก Portal · แสดงเฉพาะ งานอณูชีววิทยา และงานตรวจพิเศษและห้องปฏิบัติการตรวจต่อ
             </p>
           </div>
         </div>
-        <form onSubmit={lookup} className="flex w-full min-w-0 flex-col gap-2 sm:flex-row">
+        <form onSubmit={lookup} className="flex w-full min-w-0 flex-col gap-2 sm:flex-row lg:max-w-xl">
           <Input
             value={labCode}
             onChange={(event) => setLabCode(event.target.value.toUpperCase())}
@@ -399,18 +399,18 @@ function SyncControl({
           </Button>
         </form>
       </div>
-      <div className="grid gap-3 border-t border-[#dcebea] p-4 text-xs text-[#58747d] sm:grid-cols-3">
-        <div>
+      <div className="grid gap-0 border-t border-[#dcebea] text-xs text-[#58747d] sm:grid-cols-3">
+        <div className="border-b border-[#edf2f2] px-4 py-3 sm:border-b-0 sm:border-r">
           <p className="font-semibold text-[#8ba0a5]">รายการที่เชื่อมแล้ว</p>
           <p className="mono mt-1 text-base font-bold text-[#173d50]">{linkedCount}</p>
         </div>
-        <div>
+        <div className="border-b border-[#edf2f2] px-4 py-3 sm:border-b-0 sm:border-r">
           <p className="font-semibold text-[#8ba0a5]">Sync ล่าสุด</p>
           <p className="mt-1 font-semibold text-[#315763]">
             {lastRun?.finishedAt ? formatDateTime(lastRun.finishedAt) : "ยังไม่เคย Sync"}
           </p>
         </div>
-        <div>
+        <div className="px-4 py-3">
           <p className="font-semibold text-[#8ba0a5]">สถานะ</p>
           <p className="mt-1 font-semibold text-[#315763]">
             {lastRun?.status === "succeeded"
@@ -617,11 +617,22 @@ function Registry({
     );
   }
   return (
-    <div className="grid gap-4 2xl:grid-cols-[400px_minmax(0,1fr)]">
-      <div className="space-y-4">
-        <SyncControl actor={actor} workspace={workspace} busy={busy} mutate={mutate} />
-        <Card className="overflow-hidden">
-          <div className="border-b border-[#e1eaeb] p-3">
+    <div className="space-y-4">
+      <SyncControl actor={actor} workspace={workspace} busy={busy} mutate={mutate} />
+      <div className="grid items-start gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+        <Card className="overflow-hidden xl:sticky xl:top-4">
+          <div className="border-b border-[#e1eaeb] bg-[#fbfdfd] p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="font-bold text-[#173d50]">รายการเครื่องมือ</h2>
+                <p className="mt-1 text-xs leading-5 text-[#789097]">
+                  เลือกเครื่องมือเพื่อดูข้อมูลและจัดการงานที่เกี่ยวข้อง
+                </p>
+              </div>
+              <span className="mono shrink-0 rounded-full bg-[#e9f4f3] px-2 py-1 text-[11px] font-bold text-[#0b7f76]">
+                {filtered.length}/{workspace.equipment.length}
+              </span>
+            </div>
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,0.65fr)]">
               <label className="block">
                 <span className="mb-1 block text-xs font-semibold text-[#58747d]">
@@ -652,10 +663,8 @@ function Registry({
                 </Select>
               </Field>
             </div>
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#789097]">
-              <span>
-                แสดง {filtered.length} จาก {workspace.equipment.length} เครื่องมือ
-              </span>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#789097]">
+              <span>กำลังแสดงรายการที่ตรงกับตัวกรอง</span>
               {search || classification ? (
                 <button
                   type="button"
@@ -670,15 +679,15 @@ function Registry({
               ) : null}
             </div>
           </div>
-          <div className="max-h-[620px] divide-y divide-[#edf2f2] overflow-y-auto">
+          <div className="max-h-[620px] divide-y divide-[#edf2f2] overflow-y-auto xl:max-h-[calc(100dvh-19rem)]">
             {filtered.length ? filtered.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => selectEquipment(item.id)}
-                className={`flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left ${selected?.id === item.id ? "bg-[#eaf7f5]" : "hover:bg-[#f8fbfb]"}`}
+                className={`group flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors ${selected?.id === item.id ? "bg-[#eaf7f5]" : "hover:bg-[#f8fbfb]"}`}
               >
-                <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-[#e8f4f3] text-[#0b7f76]">
+                <div className={`grid size-10 shrink-0 place-items-center rounded-lg text-[#0b7f76] transition-colors ${selected?.id === item.id ? "bg-[#d5efeb]" : "bg-[#e8f4f3] group-hover:bg-[#dff1ef]"}`}>
                   <Stethoscope className="size-5" />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -708,9 +717,8 @@ function Registry({
             )}
           </div>
         </Card>
-      </div>
       {selected ? (
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <Card className="overflow-hidden">
             <div className="bg-[#123944] p-5 text-white">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -739,56 +747,70 @@ function Registry({
                 </div>
               </div>
             </div>
-            {selected.photos.length ? (
-              <div className="grid grid-cols-2 gap-3 border-b border-[#edf2f2] p-4 sm:grid-cols-3">
-                {selected.photos.map((photo) => (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    key={photo.id}
-                    src={`/api/attachments/${photo.id}`}
-                    alt={`รูป ${equipmentPrimaryName(selected)}`}
-                    className="aspect-[4/3] w-full rounded-xl border border-[#d9e5e5] bg-white object-cover"
+            <div className="grid gap-4 border-b border-[#edf2f2] p-4 sm:p-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(18rem,0.75fr)]">
+              <div className="min-w-0">
+                {selected.photos.length ? (
+                  <div className={selected.photos.length > 1 ? "grid gap-3 sm:grid-cols-2" : "grid gap-3"}>
+                    {selected.photos.map((photo) => (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        key={photo.id}
+                        src={`/api/attachments/${photo.id}`}
+                        alt={`รูป ${equipmentPrimaryName(selected)}`}
+                        className="aspect-[16/10] w-full rounded-xl border border-[#d9e5e5] bg-white object-cover"
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid min-h-56 place-items-center rounded-xl border border-dashed border-[#c9dadd] bg-[#f7fbfb] px-4 text-center">
+                    <div>
+                      <Stethoscope className="mx-auto size-8 text-[#8ba0a5]" aria-hidden="true" />
+                      <p className="mt-2 text-sm font-semibold text-[#55727c]">ยังไม่มีรูปเครื่องมือ</p>
+                      <p className="mt-1 text-xs text-[#8ba0a5]">แนบรูปเพื่อให้ทีมระบุเครื่องมือได้เร็วขึ้น</p>
+                    </div>
+                  </div>
+                )}
+                <div className="mt-4">
+                  <AttachmentList
+                    module="equipment"
+                    entityType="equipment"
+                    entityId={selected.id}
+                    kind="equipment-photo"
+                    canDelete={actor.role === "Admin"}
+                    canUpload={actor.role === "Admin"}
+                    accept="image/jpeg,image/png,image/webp"
+                    label="รูปเครื่องมือ"
+                    onChanged={onAttachmentsChanged}
                   />
-                ))}
+                </div>
               </div>
-            ) : null}
-            <div className="border-b border-[#edf2f2] p-4">
-              <AttachmentList
-                module="equipment"
-                entityType="equipment"
-                entityId={selected.id}
-                kind="equipment-photo"
-                canDelete={actor.role === "Admin"}
-                canUpload={actor.role === "Admin"}
-                accept="image/jpeg,image/png,image/webp"
-                label="รูปเครื่องมือ"
-                onChanged={onAttachmentsChanged}
-              />
+              <div className="grid content-start gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                <Info label="Serial No." value={selected.serialNumber} />
+                <Info label="Asset No." value={selected.assetNumber} />
+                <Info
+                  label="ติดตั้ง"
+                  value={
+                    selected.installedOn
+                      ? formatDate(selected.installedOn)
+                      : null
+                  }
+                />
+                <Info
+                  label="หมดประกัน"
+                  value={
+                    selected.warrantyUntil
+                      ? formatDate(selected.warrantyUntil)
+                      : null
+                  }
+                />
+              </div>
             </div>
             <div id="selected-equipment-details">
-                <div className="grid gap-3 p-4 sm:grid-cols-3">
-                  <Info label="Serial No." value={selected.serialNumber} />
-                  <Info label="Asset No." value={selected.assetNumber} />
-                  <Info
-                    label="ติดตั้ง"
-                    value={
-                      selected.installedOn
-                        ? formatDate(selected.installedOn)
-                        : null
-                    }
-                  />
-                  <Info
-                    label="หมดประกัน"
-                    value={
-                      selected.warrantyUntil
-                        ? formatDate(selected.warrantyUntil)
-                        : null
-                    }
-                  />
-                  <Info label="ประเภท" value={selected.category} />
+                <div className="grid gap-3 border-b border-[#edf2f2] p-4 sm:grid-cols-2">
+                  <Info label="ประเภท / Classification" value={selected.category} />
                   <Info label="หมายเหตุ" value={selected.note} />
                 </div>
-                <div className="grid gap-3 border-t border-[#edf2f2] p-4 sm:grid-cols-2">
+                <div className="grid gap-3 p-4 sm:grid-cols-2">
                   <Field
                     label="สถานที่ใช้งานภายใน Stock-BM"
                     hint="ข้อมูลนี้เป็นของ Stock-BM และ Sync จาก Portal จะไม่เขียนทับ"
@@ -1044,6 +1066,7 @@ function Registry({
       ) : (
         <Empty text="ยังไม่มีเครื่องมือ" />
       )}
+      </div>
     </div>
   );
 }

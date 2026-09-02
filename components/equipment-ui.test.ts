@@ -52,6 +52,13 @@ describe("equipment interface", () => {
     expect(view).toContain("item.category,");
   });
 
+  it("uses a responsive catalog rail and detail workspace", () => {
+    expect(view).toContain("xl:grid-cols-[360px_minmax(0,1fr)]");
+    expect(view).toContain("xl:sticky xl:top-4");
+    expect(view).toContain("lg:grid-cols-[minmax(0,1.25fr)_minmax(18rem,0.75fr)]");
+    expect(view).toContain("ยังไม่มีรูปเครื่องมือ");
+  });
+
   it("keeps Portal master data read-only while exposing local equipment details", () => {
     expect(view).not.toContain("equipmentCardOpen");
     expect(view).toContain('id="selected-equipment-details"');
