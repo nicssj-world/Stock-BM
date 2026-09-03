@@ -16,4 +16,11 @@ describe('Morning Talk server rules', () => {
     expect(service).toContain('You are not assigned to this Morning Talk')
     expect(service).toContain("'morning-talk.acknowledge'")
   })
+
+  it('limits follow-up updates to the right users', () => {
+    expect(service).toContain('updateMorningTalkChecklistItem')
+    expect(service).toContain('Only assigned attendees can update the checklist')
+    expect(service).toContain('Only the action owner or Admin can update this action item')
+    expect(service).toContain("'morning-talk.action.update'")
+  })
 })

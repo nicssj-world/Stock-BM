@@ -1,5 +1,7 @@
 import type { BmRole } from '@/lib/bm/types'
 
+export type MorningTalkActionStatus = 'todo' | 'in-progress' | 'done'
+
 export interface MorningTalkUser {
   id: string
   displayName: string
@@ -15,6 +17,27 @@ export interface MorningTalkAttendee {
   acknowledgedAt: string | null
 }
 
+export interface MorningTalkChecklistItem {
+  id: string
+  title: string
+  sortOrder: number
+  completedAt: string | null
+  completedByName: string | null
+}
+
+export interface MorningTalkActionItem {
+  id: string
+  title: string
+  ownerId: string | null
+  ownerName: string | null
+  dueDate: string | null
+  status: MorningTalkActionStatus
+  note: string | null
+  completedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export interface MorningTalk {
   id: string
   talkDate: string
@@ -23,6 +46,8 @@ export interface MorningTalk {
   createdByName: string | null
   createdAt: string
   attendees: MorningTalkAttendee[]
+  checklistItems: MorningTalkChecklistItem[]
+  actionItems: MorningTalkActionItem[]
 }
 
 export interface MorningTalkWorkspace {

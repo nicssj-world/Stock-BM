@@ -56,6 +56,9 @@ supabase/migrations/202606120001_bm_stock_v1.sql
 
 Migration นี้สร้างตาราง `bm_*` แยกจาก `nipt_stock_*` แต่ผูกบัญชีผู้ใช้กับ `nipt_users`
 
+สำหรับฟีเจอร์ Morning Talk ให้ apply migration ต่อจาก `202607240002_morning_talk.sql` คือ
+`202609030001_morning_talk_followup.sql` เพื่อสร้าง Checklist และ Action items
+
 สำหรับการดึงเครื่องมือจาก Portal ให้ apply migration ของ **Stock-BM เท่านั้น** ต่อจาก
 migration หลักตามลำดับนี้: `20260901150000_portal_equipment_sync.sql`,
 `20260902012011_equipment_portal_photo_sync.sql` และ

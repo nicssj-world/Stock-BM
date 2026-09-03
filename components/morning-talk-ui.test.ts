@@ -13,6 +13,14 @@ describe('Morning Talk interface', () => {
     expect(view).toContain('/acknowledge')
   })
 
+  it('supports checklist completion and accountable action items', () => {
+    expect(view).toContain('Checklist ประจำวัน')
+    expect(view).toContain('Action items / งานติดตาม')
+    expect(view).toContain('/checklist/')
+    expect(view).toContain('/actions/')
+    expect(view).toContain('Action ค้างทั้งหมด')
+  })
+
   it('is visible and protected for every active QMS user', () => {
     expect(shell).toContain("href: '/morning-talk'")
     expect(proxy).toContain("'/morning-talk/:path*'")
