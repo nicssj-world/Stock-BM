@@ -25,10 +25,11 @@ describe('equipment routine response sets migration', () => {
     expect(sql).toContain("(normal_set, 2, 'damaged', 'ชำรุด', '✕')")
   })
 
-  it('backfills every existing version to the legacy set before making the column mandatory', () => {
+  it('links the response set to each checklist item, not the whole version, and backfills existing rows', () => {
+    expect(sql).toContain('alter table public.bm_equipment_routine_form_items')
     expect(sql).toContain('add column if not exists response_set_id uuid')
     expect(sql).toContain('alter column response_set_id set not null')
-    expect(sql).toContain('bm_equipment_routine_form_versions_response_set_fk')
+    expect(sql).toContain('bm_equipment_routine_form_items_response_set_fk')
   })
 
   it('protects the new tables with RLS and refreshes the API schema cache', () => {

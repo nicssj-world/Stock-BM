@@ -3,11 +3,12 @@ import type { BmActor } from '@/lib/bm/types'
 export const ROUTINE_FREQUENCIES = ['daily', 'weekly', 'monthly', 'yearly'] as const
 export type RoutineFrequency = (typeof ROUTINE_FREQUENCIES)[number]
 
-// A response set defines the vocabulary a form's checklist answers with
+// A response set defines the vocabulary a checklist item answers with
 // (e.g. done/not-applicable/not-done, or normal/damaged). Sets are global
-// and reusable; the set a version was created with is fixed for that
-// version, so historical entries always resolve against the set that was
-// actually shown when they were logged.
+// and reusable, and are chosen per checklist item (not per whole form),
+// since one form can mix vocabularies across its items. The set an item
+// was created with is fixed for that item's version, so historical
+// entries always resolve against the set that was actually shown.
 export type RoutineTaskState = string
 
 export type RoutineResponseOption = {
@@ -38,6 +39,8 @@ export type RoutineMaintenanceItem = {
   id: string
   position: number
   label: string
+  responseSetId: string
+  responseSet: RoutineResponseSet
 }
 
 export type RoutineMaintenanceVersion = {
@@ -48,8 +51,6 @@ export type RoutineMaintenanceVersion = {
   startsOn: string
   effectiveOn: string
   items: RoutineMaintenanceItem[]
-  responseSetId: string
-  responseSet: RoutineResponseSet
 }
 
 export type RoutineMaintenanceForm = {

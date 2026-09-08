@@ -42,7 +42,8 @@ function stateMark(entry: RoutineMaintenanceEntry | undefined, label: string, fo
   const state = entry?.taskResults.find((item) => item.label === label)?.state
   if (!state) return ''
   const version = form.versions.find((item) => item.id === entry?.versionId)
-  return version?.responseSet.options.find((option) => option.value === state)?.mark ?? ''
+  const item = version?.items.find((item) => item.label === label)
+  return item?.responseSet.options.find((option) => option.value === state)?.mark ?? ''
 }
 
 function thaiPeriod(frequency: RoutineFrequency, period: string) {

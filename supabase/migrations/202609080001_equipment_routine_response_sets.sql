@@ -70,21 +70,24 @@ begin
   end if;
 end $$;
 
-alter table public.bm_equipment_routine_form_versions
+-- The response set is chosen per checklist item (not per form/version),
+-- since a single form can mix vocabularies (e.g. one item answered
+-- done/not-done, another answered normal/damaged).
+alter table public.bm_equipment_routine_form_items
   add column if not exists response_set_id uuid;
 
-update public.bm_equipment_routine_form_versions version
+update public.bm_equipment_routine_form_items item
    set response_set_id = legacy.id
   from (
     select id from public.bm_equipment_routine_response_sets
      where lower(trim(name)) = lower('ทำแล้ว / N/A / ยังไม่ทำ')
   ) legacy
- where version.response_set_id is null;
+ where item.response_set_id is null;
 
-alter table public.bm_equipment_routine_form_versions
+alter table public.bm_equipment_routine_form_items
   alter column response_set_id set not null;
-alter table public.bm_equipment_routine_form_versions
-  add constraint bm_equipment_routine_form_versions_response_set_fk
+alter table public.bm_equipment_routine_form_items
+  add constraint bm_equipment_routine_form_items_response_set_fk
   foreign key (response_set_id) references public.bm_equipment_routine_response_sets(id);
 
 alter table public.bm_equipment_routine_response_sets enable row level security;

@@ -18,13 +18,13 @@ import { HttpError } from '@/lib/server/errors'
 const frequency = z.enum(['daily', 'weekly', 'monthly', 'yearly'])
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const itemLabel = z.string().trim().min(1).max(500)
+const itemInput = z.object({ label: itemLabel, responseSetId: z.string().uuid() })
 const formFields = {
   name: z.string().trim().min(1).max(200),
   frequency,
   startsOn: date,
   reviewerId: z.string().uuid().nullable().optional(),
-  items: z.array(itemLabel).min(1).max(80),
-  responseSetId: z.string().uuid(),
+  items: z.array(itemInput).min(1).max(80),
   active: z.boolean().optional(),
 }
 const createFormSchema = z.object({ action: z.literal('create-form'), equipmentId: z.string().uuid(), ...formFields })

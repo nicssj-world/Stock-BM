@@ -30,14 +30,15 @@ import { getAdminClient } from '@/lib/supabase/admin'
 type Row = Record<string, unknown>
 type DbError = { message: string; code?: string } | null
 
+export type RoutineMaintenanceItemInput = { label: string; responseSetId: string }
+
 export type RoutineMaintenanceFormInput = {
   equipmentId: string
   name: string
   frequency: RoutineFrequency
   startsOn: string
   reviewerId?: string | null
-  items: string[]
-  responseSetId: string
+  items: RoutineMaintenanceItemInput[]
   active?: boolean
 }
 
@@ -128,16 +129,20 @@ function ensurePeriod(frequency: RoutineFrequency, period: string) {
   if (kind === 'month' && (Number(period.slice(5, 7)) < 1 || Number(period.slice(5, 7)) > 12)) throw new HttpError(400, 'เดือนสำหรับ Review ไม่ถูกต้อง')
 }
 
-function cleanItems(items: string[]) {
+async function cleanItems(items: RoutineMaintenanceItemInput[]) {
   if (!Array.isArray(items) || items.length < 1 || items.length > 80) {
     throw new HttpError(400, 'Checklist ต้องมีอย่างน้อย 1 รายการและไม่เกิน 80 รายการ')
   }
-  const labels = items.map((item) => item.trim())
-  if (labels.some((item) => !item || item.length > 500)) throw new HttpError(400, 'รายการ Checklist ไม่ถูกต้อง')
-  if (new Set(labels.map((item) => item.toLocaleLowerCase())).size !== labels.length) {
+  const labels = items.map((item) => item.label.trim())
+  if (labels.some((label) => !label || label.length > 500)) throw new HttpError(400, 'รายการ Checklist ไม่ถูกต้อง')
+  if (new Set(labels.map((label) => label.toLocaleLowerCase())).size !== labels.length) {
     throw new HttpError(409, 'ห้ามมีรายการ Checklist ซ้ำกัน')
   }
-  return labels
+  const validSetIds = new Set((await fetchResponseSets()).map((set) => set.id))
+  if (items.some((item) => !validSetIds.has(item.responseSetId))) {
+    throw new HttpError(400, 'ไม่พบชุดตัวเลือกที่เลือกในบางรายการ Checklist')
+  }
+  return items.map((item, index) => ({ label: labels[index], responseSetId: item.responseSetId }))
 }
 
 function cleanFormName(name: string) {
@@ -221,13 +226,20 @@ async function rowsFor(table: string, column: string, values: string[]) {
   return (data ?? []) as Row[]
 }
 
-function mapItems(rows: Row[]) {
+function mapItems(rows: Row[], setsById: Map<string, RoutineResponseSet>) {
   return rows
-    .map((row) => ({
-      id: string(row.id),
-      position: number(row.position),
-      label: string(row.label),
-    } satisfies RoutineMaintenanceItem))
+    .map((row) => {
+      const responseSetId = string(row.response_set_id)
+      const responseSet = setsById.get(responseSetId)
+      if (!responseSet) throw new HttpError(500, 'ไม่พบชุดตัวเลือกของรายการ Checklist นี้')
+      return {
+        id: string(row.id),
+        position: number(row.position),
+        label: string(row.label),
+        responseSetId,
+        responseSet,
+      } satisfies RoutineMaintenanceItem
+    })
     .sort((a, b) => a.position - b.position)
 }
 
@@ -235,23 +247,16 @@ function mapVersions(versionRows: Row[], itemRows: Row[], setsById: Map<string, 
   const itemMap = new Map<string, Row[]>()
   for (const row of itemRows) itemMap.set(string(row.version_id), [...(itemMap.get(string(row.version_id)) ?? []), row])
   return versionRows
-    .map((row) => {
-      const responseSetId = string(row.response_set_id)
-      const responseSet = setsById.get(responseSetId)
-      if (!responseSet) throw new HttpError(500, 'ไม่พบชุดตัวเลือกของ Version นี้')
-      return {
-        id: string(row.id),
-        formId: string(row.form_id),
-        versionNumber: number(row.version_number),
-        frequency: validFrequency(row.frequency) ? row.frequency : 'daily',
-        startsOn: string(row.starts_on),
-        // The effective date is represented by starts_on in the current schema.
-        effectiveOn: string(row.starts_on),
-        items: mapItems(itemMap.get(string(row.id)) ?? []),
-        responseSetId,
-        responseSet,
-      } satisfies RoutineMaintenanceVersion
-    })
+    .map((row) => ({
+      id: string(row.id),
+      formId: string(row.form_id),
+      versionNumber: number(row.version_number),
+      frequency: validFrequency(row.frequency) ? row.frequency : 'daily',
+      startsOn: string(row.starts_on),
+      // The effective date is represented by starts_on in the current schema.
+      effectiveOn: string(row.starts_on),
+      items: mapItems(itemMap.get(string(row.id)) ?? [], setsById),
+    } satisfies RoutineMaintenanceVersion))
     .sort((a, b) => a.startsOn.localeCompare(b.startsOn) || a.versionNumber - b.versionNumber)
 }
 
@@ -275,12 +280,6 @@ async function fetchResponseSets() {
 export async function getResponseSetsCatalog() {
   const responseSets = await fetchResponseSets()
   return { responseSets, defaultResponseSetId: responseSets[0]?.id ?? '' }
-}
-
-async function assertResponseSetExists(responseSetId: string) {
-  const { data, error } = await getAdminClient().from('bm_equipment_routine_response_sets').select('id').eq('id', responseSetId).maybeSingle()
-  fail(error)
-  if (!data) throw new HttpError(400, 'ไม่พบชุดตัวเลือกที่เลือก')
 }
 
 function mapTaskResults(value: unknown, items: RoutineMaintenanceItem[]) {
@@ -470,11 +469,10 @@ export async function createRoutineMaintenanceForm(input: RoutineMaintenanceForm
   ensureDate(input.startsOn, 'วันเริ่มต้น')
   if (!validFrequency(input.frequency)) throw new HttpError(400, 'รอบ Maintenance ไม่ถูกต้อง')
   const name = cleanFormName(input.name)
-  const labels = cleanItems(input.items)
+  const items = await cleanItems(input.items)
   const equipment = await equipmentById(input.equipmentId)
   if (string(equipment.status) === 'decommissioned') throw new HttpError(409, 'เครื่องมือถูกเลิกใช้งานแล้ว')
   await assertReviewerExists(input.reviewerId)
-  await assertResponseSetExists(input.responseSetId)
   const admin = getAdminClient()
   const { data: formData, error: formError } = await admin.from('bm_equipment_routine_forms').insert({
     equipment_id: input.equipmentId,
@@ -493,18 +491,17 @@ export async function createRoutineMaintenanceForm(input: RoutineMaintenanceForm
       version_number: 1,
       frequency: input.frequency,
       starts_on: input.startsOn,
-      response_set_id: input.responseSetId,
       created_by: actor.id,
     }).select('id').single()
     fail(versionError)
     const versionId = string((versionData as Row).id)
-    const { error: itemError } = await admin.from('bm_equipment_routine_form_items').insert(labels.map((label, index) => ({ version_id: versionId, position: index + 1, label })))
+    const { error: itemError } = await admin.from('bm_equipment_routine_form_items').insert(items.map((item, index) => ({ version_id: versionId, position: index + 1, label: item.label, response_set_id: item.responseSetId })))
     fail(itemError)
   } catch (error) {
     await admin.from('bm_equipment_routine_forms').delete().eq('id', formId)
     throw error
   }
-  await writeAudit(actor, 'equipment.routine-maintenance.form.create', 'equipment-routine-form', formId, { equipmentId: input.equipmentId, name, frequency: input.frequency, startsOn: input.startsOn, itemCount: labels.length })
+  await writeAudit(actor, 'equipment.routine-maintenance.form.create', 'equipment-routine-form', formId, { equipmentId: input.equipmentId, name, frequency: input.frequency, startsOn: input.startsOn, itemCount: items.length })
   return getRoutineWorkspace(actor, input.equipmentId)
 }
 
@@ -513,10 +510,9 @@ export async function updateRoutineMaintenanceForm(input: RoutineMaintenanceForm
   ensureDate(input.startsOn, 'วันเริ่มต้น')
   if (!validFrequency(input.frequency)) throw new HttpError(400, 'รอบ Maintenance ไม่ถูกต้อง')
   const name = cleanFormName(input.name)
-  const labels = cleanItems(input.items)
+  const items = await cleanItems(input.items)
   const definition = await formDefinition(input.formId)
   await assertReviewerExists(input.reviewerId)
-  await assertResponseSetExists(input.responseSetId)
   const admin = getAdminClient()
   const [entryResult, reviewResult] = await Promise.all([
     admin.from('bm_equipment_routine_maintenance').select('id').eq('form_id', input.formId).limit(1),
@@ -539,11 +535,11 @@ export async function updateRoutineMaintenanceForm(input: RoutineMaintenanceForm
   const versionNumber = (latest?.versionNumber ?? 0) + 1
   let versionId = ''
   try {
-    const { data: versionData, error: versionError } = await admin.from('bm_equipment_routine_form_versions').insert({ form_id: input.formId, version_number: versionNumber, frequency: input.frequency, starts_on: startsOn, response_set_id: input.responseSetId, created_by: actor.id }).select('id').single()
+    const { data: versionData, error: versionError } = await admin.from('bm_equipment_routine_form_versions').insert({ form_id: input.formId, version_number: versionNumber, frequency: input.frequency, starts_on: startsOn, created_by: actor.id }).select('id').single()
     if (isDuplicate(versionError)) throw new HttpError(409, 'ไม่สามารถสร้าง Version ในวันเริ่มต้นนี้ได้')
     fail(versionError)
     versionId = string((versionData as Row).id)
-    const { error: itemError } = await admin.from('bm_equipment_routine_form_items').insert(labels.map((label, index) => ({ version_id: versionId, position: index + 1, label })))
+    const { error: itemError } = await admin.from('bm_equipment_routine_form_items').insert(items.map((item, index) => ({ version_id: versionId, position: index + 1, label: item.label, response_set_id: item.responseSetId })))
     fail(itemError)
     const { error: formError } = await admin.from('bm_equipment_routine_forms').update({ name, reviewer_id: input.reviewerId ?? null, is_active: input.active ?? definition.form.active, updated_by: actor.id, updated_at: new Date().toISOString() }).eq('id', input.formId)
     if (isDuplicate(formError)) throw new HttpError(409, 'มีชื่อฟอร์มนี้ในเครื่องมือแล้ว')
@@ -552,7 +548,7 @@ export async function updateRoutineMaintenanceForm(input: RoutineMaintenanceForm
     if (versionId) await admin.from('bm_equipment_routine_form_versions').delete().eq('id', versionId)
     throw error
   }
-  await writeAudit(actor, 'equipment.routine-maintenance.form.update', 'equipment-routine-form', input.formId, { name, frequency: input.frequency, startsOn, versionId, versionNumber, itemCount: labels.length })
+  await writeAudit(actor, 'equipment.routine-maintenance.form.update', 'equipment-routine-form', input.formId, { name, frequency: input.frequency, startsOn, versionId, versionNumber, itemCount: items.length })
   return getRoutineWorkspace(actor, definition.form.equipmentId)
 }
 
@@ -574,15 +570,15 @@ async function assertUnlocked(formId: string, frequency: RoutineFrequency, date:
 
 function snapshotResults(version: RoutineMaintenanceVersion, results: RoutineMaintenanceLogInput['taskResults']) {
   if (results.length !== version.items.length) throw new HttpError(400, 'จำนวนรายการ Checklist ไม่ถูกต้อง')
-  const validValues = new Set(version.responseSet.options.map((option) => option.value))
   const byId = new Map<string, { itemId: string; label?: string; state: RoutineTaskState }>()
   for (const result of results) {
-    if (!result.itemId || byId.has(result.itemId) || !result.state || !validValues.has(result.state)) throw new HttpError(400, 'รายการ Checklist หรือสถานะไม่ถูกต้อง')
+    if (!result.itemId || byId.has(result.itemId) || !result.state) throw new HttpError(400, 'รายการ Checklist หรือสถานะไม่ถูกต้อง')
     byId.set(result.itemId, result)
   }
   return version.items.map((item) => {
     const result = byId.get(item.id)
     if (!result) throw new HttpError(400, 'รายการ Checklist ไม่ครบถ้วน')
+    if (!item.responseSet.options.some((option) => option.value === result.state)) throw new HttpError(400, 'สถานะไม่ตรงกับชุดตัวเลือกของรายการนี้')
     return { itemId: item.id, label: item.label, state: result.state } satisfies RoutineTaskResult
   })
 }
@@ -709,7 +705,7 @@ export function dueVersion(form: RoutineMaintenanceForm, today = todayBangkok())
 }
 
 async function responseSetUsageCount(responseSetId: string) {
-  const { data, error } = await getAdminClient().from('bm_equipment_routine_form_versions').select('id').eq('response_set_id', responseSetId).limit(1)
+  const { data, error } = await getAdminClient().from('bm_equipment_routine_form_items').select('id').eq('response_set_id', responseSetId).limit(1)
   fail(error)
   return (data ?? []).length
 }
