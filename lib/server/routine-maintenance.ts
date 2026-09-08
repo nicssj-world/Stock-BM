@@ -73,7 +73,7 @@ export type RoutineMaintenanceReviewInput = {
 }
 
 export type RoutineReportCatalog = {
-  equipment: { id: string; code: string; name: string; status: string }[]
+  equipment: { id: string; code: string; name: string; manufacturer: string | null; model: string | null; status: string }[]
   forms: { id: string; equipmentId: string; name: string; active: boolean }[]
 }
 
@@ -448,13 +448,13 @@ export async function getRoutineReportCatalog(actor: BmActor): Promise<RoutineRe
   assertStaff(actor)
   const admin = getAdminClient()
   const [equipmentResult, formResult] = await Promise.all([
-    admin.from('bm_equipment').select('id,code,name,status').order('code'),
+    admin.from('bm_equipment').select('id,code,name,manufacturer,model,status').order('code'),
     admin.from('bm_equipment_routine_forms').select('id,equipment_id,name,is_active').order('name'),
   ])
   fail(equipmentResult.error)
   fail(formResult.error)
   return {
-    equipment: ((equipmentResult.data ?? []) as Row[]).map((row) => ({ id: string(row.id), code: string(row.code), name: string(row.name), status: string(row.status) })),
+    equipment: ((equipmentResult.data ?? []) as Row[]).map((row) => ({ id: string(row.id), code: string(row.code), name: string(row.name), manufacturer: nullable(row.manufacturer), model: nullable(row.model), status: string(row.status) })),
     forms: ((formResult.data ?? []) as Row[]).map((row) => ({ id: string(row.id), equipmentId: string(row.equipment_id), name: string(row.name), active: Boolean(row.is_active) })),
   }
 }
