@@ -3,6 +3,7 @@ import 'server-only'
 import type { BmActor } from '@/lib/bm/types'
 import {
   actorCanBackfill,
+  addRoutineDays,
   addRoutineFrequency,
   currentRoutineVersion,
   routineOccurrenceForPlannedDate,
@@ -21,6 +22,7 @@ import {
   type RoutineTaskResult,
   type RoutineTaskState,
 } from '@/lib/equipment/routine-maintenance'
+import { parseIcsHolidays, THAI_HOLIDAY_ICS_URL } from '@/lib/equipment/google-holidays'
 import { todayBangkok } from '@/lib/bm/rules'
 import { responsibleCodeForDisplayName } from '@/lib/bm/responsible-codes'
 import { writeAudit } from '@/lib/server/audit'
@@ -658,6 +660,34 @@ export async function deleteRoutineHoliday(formId: string, date: string, actor: 
   fail(error)
   await writeAudit(actor, 'equipment.routine-maintenance.holiday.delete', 'equipment-routine-holiday', `${formId}:${date}`, {})
   return getRoutineWorkspace(actor, definition.form.equipmentId)
+}
+
+export async function importGoogleHolidays(equipmentId: string, actor: BmActor) {
+  assertAdmin(actor)
+  let text: string
+  try {
+    const response = await fetch(THAI_HOLIDAY_ICS_URL, { signal: AbortSignal.timeout(10000) })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    text = await response.text()
+  } catch {
+    throw new HttpError(502, 'ดึงข้อมูลวันหยุดจาก Google ไม่สำเร็จ')
+  }
+  const cutoff = addRoutineDays(todayBangkok(), -7)
+  const holidays = parseIcsHolidays(text).filter((holiday) => holiday.date >= cutoff)
+  const admin = getAdminClient()
+  const { data: formRows, error: formError } = await admin.from('bm_equipment_routine_forms').select('id')
+  fail(formError)
+  const formIds = ((formRows ?? []) as Row[]).map((row) => string(row.id))
+  if (!holidays.length || !formIds.length) {
+    return { workspace: await getRoutineWorkspace(actor, equipmentId), imported: 0, skipped: 0 }
+  }
+  const rows = formIds.flatMap((formId) => holidays.map((holiday) => ({ form_id: formId, date: holiday.date, note: holiday.name, created_by: actor.id })))
+  const { data, error } = await admin.from('bm_equipment_routine_holidays').upsert(rows, { onConflict: 'form_id,date', ignoreDuplicates: true }).select('id')
+  fail(error)
+  const imported = (data ?? []).length
+  const skipped = rows.length - imported
+  await writeAudit(actor, 'equipment.routine-maintenance.holiday.import-google', 'equipment-routine-holiday', 'google-import', { holidayCount: holidays.length, formCount: formIds.length, imported, skipped })
+  return { workspace: await getRoutineWorkspace(actor, equipmentId), imported, skipped }
 }
 
 export async function reviewRoutinePeriod(input: RoutineMaintenanceReviewInput, actor: BmActor) {

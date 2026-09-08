@@ -156,6 +156,13 @@ function isWeekend(value: string) {
   return day === 0 || day === 6
 }
 
+// Single source of truth for which day-of-week name to show next to a date,
+// shared by the UI badges and the printed report so they never disagree.
+export function weekendDayLabel(value: string): '' | 'เสาร์' | 'อาทิตย์' {
+  const day = utcDate(value).getUTCDay()
+  return day === 6 ? 'เสาร์' : day === 0 ? 'อาทิตย์' : ''
+}
+
 function monthlyAnchorDate(start: string, occurrenceIndex: number) {
   const { year, month, day } = parseDate(start)
   const absoluteMonth = year * 12 + (month - 1) + occurrenceIndex

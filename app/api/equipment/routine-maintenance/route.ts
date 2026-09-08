@@ -6,6 +6,7 @@ import {
   deleteRoutineHoliday,
   deleteRoutineMaintenanceEntry,
   getRoutineWorkspace,
+  importGoogleHolidays,
   logRoutineMaintenance,
   reviewRoutinePeriod,
   setRoutineHoliday,
@@ -45,6 +46,7 @@ const deleteHolidaySchema = z.object({ action: z.literal('delete-holiday'), form
 const reviewSchema = z.object({ action: z.literal('review'), formId: z.string().uuid(), frequency, period: z.string().regex(/^\d{4}(?:-\d{2})?$/) })
 const unlockSchema = z.object({ action: z.literal('unlock'), formId: z.string().uuid(), frequency, period: z.string().regex(/^\d{4}(?:-\d{2})?$/) })
 const deleteEntrySchema = z.object({ action: z.literal('delete-entry'), id: z.string().uuid() })
+const importHolidaysSchema = z.object({ action: z.literal('import-google-holidays'), equipmentId: z.string().uuid() })
 const schema = z.discriminatedUnion('action', [
   createFormSchema,
   updateFormSchema,
@@ -55,6 +57,7 @@ const schema = z.discriminatedUnion('action', [
   reviewSchema,
   unlockSchema,
   deleteEntrySchema,
+  importHolidaysSchema,
 ])
 
 export async function GET(request: Request) {
@@ -70,6 +73,7 @@ export async function POST(request: Request) {
   return respond(async () => {
     const actor = await requireActor()
     const body = await readJson(request, schema)
+    if (body.action === 'import-google-holidays') return importGoogleHolidays(body.equipmentId, actor)
     const workspace = body.action === 'create-form' ? await createRoutineMaintenanceForm(body, actor)
       : body.action === 'update-form' ? await updateRoutineMaintenanceForm(body, actor)
       : body.action === 'deactivate-form' ? await deactivateRoutineMaintenanceForm(body.formId, actor)

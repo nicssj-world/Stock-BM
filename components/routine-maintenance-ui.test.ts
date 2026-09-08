@@ -9,6 +9,7 @@ const report = readFileSync(join(process.cwd(), 'app/(protected)/equipment/routi
 const qrPage = readFileSync(join(process.cwd(), 'app/(protected)/equipment/routine/[token]/page.tsx'), 'utf8')
 const routineQrPage = readFileSync(join(process.cwd(), 'app/(protected)/equipment/routine/qr/[token]/page.tsx'), 'utf8')
 const routineQrSheet = readFileSync(join(process.cwd(), 'components/routine-qr-sheet.tsx'), 'utf8')
+const routineLib = readFileSync(join(process.cwd(), 'lib/equipment/routine-maintenance.ts'), 'utf8')
 
 describe('generic routine maintenance UI', () => {
   it('mounts the routine workspace for every selected equipment item', () => {
@@ -24,6 +25,16 @@ describe('generic routine maintenance UI', () => {
 
   it('lets admins choose and manage configurable response-option sets per form', () => {
     for (const text of ['responseSetId', 'ResponseSetManager', 'จัดการชุดตัวเลือก', 'response-sets', 'responseSet.options']) expect(routine).toContain(text)
+  })
+
+  it('auto-highlights weekends everywhere a Routine Maintenance date is shown, and can import Thai public holidays from Google', () => {
+    for (const text of ['เสาร์', 'อาทิตย์']) expect(routineLib).toContain(text)
+    expect(routine).toContain('weekendDayLabel')
+    expect(routine).toContain('WeekendTag')
+    expect(routine).toContain('import-google-holidays')
+    expect(routine).toContain('นำเข้าวันหยุดราชการ (Google)')
+    expect(report).toContain('weekendDayLabel')
+    expect(report).toContain('.date-col.weekend')
   })
 
   it('keeps the public QR service page and adds a protected routine link', () => {
