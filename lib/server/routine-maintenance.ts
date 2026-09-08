@@ -648,7 +648,7 @@ export async function setRoutineHoliday(formId: string, date: string, note: stri
   const definition = await formDefinition(formId)
   const { error } = await getAdminClient().from('bm_equipment_routine_holidays').upsert({ form_id: formId, date, note: note?.trim() || null, created_by: actor.id }, { onConflict: 'form_id,date' })
   fail(error)
-  await writeAudit(actor, 'equipment.routine-maintenance.holiday.set', 'equipment-routine-holiday', `${formId}:${date}`, { note: note?.trim() || null })
+  await writeAudit(actor, 'equipment.routine-maintenance.holiday.set', 'equipment-routine-holiday', formId, { date, note: note?.trim() || null })
   return getRoutineWorkspace(actor, definition.form.equipmentId)
 }
 
@@ -658,7 +658,7 @@ export async function deleteRoutineHoliday(formId: string, date: string, actor: 
   const definition = await formDefinition(formId)
   const { error } = await getAdminClient().from('bm_equipment_routine_holidays').delete().eq('form_id', formId).eq('date', date)
   fail(error)
-  await writeAudit(actor, 'equipment.routine-maintenance.holiday.delete', 'equipment-routine-holiday', `${formId}:${date}`, {})
+  await writeAudit(actor, 'equipment.routine-maintenance.holiday.delete', 'equipment-routine-holiday', formId, { date })
   return getRoutineWorkspace(actor, definition.form.equipmentId)
 }
 
@@ -686,7 +686,7 @@ export async function importGoogleHolidays(equipmentId: string, actor: BmActor) 
   fail(error)
   const imported = (data ?? []).length
   const skipped = rows.length - imported
-  await writeAudit(actor, 'equipment.routine-maintenance.holiday.import-google', 'equipment-routine-holiday', 'google-import', { holidayCount: holidays.length, formCount: formIds.length, imported, skipped })
+  await writeAudit(actor, 'equipment.routine-maintenance.holiday.import-google', 'equipment-routine-holiday', undefined, { holidayCount: holidays.length, formCount: formIds.length, imported, skipped })
   return { workspace: await getRoutineWorkspace(actor, equipmentId), imported, skipped }
 }
 
@@ -700,7 +700,7 @@ export async function reviewRoutinePeriod(input: RoutineMaintenanceReviewInput, 
   const { error } = await getAdminClient().from('bm_equipment_routine_reviews').insert({ equipment_id: definition.form.equipmentId, form_id: input.formId, frequency: input.frequency, period: input.period, reviewed_by: actor.id })
   if (isDuplicate(error)) throw new HttpError(409, 'งวดนี้ล็อกแล้ว')
   fail(error)
-  await writeAudit(actor, 'equipment.routine-maintenance.review.lock', 'equipment-routine-review', `${input.formId}:${input.frequency}:${input.period}`, {})
+  await writeAudit(actor, 'equipment.routine-maintenance.review.lock', 'equipment-routine-review', input.formId, { frequency: input.frequency, period: input.period })
   return getRoutineWorkspace(actor, definition.form.equipmentId)
 }
 
@@ -710,7 +710,7 @@ export async function unlockRoutinePeriod(input: RoutineMaintenanceReviewInput, 
   ensurePeriod(input.frequency, input.period)
   const { error } = await getAdminClient().from('bm_equipment_routine_reviews').delete().eq('form_id', input.formId).eq('frequency', input.frequency).eq('period', input.period)
   fail(error)
-  await writeAudit(actor, 'equipment.routine-maintenance.review.unlock', 'equipment-routine-review', `${input.formId}:${input.frequency}:${input.period}`, {})
+  await writeAudit(actor, 'equipment.routine-maintenance.review.unlock', 'equipment-routine-review', input.formId, { frequency: input.frequency, period: input.period })
   return getRoutineWorkspace(actor, definition.form.equipmentId)
 }
 
