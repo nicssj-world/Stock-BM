@@ -16,6 +16,7 @@ import {
   type RoutineMaintenanceReview,
   type RoutineMaintenanceVersion,
   type RoutineMaintenanceWorkspace,
+  type RoutineResponseSet,
   type RoutineSource,
   type RoutineTaskResult,
   type RoutineTaskState,
@@ -36,12 +37,19 @@ export type RoutineMaintenanceFormInput = {
   startsOn: string
   reviewerId?: string | null
   items: string[]
+  responseSetId: string
   active?: boolean
 }
 
 export type RoutineMaintenanceFormUpdateInput = Omit<RoutineMaintenanceFormInput, 'equipmentId'> & {
   formId: string
 }
+
+export type RoutineResponseOptionInput = { id?: string; value: string; label: string; mark: string }
+
+export type RoutineResponseSetCreateInput = { name: string; options: RoutineResponseOptionInput[] }
+
+export type RoutineResponseSetUpdateInput = { id: string; name: string; active: boolean; options: RoutineResponseOptionInput[] }
 
 export type RoutineMaintenanceLogInput = {
   equipmentId?: string
@@ -102,10 +110,6 @@ function validSource(value: unknown): value is RoutineSource {
   return value === 'internal' || value === 'qr'
 }
 
-function validState(value: unknown): value is RoutineTaskState {
-  return value === 'done' || value === 'not-applicable' || value === 'not-done'
-}
-
 function isDateKey(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
   const [year, month, day] = value.split('-').map(Number)
@@ -140,6 +144,31 @@ function cleanFormName(name: string) {
   const value = name.trim()
   if (!value || value.length > 200) throw new HttpError(400, 'ชื่อฟอร์มไม่ถูกต้อง')
   return value
+}
+
+function cleanResponseSetName(name: string) {
+  const value = name.trim()
+  if (!value || value.length > 200) throw new HttpError(400, 'ชื่อชุดตัวเลือกไม่ถูกต้อง')
+  return value
+}
+
+function cleanResponseOptions(options: RoutineResponseOptionInput[]) {
+  if (!Array.isArray(options) || options.length < 1 || options.length > 20) {
+    throw new HttpError(400, 'ชุดตัวเลือกต้องมีอย่างน้อย 1 ตัวเลือกและไม่เกิน 20 ตัวเลือก')
+  }
+  const cleaned = options.map((option) => ({
+    id: option.id,
+    value: option.value.trim(),
+    label: option.label.trim(),
+    mark: option.mark.trim(),
+  }))
+  if (cleaned.some((option) => !option.value || !option.label || !option.mark || option.value.length > 40 || option.label.length > 200 || option.mark.length > 10)) {
+    throw new HttpError(400, 'ตัวเลือกไม่ถูกต้อง')
+  }
+  if (new Set(cleaned.map((option) => option.value.toLocaleLowerCase())).size !== cleaned.length) {
+    throw new HttpError(409, 'ห้ามมีค่าตัวเลือกซ้ำกันในชุดเดียวกัน')
+  }
+  return cleaned
 }
 
 function reviewerCode(actor: BmActor) {
@@ -202,21 +231,56 @@ function mapItems(rows: Row[]) {
     .sort((a, b) => a.position - b.position)
 }
 
-function mapVersions(versionRows: Row[], itemRows: Row[]) {
+function mapVersions(versionRows: Row[], itemRows: Row[], setsById: Map<string, RoutineResponseSet>) {
   const itemMap = new Map<string, Row[]>()
   for (const row of itemRows) itemMap.set(string(row.version_id), [...(itemMap.get(string(row.version_id)) ?? []), row])
   return versionRows
-    .map((row) => ({
-      id: string(row.id),
-      formId: string(row.form_id),
-      versionNumber: number(row.version_number),
-      frequency: validFrequency(row.frequency) ? row.frequency : 'daily',
-      startsOn: string(row.starts_on),
-      // The effective date is represented by starts_on in the current schema.
-      effectiveOn: string(row.starts_on),
-      items: mapItems(itemMap.get(string(row.id)) ?? []),
-    } satisfies RoutineMaintenanceVersion))
+    .map((row) => {
+      const responseSetId = string(row.response_set_id)
+      const responseSet = setsById.get(responseSetId)
+      if (!responseSet) throw new HttpError(500, 'ไม่พบชุดตัวเลือกของ Version นี้')
+      return {
+        id: string(row.id),
+        formId: string(row.form_id),
+        versionNumber: number(row.version_number),
+        frequency: validFrequency(row.frequency) ? row.frequency : 'daily',
+        startsOn: string(row.starts_on),
+        // The effective date is represented by starts_on in the current schema.
+        effectiveOn: string(row.starts_on),
+        items: mapItems(itemMap.get(string(row.id)) ?? []),
+        responseSetId,
+        responseSet,
+      } satisfies RoutineMaintenanceVersion
+    })
     .sort((a, b) => a.startsOn.localeCompare(b.startsOn) || a.versionNumber - b.versionNumber)
+}
+
+async function fetchResponseSets() {
+  const { data: setData, error: setError } = await getAdminClient().from('bm_equipment_routine_response_sets').select('*').order('created_at')
+  fail(setError)
+  const setRows = (setData ?? []) as Row[]
+  const optionRows = await rowsFor('bm_equipment_routine_response_options', 'set_id', setRows.map((row) => string(row.id)))
+  const optionsBySet = new Map<string, Row[]>()
+  for (const row of optionRows) optionsBySet.set(string(row.set_id), [...(optionsBySet.get(string(row.set_id)) ?? []), row])
+  return setRows.map((row) => ({
+    id: string(row.id),
+    name: string(row.name),
+    active: Boolean(row.is_active),
+    options: (optionsBySet.get(string(row.id)) ?? [])
+      .map((option) => ({ id: string(option.id), value: string(option.value), label: string(option.label), mark: string(option.mark), position: number(option.position) }))
+      .sort((a, b) => a.position - b.position),
+  } satisfies RoutineResponseSet))
+}
+
+export async function getResponseSetsCatalog() {
+  const responseSets = await fetchResponseSets()
+  return { responseSets, defaultResponseSetId: responseSets[0]?.id ?? '' }
+}
+
+async function assertResponseSetExists(responseSetId: string) {
+  const { data, error } = await getAdminClient().from('bm_equipment_routine_response_sets').select('id').eq('id', responseSetId).maybeSingle()
+  fail(error)
+  if (!data) throw new HttpError(400, 'ไม่พบชุดตัวเลือกที่เลือก')
 }
 
 function mapTaskResults(value: unknown, items: RoutineMaintenanceItem[]) {
@@ -229,7 +293,7 @@ function mapTaskResults(value: unknown, items: RoutineMaintenanceItem[]) {
     return [{
       itemId,
       label: string(row.label) || item?.label || `Checklist item ${index + 1}`,
-      state: validState(row.state) ? row.state : 'not-done',
+      state: string(row.state),
     } satisfies RoutineTaskResult]
   })
 }
@@ -284,7 +348,9 @@ async function formDefinition(formId: string) {
     .eq('form_id', formId)
     .order('starts_on')
   fail(versionError)
-  const versions = mapVersions((versionData ?? []) as Row[], await rowsFor('bm_equipment_routine_form_items', 'version_id', ((versionData ?? []) as Row[]).map((row) => string(row.id))))
+  const responseSets = await fetchResponseSets()
+  const setsById = new Map(responseSets.map((set) => [set.id, set]))
+  const versions = mapVersions((versionData ?? []) as Row[], await rowsFor('bm_equipment_routine_form_items', 'version_id', ((versionData ?? []) as Row[]).map((row) => string(row.id))), setsById)
   const { data: holidayData, error: holidayError } = await admin
     .from('bm_equipment_routine_holidays')
     .select('id,form_id,date,note')
@@ -325,15 +391,17 @@ export async function getRoutineWorkspace(actor: BmActor, equipmentId: string): 
   const formIds = formRows.map((row) => string(row.id))
   const versionRows = await rowsFor('bm_equipment_routine_form_versions', 'form_id', formIds)
   const versionIds = versionRows.map((row) => string(row.id))
-  const [itemRows, entryResult, holidayRows, reviewResult] = await Promise.all([
+  const [itemRows, entryResult, holidayRows, reviewResult, responseSets] = await Promise.all([
     rowsFor('bm_equipment_routine_form_items', 'version_id', versionIds),
     admin.from('bm_equipment_routine_maintenance').select('*').eq('equipment_id', equipmentId).order('planned_on', { ascending: false }).limit(2000),
     rowsFor('bm_equipment_routine_holidays', 'form_id', formIds),
     admin.from('bm_equipment_routine_reviews').select('*').eq('equipment_id', equipmentId).order('reviewed_at', { ascending: false }).limit(2000),
+    fetchResponseSets(),
   ])
   fail(entryResult.error)
   fail(reviewResult.error)
-  const versions = mapVersions(versionRows, itemRows)
+  const setsById = new Map(responseSets.map((set) => [set.id, set]))
+  const versions = mapVersions(versionRows, itemRows, setsById)
   const versionMap = new Map(versions.map((version) => [version.id, version]))
   const usersRows = (userData.data ?? []) as Row[]
   const names = new Map(usersRows.map((row) => [string(row.id), string(row.display_name)]))
@@ -362,6 +430,8 @@ export async function getRoutineWorkspace(actor: BmActor, equipmentId: string): 
     holidays: holidayRows.map((row) => ({ id: string(row.id), formId: string(row.form_id), date: string(row.date), note: nullable(row.note) })),
     reviews,
     users: usersRows.filter((row) => Boolean(row.is_active)).map((row) => ({ id: string(row.id), displayName: string(row.display_name) })),
+    responseSets,
+    defaultResponseSetId: responseSets[0]?.id ?? '',
     today: todayBangkok(),
   }
 }
@@ -404,6 +474,7 @@ export async function createRoutineMaintenanceForm(input: RoutineMaintenanceForm
   const equipment = await equipmentById(input.equipmentId)
   if (string(equipment.status) === 'decommissioned') throw new HttpError(409, 'เครื่องมือถูกเลิกใช้งานแล้ว')
   await assertReviewerExists(input.reviewerId)
+  await assertResponseSetExists(input.responseSetId)
   const admin = getAdminClient()
   const { data: formData, error: formError } = await admin.from('bm_equipment_routine_forms').insert({
     equipment_id: input.equipmentId,
@@ -422,6 +493,7 @@ export async function createRoutineMaintenanceForm(input: RoutineMaintenanceForm
       version_number: 1,
       frequency: input.frequency,
       starts_on: input.startsOn,
+      response_set_id: input.responseSetId,
       created_by: actor.id,
     }).select('id').single()
     fail(versionError)
@@ -444,6 +516,7 @@ export async function updateRoutineMaintenanceForm(input: RoutineMaintenanceForm
   const labels = cleanItems(input.items)
   const definition = await formDefinition(input.formId)
   await assertReviewerExists(input.reviewerId)
+  await assertResponseSetExists(input.responseSetId)
   const admin = getAdminClient()
   const [entryResult, reviewResult] = await Promise.all([
     admin.from('bm_equipment_routine_maintenance').select('id').eq('form_id', input.formId).limit(1),
@@ -466,7 +539,7 @@ export async function updateRoutineMaintenanceForm(input: RoutineMaintenanceForm
   const versionNumber = (latest?.versionNumber ?? 0) + 1
   let versionId = ''
   try {
-    const { data: versionData, error: versionError } = await admin.from('bm_equipment_routine_form_versions').insert({ form_id: input.formId, version_number: versionNumber, frequency: input.frequency, starts_on: startsOn, created_by: actor.id }).select('id').single()
+    const { data: versionData, error: versionError } = await admin.from('bm_equipment_routine_form_versions').insert({ form_id: input.formId, version_number: versionNumber, frequency: input.frequency, starts_on: startsOn, response_set_id: input.responseSetId, created_by: actor.id }).select('id').single()
     if (isDuplicate(versionError)) throw new HttpError(409, 'ไม่สามารถสร้าง Version ในวันเริ่มต้นนี้ได้')
     fail(versionError)
     versionId = string((versionData as Row).id)
@@ -501,9 +574,10 @@ async function assertUnlocked(formId: string, frequency: RoutineFrequency, date:
 
 function snapshotResults(version: RoutineMaintenanceVersion, results: RoutineMaintenanceLogInput['taskResults']) {
   if (results.length !== version.items.length) throw new HttpError(400, 'จำนวนรายการ Checklist ไม่ถูกต้อง')
+  const validValues = new Set(version.responseSet.options.map((option) => option.value))
   const byId = new Map<string, { itemId: string; label?: string; state: RoutineTaskState }>()
   for (const result of results) {
-    if (!result.itemId || byId.has(result.itemId) || !validState(result.state)) throw new HttpError(400, 'รายการ Checklist หรือสถานะไม่ถูกต้อง')
+    if (!result.itemId || byId.has(result.itemId) || !result.state || !validValues.has(result.state)) throw new HttpError(400, 'รายการ Checklist หรือสถานะไม่ถูกต้อง')
     byId.set(result.itemId, result)
   }
   return version.items.map((item) => {
@@ -632,4 +706,85 @@ export async function deleteRoutineMaintenanceEntry(id: string, actor: BmActor) 
 
 export function dueVersion(form: RoutineMaintenanceForm, today = todayBangkok()) {
   return currentRoutineVersion(form, today)
+}
+
+async function responseSetUsageCount(responseSetId: string) {
+  const { data, error } = await getAdminClient().from('bm_equipment_routine_form_versions').select('id').eq('response_set_id', responseSetId).limit(1)
+  fail(error)
+  return (data ?? []).length
+}
+
+export async function createResponseSet(input: RoutineResponseSetCreateInput, actor: BmActor) {
+  assertAdmin(actor)
+  const name = cleanResponseSetName(input.name)
+  const options = cleanResponseOptions(input.options)
+  const admin = getAdminClient()
+  const { data: setData, error: setError } = await admin.from('bm_equipment_routine_response_sets').insert({ name, created_by: actor.id, updated_by: actor.id }).select('id').single()
+  if (isDuplicate(setError)) throw new HttpError(409, 'มีชื่อชุดตัวเลือกนี้อยู่แล้ว')
+  fail(setError)
+  const setId = string((setData as Row).id)
+  try {
+    const { error: optionError } = await admin.from('bm_equipment_routine_response_options').insert(options.map((option, index) => ({ set_id: setId, position: index + 1, value: option.value, label: option.label, mark: option.mark })))
+    fail(optionError)
+  } catch (error) {
+    await admin.from('bm_equipment_routine_response_sets').delete().eq('id', setId)
+    throw error
+  }
+  await writeAudit(actor, 'equipment.routine-maintenance.response-set.create', 'equipment-routine-response-set', setId, { name, optionCount: options.length })
+  return getResponseSetsCatalog()
+}
+
+export async function updateResponseSet(input: RoutineResponseSetUpdateInput, actor: BmActor) {
+  assertAdmin(actor)
+  const name = cleanResponseSetName(input.name)
+  const options = cleanResponseOptions(input.options)
+  const admin = getAdminClient()
+  const { data: existingSet, error: existingSetError } = await admin.from('bm_equipment_routine_response_sets').select('id').eq('id', input.id).maybeSingle()
+  fail(existingSetError)
+  if (!existingSet) throw new HttpError(404, 'ไม่พบชุดตัวเลือก')
+  const { data: existingOptionsData, error: existingOptionsError } = await admin.from('bm_equipment_routine_response_options').select('id').eq('set_id', input.id)
+  fail(existingOptionsError)
+  const existingOptionIds = new Set(((existingOptionsData ?? []) as Row[]).map((row) => string(row.id)))
+  const keptOptionIds = new Set(options.map((option) => option.id).filter((id): id is string => Boolean(id)))
+  const removedIds = [...existingOptionIds].filter((id) => !keptOptionIds.has(id))
+  if (removedIds.length && await responseSetUsageCount(input.id)) throw new HttpError(409, 'ชุดนี้ถูกใช้งานแล้ว ลบตัวเลือกไม่ได้')
+
+  // Kept options are bumped out of the 1..N range first, otherwise
+  // reordering two options in place can collide with the (set_id, position)
+  // unique index while the update statements run one at a time.
+  for (const [index, option] of options.entries()) {
+    if (option.id && existingOptionIds.has(option.id)) {
+      const { error } = await admin.from('bm_equipment_routine_response_options').update({ position: 1000 + index }).eq('id', option.id)
+      fail(error)
+    }
+  }
+  if (removedIds.length) {
+    const { error } = await admin.from('bm_equipment_routine_response_options').delete().in('id', removedIds)
+    fail(error)
+  }
+  const newOptions = options.map((option, index) => ({ option, index })).filter(({ option }) => !option.id)
+  if (newOptions.length) {
+    const { error } = await admin.from('bm_equipment_routine_response_options').insert(newOptions.map(({ option, index }) => ({ set_id: input.id, position: index + 1, value: option.value, label: option.label, mark: option.mark })))
+    fail(error)
+  }
+  for (const [index, option] of options.entries()) {
+    if (option.id && existingOptionIds.has(option.id)) {
+      const { error } = await admin.from('bm_equipment_routine_response_options').update({ position: index + 1, value: option.value, label: option.label, mark: option.mark }).eq('id', option.id)
+      fail(error)
+    }
+  }
+  const { error: setError } = await admin.from('bm_equipment_routine_response_sets').update({ name, is_active: input.active, updated_by: actor.id, updated_at: new Date().toISOString() }).eq('id', input.id)
+  if (isDuplicate(setError)) throw new HttpError(409, 'มีชื่อชุดตัวเลือกนี้อยู่แล้ว')
+  fail(setError)
+  await writeAudit(actor, 'equipment.routine-maintenance.response-set.update', 'equipment-routine-response-set', input.id, { name, active: input.active, optionCount: options.length })
+  return getResponseSetsCatalog()
+}
+
+export async function deleteResponseSet(id: string, actor: BmActor) {
+  assertAdmin(actor)
+  if (await responseSetUsageCount(id)) throw new HttpError(409, 'ชุดนี้ถูกใช้งานแล้ว ลบไม่ได้')
+  const { error } = await getAdminClient().from('bm_equipment_routine_response_sets').delete().eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'equipment.routine-maintenance.response-set.delete', 'equipment-routine-response-set', id, {})
+  return getResponseSetsCatalog()
 }

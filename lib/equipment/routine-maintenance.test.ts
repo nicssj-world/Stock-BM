@@ -17,6 +17,8 @@ function version(frequency: RoutineMaintenanceVersion['frequency'], startsOn: st
     startsOn,
     effectiveOn: startsOn,
     items: [],
+    responseSetId: 'set-1',
+    responseSet: { id: 'set-1', name: 'test set', active: true, options: [] },
   }
 }
 

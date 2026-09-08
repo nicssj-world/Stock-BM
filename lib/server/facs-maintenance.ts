@@ -55,7 +55,7 @@ export async function getFacsMaintenanceWorkspace(actor: BmActor): Promise<FacsM
       equipmentId: entry.equipmentId,
       frequency: entry.frequency as FacsMaintenanceFrequency,
       performedOn: entry.scheduledOn,
-      taskResults: entry.taskResults.map((item) => ({ state: item.state })),
+      taskResults: entry.taskResults.map((item) => ({ state: item.state as FacsTaskResult['state'] })),
       note: entry.note,
       operatorName: entry.operatorName,
       operatorCode: entry.operatorCode,

@@ -10,7 +10,7 @@ const logSchema = z.object({
   versionId: z.string().uuid(),
   plannedOn: date,
   scheduledOn: date,
-  taskResults: z.array(z.object({ itemId: z.string().uuid(), label: z.string().optional(), state: z.enum(['done', 'not-applicable', 'not-done']) })).min(1).max(80),
+  taskResults: z.array(z.object({ itemId: z.string().uuid(), label: z.string().optional(), state: z.string().trim().min(1).max(60) })).min(1).max(80),
   note: z.string().trim().max(2000).nullable().optional(),
   idempotencyKey: z.string().uuid(),
 })

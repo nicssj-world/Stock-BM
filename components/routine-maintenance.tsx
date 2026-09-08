@@ -14,6 +14,7 @@ import {
   Pencil,
   Plus,
   QrCode,
+  Settings2,
   ShieldCheck,
   Trash2,
   Unlock,
@@ -36,6 +37,8 @@ import {
   type RoutineMaintenanceOccurrence,
   type RoutineMaintenanceReview,
   type RoutineMaintenanceWorkspace,
+  type RoutineResponseOption,
+  type RoutineResponseSet,
   type RoutineReviewPeriod,
   type RoutineTaskResult,
   type RoutineTaskState,
@@ -49,7 +52,17 @@ type Draft = {
   startsOn: string
   reviewerId: string
   items: string[]
+  responseSetId: string
   active: boolean
+}
+
+type OptionDraft = { id?: string; value: string; label: string; mark: string }
+
+type SetDraft = {
+  id: string | null
+  name: string
+  active: boolean
+  options: OptionDraft[]
 }
 
 type LogPayload = {
@@ -75,12 +88,16 @@ function frequencyDescription(value: RoutineFrequency) {
         : "ทุกปี ยึดเดือนและวันที่จากวันเริ่ม"
 }
 
-function taskStateLabel(value: RoutineTaskState) {
-  return value === "done" ? "✓ ทำแล้ว" : value === "not-applicable" ? "N/A ไม่เกี่ยวข้อง" : "✕ ยังไม่ทำ"
+function optionFor(set: RoutineResponseSet | undefined, value: RoutineTaskState): RoutineResponseOption | undefined {
+  return set?.options.find((option) => option.value === value)
 }
 
-function emptyDraft(today: string): Draft {
-  return { formId: null, name: "", frequency: "daily", startsOn: today, reviewerId: "", items: [""], active: true }
+function emptyDraft(today: string, defaultResponseSetId: string): Draft {
+  return { formId: null, name: "", frequency: "daily", startsOn: today, reviewerId: "", items: [""], responseSetId: defaultResponseSetId, active: true }
+}
+
+function emptySetDraft(): SetDraft {
+  return { id: null, name: "", active: true, options: [{ value: "", label: "", mark: "" }] }
 }
 
 function latestVersion(form: RoutineMaintenanceForm) {
@@ -93,6 +110,11 @@ function entryLocked(entry: RoutineMaintenanceEntry, reviews: RoutineMaintenance
 
 function occurrenceLocked(formId: string, frequency: RoutineFrequency, plannedOn: string, reviews: RoutineMaintenanceReview[]) {
   return reviews.some((review) => review.formId === formId && review.frequency === frequency && review.period === routinePeriodFor(frequency, plannedOn))
+}
+
+function resultSummary(entry: RoutineMaintenanceEntry, form: RoutineMaintenanceForm) {
+  const options = form.versions.find((version) => version.id === entry.versionId)?.responseSet.options ?? []
+  return options.map((option) => `${option.mark} ${entry.taskResults.filter((item) => item.state === option.value).length}`).join(" · ")
 }
 
 function reviewPeriodLabel(frequency: RoutineFrequency, period: string) {
@@ -132,7 +154,8 @@ export function RoutineMaintenance({
   const [reviewFrequencySelection, setReviewFrequencySelection] = useState<RoutineFrequency | "">("")
   const [reviewPeriodSelection, setReviewPeriodSelection] = useState("")
   const [builderOpen, setBuilderOpen] = useState(false)
-  const [draft, setDraft] = useState<Draft>(emptyDraft(""))
+  const [draft, setDraft] = useState<Draft>(emptyDraft("", ""))
+  const [managerOpen, setManagerOpen] = useState(false)
   const [logTarget, setLogTarget] = useState<{ form: RoutineMaintenanceForm; occurrence: RoutineMaintenanceOccurrence } | null>(null)
   const [holidayDate, setHolidayDate] = useState("")
   const [holidayNote, setHolidayNote] = useState("")
@@ -196,7 +219,7 @@ export function RoutineMaintenance({
   const nextOccurrence = occurrences.find((occurrence) => occurrence.scheduledOn >= (data?.today ?? ""))
 
   function openCreate() {
-    setDraft(emptyDraft(data?.today ?? ""))
+    setDraft(emptyDraft(data?.today ?? "", data?.defaultResponseSetId ?? ""))
     setBuilderOpen(true)
   }
 
@@ -210,6 +233,7 @@ export function RoutineMaintenance({
       startsOn: version?.startsOn ?? data?.today ?? "",
       reviewerId: form.reviewerId ?? "",
       items: version?.items.map((item) => item.label) ?? [""],
+      responseSetId: version?.responseSetId ?? data?.defaultResponseSetId ?? "",
       active: form.active,
     })
     setBuilderOpen(true)
@@ -225,10 +249,50 @@ export function RoutineMaintenance({
       startsOn: draft.startsOn,
       reviewerId: draft.reviewerId || null,
       items: draft.items,
+      responseSetId: draft.responseSetId,
       active: draft.active,
     }
     const ok = await submit(endpointForInternal(endpoint, token), body, draft.formId ? "สร้าง Version ใหม่ให้ฟอร์มแล้ว" : "เพิ่มฟอร์ม Routine Maintenance แล้ว")
     if (ok) setBuilderOpen(false)
+  }
+
+  async function saveResponseSet(draftSet: SetDraft) {
+    const body = draftSet.id
+      ? { action: "update-set", id: draftSet.id, name: draftSet.name, active: draftSet.active, options: draftSet.options }
+      : { action: "create-set", name: draftSet.name, options: draftSet.options }
+    setBusy(true)
+    setError("")
+    setNotice("")
+    try {
+      const result = await api<{ responseSets: RoutineResponseSet[]; defaultResponseSetId: string }>("/api/equipment/routine-maintenance/response-sets", { method: "POST", body: JSON.stringify(body) })
+      setData((current) => current ? { ...current, responseSets: result.responseSets, defaultResponseSetId: result.defaultResponseSetId } : current)
+      setNotice(draftSet.id ? "บันทึกชุดตัวเลือกแล้ว" : "เพิ่มชุดตัวเลือกแล้ว")
+      setDraft((current) => current.responseSetId ? current : { ...current, responseSetId: result.defaultResponseSetId })
+      return true
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "บันทึกชุดตัวเลือกไม่สำเร็จ")
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function deleteResponseSet(id: string) {
+    if (!window.confirm("ลบชุดตัวเลือกนี้ใช่หรือไม่?")) return false
+    setBusy(true)
+    setError("")
+    setNotice("")
+    try {
+      const result = await api<{ responseSets: RoutineResponseSet[]; defaultResponseSetId: string }>("/api/equipment/routine-maintenance/response-sets", { method: "POST", body: JSON.stringify({ action: "delete-set", id }) })
+      setData((current) => current ? { ...current, responseSets: result.responseSets, defaultResponseSetId: result.defaultResponseSetId } : current)
+      setNotice("ลบชุดตัวเลือกแล้ว")
+      return true
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "ลบชุดตัวเลือกไม่สำเร็จ")
+      return false
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function deactivate(form: RoutineMaintenanceForm) {
@@ -293,6 +357,7 @@ export function RoutineMaintenance({
             <Link className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[#9ed8d1] bg-[#f3fbfa] px-3 text-[#0b7f76] hover:bg-[#e8f7f4]" href={`/equipment/routine/qr/${data.equipment.qrToken}`} target="_blank" rel="noreferrer" aria-label={`เปิด QR Routine Maintenance ของ ${data.equipment.name}`}><QrCode className="size-3.5" /> QR Routine</Link>
             <Link className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[#c9dadd] bg-white px-3 text-[#58747d] hover:bg-[#f4fbfa]" href={`/service/equipment/${data.equipment.qrToken}`} target="_blank" rel="noreferrer" aria-label={`เปิด QR ฟอร์มช่างของ ${data.equipment.name}`}><Wrench className="size-3.5" /> QR ช่าง</Link>
           </> : null}
+          {isAdmin && !token ? <Button type="button" variant="secondary" className="min-h-9" onClick={() => setManagerOpen(true)}><Settings2 className="size-3.5" /> จัดการชุดตัวเลือก</Button> : null}
           {isAdmin && !token ? <Button type="button" className="min-h-9" onClick={openCreate}><Plus className="size-4" /> เพิ่มฟอร์ม</Button> : null}
         </div>
       </div>
@@ -338,12 +403,13 @@ export function RoutineMaintenance({
         <Card className="p-0">
           <button type="button" className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-bold text-[#315763] hover:bg-[#f6faf9]" onClick={() => setShowHistory((value) => !value)}><span className="flex items-center gap-2"><History className="size-4 text-[#0b7f76]" /> ประวัติการทำ Maintenance</span><span className="text-xs text-[#789097]">{showHistory ? "ซ่อน" : `แสดง (${selectedEntries.length})`}</span></button>
         </Card>
-        {showHistory ? <Card className="overflow-x-auto p-0"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-[#f5f9f9] text-xs text-[#58747d]"><tr><th className="p-3">วันที่ตามรอบ</th><th className="p-3">วันที่ทำจริง</th><th className="p-3">ผู้ปฏิบัติ</th><th className="p-3">ผล</th><th className="p-3">หมายเหตุ</th><th className="p-3">แหล่งที่มา</th><th className="p-3">สถานะ</th>{isAdmin ? <th className="p-3 text-right">จัดการ</th> : null}</tr></thead><tbody className="divide-y divide-[#e6eeee]">{selectedEntries.slice(0, 100).map((entry) => { const locked = entryLocked(entry, data.reviews); return <tr key={entry.id}><td className="p-3">{formatDate(entry.plannedOn)}</td><td className="p-3">{entry.scheduledOn !== entry.plannedOn ? <>{formatDate(entry.scheduledOn)} <span className="text-[11px] text-[#a9700f]">(เลื่อน)</span></> : formatDate(entry.scheduledOn)}</td><td className="p-3"><strong>{entry.operatorCode}</strong><span className="ml-1 text-xs text-[#789097]">{entry.operatorName}</span></td><td className="p-3">✓ {entry.taskResults.filter((item) => item.state === "done").length} · N/A {entry.taskResults.filter((item) => item.state === "not-applicable").length} · ✕ {entry.taskResults.filter((item) => item.state === "not-done").length}</td><td className="max-w-[220px] p-3">{entry.note ?? "—"}</td><td className="p-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${entry.source === "qr" ? "bg-[#fff4df] text-[#9a641d]" : "bg-[#eef7f6] text-[#0b7f76]"}`}>{entry.source === "qr" ? "QR" : "ภายในระบบ"}</span></td><td className="p-3">{locked ? <span className="inline-flex items-center gap-1 text-xs font-bold text-[#0b7f76]"><Lock className="size-3" /> Locked</span> : "เปิดแก้ไข"}</td>{isAdmin ? <td className="p-3 text-right">{locked ? <span className="text-xs text-[#789097]">ล็อกแล้ว</span> : <button type="button" disabled={busy} className="text-xs font-bold text-[#a83541] hover:underline disabled:opacity-50" onClick={() => { if (window.confirm(`ลบรายการ ${entry.plannedOn} นี้ใช่หรือไม่?`)) void submit(endpointForInternal(endpoint, token), { action: "delete-entry", id: entry.id }, "ลบรายการแล้ว") }}>ลบ</button>}</td> : null}</tr> })}{!selectedEntries.length ? <tr><td className="p-8 text-center text-[#789097]" colSpan={isAdmin ? 8 : 7}>ยังไม่มีประวัติของฟอร์มนี้</td></tr> : null}</tbody></table></Card> : null}
+        {showHistory ? <Card className="overflow-x-auto p-0"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-[#f5f9f9] text-xs text-[#58747d]"><tr><th className="p-3">วันที่ตามรอบ</th><th className="p-3">วันที่ทำจริง</th><th className="p-3">ผู้ปฏิบัติ</th><th className="p-3">ผล</th><th className="p-3">หมายเหตุ</th><th className="p-3">แหล่งที่มา</th><th className="p-3">สถานะ</th>{isAdmin ? <th className="p-3 text-right">จัดการ</th> : null}</tr></thead><tbody className="divide-y divide-[#e6eeee]">{selectedEntries.slice(0, 100).map((entry) => { const locked = entryLocked(entry, data.reviews); return <tr key={entry.id}><td className="p-3">{formatDate(entry.plannedOn)}</td><td className="p-3">{entry.scheduledOn !== entry.plannedOn ? <>{formatDate(entry.scheduledOn)} <span className="text-[11px] text-[#a9700f]">(เลื่อน)</span></> : formatDate(entry.scheduledOn)}</td><td className="p-3"><strong>{entry.operatorCode}</strong><span className="ml-1 text-xs text-[#789097]">{entry.operatorName}</span></td><td className="p-3">{resultSummary(entry, selectedForm)}</td><td className="max-w-[220px] p-3">{entry.note ?? "—"}</td><td className="p-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${entry.source === "qr" ? "bg-[#fff4df] text-[#9a641d]" : "bg-[#eef7f6] text-[#0b7f76]"}`}>{entry.source === "qr" ? "QR" : "ภายในระบบ"}</span></td><td className="p-3">{locked ? <span className="inline-flex items-center gap-1 text-xs font-bold text-[#0b7f76]"><Lock className="size-3" /> Locked</span> : "เปิดแก้ไข"}</td>{isAdmin ? <td className="p-3 text-right">{locked ? <span className="text-xs text-[#789097]">ล็อกแล้ว</span> : <button type="button" disabled={busy} className="text-xs font-bold text-[#a83541] hover:underline disabled:opacity-50" onClick={() => { if (window.confirm(`ลบรายการ ${entry.plannedOn} นี้ใช่หรือไม่?`)) void submit(endpointForInternal(endpoint, token), { action: "delete-entry", id: entry.id }, "ลบรายการแล้ว") }}>ลบ</button>}</td> : null}</tr> })}{!selectedEntries.length ? <tr><td className="p-8 text-center text-[#789097]" colSpan={isAdmin ? 8 : 7}>ยังไม่มีประวัติของฟอร์มนี้</td></tr> : null}</tbody></table></Card> : null}
       </> : null}
     </> : <Card className="p-6"><p className="font-bold text-[#173d50]">ยังไม่มีฟอร์ม Routine Maintenance สำหรับเครื่องมือนี้</p><p className="mt-1 text-sm text-[#58747d]">Admin สามารถเพิ่มฟอร์มและ Checklist ได้จากปุ่ม “เพิ่มฟอร์ม”</p>{isAdmin && !token ? <Button type="button" className="mt-4" onClick={openCreate}><Plus className="size-4" /> เพิ่มฟอร์มแรก</Button> : null}</Card>}
 
-    {builderOpen ? <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 sm:items-center sm:p-5" role="presentation" onMouseDown={() => setBuilderOpen(false)}><section role="dialog" aria-modal="true" aria-label="Routine Maintenance Form Builder" className="max-h-[94dvh] w-full max-w-3xl overflow-y-auto rounded-t-xl bg-white p-4 shadow-2xl sm:rounded-xl sm:p-6" onMouseDown={(event) => event.stopPropagation()}><div className="flex items-start justify-between gap-3"><div><p className="text-[11px] font-bold tracking-[.16em] text-[#0b7f76] uppercase">Form Builder</p><h3 className="mt-1 text-xl font-bold text-[#173d50]">{draft.formId ? "แก้ไขฟอร์มและสร้าง Version ใหม่" : "เพิ่ม Routine Maintenance Form"}</h3><p className="mt-1 text-xs text-[#789097]">Checklist เท่านั้น · แก้ไขรายการแล้วประวัติเดิมจะใช้ Snapshot ของ Version เดิม</p></div><button type="button" onClick={() => setBuilderOpen(false)} className="rounded p-1 text-[#58747d] hover:bg-[#eef5f4]" aria-label="ปิด"><X className="size-5" /></button></div><form className="mt-5 space-y-4" onSubmit={saveDraft}><div className="grid gap-3 sm:grid-cols-2"><Field label="ชื่อฟอร์ม *"><Input required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="เช่น Weekly Cleaning" /></Field><Field label="รอบ *"><Select value={draft.frequency} onChange={(event) => setDraft({ ...draft, frequency: event.target.value as RoutineFrequency })}>{(["daily", "weekly", "monthly", "yearly"] as RoutineFrequency[]).map((frequency) => <option key={frequency} value={frequency}>{frequencyLabel(frequency)} · {frequencyDescription(frequency)}</option>)}</Select></Field><Field label="วันเริ่มต้น *" hint="ใช้เป็นวันตั้งต้นในการคำนวณรอบ"><Input required type="date" value={draft.startsOn} onChange={(event) => setDraft({ ...draft, startsOn: event.target.value })} /></Field><Field label="ผู้ตรวจประจำฟอร์ม"><Select value={draft.reviewerId} onChange={(event) => setDraft({ ...draft, reviewerId: event.target.value })}><option value="">— ยังไม่กำหนด —</option>{data.users.map((user) => <option key={user.id} value={user.id}>{user.displayName}</option>)}</Select></Field></div><label className="flex items-center gap-2 text-sm text-[#315763]"><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} className="size-4 accent-[#0b7f76]" /> เปิดใช้งานฟอร์ม</label><div className="rounded-lg border border-[#dbe6e6] bg-[#fbfdfd] p-3"><div className="flex items-center justify-between gap-3"><div><h4 className="font-bold text-[#173d50]">Checklist</h4><p className="text-xs text-[#789097]">เพิ่ม ลบ และเลื่อนลำดับรายการได้</p></div><Button type="button" variant="secondary" className="min-h-9" onClick={() => setDraft({ ...draft, items: [...draft.items, ""] })}><Plus className="size-3.5" /> เพิ่มรายการ</Button></div><div className="mt-3 space-y-2">{draft.items.map((item, index) => <div key={`${index}-${item}`} className="flex items-start gap-2"><span className="mt-3 w-6 text-center text-xs font-bold text-[#789097]">{index + 1}</span><Input required value={item} onChange={(event) => setDraft({ ...draft, items: draft.items.map((current, itemIndex) => itemIndex === index ? event.target.value : current) })} placeholder="รายการตรวจสอบ" /><Button type="button" variant="ghost" className="min-h-11 px-2" disabled={draft.items.length <= 1} onClick={() => setDraft({ ...draft, items: draft.items.filter((_, itemIndex) => itemIndex !== index) })} aria-label={`ลบรายการที่ ${index + 1}`}><Trash2 className="size-4 text-[#a83541]" /></Button><div className="flex flex-col"><Button type="button" variant="ghost" className="min-h-5 px-1 py-0" disabled={index === 0} onClick={() => { const items = [...draft.items]; [items[index - 1], items[index]] = [items[index], items[index - 1]]; setDraft({ ...draft, items }) }} aria-label="เลื่อนขึ้น"><ArrowUp className="size-3.5" /></Button><Button type="button" variant="ghost" className="min-h-5 px-1 py-0" disabled={index === draft.items.length - 1} onClick={() => { const items = [...draft.items]; [items[index], items[index + 1]] = [items[index + 1], items[index]]; setDraft({ ...draft, items }) }} aria-label="เลื่อนลง"><ArrowDown className="size-3.5" /></Button></div></div>)}</div></div><div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setBuilderOpen(false)}>ยกเลิก</Button><Button type="submit" disabled={busy}><ClipboardCheck className="size-4" /> บันทึกฟอร์ม</Button></div></form></section></div> : null}
+    {builderOpen ? <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 sm:items-center sm:p-5" role="presentation" onMouseDown={() => setBuilderOpen(false)}><section role="dialog" aria-modal="true" aria-label="Routine Maintenance Form Builder" className="max-h-[94dvh] w-full max-w-3xl overflow-y-auto rounded-t-xl bg-white p-4 shadow-2xl sm:rounded-xl sm:p-6" onMouseDown={(event) => event.stopPropagation()}><div className="flex items-start justify-between gap-3"><div><p className="text-[11px] font-bold tracking-[.16em] text-[#0b7f76] uppercase">Form Builder</p><h3 className="mt-1 text-xl font-bold text-[#173d50]">{draft.formId ? "แก้ไขฟอร์มและสร้าง Version ใหม่" : "เพิ่ม Routine Maintenance Form"}</h3><p className="mt-1 text-xs text-[#789097]">Checklist เท่านั้น · แก้ไขรายการแล้วประวัติเดิมจะใช้ Snapshot ของ Version เดิม</p></div><button type="button" onClick={() => setBuilderOpen(false)} className="rounded p-1 text-[#58747d] hover:bg-[#eef5f4]" aria-label="ปิด"><X className="size-5" /></button></div><form className="mt-5 space-y-4" onSubmit={saveDraft}><div className="grid gap-3 sm:grid-cols-2"><Field label="ชื่อฟอร์ม *"><Input required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="เช่น Weekly Cleaning" /></Field><Field label="รอบ *"><Select value={draft.frequency} onChange={(event) => setDraft({ ...draft, frequency: event.target.value as RoutineFrequency })}>{(["daily", "weekly", "monthly", "yearly"] as RoutineFrequency[]).map((frequency) => <option key={frequency} value={frequency}>{frequencyLabel(frequency)} · {frequencyDescription(frequency)}</option>)}</Select></Field><Field label="วันเริ่มต้น *" hint="ใช้เป็นวันตั้งต้นในการคำนวณรอบ"><Input required type="date" value={draft.startsOn} onChange={(event) => setDraft({ ...draft, startsOn: event.target.value })} /></Field><Field label="ผู้ตรวจประจำฟอร์ม"><Select value={draft.reviewerId} onChange={(event) => setDraft({ ...draft, reviewerId: event.target.value })}><option value="">— ยังไม่กำหนด —</option>{data.users.map((user) => <option key={user.id} value={user.id}>{user.displayName}</option>)}</Select></Field><Field label="รูปแบบผลลัพธ์ *" hint="เลือกชุดตัวเลือกที่ใช้ตอบแต่ละรายการ Checklist"><div className="flex items-center gap-2"><Select required className="flex-1" value={draft.responseSetId} onChange={(event) => setDraft({ ...draft, responseSetId: event.target.value })}>{data.responseSets.filter((set) => set.active || set.id === draft.responseSetId).map((set) => <option key={set.id} value={set.id}>{set.name}</option>)}</Select><Button type="button" variant="ghost" className="min-h-9 px-2" onClick={() => setManagerOpen(true)} aria-label="จัดการชุดตัวเลือก"><Settings2 className="size-4 text-[#58747d]" /></Button></div></Field></div><label className="flex items-center gap-2 text-sm text-[#315763]"><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} className="size-4 accent-[#0b7f76]" /> เปิดใช้งานฟอร์ม</label><div className="rounded-lg border border-[#dbe6e6] bg-[#fbfdfd] p-3"><div className="flex items-center justify-between gap-3"><div><h4 className="font-bold text-[#173d50]">Checklist</h4><p className="text-xs text-[#789097]">เพิ่ม ลบ และเลื่อนลำดับรายการได้</p></div><Button type="button" variant="secondary" className="min-h-9" onClick={() => setDraft({ ...draft, items: [...draft.items, ""] })}><Plus className="size-3.5" /> เพิ่มรายการ</Button></div><div className="mt-3 space-y-2">{draft.items.map((item, index) => <div key={`${index}-${item}`} className="flex items-start gap-2"><span className="mt-3 w-6 text-center text-xs font-bold text-[#789097]">{index + 1}</span><Input required value={item} onChange={(event) => setDraft({ ...draft, items: draft.items.map((current, itemIndex) => itemIndex === index ? event.target.value : current) })} placeholder="รายการตรวจสอบ" /><Button type="button" variant="ghost" className="min-h-11 px-2" disabled={draft.items.length <= 1} onClick={() => setDraft({ ...draft, items: draft.items.filter((_, itemIndex) => itemIndex !== index) })} aria-label={`ลบรายการที่ ${index + 1}`}><Trash2 className="size-4 text-[#a83541]" /></Button><div className="flex flex-col"><Button type="button" variant="ghost" className="min-h-5 px-1 py-0" disabled={index === 0} onClick={() => { const items = [...draft.items]; [items[index - 1], items[index]] = [items[index], items[index - 1]]; setDraft({ ...draft, items }) }} aria-label="เลื่อนขึ้น"><ArrowUp className="size-3.5" /></Button><Button type="button" variant="ghost" className="min-h-5 px-1 py-0" disabled={index === draft.items.length - 1} onClick={() => { const items = [...draft.items]; [items[index], items[index + 1]] = [items[index + 1], items[index]]; setDraft({ ...draft, items }) }} aria-label="เลื่อนลง"><ArrowDown className="size-3.5" /></Button></div></div>)}</div></div><div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setBuilderOpen(false)}>ยกเลิก</Button><Button type="submit" disabled={busy}><ClipboardCheck className="size-4" /> บันทึกฟอร์ม</Button></div></form></section></div> : null}
     {logTarget && selectedForm ? <RoutineLogDialog key={`${logTarget.form.id}:${logTarget.occurrence.versionId}:${logTarget.occurrence.plannedOn}`} actor={actor} form={logTarget.form} occurrence={logTarget.occurrence} entries={data.entries} reviews={data.reviews} holidays={new Set(data.holidays.filter((holiday) => holiday.formId === logTarget.form.id).map((holiday) => holiday.date))} today={data.today} busy={busy} onClose={() => setLogTarget(null)} onSave={(payload) => void saveLog(payload)} /> : null}
+    {managerOpen ? <ResponseSetManager sets={data.responseSets} busy={busy} onClose={() => setManagerOpen(false)} onSave={(draftSet) => saveResponseSet(draftSet)} onDelete={(id) => deleteResponseSet(id)} /> : null}
   </div>
 }
 
@@ -376,7 +442,8 @@ function RoutineLogDialog({
 }) {
   const version = form.versions.find((item) => item.id === occurrence.versionId) ?? latestVersion(form)
   const [plannedDate, setPlannedDate] = useState(occurrence.plannedOn)
-  const [results, setResults] = useState<RoutineTaskResult[]>(() => version?.items.map((item) => ({ itemId: item.id, label: item.label, state: "done" })) ?? [])
+  const defaultState = version?.responseSet.options[0]?.value ?? ""
+  const [results, setResults] = useState<RoutineTaskResult[]>(() => version?.items.map((item) => ({ itemId: item.id, label: item.label, state: defaultState })) ?? [])
   const [note, setNote] = useState("")
   if (!version) return null
   const resolved = routineOccurrenceForPlannedDate(version, plannedDate, holidays)
@@ -394,5 +461,85 @@ function RoutineLogDialog({
     onSave({ formId: form.id, versionId: version.id, plannedOn: resolved.plannedOn, scheduledOn: resolved.scheduledOn, taskResults: results, note: note.trim() || null })
   }
 
-  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 sm:items-center sm:p-5" role="presentation" onMouseDown={onClose}><section role="dialog" aria-modal="true" aria-label={`${form.name} checklist`} className="max-h-[94dvh] w-full max-w-3xl overflow-y-auto rounded-t-xl bg-white p-4 shadow-2xl sm:rounded-xl sm:p-6" onMouseDown={(event) => event.stopPropagation()}><div className="flex items-start justify-between gap-3"><div><p className="text-[11px] font-bold tracking-[.16em] text-[#0b7f76] uppercase">Routine Maintenance Checklist</p><h3 className="mt-1 text-xl font-bold text-[#173d50]">{form.name}</h3><p className="mt-1 text-sm text-[#58747d]">Version {version.versionNumber} · {frequencyLabel(version.frequency)}</p></div><button type="button" onClick={onClose} className="rounded p-1 text-[#58747d] hover:bg-[#eef5f4]" aria-label="ปิด"><X className="size-5" /></button></div><form className="mt-5 space-y-4" onSubmit={save}>{actor.role === "Admin" ? <Field label="วันที่ตามรอบ" hint="Admin เลือกย้อนหลังได้ ระบบจะตรวจว่าวันนี้ตรงกับรอบจริง"><Input type="date" value={plannedDate} onChange={(event) => setPlannedDate(event.target.value)} /></Field> : <div className="rounded-lg bg-[#f5f9f9] p-3 text-sm text-[#315763]">วันที่ตามรอบ: <strong>{formatDate(plannedDate)}</strong></div>}{resolved ? <div className="rounded-lg border border-[#cfe3e1] bg-[#f3fbfa] p-3 text-sm text-[#315763]">วันที่ระบบคำนวณให้ทำจริง: <strong>{formatDate(resolved.scheduledOn)}</strong>{resolved.shifted ? <span className="ml-2 text-xs font-bold text-[#a9700f]">เลื่อนจากวันหยุด/วันหยุดสุดสัปดาห์</span> : null}{existing ? <span className="ml-2 text-xs font-bold text-[#0b7f76]">บันทึกแล้วโดย {existing.operatorCode}</span> : null}{locked ? <span className="ml-2 text-xs font-bold text-[#a83541]">งวดถูก Lock</span> : null}</div> : <Notice tone="danger">วันที่นี้ไม่ตรงกับรอบของฟอร์ม หรืออยู่นอกช่วง Version</Notice>}{future ? <Notice tone="warning">วันที่ทำงานยังเป็นอนาคต จึงยังบันทึกไม่ได้</Notice> : null}<div className="space-y-2">{version.items.map((item, index) => <div key={item.id} className="grid gap-2 rounded-lg border border-[#e1ebeb] p-3 sm:grid-cols-[1fr_180px] sm:items-center"><span className="text-sm text-[#315763]"><strong className="mr-1 text-[#789097]">{index + 1}.</strong>{item.label}</span><Select disabled={Boolean(existing || locked || future || !resolved)} value={results.find((result) => result.itemId === item.id)?.state ?? "not-done"} onChange={(event) => updateResult(item.id, event.target.value as RoutineTaskState)}><option value="done">{taskStateLabel("done")}</option><option value="not-applicable">{taskStateLabel("not-applicable")}</option><option value="not-done">{taskStateLabel("not-done")}</option></Select></div>)}</div><Field label="หมายเหตุรวม"><Textarea rows={3} disabled={Boolean(existing || locked || future || !resolved)} value={existing?.note ?? note} onChange={(event) => setNote(event.target.value)} placeholder="บันทึกหมายเหตุของรอบนี้" /></Field><div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="secondary" onClick={onClose}>ปิด</Button>{!existing ? <Button type="submit" disabled={busy || locked || future || !resolved}>{locked ? <Lock className="size-4" /> : <CheckSquare className="size-4" />} บันทึก Checklist</Button> : null}</div></form></section></div>
+  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 sm:items-center sm:p-5" role="presentation" onMouseDown={onClose}><section role="dialog" aria-modal="true" aria-label={`${form.name} checklist`} className="max-h-[94dvh] w-full max-w-3xl overflow-y-auto rounded-t-xl bg-white p-4 shadow-2xl sm:rounded-xl sm:p-6" onMouseDown={(event) => event.stopPropagation()}><div className="flex items-start justify-between gap-3"><div><p className="text-[11px] font-bold tracking-[.16em] text-[#0b7f76] uppercase">Routine Maintenance Checklist</p><h3 className="mt-1 text-xl font-bold text-[#173d50]">{form.name}</h3><p className="mt-1 text-sm text-[#58747d]">Version {version.versionNumber} · {frequencyLabel(version.frequency)}</p></div><button type="button" onClick={onClose} className="rounded p-1 text-[#58747d] hover:bg-[#eef5f4]" aria-label="ปิด"><X className="size-5" /></button></div><form className="mt-5 space-y-4" onSubmit={save}>{actor.role === "Admin" ? <Field label="วันที่ตามรอบ" hint="Admin เลือกย้อนหลังได้ ระบบจะตรวจว่าวันนี้ตรงกับรอบจริง"><Input type="date" value={plannedDate} onChange={(event) => setPlannedDate(event.target.value)} /></Field> : <div className="rounded-lg bg-[#f5f9f9] p-3 text-sm text-[#315763]">วันที่ตามรอบ: <strong>{formatDate(plannedDate)}</strong></div>}{resolved ? <div className="rounded-lg border border-[#cfe3e1] bg-[#f3fbfa] p-3 text-sm text-[#315763]">วันที่ระบบคำนวณให้ทำจริง: <strong>{formatDate(resolved.scheduledOn)}</strong>{resolved.shifted ? <span className="ml-2 text-xs font-bold text-[#a9700f]">เลื่อนจากวันหยุด/วันหยุดสุดสัปดาห์</span> : null}{existing ? <span className="ml-2 text-xs font-bold text-[#0b7f76]">บันทึกแล้วโดย {existing.operatorCode}</span> : null}{locked ? <span className="ml-2 text-xs font-bold text-[#a83541]">งวดถูก Lock</span> : null}</div> : <Notice tone="danger">วันที่นี้ไม่ตรงกับรอบของฟอร์ม หรืออยู่นอกช่วง Version</Notice>}{future ? <Notice tone="warning">วันที่ทำงานยังเป็นอนาคต จึงยังบันทึกไม่ได้</Notice> : null}<div className="space-y-2">{version.items.map((item, index) => <div key={item.id} className="grid gap-2 rounded-lg border border-[#e1ebeb] p-3 sm:grid-cols-[1fr_180px] sm:items-center"><span className="text-sm text-[#315763]"><strong className="mr-1 text-[#789097]">{index + 1}.</strong>{item.label}</span><Select disabled={Boolean(existing || locked || future || !resolved)} value={results.find((result) => result.itemId === item.id)?.state ?? defaultState} onChange={(event) => updateResult(item.id, event.target.value)}>{version.responseSet.options.map((option) => <option key={option.id} value={option.value}>{option.label}</option>)}</Select></div>)}</div><Field label="หมายเหตุรวม"><Textarea rows={3} disabled={Boolean(existing || locked || future || !resolved)} value={existing?.note ?? note} onChange={(event) => setNote(event.target.value)} placeholder="บันทึกหมายเหตุของรอบนี้" /></Field><div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="secondary" onClick={onClose}>ปิด</Button>{!existing ? <Button type="submit" disabled={busy || locked || future || !resolved}>{locked ? <Lock className="size-4" /> : <CheckSquare className="size-4" />} บันทึก Checklist</Button> : null}</div></form></section></div>
+}
+
+function ResponseSetManager({
+  sets,
+  busy,
+  onClose,
+  onSave,
+  onDelete,
+}: {
+  sets: RoutineResponseSet[]
+  busy: boolean
+  onClose: () => void
+  onSave: (draft: SetDraft) => Promise<boolean>
+  onDelete: (id: string) => Promise<boolean>
+}) {
+  const [editing, setEditing] = useState<SetDraft | null>(null)
+
+  function startEdit(set: RoutineResponseSet) {
+    setEditing({ id: set.id, name: set.name, active: set.active, options: set.options.map((option) => ({ id: option.id, value: option.value, label: option.label, mark: option.mark })) })
+  }
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!editing) return
+    if (await onSave(editing)) setEditing(null)
+  }
+
+  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 sm:items-center sm:p-5" role="presentation" onMouseDown={onClose}><section role="dialog" aria-modal="true" aria-label="จัดการชุดตัวเลือก" className="max-h-[94dvh] w-full max-w-2xl overflow-y-auto rounded-t-xl bg-white p-4 shadow-2xl sm:rounded-xl sm:p-6" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <p className="text-[11px] font-bold tracking-[.16em] text-[#0b7f76] uppercase">Response Sets</p>
+        <h3 className="mt-1 text-xl font-bold text-[#173d50]">จัดการชุดตัวเลือก</h3>
+        <p className="mt-1 text-xs text-[#789097]">ชุดตัวเลือกใช้ร่วมกันได้ทุกฟอร์ม · แต่ละ Version ของฟอร์มจะจำชุดตัวเลือกที่เลือกไว้ตอนนั้นเสมอ</p>
+      </div>
+      <button type="button" onClick={onClose} className="rounded p-1 text-[#58747d] hover:bg-[#eef5f4]" aria-label="ปิด"><X className="size-5" /></button>
+    </div>
+
+    {!editing ? <div className="mt-5 space-y-3">
+      <div className="flex justify-end"><Button type="button" variant="secondary" className="min-h-9" onClick={() => setEditing(emptySetDraft())}><Plus className="size-3.5" /> เพิ่มชุดใหม่</Button></div>
+      <div className="divide-y divide-[#edf2f2] rounded-lg border border-[#e1ebeb]">
+        {sets.map((set) => <div key={set.id} className="flex items-center justify-between gap-3 p-3">
+          <div>
+            <p className="font-bold text-[#173d50]">{set.name}{!set.active ? <span className="ml-2 rounded-full bg-[#f2f4f4] px-1.5 py-0.5 text-[10px] font-bold text-[#70868b]">ปิด</span> : null}</p>
+            <p className="mt-0.5 text-xs text-[#789097]">{set.options.map((option) => `${option.mark} ${option.label}`).join(" · ")}</p>
+          </div>
+          <div className="flex items-center gap-1">
+            <Button type="button" variant="ghost" className="min-h-9 px-2" onClick={() => startEdit(set)} aria-label={`แก้ไข ${set.name}`}><Pencil className="size-3.5" /></Button>
+            <Button type="button" variant="ghost" className="min-h-9 px-2 text-[#a83541]" disabled={busy} onClick={() => void onDelete(set.id)} aria-label={`ลบ ${set.name}`}><Trash2 className="size-3.5" /></Button>
+          </div>
+        </div>)}
+        {!sets.length ? <p className="p-4 text-center text-xs text-[#789097]">ยังไม่มีชุดตัวเลือก</p> : null}
+      </div>
+    </div> : <form className="mt-5 space-y-4" onSubmit={save}>
+      <Field label="ชื่อชุดตัวเลือก *"><Input required value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} placeholder="เช่น ปกติ / ชำรุด" /></Field>
+      <label className="flex items-center gap-2 text-sm text-[#315763]"><input type="checkbox" checked={editing.active} onChange={(event) => setEditing({ ...editing, active: event.target.checked })} className="size-4 accent-[#0b7f76]" /> เปิดใช้งาน (แสดงเป็นตัวเลือกตอนสร้างฟอร์มใหม่)</label>
+      <div className="rounded-lg border border-[#dbe6e6] bg-[#fbfdfd] p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div><h4 className="font-bold text-[#173d50]">ตัวเลือก</h4><p className="text-xs text-[#789097]">Mark คือสัญลักษณ์สั้นที่แสดงในรายงานและประวัติ · ลบตัวเลือกไม่ได้ถ้าชุดนี้มีฟอร์มใช้งานอยู่แล้ว (เพิ่มใหม่ได้เสมอ)</p></div>
+          <Button type="button" variant="secondary" className="min-h-9" onClick={() => setEditing({ ...editing, options: [...editing.options, { value: "", label: "", mark: "" }] })}><Plus className="size-3.5" /> เพิ่มตัวเลือก</Button>
+        </div>
+        <div className="mt-3 space-y-2">
+          {editing.options.map((option, index) => <div key={option.id ?? `new-${index}`} className="flex items-start gap-2">
+            <span className="mt-3 w-6 text-center text-xs font-bold text-[#789097]">{index + 1}</span>
+            <Input required value={option.value} onChange={(event) => setEditing({ ...editing, options: editing.options.map((current, i) => i === index ? { ...current, value: event.target.value } : current) })} placeholder="ค่า เช่น normal" className="w-28" />
+            <Input required value={option.label} onChange={(event) => setEditing({ ...editing, options: editing.options.map((current, i) => i === index ? { ...current, label: event.target.value } : current) })} placeholder="ป้ายกำกับ เช่น ปกติ" />
+            <Input required value={option.mark} onChange={(event) => setEditing({ ...editing, options: editing.options.map((current, i) => i === index ? { ...current, mark: event.target.value } : current) })} placeholder="Mark เช่น ✓" className="w-20" />
+            <Button type="button" variant="ghost" className="min-h-11 px-2" disabled={editing.options.length <= 1} onClick={() => setEditing({ ...editing, options: editing.options.filter((_, i) => i !== index) })} aria-label={`ลบตัวเลือกที่ ${index + 1}`}><Trash2 className="size-4 text-[#a83541]" /></Button>
+            <div className="flex flex-col">
+              <Button type="button" variant="ghost" className="min-h-5 px-1 py-0" disabled={index === 0} onClick={() => { const options = [...editing.options]; [options[index - 1], options[index]] = [options[index], options[index - 1]]; setEditing({ ...editing, options }) }} aria-label="เลื่อนขึ้น"><ArrowUp className="size-3.5" /></Button>
+              <Button type="button" variant="ghost" className="min-h-5 px-1 py-0" disabled={index === editing.options.length - 1} onClick={() => { const options = [...editing.options]; [options[index], options[index + 1]] = [options[index + 1], options[index]]; setEditing({ ...editing, options }) }} aria-label="เลื่อนลง"><ArrowDown className="size-3.5" /></Button>
+            </div>
+          </div>)}
+        </div>
+      </div>
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button type="button" variant="secondary" onClick={() => setEditing(null)}>ยกเลิก</Button>
+        <Button type="submit" disabled={busy}><ClipboardCheck className="size-4" /> บันทึกชุดตัวเลือก</Button>
+      </div>
+    </form>}
+  </section></div>
 }

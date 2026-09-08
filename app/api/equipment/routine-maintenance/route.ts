@@ -24,6 +24,7 @@ const formFields = {
   startsOn: date,
   reviewerId: z.string().uuid().nullable().optional(),
   items: z.array(itemLabel).min(1).max(80),
+  responseSetId: z.string().uuid(),
   active: z.boolean().optional(),
 }
 const createFormSchema = z.object({ action: z.literal('create-form'), equipmentId: z.string().uuid(), ...formFields })
@@ -35,7 +36,7 @@ const logSchema = z.object({
   versionId: z.string().uuid(),
   plannedOn: date,
   scheduledOn: date,
-  taskResults: z.array(z.object({ itemId: z.string().uuid(), label: z.string().optional(), state: z.enum(['done', 'not-applicable', 'not-done']) })).min(1).max(80),
+  taskResults: z.array(z.object({ itemId: z.string().uuid(), label: z.string().optional(), state: z.string().trim().min(1).max(60) })).min(1).max(80),
   note: z.string().trim().max(2000).nullable().optional(),
   idempotencyKey: z.string().uuid().nullable().optional(),
 })

@@ -17,9 +17,13 @@ describe('generic routine maintenance UI', () => {
   })
 
   it('includes the admin form builder, version editing, recurrence, review, and status controls', () => {
-    for (const text of ['Form Builder', 'สร้าง Version ใหม่', 'เพิ่มรายการ', 'review', 'not-applicable', 'not-done', 'idempotencyKey']) expect(routine).toContain(text)
+    for (const text of ['Form Builder', 'สร้าง Version ใหม่', 'เพิ่มรายการ', 'review', 'idempotencyKey']) expect(routine).toContain(text)
     expect(routine).toContain('deactivate-form')
     expect(routine).toContain('routinePeriodFor')
+  })
+
+  it('lets admins choose and manage configurable response-option sets per form', () => {
+    for (const text of ['responseSetId', 'ResponseSetManager', 'จัดการชุดตัวเลือก', 'response-sets', 'responseSet.options']) expect(routine).toContain(text)
   })
 
   it('keeps the public QR service page and adds a protected routine link', () => {
@@ -45,7 +49,7 @@ describe('generic routine maintenance UI', () => {
     expect(report).toContain('name="equipmentId"')
     expect(report).toContain('name="formId"')
     expect(report).toContain('PrintButton')
-    expect(report).toContain('N/A')
+    expect(report).toContain('responseSet.options')
     expect(report).toContain('Review / Lock')
   })
 })
