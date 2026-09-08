@@ -32,6 +32,11 @@ describe('equipment routine response sets migration', () => {
     expect(sql).toContain('bm_equipment_routine_form_items_response_set_fk')
   })
 
+  it('safely repairs a database that already ran the earlier version-level draft of this migration', () => {
+    expect(sql).toContain('alter table public.bm_equipment_routine_form_versions')
+    expect(sql).toContain('drop column if exists response_set_id')
+  })
+
   it('protects the new tables with RLS and refreshes the API schema cache', () => {
     expect(sql).toContain('alter table public.bm_equipment_routine_response_sets enable row level security')
     expect(sql).toContain('alter table public.bm_equipment_routine_response_options enable row level security')

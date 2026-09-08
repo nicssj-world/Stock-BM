@@ -86,9 +86,22 @@ update public.bm_equipment_routine_form_items item
 
 alter table public.bm_equipment_routine_form_items
   alter column response_set_id set not null;
-alter table public.bm_equipment_routine_form_items
-  add constraint bm_equipment_routine_form_items_response_set_fk
-  foreign key (response_set_id) references public.bm_equipment_routine_response_sets(id);
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'bm_equipment_routine_form_items_response_set_fk'
+  ) then
+    alter table public.bm_equipment_routine_form_items
+      add constraint bm_equipment_routine_form_items_response_set_fk
+      foreign key (response_set_id) references public.bm_equipment_routine_response_sets(id);
+  end if;
+end $$;
+
+-- Defensive cleanup: an earlier draft of this migration put response_set_id
+-- on the version instead of the item before that design was corrected. This
+-- is a no-op on a database that only ever ran this (already-corrected) file.
+alter table public.bm_equipment_routine_form_versions
+  drop column if exists response_set_id;
 
 alter table public.bm_equipment_routine_response_sets enable row level security;
 alter table public.bm_equipment_routine_response_options enable row level security;
