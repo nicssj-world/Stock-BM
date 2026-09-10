@@ -123,6 +123,19 @@ export type RoutineReviewPeriod = {
   period: string
 }
 
+/**
+ * Weekly and monthly forms are kept for backwards-compatible naming, but
+ * their checklists are available every calendar day. They are intentionally
+ * outside the period-level Review & Lock workflow.
+ */
+export function routineAllowsDailyLogging(frequency: RoutineFrequency) {
+  return frequency === 'weekly' || frequency === 'monthly'
+}
+
+export function routineUsesReviewLock(frequency: RoutineFrequency) {
+  return !routineAllowsDailyLogging(frequency)
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000
 
 function parseDate(value: string) {
@@ -177,16 +190,12 @@ function yearlyAnchorDate(start: string, occurrenceIndex: number) {
 }
 
 export function addRoutineFrequency(value: string, frequency: RoutineFrequency) {
-  if (frequency === 'daily') return addRoutineDays(value, 1)
-  if (frequency === 'weekly') return addRoutineDays(value, 7)
-  if (frequency === 'monthly') return monthlyAnchorDate(value, 1)
-  return yearlyAnchorDate(value, 1)
+  if (frequency === 'yearly') return yearlyAnchorDate(value, 1)
+  return addRoutineDays(value, 1)
 }
 
 export function occurrenceAtIndex(start: string, frequency: RoutineFrequency, index: number) {
-  if (frequency === 'daily') return addRoutineDays(start, index)
-  if (frequency === 'weekly') return addRoutineDays(start, index * 7)
-  if (frequency === 'monthly') return monthlyAnchorDate(start, index)
+  if (frequency === 'daily' || frequency === 'weekly' || frequency === 'monthly') return addRoutineDays(start, index)
   return yearlyAnchorDate(start, index)
 }
 
@@ -200,7 +209,7 @@ function nextWorkingDay(value: string, holidays: ReadonlySet<string>) {
 }
 
 export function routinePeriodKind(frequency: RoutineFrequency): 'month' | 'year' {
-  return frequency === 'daily' || frequency === 'weekly' ? 'month' : 'year'
+  return frequency === 'yearly' ? 'year' : 'month'
 }
 
 export function routinePeriodFor(frequency: RoutineFrequency, date: string) {
@@ -224,13 +233,14 @@ function nextRoutineReviewPeriod(period: string, kind: 'month' | 'year') {
 }
 
 /**
- * Returns every calendar period that a form can be reviewed through today.
+ * Returns every calendar period for frequencies that use Review & Lock.
  * Review is a period-level action, so it must remain available even when a
  * period has no logged occurrence yet (for example, an empty August record).
  */
 export function routineReviewPeriods(form: RoutineMaintenanceForm, today: string): RoutineReviewPeriod[] {
   const periods = new Map<string, RoutineReviewPeriod>()
   for (const version of form.versions) {
+    if (!routineUsesReviewLock(version.frequency)) continue
     const kind = routinePeriodKind(version.frequency)
     const first = routinePeriodFor(version.frequency, version.startsOn)
     const last = routinePeriodFor(version.frequency, today)
@@ -267,7 +277,7 @@ export function generateRoutineOccurrences(
   while (plannedOn <= to && index < 10000) {
     if (plannedOn >= searchFrom) {
       if (version.frequency !== 'daily' || !isWeekend(plannedOn)) {
-        const scheduledOn = nextWorkingDay(plannedOn, holidays)
+        const scheduledOn = routineAllowsDailyLogging(version.frequency) ? plannedOn : nextWorkingDay(plannedOn, holidays)
         // The report and the unique key are based on the nominal date. A
         // holiday at the end of a range may move the actual work date into
         // the next range, but the original occurrence must still be shown.
@@ -321,7 +331,7 @@ export function routineOccurrenceForPlannedDate(
   while (candidate <= plannedOn && index < 10000) {
     if (candidate === plannedOn) {
       if (version.frequency === 'daily' && isWeekend(candidate)) return null
-      const scheduledOn = nextWorkingDay(candidate, holidays)
+      const scheduledOn = routineAllowsDailyLogging(version.frequency) ? candidate : nextWorkingDay(candidate, holidays)
       return {
         key: `${version.id}:${candidate}`,
         formId: version.formId,

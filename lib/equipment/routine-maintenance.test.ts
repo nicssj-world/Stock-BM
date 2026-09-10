@@ -5,6 +5,7 @@ import {
   routinePeriodBounds,
   routinePeriodFor,
   routineReviewPeriods,
+  routineUsesReviewLock,
   type RoutineMaintenanceVersion,
 } from './routine-maintenance'
 
@@ -36,32 +37,76 @@ describe('generic routine maintenance schedule', () => {
     ])
   })
 
-  it('moves a weekly occurrence that starts on a weekend to Monday', () => {
-    const [occurrence] = generateRoutineOccurrences(
-      version('weekly', '2026-08-29'),
-      '2026-08-29',
-      '2026-08-31',
+  it('opens weekly maintenance on every calendar day without shifting weekends or holidays', () => {
+    const occurrences = generateRoutineOccurrences(
+      version('weekly', '2026-08-28'),
+      '2026-08-28',
+      '2026-09-01',
+      new Set(['2026-08-31']),
     )
 
-    expect(occurrence).toMatchObject({ plannedOn: '2026-08-29', scheduledOn: '2026-08-31', shifted: true })
+    expect(occurrences.map((occurrence) => [occurrence.plannedOn, occurrence.scheduledOn])).toEqual([
+      ['2026-08-28', '2026-08-28'],
+      ['2026-08-29', '2026-08-29'],
+      ['2026-08-30', '2026-08-30'],
+      ['2026-08-31', '2026-08-31'],
+      ['2026-09-01', '2026-09-01'],
+    ])
+  })
+
+  it('resolves any calendar date for weekly maintenance', () => {
+    expect(routineOccurrenceForPlannedDate(version('weekly', '2026-08-28'), '2026-08-30', new Set(['2026-08-30']))).toMatchObject({
+      plannedOn: '2026-08-30',
+      scheduledOn: '2026-08-30',
+      shifted: false,
+    })
+  })
+
+  it('opens monthly maintenance on every calendar day without shifting holidays', () => {
+    const occurrences = generateRoutineOccurrences(
+      version('monthly', '2026-08-28'),
+      '2026-08-28',
+      '2026-08-31',
+      new Set(['2026-08-31']),
+    )
+
+    expect(occurrences.map((occurrence) => [occurrence.plannedOn, occurrence.scheduledOn])).toEqual([
+      ['2026-08-28', '2026-08-28'],
+      ['2026-08-29', '2026-08-29'],
+      ['2026-08-30', '2026-08-30'],
+      ['2026-08-31', '2026-08-31'],
+    ])
+  })
+
+  it('resolves any calendar date for monthly maintenance', () => {
+    expect(routineOccurrenceForPlannedDate(version('monthly', '2026-08-28'), '2026-08-30', new Set(['2026-08-30']))).toMatchObject({
+      plannedOn: '2026-08-30',
+      scheduledOn: '2026-08-30',
+      shifted: false,
+    })
+  })
+
+  it('keeps weekly maintenance outside Review & Lock', () => {
+    expect(routineUsesReviewLock('weekly')).toBe(false)
+    expect(routineUsesReviewLock('monthly')).toBe(false)
+    expect(routineUsesReviewLock('daily')).toBe(true)
   })
 
   it('does not accept a weekend as a daily nominal occurrence', () => {
     expect(routineOccurrenceForPlannedDate(version('daily', '2026-08-28'), '2026-08-29')).toBeNull()
   })
 
-  it('clamps monthly dates to the last day without losing the original anchor', () => {
+  it('continues opening monthly maintenance every day after the start date', () => {
     const occurrences = generateRoutineOccurrences(
       version('monthly', '2025-01-31'),
-      '2025-01-01',
-      '2025-04-30',
+      '2025-01-29',
+      '2025-02-02',
     )
 
     expect(occurrences.map((item) => item.plannedOn)).toEqual([
       '2025-01-31',
-      '2025-02-28',
-      '2025-03-31',
-      '2025-04-30',
+      '2025-02-01',
+      '2025-02-02',
     ])
   })
 
@@ -84,9 +129,10 @@ describe('generic routine maintenance schedule', () => {
   it('derives review periods from the nominal maintenance date', () => {
     expect(routinePeriodFor('daily', '2026-08-31')).toBe('2026-08')
     expect(routinePeriodFor('weekly', '2026-08-31')).toBe('2026-08')
-    expect(routinePeriodFor('monthly', '2026-08-31')).toBe('2026')
+    expect(routinePeriodFor('monthly', '2026-08-31')).toBe('2026-08')
     expect(routinePeriodFor('yearly', '2026-08-31')).toBe('2026')
     expect(routinePeriodBounds('daily', '2026-02')).toEqual({ from: '2026-02-01', to: '2026-02-28' })
+    expect(routinePeriodBounds('monthly', '2026-08')).toEqual({ from: '2026-08-01', to: '2026-08-31' })
     expect(routinePeriodBounds('yearly', '2024')).toEqual({ from: '2024-01-01', to: '2024-12-31' })
   })
 
@@ -98,7 +144,7 @@ describe('generic routine maintenance schedule', () => {
         name: 'Daily',
         active: true,
         reviewerId: null,
-        versions: [version('daily', '2026-07-15')],
+        versions: [version('daily', '2026-07-15'), version('weekly', '2026-07-15')],
       },
       '2026-09-02',
     )
@@ -110,19 +156,19 @@ describe('generic routine maintenance schedule', () => {
     ])
   })
 
-  it('resolves a logged date with the exact calculated shifted date', () => {
+  it('resolves a monthly date without shifting it', () => {
     const occurrence = routineOccurrenceForPlannedDate(
       version('monthly', '2026-08-31'),
       '2026-08-31',
       new Set(['2026-08-31']),
     )
 
-    expect(occurrence).toMatchObject({ plannedOn: '2026-08-31', scheduledOn: '2026-09-01' })
+    expect(occurrence).toMatchObject({ plannedOn: '2026-08-31', scheduledOn: '2026-08-31', shifted: false })
   })
 
   it('keeps a nominal occurrence when its shifted work date crosses the range end', () => {
     const occurrences = generateRoutineOccurrences(
-      version('monthly', '2026-08-31'),
+      version('yearly', '2026-08-31'),
       '2026-08-01',
       '2026-08-31',
       new Set(['2026-08-31']),

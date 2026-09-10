@@ -32,6 +32,8 @@ import {
   routinePeriodFor,
   routinePeriodKind,
   routineReviewPeriods,
+  routineAllowsDailyLogging,
+  routineUsesReviewLock,
   weekendDayLabel,
   type RoutineFrequency,
   type RoutineMaintenanceEntry,
@@ -85,9 +87,9 @@ function frequencyDescription(value: RoutineFrequency) {
   return value === "daily"
     ? "ทุกวันทำการ"
     : value === "weekly"
-      ? "ทุกสัปดาห์ ยึดวันจากวันเริ่ม"
+      ? "เปิดบันทึกได้ทุกวัน · ไม่ใช้ Review & Lock"
       : value === "monthly"
-        ? "ทุกเดือน ยึดเลขวันที่จากวันเริ่ม"
+        ? "เปิดบันทึกได้ทุกวัน · ไม่ใช้ Review & Lock"
         : "ทุกปี ยึดเดือนและวันที่จากวันเริ่ม"
 }
 
@@ -108,10 +110,12 @@ function latestVersion(form: RoutineMaintenanceForm) {
 }
 
 function entryLocked(entry: RoutineMaintenanceEntry, reviews: RoutineMaintenanceReview[]) {
+  if (!routineUsesReviewLock(entry.frequency)) return false
   return reviews.some((review) => review.formId === entry.formId && review.frequency === entry.frequency && review.period === routinePeriodFor(entry.frequency, entry.plannedOn))
 }
 
 function occurrenceLocked(formId: string, frequency: RoutineFrequency, plannedOn: string, reviews: RoutineMaintenanceReview[]) {
+  if (!routineUsesReviewLock(frequency)) return false
   return reviews.some((review) => review.formId === formId && review.frequency === frequency && review.period === routinePeriodFor(frequency, plannedOn))
 }
 
@@ -139,7 +143,7 @@ function reviewPeriodLabel(frequency: RoutineFrequency, period: string) {
 function availableReviewPeriods(form: RoutineMaintenanceForm, today: string, reviews: RoutineMaintenanceReview[]) {
   const periods = new Map<string, RoutineReviewPeriod>()
   for (const period of routineReviewPeriods(form, today)) periods.set(`${period.frequency}:${period.period}`, period)
-  for (const review of reviews.filter((item) => item.formId === form.id)) {
+  for (const review of reviews.filter((item) => item.formId === form.id && routineUsesReviewLock(item.frequency))) {
     periods.set(`${review.frequency}:${review.period}`, { frequency: review.frequency, period: review.period })
   }
   return [...periods.values()].sort((a, b) => b.period.localeCompare(a.period) || a.frequency.localeCompare(b.frequency))
@@ -359,7 +363,7 @@ export function RoutineMaintenance({
   }
 
   async function review() {
-    if (!selectedForm || !effectiveReviewFrequency || !effectiveReviewPeriod) return
+    if (!selectedForm || !effectiveReviewFrequency || !effectiveReviewPeriod || !routineUsesReviewLock(effectiveReviewFrequency)) return
     await submit(endpointForInternal(endpoint, token), { action: "review", formId: selectedForm.id, frequency: effectiveReviewFrequency, period: effectiveReviewPeriod }, "ล็อกงวด Review แล้ว")
   }
 
@@ -417,9 +421,11 @@ export function RoutineMaintenance({
             </div>
             <div className="flex items-center justify-end"><Button type="button" disabled={busy || !selectedForm.active || (!todayOccurrence && !isAdmin)} onClick={() => openLog(selectedForm)}><CheckSquare className="size-4" /> {isAdmin ? "บันทึก / แก้ไขรอบ" : "บันทึกวันนี้"}</Button></div>
           </div>
-        </Card>
+         </Card>
 
-        <Card className="p-0">
+         {currentVersion && routineAllowsDailyLogging(currentVersion.frequency) ? <Notice tone="success">{frequencyLabel(currentVersion.frequency)} เปิดบันทึกได้ทุกวัน และไม่ใช้ Review & Lock</Notice> : null}
+
+         <Card className="p-0">
           <button type="button" className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-bold text-[#315763] hover:bg-[#f6faf9]" onClick={() => setShowReview((value) => !value)}><span className="flex items-center gap-2"><ShieldCheck className="size-4 text-[#0b7f76]" /> Review & lock</span><span className="text-xs text-[#789097]">{showReview ? "ซ่อน" : "แสดง"}</span></button>
         </Card>
         {showReview ? <Card className="p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h4 className="font-bold text-[#173d50]">Review & lock ต่อฟอร์ม</h4><p className="mt-1 text-xs text-[#58747d]">{effectiveReviewFrequency && effectiveReviewPeriod ? `${frequencyLabel(effectiveReviewFrequency)} ล็อกเป็น${routinePeriodKind(effectiveReviewFrequency) === "month" ? "รายเดือน" : "รายปี"} · ${reviewPeriodLabel(effectiveReviewFrequency, effectiveReviewPeriod)}` : "ยังไม่มีรอบ"}</p></div><div className="flex flex-wrap items-center gap-2">{selectedForm.reviewerId === actor.id && effectiveReviewFrequency && effectiveReviewPeriod && !selectedReviewLocked ? <Button type="button" variant="secondary" disabled={busy} onClick={() => void review()}><Lock className="size-4" /> Lock {reviewPeriodLabel(effectiveReviewFrequency, effectiveReviewPeriod)}</Button> : null}{selectedReviewLocked ? <span className="inline-flex items-center gap-1 rounded-full bg-[#e8f7f4] px-2 py-1 text-xs font-bold text-[#0b7f76]"><Lock className="size-3" /> Locked</span> : null}</div></div><div className="mt-4 grid gap-3 sm:grid-cols-2"><Field label="รอบที่ต้องการ Lock"><Select value={effectiveReviewFrequency} disabled={!reviewFrequencies.length} onChange={(event) => { setReviewFrequencySelection(event.target.value as RoutineFrequency); setReviewPeriodSelection("") }}><option value="">— เลือกรอบ —</option>{reviewFrequencies.map((frequency) => <option key={frequency} value={frequency}>{frequencyLabel(frequency)}</option>)}</Select></Field><Field label="งวดที่ต้องการ Lock"><Select value={effectiveReviewPeriod} disabled={!selectedReviewPeriods.length} onChange={(event) => setReviewPeriodSelection(event.target.value)}><option value="">— เลือกงวด —</option>{selectedReviewPeriods.map((item) => <option key={`${item.frequency}:${item.period}`} value={item.period}>{reviewPeriodLabel(item.frequency, item.period)} ({item.period})</option>)}</Select></Field></div><p className="mt-3 text-xs text-[#789097]">เลือกได้ทั้งงวดปัจจุบันและงวดที่ผ่านมา เช่น สิงหาคม เพื่อปิด Review ย้อนหลัง · ผู้ตรวจที่กำหนด: {reviewerName}{selectedForm.reviewerId !== actor.id ? " · เฉพาะผู้ตรวจที่กำหนดเท่านั้นที่ Lock ได้" : ""}</p>{isAdmin && data.reviews.filter((reviewItem) => reviewItem.formId === selectedForm.id).length ? <div className="mt-4 border-t border-[#e6eeee] pt-3"><p className="mb-2 text-xs font-bold text-[#58747d]">งวดที่ Lock แล้ว</p><div className="flex flex-wrap gap-2">{data.reviews.filter((reviewItem) => reviewItem.formId === selectedForm.id).slice(0, 12).map((reviewItem) => <span key={reviewItem.id} className="inline-flex items-center gap-1 rounded border border-[#dbe6e6] bg-[#fbfdfd] px-2 py-1 text-xs text-[#58747d]">{reviewItem.frequency} · {reviewItem.period}<button type="button" disabled={busy} className="ml-1 text-[#a83541] hover:underline" onClick={() => void unlock(reviewItem)} aria-label={`ปลดล็อก ${reviewItem.period}`}><Unlock className="size-3" /></button></span>)}</div></div> : null}</Card> : null}

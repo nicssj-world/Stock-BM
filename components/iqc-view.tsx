@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { AlertTriangle, CalendarClock, Calculator, ChevronDown, ClipboardList, Eye, Gauge, Layers3, Lock, LineChart, ListFilter, PlusCircle, Printer, Search, Settings, Sigma, Trash2, Wrench } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
@@ -298,6 +298,8 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
       .map((lot) => lot.id),
   )
   const visibleLotCharts = data.charts.filter((chart) => lotsById.get(chart.controlLotId)?.isActive === (lotVisibility === 'active'))
+  const chartLotIds = new Set(data.charts.map((chart) => chart.controlLotId))
+  const activeLotsWithoutCharts = data.controlLots.filter((lot) => lot.isActive && !chartLotIds.has(lot.id))
   const attentionKeys = new Set(visibleLotCharts.filter((chart) => chart.status !== 'accepted' || expiringLotIds.has(chart.controlLotId)).map((chart) => chart.key))
   const rejectedCount = visibleLotCharts.filter((chart) => chart.status === 'rejected').length
   const warningCount = visibleLotCharts.filter((chart) => chart.status === 'warning').length
@@ -455,8 +457,8 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
             }}
             aria-label="Lot visibility"
           >
-            <option value="active">Active lots</option>
-            <option value="closed">Closed lots / History</option>
+            <option value="active">Active chart lots (มีผลแล้ว)</option>
+            <option value="closed">Closed lots / History (chart history)</option>
           </Select>
           <Select
             value={statusFilter}
@@ -478,6 +480,12 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
           </Select>
         </div>
       </Card>
+
+      {lotVisibility === 'active' && activeLotsWithoutCharts.length ? <div className="rounded-lg border border-[#eed4a6] bg-[#fff9ed] px-3 py-2.5 text-xs text-[#795d2d]">
+        <span className="font-bold text-[#8b5a08]">Active Control lot ที่ยังไม่มีผล/กราฟ:</span>{' '}
+        {activeLotsWithoutCharts.map((lot) => `${lot.controlMaterialName} · Lot ${lot.lotNumber}`).join(', ')}
+        <span className="ml-1">(จะแสดงในรายการกราฟหลังบันทึกผล)</span>
+      </div> : null}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(520px,1.25fr)]">
         <div className="space-y-3">
@@ -586,7 +594,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
               )
             })
           ) : (
-            <Card className="p-8 text-center text-sm text-[#8198a0]">{lotVisibility === 'active' ? 'No active IQC lots match this filter.' : 'No closed IQC lots match this filter.'}</Card>
+            <Card className="p-8 text-center text-sm text-[#8198a0]">{lotVisibility === 'active' ? 'No active IQC charts match this filter.' : 'No closed IQC charts match this filter.'}</Card>
           )}
         </div>
 
@@ -618,6 +626,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
 
 function PointDetailCard({ chart, point, run, result, correctiveAction, busy, onVoid, onStartCorrectiveAction, onOpenCorrectiveAction }: { chart: IqcWorkspace['charts'][number]; point: IqcWorkspace['charts'][number]['points'][number]; run: IqcWorkspace['runs'][number] | null; result: IqcWorkspace['runs'][number]['results'][number] | null; correctiveAction: IqcWorkspace['correctiveActions'][number] | null; busy: boolean; onVoid: () => void; onStartCorrectiveAction: (context: IqcCorrectiveContext) => void; onOpenCorrectiveAction: (id: string) => void }) {
   const needsAction = point.status === 'warning' || point.status === 'investigate' || point.status === 'rejected'
+  const trucountLot = run?.consumables.find((consumable) => consumable.kind === 'trucount-tube' && consumable.lotNumber.trim())
 
   return (
     <Card className="space-y-3 p-4">
@@ -654,6 +663,7 @@ function PointDetailCard({ chart, point, run, result, correctiveAction, busy, on
       </div>
 
       {run?.note ? <p className="rounded-md bg-[#f6fafa] px-3 py-2 text-xs text-[#58747d]">Note: {run.note}</p> : null}
+      {trucountLot ? <p className="rounded-md border border-[#b9ded8] bg-[#f1faf8] px-3 py-2 text-xs text-[#176d65]">Trucount tube lot used for this point: <span className="font-bold">{trucountLot.lotNumber}</span></p> : null}
       {result?.qualitativeValue ? <p className="text-xs text-[#789097]">Qualitative: {result.qualitativeValue}</p> : null}
       {correctiveAction ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#eed4a6] bg-[#fff9ed] p-3">
@@ -869,6 +879,40 @@ type ValueRow = {
   value: string
 }
 type ConsumableRow = { id: number; kind: string; lotNumber: string; stockLotId: string }
+const CD4_ANALYTE_CODES = new Set(['%CD3', '%CD4', 'AbsCD3', 'AbsCD4'])
+const CD4_TRUCOUNT_TUBE_ITEM_CODE = 'LS058081'
+
+function isCd4AnalyteCode(code: string | undefined) {
+  return Boolean(code && CD4_ANALYTE_CODES.has(code))
+}
+
+type TrucountLotSelection = { lotNumber: string; stockLotId: string }
+
+function findLatestCd4TrucountLot(runs: IqcWorkspace['runs']): TrucountLotSelection | null {
+  const orderedRuns = [...runs].sort((a, b) => b.runDatetime.localeCompare(a.runDatetime))
+  for (const run of orderedRuns) {
+    if (!run.results.some((result) => !result.isVoided && isCd4AnalyteCode(result.analyteCode))) continue
+    const consumable = run.consumables.find((item) => item.kind === 'trucount-tube' && item.lotNumber.trim())
+    if (consumable) return { lotNumber: consumable.lotNumber, stockLotId: consumable.stockLotId ?? '' }
+  }
+  return null
+}
+
+function findPanelControlLots(testSet: string, lots: IqcWorkspace['controlLots']) {
+  const panelTokens = testSet.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length >= 3)
+  return lots.filter((lot) => panelTokens.some((token) => lot.controlMaterialName.toLowerCase().includes(token)))
+}
+
+function findLatestUsedControlLotId(runs: IqcWorkspace['runs'], candidateLotIds: string[], analyteIds: Set<string>, instrumentId: string) {
+  const candidateIds = new Set(candidateLotIds)
+  const orderedRuns = [...runs].sort((a, b) => b.runDatetime.localeCompare(a.runDatetime))
+  for (const run of orderedRuns) {
+    if (instrumentId && run.instrumentId !== instrumentId) continue
+    const result = run.results.find((item) => !item.isVoided && candidateIds.has(item.controlLotId) && analyteIds.has(item.analyteId))
+    if (result) return result.controlLotId
+  }
+  return null
+}
 
 function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void; onDone: () => void }) {
   const activeAnalytes = useMemo(() => data.analytes.filter((a) => a.isActive), [data.analytes])
@@ -880,10 +924,12 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
   const [rows, setRows] = useState<ValueRow[]>([])
   const [fillLot, setFillLot] = useState('')
   const [testSet, setTestSet] = useState('')
+  const [testSetControlLotId, setTestSetControlLotId] = useState('')
   const [lotMappingWarning, setLotMappingWarning] = useState('')
   const [busy, setBusy] = useState(false)
   const [showImport, setShowImport] = useState(false)
-  const seq = useMemo(() => ({ n: 1 }), [])
+  const seq = useRef(1)
+  const cd4TrucountSeeded = useRef(false)
 
   useEffect(() => {
     const timer = window.setTimeout(() => setRunDatetime(nowForDatetimeLocalInput()), 0)
@@ -893,10 +939,6 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
   const analyteById = useMemo(() => new Map(data.analytes.map((a) => [a.id, a])), [data.analytes])
   const selectedInstrument = data.instruments.find((instrument) => instrument.id === instrumentId)
   const selectedEquipmentId = selectedInstrument?.equipmentId ?? null
-  const availableStockLots = useMemo(
-    () => selectedEquipmentId ? data.stockLots.filter((lot) => lot.equipmentIds.includes(selectedEquipmentId)) : data.stockLots,
-    [data.stockLots, selectedEquipmentId],
-  )
   const selectedControlPlans = useMemo(
     () => data.controlPlans.filter((plan) => plan.isActive && plan.instrumentId === instrumentId),
     [data.controlPlans, instrumentId],
@@ -912,6 +954,19 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
     return groups
   }, [activeAnalytes])
   const selectedTestSetAnalyteIds = testSet ? testSetAnalyteIds.get(testSet) : undefined
+  const selectedTestSetAnalytes = useMemo(
+    () => activeAnalytes.filter((analyte) => selectedTestSetAnalyteIds?.has(analyte.id)),
+    [activeAnalytes, selectedTestSetAnalyteIds],
+  )
+  const isCd4TestSet = Boolean(testSet && selectedTestSetAnalytes.length > 0 && selectedTestSetAnalytes.every((analyte) => isCd4AnalyteCode(analyte.code)))
+  const panelControlLots = useMemo(
+    () => testSet ? findPanelControlLots(testSet, activeLots) : [],
+    [activeLots, testSet],
+  )
+  const effectiveTestSetControlLotId = panelControlLots.some((lot) => lot.id === testSetControlLotId)
+    ? testSetControlLotId
+    : isCd4TestSet && panelControlLots.length === 1 ? panelControlLots[0].id : ''
+  const selectedPanelControlLot = panelControlLots.find((lot) => lot.id === effectiveTestSetControlLotId)
   const testSetOptions = useMemo(
     () => [...testSetAnalyteIds.entries()]
       .filter(([, analyteIds]) => !instrumentId || !plannedAnalyteIds.size || [...analyteIds].some((id) => plannedAnalyteIds.has(id)))
@@ -924,13 +979,55 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
       && (!selectedTestSetAnalyteIds || selectedTestSetAnalyteIds.has(analyte.id))),
     [activeAnalytes, instrumentId, plannedAnalyteIds, selectedTestSetAnalyteIds],
   )
+  const isCd4Entry = useMemo(() => {
+    const plannedCd4 = selectedControlPlans.some((plan) => isCd4AnalyteCode(plan.analyteCode))
+    const selectedTestSetCd4 = [...(selectedTestSetAnalyteIds ?? [])].some((id) => isCd4AnalyteCode(analyteById.get(id)?.code))
+    const enteredCd4 = rows.some((row) => isCd4AnalyteCode(analyteById.get(row.analyteId)?.code))
+    return plannedCd4 || selectedTestSetCd4 || enteredCd4
+  }, [analyteById, rows, selectedControlPlans, selectedTestSetAnalyteIds])
+  const availableStockLots = useMemo(
+    () => selectedEquipmentId ? data.stockLots.filter((lot) => lot.equipmentIds.includes(selectedEquipmentId)) : data.stockLots,
+    [data.stockLots, selectedEquipmentId],
+  )
+  const availableCd4TrucountLots = useMemo(
+    () => availableStockLots.filter((lot) => lot.itemCode === CD4_TRUCOUNT_TUBE_ITEM_CODE),
+    [availableStockLots],
+  )
+  const latestCd4TrucountLot = useMemo(() => findLatestCd4TrucountLot(data.runs), [data.runs])
+  const createTrucountRow = useCallback((): ConsumableRow => {
+    const preferredStockLot = latestCd4TrucountLot
+      ? availableCd4TrucountLots.find((lot) => latestCd4TrucountLot.stockLotId
+        ? lot.id === latestCd4TrucountLot.stockLotId
+        : lot.lotNumber === latestCd4TrucountLot.lotNumber)
+      : undefined
+    return {
+      id: seq.current++,
+      kind: 'trucount-tube',
+      lotNumber: preferredStockLot?.lotNumber ?? latestCd4TrucountLot?.lotNumber ?? '',
+      stockLotId: preferredStockLot?.id ?? '',
+    }
+  }, [availableCd4TrucountLots, latestCd4TrucountLot])
   const hasLogScaleResult = rows.some((row) => analyteById.get(row.analyteId)?.scale === 'log10')
+
+  useEffect(() => {
+    if (!isCd4Entry) {
+      cd4TrucountSeeded.current = false
+      return
+    }
+    if (cd4TrucountSeeded.current) return
+    const timer = window.setTimeout(() => {
+      cd4TrucountSeeded.current = true
+      if (!latestCd4TrucountLot) return
+      setConsumables((current) => current.some((item) => item.kind === 'trucount-tube') ? current : [createTrucountRow()])
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [createTrucountRow, isCd4Entry, latestCd4TrucountLot])
 
   function addRow() {
     setRows((r) => [
       ...r,
       {
-        id: seq.n++,
+        id: seq.current++,
         controlLotId: activeLots[0]?.id ?? '',
         analyteId: availableAnalytes[0]?.id ?? '',
         value: '',
@@ -949,27 +1046,38 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
     const eligibleAnalyteIds = (specs.length ? specs.map((s) => s.analyteId) : activeAnalytes.map((a) => a.id))
       .filter((analyteId) => (!instrumentId || !plannedAnalyteIds.size || plannedAnalyteIds.has(analyteId)) && (!selectedSetIds || selectedSetIds.has(analyteId)))
     const added = eligibleAnalyteIds.map((analyteId) => ({
-      id: seq.n++,
+      id: seq.current++,
       controlLotId,
       analyteId,
       value: '',
     }))
     setRows(added)
   }
-  function startTestSet(selectedSet: string) {
+  function startTestSet(selectedSet: string, selectedControlLotId?: string) {
     const selectedSetIds = testSetAnalyteIds.get(selectedSet) ?? new Set<string>()
     const selectedAnalytes = activeAnalytes.filter((analyte) => selectedSetIds.has(analyte.id) && (!instrumentId || !plannedAnalyteIds.size || plannedAnalyteIds.has(analyte.id)))
-    const panelTokens = selectedSet.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length >= 3)
-    const panelLots = activeLots.filter((lot) => panelTokens.some((token) => lot.controlMaterialName.toLowerCase().includes(token)))
+    const panelLots = findPanelControlLots(selectedSet, activeLots)
+    const isCd4Panel = selectedAnalytes.length > 0 && selectedAnalytes.every((analyte) => isCd4AnalyteCode(analyte.code))
+    const latestUsedLotId = isCd4Panel
+      ? findLatestUsedControlLotId(data.runs, panelLots.map((lot) => lot.id), selectedSetIds, instrumentId)
+      : null
+    const selectedCd4Lot = isCd4Panel
+      ? selectedControlLotId !== undefined
+        ? panelLots.find((lot) => lot.id === selectedControlLotId)
+        : panelLots.find((lot) => lot.id === latestUsedLotId) ?? (panelLots.length === 1 ? panelLots[0] : undefined)
+      : undefined
+    if (isCd4Panel) setTestSetControlLotId(selectedCd4Lot?.id ?? '')
     const unmapped: string[] = []
     const added = selectedAnalytes.map((analyte) => {
       const token = `${analyte.code} ${analyte.name}`.toLowerCase()
       // A panel with one control lot (for example CD4 Low) uses that lot for
       // every analyte in the panel. Multi-level panels such as HIV-VL match
       // the analyte's level to the corresponding control lot instead.
-      const controlLot = panelLots.length === 1
-        ? panelLots[0]
-        : panelLots.find((lot) => {
+      const controlLot = isCd4Panel
+        ? selectedCd4Lot
+        : panelLots.length === 1
+          ? panelLots[0]
+          : panelLots.find((lot) => {
           // A combined material level such as "HPC/LPC" is one physical
           // control kit, but must be usable for both HIV-VL (HPC) and
           // HIV-VL (LPC) result rows.
@@ -978,13 +1086,24 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
             .split(/[\\/|,;+]+/)
             .map((level) => level.trim())
             .filter(Boolean)
-          return levels.some((level) => token.includes(level))
-        })
+            return levels.some((level) => token.includes(level))
+          })
       if (!controlLot) unmapped.push(analyte.code)
-      return { id: seq.n++, controlLotId: controlLot?.id ?? '', analyteId: analyte.id, value: '' }
+      return { id: seq.current++, controlLotId: controlLot?.id ?? '', analyteId: analyte.id, value: '' }
     })
     setRows(added)
-    setLotMappingWarning(unmapped.length ? `ยังไม่พบ Control lot ที่มี Level ตรงกับ: ${unmapped.join(', ')}` : '')
+    setLotMappingWarning(isCd4Panel
+      ? selectedCd4Lot ? '' : `กรุณาเลือก Control lot สำหรับ ${selectedSet}`
+      : unmapped.length ? `ยังไม่พบ Control lot ที่มี Level ตรงกับ: ${unmapped.join(', ')}` : '')
+  }
+
+  function defaultCd4PanelLotId(selectedSet: string) {
+    const selectedSetIds = testSetAnalyteIds.get(selectedSet) ?? new Set<string>()
+    const selectedAnalytes = activeAnalytes.filter((analyte) => selectedSetIds.has(analyte.id) && (!instrumentId || !plannedAnalyteIds.size || plannedAnalyteIds.has(analyte.id)))
+    if (!selectedAnalytes.length || !selectedAnalytes.every((analyte) => isCd4AnalyteCode(analyte.code))) return ''
+    const panelLotsForSet = findPanelControlLots(selectedSet, activeLots)
+    const latestUsedLotId = findLatestUsedControlLotId(data.runs, panelLotsForSet.map((lot) => lot.id), selectedSetIds, instrumentId)
+    return panelLotsForSet.find((lot) => lot.id === latestUsedLotId)?.id ?? (panelLotsForSet.length === 1 ? panelLotsForSet[0].id : '')
   }
 
   async function submit(event: React.FormEvent) {
@@ -1073,6 +1192,8 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
               setInstrumentId(e.target.value)
               setFillLot('')
               setTestSet('')
+              setTestSetControlLotId('')
+              setConsumables([])
               setRows([])
             }}>
               <option value="">— ไม่ระบุ —</option>
@@ -1102,15 +1223,18 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
           <div>
             <div className="mb-1 flex items-center justify-between">
               <span className="text-xs font-semibold text-[#58747d]">Consumable lots</span>
-              <Button type="button" variant="ghost" className="min-h-7 px-2 py-1 text-xs" onClick={() => setConsumables((c) => [...c, { id: seq.n++, kind: 'staining-reagent', lotNumber: '', stockLotId: '' }])}>
+              <Button type="button" variant="ghost" className="min-h-7 px-2 py-1 text-xs" onClick={() => {
+                const row = createTrucountRow()
+                setConsumables((current) => [...current, row])
+              }}>
                 + เพิ่ม
               </Button>
             </div>
+            {isCd4Entry ? <p className="mb-2 rounded-md border border-[#b9ded8] bg-[#f1faf8] px-2.5 py-2 text-[11px] text-[#176d65]">CD4: เลือก Lot ของ Trucount tube เฉพาะ item code {CD4_TRUCOUNT_TUBE_ITEM_CODE}</p> : null}
             <div className="space-y-2">
               {consumables.map((c, i) => (
                 <div key={c.id} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,0.8fr)_auto] gap-1.5">
                   <Select className="h-9" value={c.kind} onChange={(e) => setConsumables((rows) => rows.map((x, j) => (j === i ? { ...x, kind: e.target.value } : x)))}>
-                    <option value="staining-reagent">Staining reagent</option>
                     <option value="trucount-tube">Trucount tube</option>
                     <option value="mastermix">Mastermix</option>
                     <option value="reagent">Reagent</option>
@@ -1121,7 +1245,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
                     setConsumables((rows) => rows.map((x, j) => (j === i ? { ...x, stockLotId: e.target.value, lotNumber: stockLot?.lotNumber ?? x.lotNumber } : x)))
                   }}>
                     <option value="">พิมพ์ lot เอง</option>
-                    {availableStockLots.map((lot) => <option key={lot.id} value={lot.id}>{lot.itemCode} · {lot.itemName} · LOT {lot.lotNumber}</option>)}
+                    {(c.kind === 'trucount-tube' && isCd4Entry ? availableCd4TrucountLots : availableStockLots).map((lot) => <option key={lot.id} value={lot.id}>{lot.itemCode} · {lot.itemName} · LOT {lot.lotNumber}</option>)}
                   </Select>
                   <Input className="h-9" placeholder="Lot no." value={c.lotNumber} readOnly={Boolean(c.stockLotId)} onChange={(e) => setConsumables((rows) => rows.map((x, j) => (j === i ? { ...x, lotNumber: e.target.value } : x)))} />
                   <button type="button" className="rounded p-1.5 text-[#c02a37] hover:bg-[#fff0f1]" aria-label="ลบ" onClick={() => setConsumables((rows) => rows.filter((_, j) => j !== i))}>
@@ -1129,7 +1253,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
                   </button>
                 </div>
               ))}
-              {!consumables.length ? <p className="text-[11px] text-[#9aafb4]">เช่น Trucount tube lot, staining reagent lot (ช่วยตามรอย abs-count shift)</p> : null}
+              {!consumables.length ? <p className="text-[11px] text-[#9aafb4]">เช่น Trucount tube lot (ช่วยตามรอย abs-count shift)</p> : null}
             </div>
           </div>
           <Field label="หมายเหตุ / Note">
@@ -1145,12 +1269,26 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
                 const selectedSet = e.target.value
                 setTestSet(selectedSet)
                 setFillLot('')
-                if (selectedSet) startTestSet(selectedSet)
-                else setRows([])
+                if (selectedSet) {
+                  const defaultLotId = defaultCd4PanelLotId(selectedSet)
+                  setTestSetControlLotId(defaultLotId)
+                  startTestSet(selectedSet, defaultLotId)
+                } else {
+                  setTestSetControlLotId('')
+                  setRows([])
+                }
               }}>
                 <option value="">ทุก test / ไม่เลือกชุด</option>
                 {testSetOptions.map((option) => <option key={option.name} value={option.name}>{option.name} ({option.count} รายการ)</option>)}
               </Select>
+              {testSet && isCd4TestSet ? <Select className="h-9 w-64" value={effectiveTestSetControlLotId} disabled={!instrumentId} aria-label={selectedPanelControlLot ? `Control lot ${selectedPanelControlLot.lotNumber}` : 'Control lot for panel'} onChange={(e) => {
+                const controlLotId = e.target.value
+                setTestSetControlLotId(controlLotId)
+                startTestSet(testSet, controlLotId)
+              }}>
+                <option value="">เลือก Control lot สำหรับ Panel…</option>
+                {panelControlLots.map((lot) => <option key={lot.id} value={lot.id}>{lot.controlMaterialName}{lot.level ? ` · ${lot.level}` : ''} · Lot {lot.lotNumber}</option>)}
+              </Select> : null}
               {!testSet ? <Select className="h-9 w-56" value={fillLot} disabled={!instrumentId} onChange={(e) => {
                 const controlLotId = e.target.value
                 setFillLot(controlLotId)

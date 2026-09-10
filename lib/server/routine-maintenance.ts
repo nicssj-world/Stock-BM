@@ -9,6 +9,7 @@ import {
   routineOccurrenceForPlannedDate,
   routinePeriodFor,
   routinePeriodKind,
+  routineUsesReviewLock,
   type RoutineFrequency,
   type RoutineMaintenanceEntry,
   type RoutineMaintenanceForm,
@@ -564,6 +565,7 @@ export async function deactivateRoutineMaintenanceForm(formId: string, actor: Bm
 }
 
 async function assertUnlocked(formId: string, frequency: RoutineFrequency, date: string) {
+  if (!routineUsesReviewLock(frequency)) return
   const period = routinePeriodFor(frequency, date)
   const { data, error } = await getAdminClient().from('bm_equipment_routine_reviews').select('id').eq('form_id', formId).eq('frequency', frequency).eq('period', period).maybeSingle()
   fail(error)
@@ -694,6 +696,7 @@ export async function reviewRoutinePeriod(input: RoutineMaintenanceReviewInput, 
   assertStaff(actor)
   const definition = await formDefinition(input.formId)
   if (definition.form.reviewerId !== actor.id) throw new HttpError(403, 'คุณไม่ได้รับมอบหมายเป็นผู้ตรวจฟอร์มนี้')
+  if (!routineUsesReviewLock(input.frequency)) throw new HttpError(400, 'Routine Maintenance รอบนี้ไม่ใช้ Review & Lock')
   ensurePeriod(input.frequency, input.period)
   if (!definition.versions.some((version) => version.frequency === input.frequency)) throw new HttpError(400, 'รอบของฟอร์มไม่ถูกต้อง')
   if (input.period > routinePeriodFor(input.frequency, todayBangkok())) throw new HttpError(400, 'ล็อกงวดในอนาคตไม่ได้')

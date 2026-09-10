@@ -46,11 +46,11 @@ function xTickIndexes(length: number) {
 }
 
 function chartShell(status: IqcChart['status']) {
-  if (status === 'rejected') return 'border-l-4 border-l-[#dc2626] shadow-[0_18px_44px_rgba(220,38,38,0.08)]'
-  if (status === 'investigate') return 'border-l-4 border-l-[#8f5f1d] shadow-[0_18px_44px_rgba(143,95,29,0.08)]'
-  if (status === 'warning') return 'border-l-4 border-l-[#d97706] shadow-[0_18px_44px_rgba(217,119,6,0.08)]'
-  if (status === 'not_evaluated') return 'border-l-4 border-l-[#789097] shadow-[0_18px_44px_rgba(120,144,151,0.08)]'
-  return 'border-l-4 border-l-[#0d9488] shadow-[0_18px_44px_rgba(13,148,136,0.06)]'
+  if (status === 'rejected') return 'ring-2 ring-inset ring-[#dc2626] shadow-[0_18px_44px_rgba(220,38,38,0.08)]'
+  if (status === 'investigate') return 'ring-2 ring-inset ring-[#8f5f1d] shadow-[0_18px_44px_rgba(143,95,29,0.08)]'
+  if (status === 'warning') return 'ring-2 ring-inset ring-[#d97706] shadow-[0_18px_44px_rgba(217,119,6,0.08)]'
+  if (status === 'not_evaluated') return 'ring-2 ring-inset ring-[#789097] shadow-[0_18px_44px_rgba(120,144,151,0.08)]'
+  return 'ring-2 ring-inset ring-[#0d9488] shadow-[0_18px_44px_rgba(13,148,136,0.06)]'
 }
 
 export function LjChart({
@@ -305,7 +305,7 @@ export function LjChart({
             return (
               <g key={i}>
                 <line x1={x} x2={x} y1={PAD.top} y2={PAD.top + PLOT_H} stroke="#6b7280" strokeWidth={1} strokeDasharray="2 3" />
-                <text x={x + 2} y={PAD.top + 8} fontSize={8} fill="#6b7280">{change.kind === 'trucount-tube' ? 'Trucount' : change.kind}</text>
+                <text x={x + 2} y={PAD.top + 8} fontSize={8} fill="#6b7280">{change.kind === 'trucount-tube' ? `Trucount · LOT ${change.lotNumber}` : change.kind}</text>
               </g>
             )
           })}
