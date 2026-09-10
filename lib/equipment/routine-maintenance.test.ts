@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   generateRoutineOccurrences,
   routineOccurrenceForPlannedDate,
+  routineFiscalMonthKeys,
+  routineFiscalYearBounds,
+  routineFiscalYearFor,
   routinePeriodBounds,
   routinePeriodFor,
   routineReviewPeriods,
@@ -134,6 +137,16 @@ describe('generic routine maintenance schedule', () => {
     expect(routinePeriodBounds('daily', '2026-02')).toEqual({ from: '2026-02-01', to: '2026-02-28' })
     expect(routinePeriodBounds('monthly', '2026-08')).toEqual({ from: '2026-08-01', to: '2026-08-31' })
     expect(routinePeriodBounds('yearly', '2024')).toEqual({ from: '2024-01-01', to: '2024-12-31' })
+  })
+
+  it('derives fiscal-year boundaries and months for monthly reports', () => {
+    expect(routineFiscalYearFor('2026-09-30')).toBe('2026')
+    expect(routineFiscalYearFor('2026-10-01')).toBe('2027')
+    expect(routineFiscalYearBounds('2026')).toEqual({ from: '2025-10-01', to: '2026-09-30' })
+    expect(routineFiscalMonthKeys('2026')).toEqual([
+      '2025-10', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03',
+      '2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09',
+    ])
   })
 
   it('keeps previous and current calendar periods available for review lock', () => {

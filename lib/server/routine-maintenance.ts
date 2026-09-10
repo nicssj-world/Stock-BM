@@ -4,7 +4,6 @@ import type { BmActor } from '@/lib/bm/types'
 import {
   actorCanBackfill,
   addRoutineDays,
-  addRoutineFrequency,
   currentRoutineVersion,
   routineOccurrenceForPlannedDate,
   routinePeriodFor,
@@ -146,6 +145,44 @@ async function cleanItems(items: RoutineMaintenanceItemInput[]) {
     throw new HttpError(400, 'ไม่พบชุดตัวเลือกที่เลือกในบางรายการ Checklist')
   }
   return items.map((item, index) => ({ label: labels[index], responseSetId: item.responseSetId }))
+}
+
+async function updateRoutineVersionInPlace(version: RoutineMaintenanceVersion, frequency: RoutineFrequency, startsOn: string, items: RoutineMaintenanceItemInput[]) {
+  const admin = getAdminClient()
+  const { error: versionError } = await admin
+    .from('bm_equipment_routine_form_versions')
+    .update({ frequency, starts_on: startsOn })
+    .eq('id', version.id)
+  fail(versionError)
+
+  const sharedCount = Math.min(version.items.length, items.length)
+  for (let index = 0; index < sharedCount; index += 1) {
+    const item = items[index]
+    const existing = version.items[index]
+    const { error } = await admin
+      .from('bm_equipment_routine_form_items')
+      .update({ label: item.label, response_set_id: item.responseSetId })
+      .eq('id', existing.id)
+    fail(error)
+  }
+
+  if (items.length > version.items.length) {
+    const { error } = await admin.from('bm_equipment_routine_form_items').insert(
+      items.slice(version.items.length).map((item, index) => ({
+        version_id: version.id,
+        position: version.items.length + index + 1,
+        label: item.label,
+        response_set_id: item.responseSetId,
+      })),
+    )
+    fail(error)
+  }
+
+  if (version.items.length > items.length) {
+    const removedIds = version.items.slice(items.length).map((item) => item.id)
+    const { error } = await admin.from('bm_equipment_routine_form_items').delete().in('id', removedIds)
+    fail(error)
+  }
 }
 
 function cleanFormName(name: string) {
@@ -526,14 +563,44 @@ export async function updateRoutineMaintenanceForm(input: RoutineMaintenanceForm
   const hasHistory = Boolean((entryResult.data ?? []).length || (reviewResult.data ?? []).length)
   const versions = [...definition.versions].sort((a, b) => b.versionNumber - a.versionNumber)
   const latest = versions[0]
-  let startsOn = input.startsOn
-  // Every edit creates a new version so the previous checklist remains
-  // immutable, including when a reviewer already locked an empty period.
-  if (hasHistory) {
-    while (startsOn <= todayBangkok()) startsOn = addRoutineFrequency(startsOn, input.frequency)
+  const startsOn = input.startsOn
+
+  if (latest && !hasHistory) {
+    const emptyVersionsAfterStart = definition.versions.filter((version) => version.id !== latest.id && version.startsOn >= startsOn)
+    if (emptyVersionsAfterStart.length) {
+      // These versions have no maintenance/review references, so they are
+      // safe to discard when an admin corrects the effective date. This also
+      // repairs empty versions created by the old auto-advance behavior.
+      const { error } = await admin
+        .from('bm_equipment_routine_form_versions')
+        .delete()
+        .in('id', emptyVersionsAfterStart.map((version) => version.id))
+      fail(error)
+    }
+
+    // No checklist or review record refers to this form yet, so editing the
+    // current version in place preserves the date selected by the admin and
+    // avoids creating another empty version on every retry.
+    await updateRoutineVersionInPlace(latest, input.frequency, startsOn, items)
+    const { error: formError } = await admin.from('bm_equipment_routine_forms').update({ name, reviewer_id: input.reviewerId ?? null, is_active: input.active ?? definition.form.active, updated_by: actor.id, updated_at: new Date().toISOString() }).eq('id', input.formId)
+    if (isDuplicate(formError)) throw new HttpError(409, 'มีชื่อฟอร์มนี้ในเครื่องมือแล้ว')
+    fail(formError)
+    await writeAudit(actor, 'equipment.routine-maintenance.form.update', 'equipment-routine-form', input.formId, { name, frequency: input.frequency, startsOn, versionId: latest.id, versionNumber: latest.versionNumber, itemCount: items.length })
+    return getRoutineWorkspace(actor, definition.form.equipmentId)
   }
-  if (latest && startsOn <= latest.startsOn) startsOn = addRoutineFrequency(latest.startsOn, input.frequency)
-  while (definition.versions.some((version) => version.startsOn === startsOn)) startsOn = addRoutineFrequency(startsOn, input.frequency)
+
+  // Once a form has history, existing versions are immutable. Keep the
+  // requested date unchanged, but reject an invalid overlap instead of
+  // silently moving it forward by one or more periods.
+  if (latest && startsOn <= latest.startsOn) {
+    throw new HttpError(409, `วันเริ่มต้น Version ใหม่ต้องหลัง Version ${latest.versionNumber} (${latest.startsOn})`)
+  }
+  if (hasHistory && startsOn <= todayBangkok()) {
+    throw new HttpError(409, 'ฟอร์มนี้มีประวัติแล้ว วันเริ่มต้น Version ใหม่ต้องเป็นวันหลังวันนี้')
+  }
+  if (definition.versions.some((version) => version.startsOn === startsOn)) {
+    throw new HttpError(409, 'ไม่สามารถสร้าง Version ในวันเริ่มต้นนี้ได้')
+  }
 
   const versionNumber = (latest?.versionNumber ?? 0) + 1
   let versionId = ''

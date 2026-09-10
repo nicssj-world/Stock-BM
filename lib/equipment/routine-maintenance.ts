@@ -227,6 +227,26 @@ export function routinePeriodBounds(frequency: RoutineFrequency, period: string)
   return { from: start, to: addRoutineDays(nextYear, -1) }
 }
 
+/**
+ * Returns the Thai fiscal year key for an ISO date. The fiscal year is named
+ * after the calendar year in which it ends (1 October through 30 September).
+ */
+export function routineFiscalYearFor(value: string): string {
+  const year = Number(value.slice(0, 4))
+  const month = Number(value.slice(5, 7))
+  return String(month >= 10 ? year + 1 : year)
+}
+
+export function routineFiscalYearBounds(fiscalYear: string) {
+  const year = Number(fiscalYear)
+  return { from: `${year - 1}-10-01`, to: `${year}-09-30` }
+}
+
+export function routineFiscalMonthKeys(fiscalYear: string) {
+  const start = `${Number(fiscalYear) - 1}-10-01`
+  return Array.from({ length: 12 }, (_, index) => monthlyAnchorDate(start, index).slice(0, 7))
+}
+
 function nextRoutineReviewPeriod(period: string, kind: 'month' | 'year') {
   if (kind === 'month') return monthlyAnchorDate(`${period}-01`, 1).slice(0, 7)
   return String(Number(period) + 1).padStart(4, '0')
