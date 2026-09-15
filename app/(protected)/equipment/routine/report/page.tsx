@@ -81,7 +81,7 @@ function thaiPeriod(frequency: RoutineFrequency, period: string) {
 }
 
 function occurrenceLabel(occurrence: RoutineMaintenanceOccurrence, isHoliday: boolean) {
-  if (occurrence.frequency === 'monthly') return <>{fiscalMonthLabel(occurrence.plannedOn)}</>
+  if (occurrence.frequency === 'monthly') return <>{fiscalMonthLabel(occurrence.plannedOn.slice(0, 7))}</>
   const weekday = weekendDayLabel(occurrence.plannedOn)
   return <>{formatDate(occurrence.plannedOn)}{occurrence.shifted ? <small>→ {formatDate(occurrence.scheduledOn)}</small> : null}{weekday ? <small>({weekday === 'เสาร์' ? 'ส' : 'อา'})</small> : isHoliday ? <small>(หยุด)</small> : null}</>
 }
