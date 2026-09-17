@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { FileText, History, PackageCheck } from 'lucide-react'
-import type { BmActor } from '@/lib/bm/types'
 import type { ReceivingWorkspace } from '@/lib/receiving/types'
 import { Card, Notice, PageHeader, StatCard, StatusBadge, Tabs } from '@/components/ui'
 import { InvoiceEditor } from '@/components/receiving/invoice-editor'
@@ -10,7 +10,7 @@ import { ReceiptDraft } from '@/components/receiving/receipt-draft'
 
 type ReceivingTab = 'receive' | 'invoices' | 'history'
 
-export function ReceivingView({ actor, initialData }: { actor: BmActor; initialData: ReceivingWorkspace }) {
+export function ReceivingView({ initialData }: { initialData: ReceivingWorkspace }) {
   const [data, setData] = useState(initialData)
   const [tab, setTab] = useState<ReceivingTab>('receive')
   const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
@@ -49,5 +49,5 @@ export function ReceivingView({ actor, initialData }: { actor: BmActor; initialD
 
 function HistoryList({ data }: { data: ReceivingWorkspace }) {
   const rows = data.receipts.filter((receipt) => receipt.status !== 'draft')
-  return <Card className="overflow-hidden"><div className="divide-y divide-[#edf2f2]">{rows.map((receipt) => <div key={receipt.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm"><div><p className="font-semibold text-[#315763]">{receipt.receiptNo ?? receipt.id.slice(0, 8)}</p><p className="text-xs text-[#81979c]">{receipt.receivedDate} · {receipt.lines.length} lines · {receipt.stockTransactionId ? `ledger ${receipt.stockTransactionId.slice(0, 8)}` : 'ยังไม่มี ledger'}</p></div><StatusBadge tone={receipt.status === 'confirmed' ? 'accepted' : 'neutral'} label={receipt.status} /></div>)}{!rows.length ? <p className="p-8 text-center text-sm text-[#81979c]">ยังไม่มีประวัติ</p> : null}</div></Card>
+  return <Card className="overflow-hidden"><div className="divide-y divide-[#edf2f2]">{rows.map((receipt) => <div key={receipt.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm"><div><p className="font-semibold text-[#315763]">{receipt.receiptNo ?? receipt.id.slice(0, 8)}</p><p className="text-xs text-[#81979c]">{receipt.receivedDate} · {receipt.lines.length} lines · {receipt.stockTransactionId ? `ledger ${receipt.stockTransactionId.slice(0, 8)}` : 'ยังไม่มี ledger'}</p></div><div className="flex items-center gap-3"><Link href={`/receiving/receipts/${receipt.id}/report`} className="text-xs font-semibold text-[#0b7f76] hover:underline">เปิดรายงาน</Link><StatusBadge tone={receipt.status === 'confirmed' ? 'accepted' : 'neutral'} label={receipt.status} /></div></div>)}{!rows.length ? <p className="p-8 text-center text-sm text-[#81979c]">ยังไม่มีประวัติ</p> : null}</div></Card>
 }

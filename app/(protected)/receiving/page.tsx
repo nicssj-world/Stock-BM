@@ -12,5 +12,5 @@ export default async function ReceivingPage() {
     if (error instanceof HttpError && error.status === 404) notFound()
     throw error
   }
-  return <ReceivingView actor={actor} initialData={await getReceivingWorkspace(actor)} />
+  return <ReceivingView initialData={await getReceivingWorkspace(actor)} />
 }
