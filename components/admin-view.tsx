@@ -3,14 +3,17 @@
 import { useEffect, useState } from 'react'
 import { ExternalLink, KeyRound, MapPin, PackagePlus, Pencil, Plus, Tags, Trash2, UserCog, X } from 'lucide-react'
 import type { AdminUserRow, BmActor, StockCategory, StockItem, StockLocation, StockWorkspace } from '@/lib/bm/types'
+import type { SupplierCandidate, Vendor } from '@/lib/receiving/types'
 import { api, Button, Card, Field, Input, Loading, Notice, PageHeader, Select } from '@/components/ui'
 import { Pagination, usePagination } from '@/components/pagination'
+import { VendorAdmin } from '@/components/vendor-admin'
 
-type Tab = 'items' | 'categories' | 'locations' | 'users'
+type Tab = 'items' | 'categories' | 'locations' | 'vendors' | 'users'
 
-export function AdminView({ actor, initialData }: { actor: BmActor; initialData: StockWorkspace }) {
+export function AdminView({ actor, initialData, initialVendors, initialSupplierCandidates }: { actor: BmActor; initialData: StockWorkspace; initialVendors: Vendor[]; initialSupplierCandidates: SupplierCandidate[] }) {
   const [tab, setTab] = useState<Tab>('items')
   const [data, setData] = useState(initialData)
+  const [vendors, setVendors] = useState(initialVendors)
   const [users, setUsers] = useState<AdminUserRow[] | null>(null)
   const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
 
@@ -34,11 +37,12 @@ export function AdminView({ actor, initialData }: { actor: BmActor; initialData:
       <PageHeader eyebrow="Administration" title="Admin" description={`Molecular-CBH QMS Admin · ${actor.displayName}`} />
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
       <div className="flex flex-wrap gap-2">
-        {(['items', 'categories', 'locations', 'users'] as Tab[]).map((item) => <Button key={item} variant={tab === item ? 'primary' : 'secondary'} onClick={() => setTab(item)}>{item}</Button>)}
+        {(['items', 'categories', 'locations', 'vendors', 'users'] as Tab[]).map((item) => <Button key={item} variant={tab === item ? 'primary' : 'secondary'} onClick={() => setTab(item)}>{item}</Button>)}
       </div>
       {tab === 'items' ? <ItemsAdmin data={data} onSaved={onStock} onError={(text) => setNotice({ tone: 'danger', text })} /> : null}
       {tab === 'categories' ? <CategoriesAdmin categories={data.categories} onSaved={onStock} onError={(text) => setNotice({ tone: 'danger', text })} /> : null}
       {tab === 'locations' ? <LocationsAdmin locations={data.locations} onSaved={onStock} onError={(text) => setNotice({ tone: 'danger', text })} /> : null}
+      {tab === 'vendors' ? <VendorAdmin vendors={vendors} supplierCandidates={initialSupplierCandidates} onSaved={(next, text) => { setVendors(next); setNotice({ tone: 'success', text }) }} onError={(text) => setNotice({ tone: 'danger', text })} /> : null}
       {tab === 'users' ? <UsersAdmin actorId={actor.id} users={users} refreshUsers={refreshUsers} onError={(text) => setNotice({ tone: 'danger', text })} onSuccess={(text) => setNotice({ tone: 'success', text })} /> : null}
     </div>
   )
