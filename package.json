@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "test:db": "node scripts/db-test.mjs",
     "test:watch": "vitest",
     "bootstrap:stock-admin": "node --env-file-if-exists=.env.local scripts/bootstrap-stock-admin.mjs",
     "seed:iqc-cd4": "node --env-file-if-exists=.env.local scripts/import-iqc-cd4.mjs",
