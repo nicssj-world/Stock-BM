@@ -125,8 +125,16 @@ export interface StockWorkspace {
   locationCount: number
 }
 
+export interface ScanCandidate {
+  itemId: string
+  itemCode: string
+  itemName: string
+  lotId?: string
+  lotNumber?: string
+}
+
 export interface ScanResolution {
-  kind: 'internal-lot' | 'manufacturer-barcode' | 'location' | 'unknown'
+  kind: 'internal-lot' | 'manufacturer-barcode' | 'location' | 'ambiguous' | 'unknown'
   code: string
   itemId?: string
   itemCode?: string
@@ -138,6 +146,7 @@ export interface ScanResolution {
   locationCode?: string
   locationName?: string
   href?: string
+  candidates?: ScanCandidate[]
 }
 
 // Context for the one-screen quick-issue reached by scanning a lot QR sticker.

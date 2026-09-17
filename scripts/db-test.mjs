@@ -40,6 +40,22 @@ function runNpx(args, { allowFailure = false } = {}) {
   return { status: result.status ?? 1, output }
 }
 
+function configureLocalApiClient() {
+  const status = runNpx(['supabase', 'status', '-o', 'env'])
+  const statusValue = (name) => {
+    const line = status.output.split(/\r?\n/).find((candidate) => candidate.trimStart().startsWith(`${name}=`))
+    const value = line?.trim().slice(name.length + 1).trim()
+    return value?.replace(/^(["'])(.*)\1$/, '$2')
+  }
+  const apiUrl = statusValue('API_URL')
+  const serviceRoleKey = statusValue('SERVICE_ROLE_KEY')
+  if (!apiUrl || !serviceRoleKey) throw new Error('Local Supabase status did not provide API_URL and SERVICE_ROLE_KEY')
+  process.env.NEXT_PUBLIC_BM_SUPABASE_URL = apiUrl
+  process.env.BM_SUPABASE_SERVICE_ROLE_KEY = serviceRoleKey
+  process.env.STOCK_DB_HARNESS = '1'
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+}
+
 function runSql(sql, label) {
   const config = fs.readFileSync(configPath, 'utf8')
   const projectId = config.match(/^project_id\s*=\s*"([^"]+)"/m)?.[1]
@@ -106,6 +122,7 @@ try {
   fs.writeFileSync(configPath, setMigrationsEnabled(originalConfig, false))
   runNpx(['supabase', 'start', '--exclude', 'analytics'])
   started = true
+  configureLocalApiClient()
 
   fs.writeFileSync(configPath, setMigrationsEnabled(originalConfig, true))
   runSql(sqlFile(externalDependenciesPath), 'external dependency bootstrap')
@@ -144,6 +161,14 @@ try {
     const output = runSql(sqlFile(path.join(testDirectory, name)), name)
     console.log(`${name} PASS`)
     if (!output.includes('PASS')) throw new Error(`${name} did not emit a PASS marker`)
+  }
+
+  if (sqlTests.includes('l0-14-ambiguous-barcode.sql')) {
+    const resolverRun = runNpx(['vitest', 'run', 'supabase/tests/l0-14-resolve.test.ts'], { allowFailure: true })
+    if (resolverRun.status !== 0) {
+      throw new Error(`L0-14 resolveScan integration failed\n${resolverRun.output}`)
+    }
+    console.log('L0-14 PASS: resolveScan returned ambiguous with every matching item candidate.')
   }
 
   console.log('Real-DB verification complete.')

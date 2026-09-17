@@ -737,23 +737,77 @@ export async function resolveScan(codeInput: string): Promise<ScanResolution> {
 
   const { data: lot, error: lotError } = await admin.from('bm_stock_lots').select('*').eq('manufacturer_barcode', code).maybeSingle()
   fail(lotError)
-  if (lot) return lotResolution(lot as RecordRow, code, 'manufacturer-barcode')
 
   const { data: item, error: itemError } = await admin.from('bm_stock_items').select('*').eq('manufacturer_barcode', code).maybeSingle()
   fail(itemError)
-  if (item) {
-    const itemRow = item as RecordRow
+  const { data: barcodeLots, error: barcodeLotError } = await admin.from('bm_stock_lot_barcodes').select('stock_lot_id').eq('barcode', code)
+  if (barcodeLotError && !isMissingBarcodeTableError(barcodeLotError)) fail(barcodeLotError)
+  const { data: barcodeItems, error: barcodeItemError } = await admin.from('bm_stock_item_barcodes').select('stock_item_id').eq('barcode', code)
+  if (barcodeItemError && !isMissingBarcodeTableError(barcodeItemError)) fail(barcodeItemError)
+
+  const lotIds = [...new Set([
+    lot ? asString((lot as RecordRow).id) : '',
+    ...((barcodeLots ?? []) as RecordRow[]).map((row) => asString(row.stock_lot_id)),
+  ].filter(Boolean))]
+  const { data: barcodeLotData, error: barcodeLotDataError } = lotIds.length
+    ? await admin.from('bm_stock_lots').select('*').in('id', lotIds)
+    : { data: [], error: null }
+  fail(barcodeLotDataError)
+  const lotById = new Map<string, RecordRow>()
+  for (const row of [...(barcodeLotData ?? []), ...(lot ? [lot] : [])] as RecordRow[]) lotById.set(asString(row.id), row)
+
+  const itemIds = [...new Set([
+    item ? asString((item as RecordRow).id) : '',
+    ...((barcodeItems ?? []) as RecordRow[]).map((row) => asString(row.stock_item_id)),
+    ...[...lotById.values()].map((row) => asString(row.item_id)),
+  ].filter(Boolean))]
+  const { data: barcodeItemData, error: barcodeItemDataError } = itemIds.length
+    ? await admin.from('bm_stock_items').select('id,item_code,name').in('id', itemIds)
+    : { data: [], error: null }
+  fail(barcodeItemDataError)
+  const itemById = new Map<string, RecordRow>()
+  for (const row of [...(barcodeItemData ?? []), ...(item ? [item] : [])] as RecordRow[]) itemById.set(asString(row.id), row)
+
+  const lotCandidates = [...lotById.values()].map((lotRow) => {
+    const itemRow = itemById.get(asString(lotRow.item_id))
+    return {
+      itemId: asString(itemRow?.id ?? lotRow.item_id),
+      itemCode: asString(itemRow?.item_code),
+      itemName: asString(itemRow?.name),
+      lotId: asString(lotRow.id),
+      lotNumber: asString(lotRow.lot_number),
+    }
+  })
+  const itemCandidates = itemIds
+    .filter((itemId) => !lotCandidates.some((candidate) => candidate.itemId === itemId))
+    .map((itemId) => {
+      const itemRow = itemById.get(itemId)
+      return {
+        itemId,
+        itemCode: asString(itemRow?.item_code),
+        itemName: asString(itemRow?.name),
+      }
+    })
+  const candidates = [...lotCandidates, ...itemCandidates]
+  if (candidates.length > 1) return { kind: 'ambiguous', code, candidates }
+  if (lotCandidates.length === 1) return lotResolution(lotById.get(lotCandidates[0].lotId!)!, code, 'manufacturer-barcode')
+  if (itemCandidates.length === 1) {
+    const itemRow = itemById.get(itemCandidates[0].itemId)!
     return {
       kind: 'manufacturer-barcode',
       code,
-      itemId: asString(itemRow.id),
+      itemId: itemCandidates[0].itemId,
       itemCode: asString(itemRow.item_code),
       itemName: asString(itemRow.name),
-      href: `/movements?mode=receive&itemId=${encodeURIComponent(asString(itemRow.id))}`,
+      href: `/movements?mode=receive&itemId=${encodeURIComponent(itemCandidates[0].itemId)}`,
     }
   }
 
   return { kind: 'unknown', code }
+}
+
+function isMissingBarcodeTableError(error: { code?: string } | null) {
+  return error?.code === '42P01' || error?.code === '42703'
 }
 
 export function extractLotToken(value: string) {
