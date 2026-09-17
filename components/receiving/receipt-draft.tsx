@@ -2,7 +2,10 @@
 
 import { useMemo, useState } from 'react'
 import { ClipboardCheck, FileText, MapPin, PackagePlus } from 'lucide-react'
-import type { ReceivingWorkspace } from '@/lib/receiving/types'
+import { remainingShelfLife, torExpiryCompliance } from '@/lib/bm/shelf-life'
+import { todayBangkok } from '@/lib/bm/rules'
+import type { Receipt, ReceivingWorkspace } from '@/lib/receiving/types'
+import { receiptIssues } from '@/lib/receiving/rules'
 import { api, Button, Card, Field, Input, Notice, Select, StatusBadge } from '@/components/ui'
 import { ReceiptLineRow } from '@/components/receiving/receipt-line-row'
 
@@ -24,10 +27,12 @@ export function ReceiptDraft({ data, onSaved, onError }: { data: ReceivingWorksp
   async function createDraft(event: React.FormEvent) {
     event.preventDefault()
     setBusy(true)
+    const receivedDate = todayBangkok()
+    const computedCompliance = torExpiryCompliance(expiryDate || null, receivedDate)
     try {
       const result = await api<{ receiving: ReceivingWorkspace }>('/api/receiving/receipts', {
         method: 'POST',
-        body: JSON.stringify({ vendorId, receiptNo: receiptNo || null, packagingStatus: null, temperatureStatus: null, lines: [{ lineNo: 1, stockItemId: itemId, locationId, lotNumber: lotNumber || null, expiryDate: expiryDate || null, lotMode: selectedItem?.trackLot ? 'new' : 'not_tracked', receivedQty: Number(receivedQty), torExpiryCompliance: expiryDate ? 'compliant' : 'not_applicable' }] }),
+        body: JSON.stringify({ vendorId, receiptNo: receiptNo || null, receivedDate, packagingStatus: null, temperatureStatus: null, lines: [{ lineNo: 1, stockItemId: itemId, locationId, lotNumber: lotNumber || null, expiryDate: expiryDate || null, lotMode: selectedItem?.trackLot ? 'new' : 'not_tracked', receivedQty: Number(receivedQty), torExpiryCompliance: computedCompliance === 'not_compliant' ? 'compliant' : computedCompliance, remainingShelfLifeDays: remainingShelfLife(expiryDate || null, receivedDate) }] }),
       })
       onSaved(result.receiving, 'สร้างร่างใบรับเข้าแล้ว')
       setReceiptNo(''); setLotNumber(''); setExpiryDate(''); setReceivedQty('1')
@@ -57,7 +62,37 @@ export function ReceiptDraft({ data, onSaved, onError }: { data: ReceivingWorksp
       </div>
       <div className="grid gap-3 md:grid-cols-2"><div className="rounded-md border border-[#dce8e9] bg-[#f8fbfb] p-3"><p className="flex items-center gap-2 text-xs font-bold text-[#315763]"><MapPin className="size-4 text-[#0b7f76]" />3. Location + evidence</p><div className="mt-3 space-y-3"><Field label="Location"><Select required value={locationId} onChange={(event) => setLocationId(event.target.value)}><option value="">เลือก location</option>{activeLocations.map((location) => <option key={location.id} value={location.id}>{location.code} · {location.name}</option>)}</Select></Field><p className="text-xs text-[#81979c]">Packaging และ temperature จะถูกกรอกใน draft ก่อนยืนยัน</p></div></div><div className="rounded-md border border-[#dce8e9] bg-[#f8fbfb] p-3"><p className="flex items-center gap-2 text-xs font-bold text-[#315763]"><ClipboardCheck className="size-4 text-[#0b7f76]" />4. Review + confirm</p><p className="mt-3 text-xs leading-5 text-[#81979c]">ระบบจะตรวจ lot, expiry, TOR และ feature flag ซ้ำใน RPC ก่อนเขียนผ่าน ledger เดิม</p><Button className="mt-3" disabled={busy || !vendorId || !itemId || !locationId}><PackagePlus className="size-4" />สร้าง draft</Button></div></div>
     </form></Card>
-    {drafts.map((receipt) => <Card key={receipt.id} className="space-y-3 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold tracking-[0.14em] text-[#0b7f76] uppercase">Draft receipt</p><h2 className="mt-1 text-lg font-bold text-[#173d50]">{receipt.receiptNo ?? receipt.id.slice(0, 8)}</h2><p className="text-xs text-[#81979c]">{receipt.lines.length} line · received date {receipt.receivedDate}</p></div><StatusBadge tone="warning" label="draft" /></div><div className="grid gap-2">{receipt.lines.map((line) => <ReceiptLineRow key={line.id} line={line} data={data} />)}</div><Notice tone="warning">ต้องกรอก packaging และ temperature รวมถึงแก้ไข TOR exception ให้ครบก่อนยืนยัน</Notice><Button disabled={busy || !receipt.lines.length} onClick={() => confirm(receipt.id)}><ClipboardCheck className="size-4" />ยืนยันรับสินค้า</Button></Card>)}
+    {drafts.map((receipt) => {
+      const viewReceipt = { ...receipt, lines: receipt.lines.map((line) => ({ ...line, torExpiryCompliance: torExpiryCompliance(line.expiryDate, receipt.receivedDate), remainingShelfLifeDays: remainingShelfLife(line.expiryDate, receipt.receivedDate) })) }
+      const issues = receiptIssues(viewReceipt, { expiryExceptionEnabled: data.policy.expiryExceptionEnabled })
+      return <Card key={receipt.id} className="space-y-3 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold tracking-[0.14em] text-[#0b7f76] uppercase">Draft receipt</p><h2 className="mt-1 text-lg font-bold text-[#173d50]">{receipt.receiptNo ?? receipt.id.slice(0, 8)}</h2><p className="text-xs text-[#81979c]">{receipt.lines.length} line · received date {receipt.receivedDate}</p></div><StatusBadge tone="warning" label="draft" /></div><ReceiptEvidence receipt={receipt} onSaved={(next) => onSaved(next, 'บันทึก packaging และ temperature แล้ว')} /><div className="grid gap-2">{receipt.lines.map((line) => <ReceiptLineRow key={line.id} line={line} receivedDate={receipt.receivedDate} data={data} onUpdated={(next) => onSaved(next, 'บันทึกเหตุผล TOR แล้ว')} />)}</div>{issues.length ? <Notice tone={issues.some((issue) => issue.target.includes('receiptDecision')) ? 'danger' : 'warning'}>{issues[0].message}</Notice> : <Notice tone="success">ข้อมูลพร้อมยืนยันรับสินค้า — ระบบจะตรวจสอบซ้ำในฐานข้อมูลก่อนเขียน ledger</Notice>}<Button disabled={busy || issues.length > 0 || !receipt.lines.length} onClick={() => confirm(receipt.id)}><ClipboardCheck className="size-4" />ยืนยันรับสินค้า</Button></Card>
+    })}
     {!drafts.length ? <Card className="p-8 text-center text-sm text-[#81979c]">ยังไม่มี draft ใบรับเข้า — สร้างจากแบบฟอร์มด้านบน</Card> : null}
   </div>
+}
+
+function ReceiptEvidence({ receipt, onSaved }: { receipt: Receipt; onSaved: (data: ReceivingWorkspace) => void }) {
+  const [temperatureValueC, setTemperatureValueC] = useState(receipt.temperatureValueC == null ? '' : String(receipt.temperatureValueC))
+  const [busy, setBusy] = useState(false)
+
+  async function save(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    setBusy(true)
+    try {
+      const result = await api<{ receiving: ReceivingWorkspace }>(`/api/receiving/receipts/${receipt.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          packagingStatus: String(form.get('packagingStatus') || '') || null,
+          temperatureStatus: String(form.get('temperatureStatus') || '') || null,
+          temperatureValueC: temperatureValueC === '' ? null : Number(temperatureValueC),
+        }),
+      })
+      onSaved(result.receiving)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <form onSubmit={save} className="grid gap-3 rounded-md border border-[#dce8e9] bg-[#f8fbfb] p-3 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end"><Field label="Packaging"><Select name="packagingStatus" defaultValue={receipt.packagingStatus ?? ''}><option value="">เลือกสถานะ</option><option value="acceptable">acceptable / ปกติ</option><option value="damaged">damaged / ชำรุด</option><option value="not_applicable">not applicable</option></Select></Field><Field label="Temperature"><Select name="temperatureStatus" defaultValue={receipt.temperatureStatus ?? ''}><option value="">เลือกสถานะ</option><option value="acceptable">acceptable / ปกติ</option><option value="out_of_range">out of range</option><option value="not_applicable">not applicable</option></Select></Field><Field label="Temperature °C" hint="กรอกเมื่อมีการวัดอุณหภูมิ"><Input type="number" step="0.1" value={temperatureValueC} onChange={(event) => setTemperatureValueC(event.target.value)} /></Field><Button variant="secondary" disabled={busy}>บันทึกหลักฐาน</Button></form>
 }

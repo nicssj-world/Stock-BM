@@ -10,6 +10,7 @@ describe('receiving function migration', () => {
     expect(sql).toContain('make_interval(months => p_months)')
     expect(sql).toContain('create or replace function public.bm_tor_expiry_compliance')
     expect(sql).toContain("p_expiry > public.bm_add_calendar_months(p_received, p_months)")
+    expect(sql).toContain('v_remaining_shelf_life_days := case when v_expiry is null then null else v_expiry - v_receipt.received_date end')
     expect(sql).toContain("'not_applicable'")
     expect(sql).toContain("'not_compliant'")
   })

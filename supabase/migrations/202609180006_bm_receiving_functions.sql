@@ -42,6 +42,7 @@ declare
   v_lot_number text;
   v_expiry date;
   v_compliance text;
+  v_remaining_shelf_life_days integer;
   v_lines jsonb := '[]'::jsonb;
   v_resolved jsonb := '[]'::jsonb;
   v_resolved_line record;
@@ -129,6 +130,12 @@ begin
     if v_compliance is distinct from v_line.tor_expiry_compliance then
       raise exception 'TOR expiry compliance does not match server calculation';
     end if;
+    v_remaining_shelf_life_days := case when v_expiry is null then null else v_expiry - v_receipt.received_date end;
+    if v_line.remaining_shelf_life_days is not null
+      and v_line.remaining_shelf_life_days is distinct from v_remaining_shelf_life_days
+    then
+      raise exception 'Remaining shelf-life days do not match server calculation';
+    end if;
     if v_compliance = 'not_compliant' then
       if not v_policy.expiry_exception_enabled then
         raise exception 'Expiry exception acceptance is not enabled (pending policy approval)';
@@ -152,6 +159,10 @@ begin
       'line_id', v_line.id,
       'lot_id', v_lot.id
     ));
+    update public.bm_receipt_lines
+    set remaining_shelf_life_days = v_remaining_shelf_life_days,
+        updated_at = now()
+    where id = v_line.id;
   end loop;
 
   -- This is the only new-workflow ledger call. The existing function owns the

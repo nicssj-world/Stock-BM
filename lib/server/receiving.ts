@@ -1,6 +1,7 @@
 import 'server-only'
 
 import type { BmActor } from '@/lib/bm/types'
+import { remainingShelfLife, torExpiryCompliance } from '@/lib/bm/shelf-life'
 import type {
   Invoice,
   InvoiceLine,
@@ -48,6 +49,8 @@ function nullableNumber(value: unknown) {
 function clean(value: string | null | undefined) {
   return value?.trim() || null
 }
+
+const EXPIRY_EXCEPTION_PENDING_MESSAGE = 'ยังไม่เปิดใช้งานการรับสินค้าที่ไม่ผ่านเกณฑ์ TOR — รออนุมัติผู้มีสิทธิ์ (P-01/P-02)'
 
 function toPolicy(row: RecordRow): ReceivingPolicy {
   return {
@@ -448,9 +451,35 @@ export async function cancelReceiptDraft(id: string, actor: BmActor) {
 
 export async function confirmReceipt(id: string, actor: BmActor) {
   const policy = await assertReceivingEnabled()
-  const { data, error } = await getAdminClient().rpc('confirm_bm_receipt', { p_receipt: id, p_actor: actor.id })
+  const admin = getAdminClient()
+  const { data: receipt, error: receiptError } = await admin.from('bm_receipts').select('id,received_date,status').eq('id', id).maybeSingle()
+  fail(receiptError)
+  if (!receipt) throw new HttpError(404, 'ไม่พบใบรับเข้า')
+  const { data: lines, error: lineError } = await admin.from('bm_receipt_lines').select('id,expiry_date,tor_threshold_months,tor_expiry_compliance,receipt_decision,acceptance_reason_code,acceptance_reason_note,remaining_shelf_life_days').eq('receipt_id', id).order('line_no').order('id')
+  fail(lineError)
+  for (const line of (lines ?? []) as RecordRow[]) {
+    const expiry = nullableString(line.expiry_date)
+    const received = asString((receipt as RecordRow).received_date)
+    const compliance = torExpiryCompliance(expiry, received)
+    if (compliance !== asString(line.tor_expiry_compliance)) {
+      throw new HttpError(400, 'ข้อมูล TOR ในรายการรับเข้าไม่ตรงกับการคำนวณจากวันรับและวันหมดอายุ')
+    }
+    if (line.remaining_shelf_life_days != null && Number(line.remaining_shelf_life_days) !== remainingShelfLife(expiry, received)) {
+      throw new HttpError(400, 'ข้อมูลอายุคงเหลือของรายการรับเข้าไม่ตรงกับวันรับและวันหมดอายุ')
+    }
+    if (compliance === 'not_compliant' && !policy.expiryExceptionEnabled) {
+      throw new HttpError(409, EXPIRY_EXCEPTION_PENDING_MESSAGE)
+    }
+    if (compliance === 'not_compliant' && asString(line.receipt_decision) !== 'accepted_with_justification') {
+      throw new HttpError(400, 'กรุณาระบุเหตุผลการยอมรับสินค้าที่ไม่ผ่านเกณฑ์ TOR')
+    }
+    if (compliance === 'not_compliant' && (!line.acceptance_reason_code || (line.acceptance_reason_code === 'other' && !String(line.acceptance_reason_note ?? '').trim()))) {
+      throw new HttpError(400, 'กรุณาระบุเหตุผลการยอมรับให้ครบถ้วน')
+    }
+  }
+  const { data, error } = await admin.rpc('confirm_bm_receipt', { p_receipt: id, p_actor: actor.id })
   if (error) {
-    if (error.message.includes('Expiry exception acceptance is not enabled')) throw new HttpError(409, 'ยังไม่เปิดใช้งานการรับสินค้าที่ไม่ผ่านเกณฑ์ TOR — รออนุมัติผู้มีสิทธิ์ (P-01/P-02)')
+    if (error.message.includes('Expiry exception acceptance is not enabled')) throw new HttpError(409, EXPIRY_EXCEPTION_PENDING_MESSAGE)
     if (error.message.includes('Receiving workflow is not enabled')) throw new HttpError(404, 'Not found')
     if (error.message.includes('Existing lot expiry date does not match')) throw new HttpError(409, error.message)
     fail(error)
