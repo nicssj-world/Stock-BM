@@ -26,6 +26,8 @@ const stockSection: NavSection = {
   ],
 }
 
+const receivingItem: NavItem = { href: '/receiving', label: 'รับเข้า / Receiving', icon: ArrowDownToLine }
+
 const hpvManagementItem: NavItem = { href: '/hpv', label: 'HPV Genotype', icon: Dna }
 const hivDrtManagementItem: NavItem = { href: '/hiv-drt', label: 'HIV DRT', icon: Biohazard }
 const hivLabAlertManagementItem: NavItem = { href: '/hiv-alert', label: 'HIV LAB Alert', icon: BellRing }
@@ -58,19 +60,19 @@ const monitoringSection: NavSection = {
   ],
 }
 
-export function AppShell({ actor, children }: { actor: BmActor; children: React.ReactNode }) {
+export function AppShell({ actor, receivingEnabled, children }: { actor: BmActor; receivingEnabled?: boolean; children: React.ReactNode }) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const router = useRouter()
   const sections: NavSection[] = actor.role === 'Assistant'
     ? [assistantManagementSection]
-    : [homeSection, stockSection, managementSection, qualitySection, monitoringSection]
+    : [homeSection, { ...stockSection, items: receivingEnabled ? [...stockSection.items, receivingItem] : stockSection.items }, managementSection, qualitySection, monitoringSection]
   if (actor.role === 'Admin') sections.push({ title: 'System', items: [{ href: '/admin', label: 'Admin', icon: Settings }] })
   const mobileItems: NavItem[] = actor.role === 'Assistant'
     ? assistantManagementSection.items
     : [
         { href: '/dashboard', label: 'Home', icon: Activity },
-        { href: '/movements?mode=receive', label: 'Receive', icon: ArrowDownToLine },
+        receivingEnabled ? receivingItem : { href: '/movements?mode=receive', label: 'Receive', icon: ArrowDownToLine },
         { href: '/movements?mode=issue', label: 'Issue', icon: ArrowUpFromLine },
         { href: '/scan', label: 'Scan', icon: QrCode },
         { href: '/inventory', label: 'Stock', icon: Boxes },

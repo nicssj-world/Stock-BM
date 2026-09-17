@@ -11,3 +11,7 @@ create table if not exists public.nipt_users (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+insert into public.nipt_users (id, ephis_id, display_name, role, is_active)
+values ('00000000-0000-0000-0000-000000000001', 'HARNESS-ADMIN', 'Stock Harness Admin', 'Admin', true)
+on conflict (id) do nothing;

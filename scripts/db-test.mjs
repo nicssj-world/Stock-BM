@@ -171,6 +171,16 @@ try {
     console.log('L0-14 PASS: resolveScan returned ambiguous with every matching item candidate.')
   }
 
+  const concurrencyRun = spawnSync(process.execPath, [path.join(projectRoot, 'scripts', 'db-concurrency-test.mjs')], {
+    cwd: projectRoot,
+    encoding: 'utf8',
+    windowsHide: true,
+  })
+  const concurrencyOutput = outputOf(concurrencyRun)
+  if (concurrencyRun.error) throw concurrencyRun.error
+  printTail(concurrencyOutput, 40)
+  if (concurrencyRun.status !== 0) throw new Error(`real Postgres concurrency checks failed\n${concurrencyOutput}`)
+
   console.log('Real-DB verification complete.')
 } finally {
   fs.writeFileSync(configPath, originalConfig)
