@@ -12,6 +12,7 @@ import type {
 } from '@/lib/receiving/types'
 import type {
   InvoiceCreateInput,
+  InvoiceLineUpdateInput,
   InvoiceUpdateInput,
   ReceiptCreateInput,
   ReceiptLineInput,
@@ -257,6 +258,7 @@ export async function createInvoice(input: InvoiceCreateInput, actor: BmActor) {
     vendor_id: input.vendorId,
     invoice_no: clean(input.invoiceNo),
     invoice_date: input.invoiceDate ?? null,
+    status: input.status ?? 'draft',
     source: input.source ?? 'manual',
     note: clean(input.note),
     created_by: actor.id,
@@ -285,6 +287,44 @@ export async function updateInvoice(id: string, input: InvoiceUpdateInput, actor
   fail(error)
   if (!data) throw new HttpError(404, 'ไม่พบใบส่งของ')
   await writeAudit(actor, 'receiving.invoice.update', 'stock-invoice', id, input as Record<string, unknown>)
+  return getReceivingWorkspace(actor)
+}
+
+export async function updateInvoiceLine(lineId: string, input: InvoiceLineUpdateInput, actor: BmActor, invoiceId?: string) {
+  await assertReceivingEnabled()
+  const admin = getAdminClient()
+  const { data: current, error: currentError } = await admin.from('bm_invoice_lines').select('id,invoice_id').eq('id', lineId).maybeSingle()
+  fail(currentError)
+  if (!current) throw new HttpError(404, 'ไม่พบรายการใบส่งของ')
+  const currentRow = current as RecordRow
+  if (invoiceId && asString(currentRow.invoice_id) !== invoiceId) throw new HttpError(404, 'ไม่พบรายการในใบส่งของนี้')
+  const resolvedInvoiceId = asString(currentRow.invoice_id)
+  const { data: invoice, error: invoiceError } = await admin.from('bm_invoices').select('id,status').eq('id', resolvedInvoiceId).maybeSingle()
+  fail(invoiceError)
+  if (!invoice) throw new HttpError(404, 'ไม่พบใบส่งของ')
+  const invoiceStatus = asString((invoice as RecordRow).status)
+  if (invoiceStatus === 'closed' || invoiceStatus === 'cancelled') throw new HttpError(409, 'แก้ไขรายการไม่ได้เมื่อใบส่งของปิดหรือยกเลิกแล้ว')
+  if (input.expectedQty !== undefined) {
+    const { count, error: receiptError } = await admin.from('bm_receipt_lines').select('id', { count: 'exact', head: true }).eq('invoice_line_id', lineId)
+    fail(receiptError)
+    if ((count ?? 0) > 0) throw new HttpError(409, 'ไม่สามารถแก้ไข expected qty หลังเริ่มรับสินค้าได้ (P-07)')
+  }
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (input.stockItemId !== undefined) updates.stock_item_id = input.stockItemId
+  if (input.catalogNoText !== undefined) updates.catalog_no_text = clean(input.catalogNoText)
+  if (input.descriptionText !== undefined) updates.description_text = clean(input.descriptionText)
+  if (input.expectedQty !== undefined) updates.expected_qty = input.expectedQty
+  if (input.lotText !== undefined) updates.lot_text = clean(input.lotText)
+  if (input.expiryText !== undefined) updates.expiry_text = clean(input.expiryText)
+  if (input.matchMethod !== undefined) updates.match_method = input.matchMethod
+  if (input.matchConfidence !== undefined) updates.match_confidence = input.matchConfidence
+  if (input.closureState !== undefined) updates.closure_state = input.closureState
+  if (input.shortReasonCode !== undefined) updates.short_reason_code = clean(input.shortReasonCode)
+  if (input.shortReasonNote !== undefined) updates.short_reason_note = clean(input.shortReasonNote)
+  if (input.sortOrder !== undefined) updates.sort_order = input.sortOrder
+  const { error } = await admin.from('bm_invoice_lines').update(updates).eq('id', lineId)
+  fail(error)
+  await writeAudit(actor, 'receiving.invoice-line.update', 'stock-invoice-line', lineId, { invoiceId: resolvedInvoiceId, input })
   return getReceivingWorkspace(actor)
 }
 
@@ -323,8 +363,38 @@ async function insertReceiptLines(receiptId: string, lines: ReceiptCreateInput['
   fail(error)
 }
 
+async function assertReceiptInvoiceLinks(invoiceId: string | null | undefined, vendorId: string | undefined, lines: Array<{ invoiceLineId?: string | null; stockItemId?: string | null }> | undefined) {
+  const linkedLineIds = [...new Set((lines ?? []).map((line) => line.invoiceLineId).filter((id): id is string => Boolean(id)))]
+  if (linkedLineIds.length > 0 && !invoiceId) throw new HttpError(400, 'ต้องระบุใบส่งของเมื่อผูกรายการรับเข้ากับ invoice line')
+  if (!invoiceId) return
+
+  const admin = getAdminClient()
+  const { data: invoice, error: invoiceError } = await admin.from('bm_invoices').select('id,vendor_id,status').eq('id', invoiceId).maybeSingle()
+  fail(invoiceError)
+  if (!invoice) throw new HttpError(404, 'ไม่พบใบส่งของ')
+  const invoiceRow = invoice as RecordRow
+  if (vendorId && asString(invoiceRow.vendor_id) !== vendorId) throw new HttpError(409, 'ใบส่งของและ vendor ของใบรับเข้าไม่ตรงกัน')
+  if (['closed', 'cancelled'].includes(asString(invoiceRow.status))) throw new HttpError(409, 'ไม่สามารถรับเข้าสินค้าจากใบส่งของที่ปิดหรือยกเลิกแล้ว')
+  if (!linkedLineIds.length) return
+
+  const { data: invoiceLines, error: lineError } = await admin.from('bm_invoice_lines').select('id,invoice_id').in('id', linkedLineIds)
+  fail(lineError)
+  const validLines = (invoiceLines ?? []) as RecordRow[]
+  if (validLines.length !== linkedLineIds.length || validLines.some((line) => asString(line.invoice_id) !== invoiceId)) {
+    throw new HttpError(409, 'รายการรับเข้าไม่ตรงกับใบส่งของที่เลือก')
+  }
+  for (const line of validLines) {
+    const requested = (lines ?? []).find((item) => item.invoiceLineId === asString(line.id))
+    const mappedStockItemId = nullableString(line.stock_item_id)
+    if (requested?.stockItemId && mappedStockItemId && requested.stockItemId !== mappedStockItemId) {
+      throw new HttpError(409, 'item ของรายการรับเข้าไม่ตรงกับ item ที่จับคู่ไว้ในใบส่งของ')
+    }
+  }
+}
+
 export async function createReceiptDraft(input: ReceiptCreateInput, actor: BmActor) {
   await assertReceivingEnabled()
+  await assertReceiptInvoiceLinks(input.invoiceId, input.vendorId, input.lines)
   const { data, error } = await getAdminClient().from('bm_receipts').insert({
     receipt_no: clean(input.receiptNo),
     invoice_id: input.invoiceId ?? null,
@@ -360,6 +430,16 @@ async function assertDraftReceipt(id: string) {
 export async function updateReceipt(id: string, input: ReceiptUpdateInput, actor: BmActor) {
   await assertReceivingEnabled()
   await assertDraftReceipt(id)
+  const admin = getAdminClient()
+  const { data: current, error: currentError } = await admin.from('bm_receipts').select('invoice_id,vendor_id').eq('id', id).maybeSingle()
+  fail(currentError)
+  if (!current) throw new HttpError(404, 'ไม่พบใบรับเข้า')
+  const currentRow = current as RecordRow
+  await assertReceiptInvoiceLinks(
+    input.invoiceId !== undefined ? input.invoiceId : nullableString(currentRow.invoice_id),
+    input.vendorId !== undefined ? input.vendorId : asString(currentRow.vendor_id),
+    [],
+  )
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (input.receiptNo !== undefined) updates.receipt_no = clean(input.receiptNo)
   if (input.invoiceId !== undefined) updates.invoice_id = input.invoiceId
@@ -374,7 +454,7 @@ export async function updateReceipt(id: string, input: ReceiptUpdateInput, actor
   if (input.coldChainApplicable !== undefined) updates.cold_chain_applicable = input.coldChainApplicable
   if (input.source !== undefined) updates.source = input.source
   if (input.note !== undefined) updates.note = clean(input.note)
-  const { error } = await getAdminClient().from('bm_receipts').update(updates).eq('id', id)
+  const { error } = await admin.from('bm_receipts').update(updates).eq('id', id)
   if (error?.code === '23505') throw new HttpError(409, 'เลขที่ใบรับเข้านี้ซ้ำ')
   fail(error)
   await writeAudit(actor, 'receiving.receipt.update', 'stock-receipt', id, input as Record<string, unknown>)
@@ -384,7 +464,13 @@ export async function updateReceipt(id: string, input: ReceiptUpdateInput, actor
 export async function addReceiptLine(receiptId: string, input: ReceiptLineInput, actor: BmActor) {
   await assertReceivingEnabled()
   await assertDraftReceipt(receiptId)
-  const { data, error } = await getAdminClient().from('bm_receipt_lines').insert(receiptLineRow(receiptId, input)).select('id').single()
+  const admin = getAdminClient()
+  const { data: receipt, error: receiptError } = await admin.from('bm_receipts').select('invoice_id,vendor_id').eq('id', receiptId).maybeSingle()
+  fail(receiptError)
+  if (!receipt) throw new HttpError(404, 'ไม่พบใบรับเข้า')
+  const receiptRow = receipt as RecordRow
+  await assertReceiptInvoiceLinks(nullableString(receiptRow.invoice_id), asString(receiptRow.vendor_id), [input])
+  const { data, error } = await admin.from('bm_receipt_lines').insert(receiptLineRow(receiptId, input)).select('id').single()
   fail(error)
   await writeAudit(actor, 'receiving.receipt-line.create', 'stock-receipt-line', asString((data as RecordRow).id), { receiptId })
   return getReceivingWorkspace(actor)
@@ -393,11 +479,24 @@ export async function addReceiptLine(receiptId: string, input: ReceiptLineInput,
 export async function updateReceiptLine(lineId: string, input: ReceiptLineUpdateInput, actor: BmActor) {
   await assertReceivingEnabled()
   const admin = getAdminClient()
-  const { data: current, error: currentError } = await admin.from('bm_receipt_lines').select('receipt_id').eq('id', lineId).maybeSingle()
+  const { data: current, error: currentError } = await admin.from('bm_receipt_lines').select('receipt_id,invoice_line_id,stock_item_id').eq('id', lineId).maybeSingle()
   fail(currentError)
   if (!current) throw new HttpError(404, 'ไม่พบรายการรับเข้า')
   const receiptId = asString((current as RecordRow).receipt_id)
   await assertDraftReceipt(receiptId)
+  const { data: receipt, error: receiptError } = await admin.from('bm_receipts').select('invoice_id,vendor_id').eq('id', receiptId).maybeSingle()
+  fail(receiptError)
+  if (!receipt) throw new HttpError(404, 'ไม่พบใบรับเข้า')
+  const currentRow = current as RecordRow
+  const receiptRow = receipt as RecordRow
+  await assertReceiptInvoiceLinks(
+    nullableString(receiptRow.invoice_id),
+    asString(receiptRow.vendor_id),
+    [{
+      invoiceLineId: input.invoiceLineId !== undefined ? input.invoiceLineId : nullableString(currentRow.invoice_line_id),
+      stockItemId: input.stockItemId !== undefined ? input.stockItemId : asString(currentRow.stock_item_id),
+    }],
+  )
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (input.invoiceLineId !== undefined) updates.invoice_line_id = input.invoiceLineId
   if (input.stockItemId !== undefined) updates.stock_item_id = input.stockItemId

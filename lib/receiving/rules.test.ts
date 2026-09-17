@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Receipt, ReceiptLine } from '@/lib/receiving/types'
-import { cumulativeReceived, deliveryCompleteness, deliveryLeadTimeDays, detectConflicts, receiptIssues, receiptReadiness } from '@/lib/receiving/rules'
+import { cumulativeReceived, deliveryClosureMetric, deliveryCompleteness, deliveryLeadTimeDays, detectConflicts, receiptIssues, receiptReadiness } from '@/lib/receiving/rules'
 
 const line = (overrides: Partial<ReceiptLine> = {}): ReceiptLine => ({
   id: 'line-1', receiptId: 'receipt-1', lineNo: 1, invoiceLineId: null, stockItemId: 'item-1', stockLotId: null,
@@ -42,6 +42,25 @@ describe('receiving rules', () => {
     expect(deliveryCompleteness(5, 5)).toBe('complete')
     expect(deliveryCompleteness(3, 2)).toBe('open')
     expect(deliveryCompleteness(0, 5)).toBe('open')
+    expect(deliveryCompleteness(10, cumulativeReceived([{ receivedQty: 8 }]))).toBe('open')
+    expect(deliveryCompleteness(10, cumulativeReceived([{ receivedQty: 8 }, { receivedQty: 2 }]))).toBe('complete')
+  })
+
+  it('keeps open and cancelled invoice lines out of the complete-delivery denominator', () => {
+    expect(deliveryClosureMetric([
+      { closureState: 'complete' },
+      { closureState: 'short_closed' },
+      { closureState: 'open' },
+      { closureState: 'cancelled' },
+    ])).toEqual({
+      numerator: 1,
+      denominator: 2,
+      excluded: [
+        { reason: 'still_open', count: 1 },
+        { reason: 'cancelled', count: 1 },
+      ],
+      percent: 50,
+    })
   })
 
   it('keeps delivery lead time informational and returns null when dates are incomplete', () => {

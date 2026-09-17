@@ -43,6 +43,7 @@ export const invoiceCreateSchema = z.object({
   vendorId: z.string().uuid(),
   invoiceNo: optionalText(120),
   invoiceDate: isoDate.nullable().optional(),
+  status: z.enum(['draft', 'open']).optional(),
   source: z.enum(['manual', 'ocr']).optional(),
   note: optionalText(2000),
   lines: z.array(invoiceLineInputSchema).max(500).optional(),
@@ -51,6 +52,7 @@ export const invoiceCreateSchema = z.object({
 export const invoiceUpdateSchema = invoiceCreateSchema.partial().extend({
   status: z.enum(['draft', 'open', 'closed', 'cancelled']).optional(),
 })
+export const invoiceLineUpdateSchema = invoiceLineInputSchema.partial()
 
 export const receiptLineInputSchema = z.object({
   lineNo: z.number().int().min(1).max(10000),
@@ -101,6 +103,7 @@ export const confirmReceiptSchema = z.object({})
 
 export type InvoiceCreateInput = z.infer<typeof invoiceCreateSchema>
 export type InvoiceUpdateInput = z.infer<typeof invoiceUpdateSchema>
+export type InvoiceLineUpdateInput = z.infer<typeof invoiceLineUpdateSchema>
 export type ReceiptCreateInput = z.infer<typeof receiptCreateSchema>
 export type ReceiptLineInput = z.infer<typeof receiptLineInputSchema>
 export type ReceiptUpdateInput = z.infer<typeof receiptUpdateSchema>

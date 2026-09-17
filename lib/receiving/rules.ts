@@ -52,6 +52,23 @@ export function deliveryCompleteness(expectedQty: number, receivedQty: number): 
   return expectedQty > 0 && receivedQty >= expectedQty ? 'complete' : 'open'
 }
 
+export function deliveryClosureMetric(lines: Array<{ closureState: 'open' | 'complete' | 'short_closed' | 'cancelled' }>) {
+  const numerator = lines.filter((line) => line.closureState === 'complete').length
+  const shortClosed = lines.filter((line) => line.closureState === 'short_closed').length
+  const open = lines.filter((line) => line.closureState === 'open').length
+  const cancelled = lines.filter((line) => line.closureState === 'cancelled').length
+  const denominator = numerator + shortClosed
+  return {
+    numerator,
+    denominator,
+    excluded: [
+      ...(open ? [{ reason: 'still_open', count: open }] : []),
+      ...(cancelled ? [{ reason: 'cancelled', count: cancelled }] : []),
+    ],
+    percent: denominator ? (numerator / denominator) * 100 : null,
+  }
+}
+
 export function deliveryLeadTimeDays(invoiceDate: string | null, receivedDate: string | null) {
   if (!invoiceDate || !receivedDate) return null
   const invoice = Date.parse(`${invoiceDate}T00:00:00Z`)

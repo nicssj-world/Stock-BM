@@ -6,6 +6,7 @@ const protectedRoutes = [
   'app/api/receiving/invoices/route.ts',
   'app/api/receiving/invoices/[id]/route.ts',
   'app/api/receiving/invoices/[id]/close/route.ts',
+  'app/api/receiving/invoices/[id]/lines/[lineId]/route.ts',
   'app/api/receiving/receipts/route.ts',
   'app/api/receiving/receipts/[id]/route.ts',
   'app/api/receiving/receipts/[id]/lines/route.ts',
@@ -26,5 +27,10 @@ describe('receiving API access control', () => {
     const source = readFileSync(join(process.cwd(), 'app/api/receiving/receipts/[id]/confirm/route.ts'), 'utf8')
     expect(source).toContain('confirmReceipt(')
     expect(source).not.toContain("rpc('confirm_bm_receipt'")
+  })
+
+  it('keeps invoice closure explicitly policy-gated', () => {
+    const source = readFileSync(join(process.cwd(), 'app/api/receiving/invoices/[id]/close/route.ts'), 'utf8')
+    expect(source).toContain("throw new HttpError(501, 'รอการอนุมัติ policy การปิดใบส่งของ')")
   })
 })
