@@ -39,7 +39,7 @@ export function AdminView({ actor, initialData, initialVendors, initialSupplierC
       <div className="flex flex-wrap gap-2">
         {(['items', 'categories', 'locations', 'vendors', 'users'] as Tab[]).map((item) => <Button key={item} variant={tab === item ? 'primary' : 'secondary'} onClick={() => setTab(item)}>{item}</Button>)}
       </div>
-      {tab === 'items' ? <ItemsAdmin data={data} onSaved={onStock} onError={(text) => setNotice({ tone: 'danger', text })} /> : null}
+      {tab === 'items' ? <ItemsAdmin data={data} vendors={vendors} onSaved={onStock} onError={(text) => setNotice({ tone: 'danger', text })} /> : null}
       {tab === 'categories' ? <CategoriesAdmin categories={data.categories} onSaved={onStock} onError={(text) => setNotice({ tone: 'danger', text })} /> : null}
       {tab === 'locations' ? <LocationsAdmin locations={data.locations} onSaved={onStock} onError={(text) => setNotice({ tone: 'danger', text })} /> : null}
       {tab === 'vendors' ? <VendorAdmin vendors={vendors} supplierCandidates={initialSupplierCandidates} onSaved={(next, text) => { setVendors(next); setNotice({ tone: 'success', text }) }} onError={(text) => setNotice({ tone: 'danger', text })} /> : null}
@@ -48,7 +48,7 @@ export function AdminView({ actor, initialData, initialVendors, initialSupplierC
   )
 }
 
-function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved: (stock: StockWorkspace, text: string) => void; onError: (text: string) => void }) {
+function ItemsAdmin({ data, vendors, onSaved, onError }: { data: StockWorkspace; vendors: Vendor[]; onSaved: (stock: StockWorkspace, text: string) => void; onError: (text: string) => void }) {
   const emptyForm = {
     itemCode: '',
     name: '',
@@ -64,6 +64,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
     manufacturerBarcode: '',
     equipmentIds: [] as string[],
     locationIds: [] as string[],
+    vendorIds: [] as string[],
     trackLot: true,
     trackExpiry: true,
     isHpv: false,
@@ -75,6 +76,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
   const [busy, setBusy] = useState(false)
   const editingItem = data.items.find((item) => item.id === editingItemId) ?? null
   const categoryOptions = data.categories.filter((category) => category.isActive || category.id === form.categoryId)
+  const vendorOptions = vendors.filter((vendor) => vendor.isActive || form.vendorIds.includes(vendor.id))
   const itemsPagination = usePagination(data.items.length, 20)
   const pagedItems = data.items.slice(itemsPagination.start, itemsPagination.end)
 
@@ -103,6 +105,7 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
       manufacturerBarcode: item.manufacturerBarcode ?? '',
       equipmentIds: item.equipmentIds ?? [],
       locationIds: item.locationIds ?? [],
+      vendorIds: item.vendorIds ?? [],
       trackLot: item.trackLot,
       trackExpiry: item.trackExpiry,
       isHpv: item.isHpv,
@@ -232,6 +235,21 @@ function ItemsAdmin({ data, onSaved, onError }: { data: StockWorkspace; onSaved:
               </span>
             </label>)}
             {!data.locations.length ? <p className="text-xs text-[#81979c]">ยังไม่มี location</p> : null}
+          </div>
+        </div>
+        <div className="rounded-md border border-[#d8e6e6] bg-[#f8fbfc] p-3">
+          <p className="text-xs font-bold text-[#315763]">Vendor ที่ได้รับอนุมัติ / Approved vendors</p>
+          <p className="mt-1 text-[11px] text-[#81979c]">ผูก vendor กับ item อย่างชัดเจนเพื่อใช้กับใบรับเข้าใหม่ ข้อความ supplier เดิมไม่ถูกแปลงอัตโนมัติ</p>
+          <div className="mt-2 space-y-2">
+            {vendorOptions.map((vendor) => <label key={vendor.id} className="flex items-start gap-2 text-xs text-[#58747d]">
+              <input
+                type="checkbox"
+                checked={form.vendorIds.includes(vendor.id)}
+                onChange={(event) => setForm({ ...form, vendorIds: event.target.checked ? [...form.vendorIds, vendor.id] : form.vendorIds.filter((id) => id !== vendor.id) })}
+              />
+              <span className="min-w-0"><span className="font-semibold text-[#0b7f76]">{vendor.code} · {vendor.name}</span>{!vendor.isActive ? <span className="ml-1 text-[10px] text-[#91a3a7]">(inactive)</span> : null}</span>
+            </label>)}
+            {!vendorOptions.length ? <p className="text-xs text-[#81979c]">ยังไม่มี vendor ที่ใช้งาน ให้สร้างในแท็บ Vendors ก่อน</p> : null}
           </div>
         </div>
         <label className="flex items-center gap-2 text-xs font-semibold text-[#58747d]"><input type="checkbox" checked={form.trackLot} onChange={(event) => setForm({ ...form, trackLot: event.target.checked, trackExpiry: event.target.checked ? form.trackExpiry : false })} /> Track lot</label>

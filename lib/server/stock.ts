@@ -70,6 +70,7 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
     { data: equipmentData, error: equipmentError },
     { data: itemEquipmentLinkData, error: itemEquipmentLinkError },
     { data: itemLocationLinkData, error: itemLocationLinkError },
+    { data: itemVendorLinkData, error: itemVendorLinkError },
   ] = await Promise.all([
     admin.from('bm_stock_categories').select('*').order('name'),
     admin.from('bm_stock_locations').select('*').order('code'),
@@ -82,6 +83,7 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
     admin.from('bm_equipment').select('id,code,name,status').order('code'),
     admin.from('bm_stock_item_equipment_links').select('stock_item_id,equipment_id'),
     admin.from('bm_stock_item_location_links').select('stock_item_id,location_id'),
+    admin.from('bm_stock_item_vendors').select('stock_item_id,vendor_id'),
   ])
   fail(categoryError)
   fail(locationError)
@@ -92,6 +94,7 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
   fail(equipmentError)
   fail(itemEquipmentLinkError)
   fail(itemLocationLinkError)
+  fail(itemVendorLinkError)
 
   const categoryRows = (categoryData ?? []) as RecordRow[]
   const locationRows = (locationData ?? []) as RecordRow[]
@@ -118,6 +121,13 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
     const locationId = asString(row.location_id)
     if (!itemId || !locationId) continue
     locationIdsByItem.set(itemId, [...(locationIdsByItem.get(itemId) ?? []), locationId])
+  }
+  const vendorIdsByItem = new Map<string, string[]>()
+  for (const row of (itemVendorLinkData ?? []) as RecordRow[]) {
+    const itemId = asString(row.stock_item_id)
+    const vendorId = asString(row.vendor_id)
+    if (!itemId || !vendorId) continue
+    vendorIdsByItem.set(itemId, [...(vendorIdsByItem.get(itemId) ?? []), vendorId])
   }
   const transactionIds = ids(transactionRows, 'id')
   const { data: transactionLineData, error: transactionLineError } = transactionIds.length
@@ -219,6 +229,7 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
       hpvClinicianCollected: Boolean(row.hpv_clinician_collected),
       equipmentIds: equipmentIdsByItem.get(asString(row.id)) ?? [],
       locationIds: locationIdsByItem.get(asString(row.id)) ?? [],
+      vendorIds: vendorIdsByItem.get(asString(row.id)) ?? [],
       isActive: Boolean(row.is_active),
       totalOnHand,
       usableOnHand,
@@ -349,6 +360,28 @@ async function replaceItemLocationLinks(itemId: string, locationIds: string[] | 
   }
 }
 
+async function replaceItemVendorLinks(itemId: string, vendorIds: string[] | undefined, actor: BmActor) {
+  if (vendorIds === undefined) return
+  const uniqueVendorIds = [...new Set(vendorIds.filter(Boolean))]
+  const admin = getAdminClient()
+  if (uniqueVendorIds.length) {
+    const { data, error } = await admin.from('bm_vendors').select('id').in('id', uniqueVendorIds)
+    fail(error)
+    const foundIds = new Set(((data ?? []) as RecordRow[]).map((row) => asString(row.id)))
+    if (foundIds.size !== uniqueVendorIds.length) throw new HttpError(400, 'One or more selected vendors were not found')
+  }
+  const { error: deleteError } = await admin.from('bm_stock_item_vendors').delete().eq('stock_item_id', itemId)
+  fail(deleteError)
+  if (uniqueVendorIds.length) {
+    const { error: insertError } = await admin.from('bm_stock_item_vendors').insert(uniqueVendorIds.map((vendorId) => ({
+      stock_item_id: itemId,
+      vendor_id: vendorId,
+      created_by: actor.id,
+    })))
+    fail(insertError)
+  }
+}
+
 export async function createCategory(name: string, actor: BmActor) {
   await assertAdmin(actor)
   const { data, error } = await getAdminClient()
@@ -437,6 +470,7 @@ export async function createItem(input: {
   manufacturerBarcode?: string | null
   equipmentIds?: string[]
   locationIds?: string[]
+  vendorIds?: string[]
   trackLot: boolean
   trackExpiry: boolean
   isHpv?: boolean
@@ -473,6 +507,7 @@ export async function createItem(input: {
   fail(error)
   await replaceItemEquipmentLinks(asString((data as RecordRow).id), input.equipmentIds, actor)
   await replaceItemLocationLinks(asString((data as RecordRow).id), input.locationIds, actor)
+  await replaceItemVendorLinks(asString((data as RecordRow).id), input.vendorIds, actor)
   await writeAudit(actor, 'item.create', 'stock-item', asString((data as RecordRow).id), input)
   return getStockWorkspace(actor)
 }
@@ -522,6 +557,7 @@ export async function updateItem(itemId: string, input: Partial<Parameters<typeo
   fail(error)
   await replaceItemEquipmentLinks(itemId, input.equipmentIds, actor)
   await replaceItemLocationLinks(itemId, input.locationIds, actor)
+  await replaceItemVendorLinks(itemId, input.vendorIds, actor)
   await writeAudit(actor, 'item.update', 'stock-item', itemId, input)
   return getStockWorkspace(actor)
 }

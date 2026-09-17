@@ -76,6 +76,7 @@ export interface StockItem {
   hpvClinicianCollected: boolean
   equipmentIds?: string[]
   locationIds?: string[]
+  vendorIds?: string[]
   isActive: boolean
   totalOnHand: number
   usableOnHand: number
