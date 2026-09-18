@@ -92,3 +92,19 @@ No production migration, deployment, or feature-flag change was performed.
 - Targeted Phase 2–4 tests: PASS — 7 files / 18 tests in the final focused run.
 - TypeScript after Phase 4 and OCR ambiguity-selection correction: PASS.
 - Production migrations, production data, production deployment, and production feature-flag changes: NOT PERFORMED.
+
+## Local `npm run dev` acceptance after Phase 4
+
+- Disposable local Supabase harness was kept running only for this acceptance pass; no hosted environment was used.
+- Authenticated local API/page checks: `/api/vendors`, vendor performance, issue create, issue resolve, annual evaluation create, evaluation page, evaluation print report, and performance CSV all returned 200.
+- Evaluation page visibly rendered `ยังไม่ได้กำหนดสูตรคะแนน` while the seeded policy remained unapproved; no result was produced.
+- Receiving feature gate: local `is_enabled=false` returned 404 for `/receiving`; local `is_enabled=true` returned 200; it was restored to `false` afterward. `expiry_exception_enabled` remained `false` throughout the final state.
+- The local login redirect target used for the HTTP check was a direct protected vendor route; the initial generic `/vendors` target is not a route and produced an expected 404 after authentication, while the authenticated API checks succeeded.
+
+## Release preparation
+
+- `scripts/verify-receiving.mjs` hardened for the owner-approved production-safe gate: explicit `local`/`production` target, `--confirm-production`, backup reference, production read-only reconciliation key, feature-flag fail-closed check, exact item/lot/manufacturer-barcode/balance/transaction/movement-line snapshots, referential-integrity checks, and strict before/after context comparison.
+- Local reconciliation harness check: PASS — captured SELECT-only local BEFORE and AFTER snapshots and `--compare` reported `Reconciliation PASS: before and after snapshots are identical.` Production snapshots were not attempted.
+- `scripts/db-test.mjs` now supports `STOCK1_KEEP_LOCAL_DB=1` solely to keep the disposable local harness alive for manual `npm run dev` acceptance; it does not alter the normal cleanup behavior.
+- Production rollout runbook prepared at `docs/superpowers/release/2026-09-18-stock1-production-safe-release.md`; commands are documentation only and were not executed.
+- Browser automation surface was unavailable (`apps=[]`, `browsers=[]`), so visual browser, camera, OCR-worker, real iPhone Safari, and preview-deployment checks remain unperformed.

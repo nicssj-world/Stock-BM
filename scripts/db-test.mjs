@@ -184,8 +184,10 @@ try {
   console.log('Real-DB verification complete.')
 } finally {
   fs.writeFileSync(configPath, originalConfig)
-  if (started) {
+  if (started && process.env.STOCK1_KEEP_LOCAL_DB !== '1') {
     const stop = runNpx(['supabase', 'stop', '--no-backup'], { allowFailure: true })
     if (stop.status !== 0) printTail(stop.output)
+  } else if (started) {
+    console.log('Local Supabase kept running because STOCK1_KEEP_LOCAL_DB=1.')
   }
 }
