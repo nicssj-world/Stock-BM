@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   applyPerspectiveTransform,
   applyCropDrag,
+  beginCropDrag,
   buildPerspectiveTransform,
   calculateLoupeViewportPosition,
   clampCropPoint,
@@ -12,6 +13,8 @@ import {
   orientedImageSize,
   orderCorners,
   resetCropCorners,
+  endCropDrag,
+  moveCropDrag,
   validatePerspectiveInput,
 } from './document-crop'
 
@@ -82,9 +85,17 @@ describe('document crop geometry', () => {
     expect(clampCropPoint({ x: -0.2, y: 1.4 })).toEqual({ x: 0, y: 1 })
     expect(applyCropDrag({ x: 0.31, y: 0.42 }, { x: 0.04, y: -0.02 })).toEqual({ x: 0.35, y: expect.closeTo(0.4) })
     expect(applyCropDrag({ x: 0.02, y: 0.98 }, { x: -0.2, y: 0.3 })).toEqual({ x: 0, y: 1 })
-    expect(calculateLoupeViewportPosition({ x: 195, y: 220 }, { width: 390, height: 844 })).toEqual({ left: 127, top: 66 })
-    expect(calculateLoupeViewportPosition({ x: 0, y: 50 }, { width: 390, height: 844 })).toEqual({ left: 8, top: 68 })
-    expect(calculateLoupeViewportPosition({ x: 389, y: 820 }, { width: 390, height: 844 })).toEqual({ left: 246, top: 666 })
+    expect(calculateLoupeViewportPosition({ x: 195, y: 220 }, { width: 390, height: 844 })).toEqual({ left: 143, top: 102 })
+    expect(calculateLoupeViewportPosition({ x: 0, y: 50 }, { width: 390, height: 844 })).toEqual({ left: 8, top: 64 })
+    expect(calculateLoupeViewportPosition({ x: 389, y: 820 }, { width: 390, height: 844 })).toEqual({ left: 278, top: 702 })
+  })
+
+  it('keeps a captured pointer offset stable and ignores unrelated pointer moves', () => {
+    const started = beginCropDrag('topLeft', 17, { x: 0.2, y: 0.3 }, { x: 0.24, y: 0.38 })
+    expect(moveCropDrag(started, 'topLeft', 99, { x: 0.5, y: 0.6 })).toBeNull()
+    expect(moveCropDrag(started, 'topLeft', 17, { x: 0.34, y: 0.48 })).toEqual({ x: expect.closeTo(0.3), y: expect.closeTo(0.4) })
+    expect(endCropDrag(started, 'topLeft', 99)).toEqual(started)
+    expect(endCropDrag(started, 'topLeft', 17)).toEqual({ key: null, pointerId: null, offset: null })
   })
 
   it('orders four corners consistently from arbitrary input order', () => {

@@ -1,13 +1,21 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckCircle2, FileScan, LoaderCircle, RefreshCcw, Square } from 'lucide-react'
+import { CheckCircle2, FileScan, RefreshCcw, Square } from 'lucide-react'
 import type { ReceivingWorkspace } from '@/lib/receiving/types'
-import { buildInvoiceOcrDraftLines, type InvoiceOcrDraftLine } from '@/lib/receiving/invoice-ocr-draft'
-import { recognizeProcessedInvoiceImage, type OcrProgress } from '@/components/receiving/ocr-worker'
+import { classifyInvoiceOcrText, type InvoiceOcrDraftLine, type InvoiceOcrIgnoredLine, type InvoiceOcrUnresolvedLine } from '@/lib/receiving/invoice-ocr-draft'
+import { recognizeProcessedInvoiceImage, type OcrPassResult, type OcrProgress } from '@/components/receiving/ocr-worker'
 import { api, Button, Card, Field, Input, Loading, Notice, Select, StatusBadge, Textarea } from '@/components/ui'
 
 type OcrItem = ReceivingWorkspace['items'][number]
+
+export type InvoiceOcrPreviewDraft = {
+  text: string
+  lines: InvoiceOcrDraftLine[]
+  unresolvedLines: InvoiceOcrUnresolvedLine[]
+  ignoredLines: InvoiceOcrIgnoredLine[]
+  passes: OcrPassResult[]
+}
 
 export function InvoiceOcr({ processedImage, vendorId, invoiceNo, invoiceDate, items, onSaved, onError, previewOnly = false, onPreviewDraft }: {
   processedImage: string | null
@@ -18,10 +26,13 @@ export function InvoiceOcr({ processedImage, vendorId, invoiceNo, invoiceDate, i
   onSaved: (data: ReceivingWorkspace, text: string) => void
   onError: (text: string) => void
   previewOnly?: boolean
-  onPreviewDraft?: (data: { text: string; lines: InvoiceOcrDraftLine[] }) => void
+  onPreviewDraft?: (data: InvoiceOcrPreviewDraft) => void
 }) {
   const [rawText, setRawText] = useState('')
   const [lines, setLines] = useState<InvoiceOcrDraftLine[]>([])
+  const [unresolvedLines, setUnresolvedLines] = useState<InvoiceOcrUnresolvedLine[]>([])
+  const [ignoredLines, setIgnoredLines] = useState<InvoiceOcrIgnoredLine[]>([])
+  const [passDiagnostics, setPassDiagnostics] = useState<OcrPassResult[]>([])
   const [progress, setProgress] = useState<OcrProgress | null>(null)
   const [busy, setBusy] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -36,6 +47,14 @@ export function InvoiceOcr({ processedImage, vendorId, invoiceNo, invoiceDate, i
     manufacturer: item.manufacturer ?? null,
     vendor: item.supplier ?? null,
   }))
+
+  function applyClassification(text: string) {
+    const classified = classifyInvoiceOcrText(text, catalogItems)
+    setLines(classified.candidateLines)
+    setUnresolvedLines(classified.unresolvedLines)
+    setIgnoredLines(classified.ignoredLines)
+    return classified
+  }
 
   function updateLine(lineNo: number, key: keyof InvoiceOcrDraftLine, value: string) {
     setLines((current) => current.map((line) => {
@@ -68,7 +87,8 @@ export function InvoiceOcr({ processedImage, vendorId, invoiceNo, invoiceDate, i
     try {
       const result = await recognizeProcessedInvoiceImage(processedImage, { signal: nextController.signal, onProgress: setProgress })
       setRawText(result.text)
-      setLines(buildInvoiceOcrDraftLines(result.text, catalogItems))
+      applyClassification(result.text)
+      setPassDiagnostics(result.passes)
       setProgress({ status: 'อ่านข้อความเสร็จแล้ว — ตรวจสอบ draft ก่อนบันทึก', progress: 1 })
     } catch (ocrError) {
       if (ocrError instanceof Error && ocrError.name === 'AbortError') setError('ยกเลิก OCR แล้ว')
@@ -80,17 +100,18 @@ export function InvoiceOcr({ processedImage, vendorId, invoiceNo, invoiceDate, i
   }
 
   function rebuildSuggestions() {
-    setLines(buildInvoiceOcrDraftLines(rawText, catalogItems))
+    applyClassification(rawText)
+    setPassDiagnostics([])
     setError(null)
   }
 
   async function saveDraft() {
-    if (!vendorId || !rawText.trim() || !lines.length) return
+    if (!vendorId || !rawText.trim() || (!previewOnly && !lines.length)) return
     setSaving(true)
     setError(null)
     try {
       if (previewOnly) {
-        onPreviewDraft?.({ text: rawText, lines })
+        onPreviewDraft?.({ text: rawText, lines, unresolvedLines, ignoredLines, passes: passDiagnostics })
         return
       }
       const form = new FormData()
@@ -127,7 +148,9 @@ export function InvoiceOcr({ processedImage, vendorId, invoiceNo, invoiceDate, i
       {error ? <Notice tone="danger">{error}</Notice> : null}
       {rawText ? <Field label="Raw OCR text" hint="แก้ข้อความได้ แล้วกดสร้างข้อเสนอแนะใหม่ก่อนบันทึก"><Textarea value={rawText} onChange={(event) => setRawText(event.target.value)} rows={6} /></Field> : null}
       {rawText ? <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" disabled={busy || saving} onClick={rebuildSuggestions}><RefreshCcw className="size-4" />สร้างข้อเสนอแนะใหม่</Button><Button type="button" disabled={saving || busy || !vendorId || !lines.length} onClick={() => void saveDraft()}><CheckCircle2 className="size-4" />{previewOnly ? 'เก็บผล OCR ใน Preview (ไม่บันทึก DB)' : 'บันทึก OCR invoice draft'}</Button></div> : null}
-      {lines.length ? <div className="space-y-2"><p className="text-xs font-bold tracking-[0.12em] text-[#315763] uppercase">Candidate review</p>{lines.map((line) => <div key={line.lineNo} className="space-y-2 rounded-md border border-[#dce8e9] bg-[#fbfdfd] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-[#315763]">#{line.lineNo} · {line.sourceText}</p>{matchBadge(line)}</div>{line.candidateItemIds.length ? <Field label="เลือก Item Master"><Select value={line.stockItemId ?? ''} onChange={(event) => chooseCandidate(line.lineNo, event.target.value)}><option value="">ยังไม่เลือก — draft จะคงเป็น unmatched</option>{line.candidateItemIds.map((id) => { const item = items.find((candidate) => candidate.id === id); return <option key={id} value={id}>{item ? `${item.itemCode} · ${item.name}` : id}</option> })}</Select></Field> : null}<div className="grid gap-2 sm:grid-cols-4"><Field label="Catalog / REF"><Input value={line.catalogNoText ?? ''} onChange={(event) => updateLine(line.lineNo, 'catalogNoText', event.target.value)} placeholder="ตรวจ/กรอก catalog" /></Field><Field label="Lot"><Input value={line.lotText ?? ''} onChange={(event) => updateLine(line.lineNo, 'lotText', event.target.value)} /></Field><Field label="Expiry"><Input value={line.expiryText ?? ''} onChange={(event) => updateLine(line.lineNo, 'expiryText', event.target.value)} /></Field><Field label="Expected qty"><Input type="number" min="0.001" step="0.001" value={line.expectedQty} onChange={(event) => updateLine(line.lineNo, 'expectedQty', event.target.value)} /></Field></div><p className="text-xs text-[#58747d]">Item Master: {line.descriptionText ?? 'ยังไม่จับคู่ — ห้ามใช้ชื่อจาก OCR เป็นชื่อสินค้า'}</p></div>)}</div> : null}
+      {lines.length ? <div className="space-y-2"><p className="text-xs font-bold tracking-[0.12em] text-[#315763] uppercase">Candidate review</p>{lines.map((line) => <div key={line.lineNo} className="space-y-2 rounded-md border border-[#dce8e9] bg-[#fbfdfd] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-[#315763]">#{line.lineNo} · {line.sourceText}</p>{matchBadge(line)}</div><p className="text-xs text-[#58747d]">Candidate reason: {line.candidateReason}</p>{line.candidateItemIds.length ? <Field label="เลือก Item Master"><Select value={line.stockItemId ?? ''} onChange={(event) => chooseCandidate(line.lineNo, event.target.value)}><option value="">ยังไม่เลือก — draft จะคงเป็น unmatched</option>{line.candidateItemIds.map((id) => { const item = items.find((candidate) => candidate.id === id); return <option key={id} value={id}>{item ? `${item.itemCode} · ${item.name}` : id}</option> })}</Select></Field> : null}<div className="grid gap-2 sm:grid-cols-4"><Field label="Catalog / REF"><Input value={line.catalogNoText ?? ''} onChange={(event) => updateLine(line.lineNo, 'catalogNoText', event.target.value)} placeholder="ตรวจ/กรอก catalog" /></Field><Field label="Lot"><Input value={line.lotText ?? ''} onChange={(event) => updateLine(line.lineNo, 'lotText', event.target.value)} /></Field><Field label="Expiry"><Input value={line.expiryText ?? ''} onChange={(event) => updateLine(line.lineNo, 'expiryText', event.target.value)} /></Field><Field label="Expected qty"><Input type="number" min="0.001" step="0.001" value={line.expectedQty} onChange={(event) => updateLine(line.lineNo, 'expectedQty', event.target.value)} /></Field></div><p className="text-xs text-[#58747d]">Item Master: {line.descriptionText ?? 'ยังไม่จับคู่ — ห้ามใช้ชื่อจาก OCR เป็นชื่อสินค้า'}</p></div>)}</div> : rawText ? <Notice tone="warning">ยังไม่มีรายการที่มีหลักฐาน Catalog/REF หรือ Item Master เพียงพอสำหรับ Candidate Review</Notice> : null}
+      {unresolvedLines.length ? <div className="space-y-2 rounded-md border border-[#e7d6b0] bg-[#fffaf0] p-3"><p className="text-xs font-bold tracking-[0.12em] text-[#76551c] uppercase">ข้อความที่ยังจับคู่ไม่ได้</p>{unresolvedLines.map((line) => <div key={`${line.lineNo}-${line.sourceText}`} className="text-sm text-[#76551c]"><span className="font-semibold">#{line.lineNo} · {line.sourceText}</span><span className="ml-2 text-xs">({line.reason === 'catalog_like_unmatched' ? 'พบ token ลักษณะ catalog แต่ยังไม่พบใน Item Master' : 'ไม่มีหลักฐาน item ที่ชัดเจน'})</span></div>)}</div> : null}
+      {previewOnly && (passDiagnostics.length || ignoredLines.length) ? <details className="rounded-md border border-[#dce8e9] bg-[#f8fbfb] p-3"><summary className="cursor-pointer text-sm font-semibold text-[#315763]">Preview OCR diagnostics — pass / token / candidate reason</summary><div className="mt-3 space-y-3 text-xs text-[#58747d]"><div><p className="font-semibold text-[#315763]">OCR pass evidence</p>{passDiagnostics.map((pass) => <div key={pass.id} className="mt-2 rounded border border-[#dce8e9] bg-white p-2"><p className="font-semibold">{pass.label} · confidence {pass.confidence ?? 'n/a'}</p>{pass.lines.map((line, index) => <p key={`${pass.id}-${index}`} className="mt-1">line: {line.text} · tokens: {line.text.split(/\s+/).filter(Boolean).join(', ')}</p>)}</div>)}</div><div><p className="font-semibold text-[#315763]">Candidate extraction decisions</p>{lines.map((line) => <p key={`candidate-${line.lineNo}`}>identified #{line.lineNo}: {line.sourceText} · outcome {line.matchMethod} · reason {line.candidateReason}</p>)}{unresolvedLines.map((line) => <p key={`unresolved-${line.lineNo}`}>rejected #{line.lineNo}: {line.sourceText} · reason {line.reason}</p>)}{ignoredLines.map((line) => <p key={`ignored-${line.lineNo}`}>ignored #{line.lineNo}: {line.sourceText} · reason {line.reason}</p>)}</div></div></details> : null}
     </>}
   </Card>
 }

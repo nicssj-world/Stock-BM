@@ -5,7 +5,7 @@ import { Camera, Check, Crop, Image as ImageIcon, RotateCcw, X } from 'lucide-re
 import { Button, Card, Notice, StatusBadge } from '@/components/ui'
 import {
   calculateLoupeViewportPosition,
-  applyCropDrag,
+  beginCropDrag,
   clampCropPoint,
   detectDocumentCorners,
   type CropCorners,
@@ -13,6 +13,8 @@ import {
   type ImageSize,
   rectifyPerspectiveImage,
   resetCropCorners,
+  endCropDrag,
+  moveCropDrag,
   validatePerspectiveInput,
 } from '@/lib/receiving/document-crop'
 
@@ -57,9 +59,9 @@ function calculateDisplayedImageRect(frame: DOMRect, imageSize: ImageSize): Disp
 }
 
 const FILE_INPUT_CLASS = 'absolute h-px w-px overflow-hidden opacity-0'
-const LOUPE_SIZE = 136
-const LOUPE_MAGNIFICATION = 2.75
-const LOUPE_GAP = 18
+const LOUPE_SIZE = 104
+const LOUPE_MAGNIFICATION = 2
+const LOUPE_GAP = 14
 
 function isSupportedImageFile(file: File) {
   return file.type.toLowerCase().startsWith('image/') || /\.(?:heic|heif)$/i.test(file.name)
@@ -80,7 +82,7 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
   const [busy, setBusy] = useState(false)
   const [displayedRect, setDisplayedRect] = useState<DisplayedImageRect | null>(null)
   const [loupe, setLoupe] = useState<LoupeState | null>(null)
-  const dragOffsetRef = useRef<{ key: CornerKey; offset: CropPoint } | null>(null)
+  const dragOffsetRef = useRef<{ key: string | null; pointerId: number | null; offset: CropPoint | null }>({ key: null, pointerId: null, offset: null })
 
   useEffect(() => {
     if (!imageSize || !frameRef.current || typeof ResizeObserver === 'undefined') return
@@ -111,7 +113,7 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
       setImageSize(null)
       setShowOriginal(true)
       setLoupe(null)
-      dragOffsetRef.current = null
+      dragOffsetRef.current = { key: null, pointerId: null, offset: null }
       setDragging(null)
       setDetectionMessage('กำลังตรวจหาขอบเอกสาร…')
       setError(null)
@@ -166,28 +168,29 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
     event.stopPropagation()
     event.currentTarget.setPointerCapture(event.pointerId)
     event.currentTarget.style.touchAction = 'none'
-    dragOffsetRef.current = {
-      key,
-      offset: pointer ? { x: currentPoint.x - pointer.x, y: currentPoint.y - pointer.y } : { x: 0, y: 0 },
-    }
+    dragOffsetRef.current = beginCropDrag(key, event.pointerId, currentPoint, pointer ?? currentPoint)
     setDragging(key)
     setLoupe({ key, point: currentPoint, clientX: event.clientX, clientY: event.clientY })
   }
 
   function moveDrag(key: CornerKey, event: React.PointerEvent<HTMLButtonElement>) {
     const activeDrag = dragOffsetRef.current
-    if (!activeDrag || activeDrag.key !== key || !cropCorners) return
+    if (!cropCorners || activeDrag.key !== key || activeDrag.pointerId !== event.pointerId) return
+    event.preventDefault()
     const pointer = pointerToNormalized(event)
     if (!pointer) return
-    const next = applyCropDrag(pointer, activeDrag.offset)
+    const next = moveCropDrag(activeDrag, key, event.pointerId, pointer)
+    if (!next) return
     setCropCorners((current) => current ? { ...current, [key]: next } : current)
     setLoupe({ key, point: next, clientX: event.clientX, clientY: event.clientY })
   }
 
   function endDrag(event: React.PointerEvent<HTMLButtonElement>) {
+    if (dragOffsetRef.current.key !== null) event.preventDefault()
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     event.currentTarget.style.touchAction = 'pan-y'
-    dragOffsetRef.current = null
+    const activeKey = dragOffsetRef.current.key
+    dragOffsetRef.current = endCropDrag(dragOffsetRef.current, activeKey ?? '', event.pointerId)
     setDragging(null)
     setLoupe(null)
   }
@@ -250,7 +253,7 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
       {detectionMessage ? <Notice tone={autoCorners ? 'info' : 'warning'}>{detectionMessage}</Notice> : null}
       <div ref={frameRef} className="relative aspect-[4/3] max-h-[70vh] min-h-[220px] overflow-hidden rounded-md border border-[#c9dadd] bg-[#eff4f4] select-none" style={{ touchAction: dragging ? 'none' : 'pan-y' }}>
         {previewImage ? <img src={previewImage} alt="Invoice preview" className="absolute inset-0 h-full w-full object-contain" style={{ imageOrientation: 'from-image' }} onLoad={showOriginal ? onOriginalLoad : undefined} /> : null}
-        {showOriginal && cropCorners ? <><svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true"><polyline points={framePoints} fill="rgba(11,127,118,.12)" stroke="#0b7f76" strokeWidth="0.5" /></svg>{cornerKeys.map((key) => { const point = framePercent(cropCorners[key], displayedRect); return <button key={key} type="button" aria-label={`ลากมุม ${cornerLabels[key]}`} className="absolute z-10 flex size-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-0 bg-transparent p-0" style={{ left: `${point.left}%`, top: `${point.top}%`, touchAction: dragging === key ? 'none' : 'pan-y' }} onPointerDown={(event) => beginDrag(key, event)} onPointerMove={(event) => moveDrag(key, event)} onPointerUp={endDrag} onPointerCancel={endDrag}><span aria-hidden="true" className="pointer-events-none size-7 rounded-full border-2 border-white bg-[#0b7f76] shadow-[0_1px_5px_rgba(0,0,0,.45)]" /></button> })}</> : null}
+         {showOriginal && cropCorners ? <><svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true"><polyline points={framePoints} fill="rgba(11,127,118,.12)" stroke="#0b7f76" strokeWidth="0.5" /></svg>{cornerKeys.map((key) => { const point = framePercent(cropCorners[key], displayedRect); return <button key={key} type="button" aria-label={`ลากมุม ${cornerLabels[key]}`} className="absolute z-10 flex size-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-0 bg-transparent p-0" style={{ left: `${point.left}%`, top: `${point.top}%`, touchAction: dragging === key ? 'none' : 'pan-y' }} onPointerDown={(event) => beginDrag(key, event)} onPointerMove={(event) => moveDrag(key, event)} onPointerUp={endDrag} onPointerCancel={endDrag}><span aria-hidden="true" className="pointer-events-none size-5 rounded-full border-2 border-white bg-[#0b7f76] shadow-[0_1px_5px_rgba(0,0,0,.45)]" /></button> })}</> : null}
         {!showOriginal && processedImage ? <div className="absolute bottom-2 left-2 rounded-full bg-[#173d50]/85 px-2.5 py-1 text-[11px] font-semibold text-white">Preview corrected image</div> : null}
       </div>
       {showOriginal && loupe && originalImage && imageSize && loupePosition ? <div aria-hidden="true" className="pointer-events-none fixed z-50 overflow-hidden rounded-full border-4 border-white bg-[#173d50] shadow-2xl" style={{ left: loupePosition.left, top: loupePosition.top, width: LOUPE_SIZE, height: LOUPE_SIZE, backgroundImage: `url(${originalImage})`, backgroundRepeat: 'no-repeat', backgroundSize: `${imageSize.width * LOUPE_MAGNIFICATION}px ${imageSize.height * LOUPE_MAGNIFICATION}px`, backgroundPosition: `${LOUPE_SIZE / 2 - loupe.point.x * imageSize.width * LOUPE_MAGNIFICATION}px ${LOUPE_SIZE / 2 - loupe.point.y * imageSize.height * LOUPE_MAGNIFICATION}px`, imageOrientation: 'from-image' }}><span className="pointer-events-none absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-white/80" /><span className="pointer-events-none absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-white/80" /><span className="pointer-events-none absolute left-1/2 top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-red-500 bg-white/30" /></div> : null}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildInvoiceOcrDraftLines, type InvoiceOcrItem } from './invoice-ocr-draft'
+import { buildInvoiceOcrDraftLines, classifyInvoiceOcrText, type InvoiceOcrItem } from './invoice-ocr-draft'
 
 const items: InvoiceOcrItem[] = [
   { itemId: 'item-1', catalogNo: 'ABC-123', itemCode: 'BM-001', name: 'Master item', manufacturer: 'Acme', vendor: 'Vendor' },
@@ -27,8 +27,30 @@ describe('invoice OCR draft suggestions', () => {
     expect(similar).toMatchObject({ stockItemId: null, descriptionText: null, matchMethod: 'similar' })
   })
 
-  it('keeps unmatched OCR text as review evidence without treating it as a product name', () => {
-    const [line] = buildInvoiceOcrDraftLines('Unknown product from invoice', items)
-    expect(line).toMatchObject({ sourceText: 'Unknown product from invoice', stockItemId: null, descriptionText: null, catalogNoText: null, matchMethod: 'unmatched', expectedQty: 1 })
+  it('keeps unresolved OCR separate from candidate review and excludes document noise', () => {
+    const classified = classifyInvoiceOcrText([
+      'Unknown Thai reagent description',
+      'สำเนาใบส่งสินค้า',
+      'Shipping charge 120',
+      'VAT 7%',
+      'ABC-123 Qty: 4 LOT: L-01 EXP: 2027-12-31',
+    ].join('\n'), items)
+
+    expect(classified.candidateLines).toHaveLength(1)
+    expect(classified.candidateLines[0]).toMatchObject({ sourceText: 'ABC-123 Qty: 4 LOT: L-01 EXP: 2027-12-31', stockItemId: 'item-1' })
+    expect(classified.unresolvedLines.map((line) => line.sourceText)).toContain('Unknown Thai reagent description')
+    expect(classified.ignoredLines.map((line) => line.sourceText)).toEqual(expect.arrayContaining(['สำเนาใบส่งสินค้า', 'Shipping charge 120', 'VAT 7%']))
+    expect(buildInvoiceOcrDraftLines('Unknown Thai reagent description', items)).toEqual([])
+  })
+
+  it('retains catalog-like numeric evidence such as 1011 and 090 without inventing an Item Master name', () => {
+    const catalogItems: InvoiceOcrItem[] = [
+      { itemId: 'item-1011', catalogNo: '101154997', itemCode: 'BM-1011', name: 'Master 1011 item', manufacturer: 'Acme', vendor: 'Vendor' },
+    ]
+    const classified = classifyInvoiceOcrText('101154997 Qty: 2\n090998877 Qty: 1\nUnknown Thai description', catalogItems)
+    expect(classified.candidateLines).toHaveLength(1)
+    expect(classified.candidateLines[0]).toMatchObject({ catalogNoText: '101154997', descriptionText: 'Master 1011 item' })
+    expect(classified.unresolvedLines.some((line) => line.sourceText.startsWith('090998877'))).toBe(true)
+    expect(classified.unresolvedLines.some((line) => line.sourceText === 'Unknown Thai description')).toBe(true)
   })
 })

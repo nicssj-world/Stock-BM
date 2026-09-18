@@ -14,7 +14,11 @@ describe('invoice OCR intake UI', () => {
   })
 
   it('shows raw text and the four match outcomes before creating an OCR draft', () => {
-    expect(source).toContain('buildInvoiceOcrDraftLines')
+    expect(source).toContain('classifyInvoiceOcrText')
+    expect(source).toContain('Candidate review')
+    expect(source).toContain('ข้อความที่ยังจับคู่ไม่ได้')
+    expect(source).toContain('candidateReason')
+    expect(source).toContain('Preview OCR diagnostics')
     expect(source).toContain('exact_unique')
     expect(source).toContain('exact_ambiguous')
     expect(source).toContain('similar')

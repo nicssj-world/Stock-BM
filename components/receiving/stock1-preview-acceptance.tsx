@@ -7,12 +7,34 @@ import { parseBarcode } from '@/lib/receiving/barcode'
 import { matchPackageBarcode, type PackageScanCandidate } from '@/lib/receiving/package-scan'
 import { Card, Notice, PageHeader, StatusBadge } from '@/components/ui'
 import { InvoiceImageCrop, type InvoiceImageCropResult } from '@/components/receiving/invoice-image-crop'
-import { InvoiceOcr } from '@/components/receiving/invoice-ocr'
+import { InvoiceOcr, type InvoiceOcrPreviewDraft } from '@/components/receiving/invoice-ocr'
 import { PackageScan, type PackageScanResponse, type PackageScanResolver } from '@/components/receiving/package-scan'
 
 type PreviewItem = ReceivingWorkspace['items'][number]
 
 const PREVIEW_ITEMS: PreviewItem[] = [
+  {
+    id: 'preview-item-1011',
+    itemCode: 'PREVIEW-REAGENT-1011',
+    name: 'Preview reagent 1011 — safe fixture',
+    unit: 'box',
+    trackLot: true,
+    trackExpiry: true,
+    catalogNo: '101154997',
+    manufacturer: 'Stock1 Fixture Manufacturer',
+    supplier: 'Stock1 Fixture Vendor',
+  },
+  {
+    id: 'preview-item-090',
+    itemCode: 'PREVIEW-REAGENT-090',
+    name: 'Preview reagent 090 — safe fixture',
+    unit: 'box',
+    trackLot: true,
+    trackExpiry: true,
+    catalogNo: '090998877',
+    manufacturer: 'Stock1 Fixture Manufacturer',
+    supplier: 'Stock1 Fixture Vendor',
+  },
   {
     id: 'preview-item-001',
     itemCode: 'PREVIEW-REAGENT-001',
@@ -79,13 +101,13 @@ function knownLotLabel(match: KnownLotMatch) {
 
 export function Stock1PreviewAcceptance() {
   const [cropResult, setCropResult] = useState<InvoiceImageCropResult | null>(null)
-  const [ocrDraft, setOcrDraft] = useState<{ text: string; lineCount: number } | null>(null)
+  const [ocrDraft, setOcrDraft] = useState<{ text: string; lineCount: number; unresolvedCount: number; ignoredCount: number; passCount: number } | null>(null)
   const [knownLotMatch, setKnownLotMatch] = useState<KnownLotMatch | null>(null)
   const [scanResult, setScanResult] = useState<PackageScanResponse | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
-  function onPreviewDraft(data: { text: string; lines: { lineNo: number }[] }) {
-    setOcrDraft({ text: data.text, lineCount: data.lines.length })
+  function onPreviewDraft(data: InvoiceOcrPreviewDraft) {
+    setOcrDraft({ text: data.text, lineCount: data.lines.length, unresolvedCount: data.unresolvedLines.length, ignoredCount: data.ignoredLines.length, passCount: data.passes.length })
     setKnownLotMatch(matchKnownLots(data.text, PREVIEW_LOTS))
     setNotice('OCR draft ถูกเก็บไว้ใน browser ของ Preview เท่านั้น — ไม่มีการเรียก Supabase หรือเขียน stock')
   }
@@ -123,7 +145,7 @@ export function Stock1PreviewAcceptance() {
         onSaved={() => undefined}
         onError={setNotice}
       />
-      {ocrDraft ? <Card className="space-y-2 border-[#b8ded8] bg-[#f4fbf9] p-4"><p className="font-semibold text-[#315763]">Browser-only OCR result captured</p><p className="text-sm text-[#58747d]">{ocrDraft.lineCount} line(s) · {ocrDraft.text.length} characters · known lot result: <span className="font-semibold">{knownLotMatch ? knownLotLabel(knownLotMatch) : 'not evaluated'}</span></p>{knownLotMatch?.kind === 'exact_ambiguous' ? <p className="text-xs text-[#8f5f1d]">Ambiguous lot candidates: {knownLotMatch.candidates.map((candidate) => candidate.lotNumber).join(', ')}</p> : null}</Card> : null}
+      {ocrDraft ? <Card className="space-y-2 border-[#b8ded8] bg-[#f4fbf9] p-4"><p className="font-semibold text-[#315763]">Browser-only OCR result captured</p><p className="text-sm text-[#58747d]">{ocrDraft.lineCount} identified candidate line(s) · {ocrDraft.unresolvedCount} unresolved · {ocrDraft.ignoredCount} ignored noise line(s) · {ocrDraft.passCount} OCR pass(es) · {ocrDraft.text.length} characters · known lot result: <span className="font-semibold">{knownLotMatch ? knownLotLabel(knownLotMatch) : 'not evaluated'}</span></p>{knownLotMatch?.kind === 'exact_ambiguous' ? <p className="text-xs text-[#8f5f1d]">Ambiguous lot candidates: {knownLotMatch.candidates.map((candidate) => candidate.lotNumber).join(', ')}</p> : null}</Card> : null}
     </section>
 
     <section aria-labelledby="preview-barcode-heading" className="space-y-2">

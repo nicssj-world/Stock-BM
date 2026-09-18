@@ -60,11 +60,35 @@ export function applyCropDrag(pointer: CropPoint, offset: CropPoint): CropPoint 
   return clampCropPoint({ x: pointer.x + offset.x, y: pointer.y + offset.y })
 }
 
+export type CropDragState = {
+  key: string | null
+  pointerId: number | null
+  offset: CropPoint | null
+}
+
+export function beginCropDrag(key: string, pointerId: number, current: CropPoint, pointer: CropPoint): CropDragState {
+  return {
+    key,
+    pointerId,
+    offset: { x: current.x - pointer.x, y: current.y - pointer.y },
+  }
+}
+
+export function moveCropDrag(state: CropDragState, key: string, pointerId: number, pointer: CropPoint): CropPoint | null {
+  if (state.key !== key || state.pointerId !== pointerId || !state.offset) return null
+  return applyCropDrag(pointer, state.offset)
+}
+
+export function endCropDrag(state: CropDragState, key: string, pointerId: number): CropDragState {
+  if (state.key !== key || state.pointerId !== pointerId) return state
+  return { key: null, pointerId: null, offset: null }
+}
+
 export function calculateLoupeViewportPosition(
   pointer: CropPoint,
   viewport: ImageSize,
-  loupeSize = 136,
-  gap = 18,
+  loupeSize = 104,
+  gap = 14,
   padding = 8,
 ) {
   const maxLeft = Math.max(padding, viewport.width - loupeSize - padding)
@@ -351,6 +375,27 @@ function edgeMagnitude(gray: Float32Array, width: number, height: number) {
     }
   }
   return magnitude
+}
+
+function blurGray(gray: Float32Array, width: number, height: number) {
+  const blurred = new Float32Array(gray.length)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let sum = 0
+      let weight = 0
+      for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+        for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+          const sampleX = Math.min(width - 1, Math.max(0, x + offsetX))
+          const sampleY = Math.min(height - 1, Math.max(0, y + offsetY))
+          const sampleWeight = offsetX === 0 && offsetY === 0 ? 4 : Math.abs(offsetX) + Math.abs(offsetY) === 1 ? 2 : 1
+          sum += gray[sampleY * width + sampleX] * sampleWeight
+          weight += sampleWeight
+        }
+      }
+      blurred[y * width + x] = sum / weight
+    }
+  }
+  return blurred
 }
 
 function detectRegionCorners(gray: Float32Array, width: number, height: number): CropCorners | null {
@@ -674,7 +719,8 @@ function addCandidate(candidates: { corners: CropCorners; score: number }[], cor
 export function detectDocumentCornersFromRgba(data: Uint8ClampedArray | Uint8Array, width: number, height: number): CropCorners | null {
   if (width < 16 || height < 16 || data.length < width * height * 4) return null
   const gray = normalizeContrast(grayscale(data, width, height))
-  const magnitude = edgeMagnitude(gray, width, height)
+  const smoothedGray = normalizeContrast(blurGray(gray, width, height))
+  const magnitude = edgeMagnitude(smoothedGray, width, height)
   const edgeSamples: number[] = []
   const sampleStride = Math.max(1, Math.floor(magnitude.length / 24000))
   for (let index = 0; index < magnitude.length; index += sampleStride) if (magnitude[index] > 0) edgeSamples.push(magnitude[index])

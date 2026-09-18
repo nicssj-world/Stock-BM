@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { OCR_MAX_EDGE, OCR_ASSET_PATHS, downscaledImageSize } from './ocr-worker'
+import { OCR_MAX_EDGE, OCR_ASSET_PATHS, OCR_PASS_CONFIG, downscaledImageSize, mergeOcrPasses } from './ocr-worker'
 
 const workerSource = readFileSync(join(process.cwd(), 'components/receiving/ocr-worker.ts'), 'utf8')
 
@@ -42,5 +42,20 @@ describe('self-hosted invoice OCR worker boundary', () => {
     expect(workerSource).toContain('AbortSignal')
     expect(workerSource).toContain('worker.terminate')
     expect(workerSource).not.toMatch(/receive_bm_stock|issue_bm_stock|adjust_bm_stock|\.rpc\(/)
+  })
+
+  it('runs three conservative browser-only passes and merges duplicate lines with pass evidence', () => {
+    expect(OCR_PASS_CONFIG.map((pass) => pass.id)).toEqual(['full', 'line_items', 'numeric'])
+    expect(workerSource).toContain('worker.recognize')
+    expect(workerSource).toContain('tessedit_char_whitelist')
+    const merged = mergeOcrPasses([
+      { id: 'full', text: '101154997 reagent\n090998877 reagent', confidence: 82 },
+      { id: 'line_items', text: '101154997 reagent\n090998877 reagent', confidence: 91 },
+      { id: 'numeric', text: '101154997', confidence: 76 },
+    ])
+    expect(merged.lines.map((line) => line.text)).toEqual(['101154997 reagent', '090998877 reagent'])
+    expect(merged.lines[0].passes).toEqual(['full', 'line_items', 'numeric'])
+    expect(merged.lines[1].passes).toEqual(['full', 'line_items'])
+    expect(merged.text).toBe('101154997 reagent\n090998877 reagent')
   })
 })

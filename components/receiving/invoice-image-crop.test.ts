@@ -53,15 +53,16 @@ describe('invoice image crop capture boundary', () => {
   })
 
   it('uses a smaller visible corner with a larger touch hitbox and an active-corner loupe', () => {
-    expect(source).toContain('LOUPE_SIZE = 136')
-    expect(source).toContain('LOUPE_MAGNIFICATION = 2.75')
+    expect(source).toContain('LOUPE_SIZE = 104')
+    expect(source).toContain('LOUPE_MAGNIFICATION = 2')
     expect(source).toContain('calculateLoupeViewportPosition')
     expect(source).toContain('backgroundImage')
     expect(source).toContain('backgroundSize')
     expect(source).toContain('pointer-events-none')
     expect(source).toContain('setLoupe(null)')
     expect(source).toContain('onPointerCancel={endDrag}')
-    expect(source).toMatch(/className="[^"]*size-12[^"]*"[^>]*>[\s\S]*?className="[^"]*size-7[^"]*"/)
+    expect(source).toMatch(/className="[^"]*size-12[^"]*"[^>]*>[\s\S]*?className="[^"]*size-5[^"]*"/)
+    expect(source).not.toContain('size-7 rounded-full border-2 border-white')
   })
 
   it('preserves touch offset, clamps corner movement, and disables scrolling only during active drag', () => {
@@ -70,6 +71,9 @@ describe('invoice image crop capture boundary', () => {
     expect(source).toContain('touchAction')
     expect(source).toContain('setLoupe({')
     expect(source).toContain('onPointerUp={endDrag}')
+    expect(source).toContain('onPointerCancel={endDrag}')
+    expect(source).toContain('releasePointerCapture')
+    expect(source).toContain('event.preventDefault()')
   })
 
   it('requires explicit crop/skip confirmation and supports reset, original preview, and replacement', () => {
