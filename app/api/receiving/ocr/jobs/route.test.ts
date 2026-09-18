@@ -17,7 +17,7 @@ describe('invoice OCR draft intake boundary', () => {
     expect(server).toContain("source: 'ocr'")
     expect(server).toContain('bm_ocr_jobs')
     expect(server).toContain('bm_ocr_candidates')
-    expect(server).toContain('descriptionText: validUnique')
+    expect(server).toContain('descriptionText: validSelectedItem')
     expect(server).not.toMatch(/receive_bm_stock|issue_bm_stock|adjust_bm_stock|confirm_bm_receipt|\.rpc\(/)
     expect(route).not.toMatch(/originalImage|processedImage|image\.arrayBuffer|storage\.from/)
   })

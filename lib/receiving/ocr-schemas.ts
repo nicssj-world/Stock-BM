@@ -10,7 +10,7 @@ export const invoiceOcrDraftLineSchema = z.object({
   expiryText: nullableText(80),
   expectedQty: z.number().finite().positive(),
   stockItemId: z.string().uuid().nullable().optional(),
-  matchMethod: z.enum(['exact_unique', 'exact_ambiguous', 'similar', 'unmatched']),
+  matchMethod: z.enum(['exact_unique', 'exact_ambiguous', 'similar', 'manual', 'unmatched']),
   matchConfidence: z.number().finite().min(0).max(1).nullable().optional(),
   candidateItemIds: z.array(z.string().uuid()).max(50).default([]),
 })

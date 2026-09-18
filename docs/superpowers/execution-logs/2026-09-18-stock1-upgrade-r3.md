@@ -77,3 +77,18 @@ No production migration, deployment, or feature-flag change was performed.
 - 3C dashboard and drill-down: implemented — protected `/vendors/[id]` view renders traceable `n/d` metrics, excluded populations, issue capture/resolution, receipt links, and significant events. No scores are rendered.
 - 3D CSV and print report: implemented — `/api/vendors/[id]/performance/export` and `/vendors/[id]/report` use the existing print-page convention. Targeted tests and TypeScript passed; local browser walkthrough remains part of the final `npm run dev` acceptance pass.
 - Real-DB Phase 3 gate: PASS — `npm run test:db` applied 83 migrations and `l0-19-vendor-performance.sql` verified issue/resolution/event persistence, empty P-12 mapping, and zero stock-ledger change. Existing L0 checks, including genuinely interleaved L0-16/L0-17, also passed.
+
+## Phase 4 progress
+
+- 4A document model: PASS — additive `bm_vendor_eval_policies`, `bm_vendor_evaluations`, `bm_vendor_eval_document_states`, `bm_vendor_eval_approvals`, and `bm_vendor_eval_approver_assignments` tables mirror the existing revisioned approval pattern. The seeded policy has empty JSON and `is_approved=false`; P-13/P-14 remain unresolved.
+- 4B draft generation: PASS — annual evaluation creation freezes the Phase 3 metrics and significant-event evidence into `metrics_snapshot` / `significant_events_snapshot`; `result` and `result_label` are explicitly null. Judgment fields are reviewable and editable.
+- 4C review/approve: implemented — evaluator/reviewer/approver signature roles use the existing `SignaturePad` and attachment route. Regenerating a draft increments revision and retains prior approvals as audit rows. A finalised/approved revision cannot be reopened while P-16 is unresolved. P-15 assignment data remains optional and unassigned rather than invented.
+- 4D report: implemented — Thai-Buddhist fiscal year label, frozen metrics, judgment, significant events above the result notice, and revision-bound signature blocks are available at `/vendors/evaluations/[id]/report`.
+- 4E policy gate: PASS — until an approved policy exists, the UI/report shows `ยังไม่ได้กำหนดสูตรคะแนน — รออนุมัติ`, no numeric result is produced, and no weight literal exists in the vendor implementation directory. P-17 significant events are evidence only and do not change an outcome.
+- Real-DB Phase 4 gate: PASS — `npm run test:db` applied 84 migrations and `l0-20-vendor-evaluation.sql` verified empty policy, frozen draft fields, revision bump with prior approval retained, null result, and zero stock-ledger change. Existing L0 checks, including genuinely interleaved L0-16/L0-17, also passed.
+
+## Local implementation status
+
+- Targeted Phase 2–4 tests: PASS — 7 files / 18 tests in the final focused run.
+- TypeScript after Phase 4 and OCR ambiguity-selection correction: PASS.
+- Production migrations, production data, production deployment, and production feature-flag changes: NOT PERFORMED.

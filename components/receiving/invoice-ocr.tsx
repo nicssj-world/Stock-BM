@@ -5,7 +5,7 @@ import { CheckCircle2, FileScan, LoaderCircle, RefreshCcw, Square } from 'lucide
 import type { ReceivingWorkspace } from '@/lib/receiving/types'
 import { buildInvoiceOcrDraftLines, type InvoiceOcrDraftLine } from '@/lib/receiving/invoice-ocr-draft'
 import { recognizeProcessedInvoiceImage, type OcrProgress } from '@/components/receiving/ocr-worker'
-import { api, Button, Card, Field, Input, Loading, Notice, StatusBadge, Textarea } from '@/components/ui'
+import { api, Button, Card, Field, Input, Loading, Notice, Select, StatusBadge, Textarea } from '@/components/ui'
 
 type OcrItem = ReceivingWorkspace['items'][number]
 
@@ -36,9 +36,23 @@ export function InvoiceOcr({ processedImage, vendorId, invoiceNo, invoiceDate, i
   }))
 
   function updateLine(lineNo: number, key: keyof InvoiceOcrDraftLine, value: string) {
+    setLines((current) => current.map((line) => {
+      if (line.lineNo !== lineNo) return line
+      const nextValue = key === 'expectedQty' ? (Number(value) > 0 ? Number(value) : 1) : value || null
+      if (key === 'catalogNoText') return { ...line, catalogNoText: nextValue as string | null, stockItemId: null, descriptionText: null, matchMethod: 'unmatched', matchConfidence: null, candidateItemIds: [] }
+      return { ...line, [key]: nextValue }
+    }))
+  }
+
+  function chooseCandidate(lineNo: number, itemId: string) {
+    const item = items.find((candidate) => candidate.id === itemId)
     setLines((current) => current.map((line) => line.lineNo === lineNo ? {
       ...line,
-      [key]: key === 'expectedQty' ? (Number(value) > 0 ? Number(value) : 1) : value || null,
+      stockItemId: item?.id ?? null,
+      descriptionText: item?.name ?? null,
+      catalogNoText: item?.catalogNo ?? line.catalogNoText,
+      matchMethod: item ? 'manual' : 'unmatched',
+      matchConfidence: null,
     } : line))
   }
 
@@ -96,6 +110,7 @@ export function InvoiceOcr({ processedImage, vendorId, invoiceNo, invoiceDate, i
     if (line.matchMethod === 'exact_unique') return <StatusBadge tone="accepted" label="exact unique — ตรวจทาน" />
     if (line.matchMethod === 'exact_ambiguous') return <StatusBadge tone="investigate" label="exact ambiguous — ต้องเลือก" />
     if (line.matchMethod === 'similar') return <StatusBadge tone="investigate" label="similar — ข้อเสนอแนะ" />
+    if (line.matchMethod === 'manual') return <StatusBadge tone="accepted" label="manual — operator เลือกแล้ว" />
     return <StatusBadge tone="neutral" label="unmatched — เลือกเอง" />
   }
 
@@ -106,7 +121,7 @@ export function InvoiceOcr({ processedImage, vendorId, invoiceNo, invoiceDate, i
       {error ? <Notice tone="danger">{error}</Notice> : null}
       {rawText ? <Field label="Raw OCR text" hint="แก้ข้อความได้ แล้วกดสร้างข้อเสนอแนะใหม่ก่อนบันทึก"><Textarea value={rawText} onChange={(event) => setRawText(event.target.value)} rows={6} /></Field> : null}
       {rawText ? <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" disabled={busy || saving} onClick={rebuildSuggestions}><RefreshCcw className="size-4" />สร้างข้อเสนอแนะใหม่</Button><Button type="button" disabled={saving || busy || !vendorId || !lines.length} onClick={() => void saveDraft()}><CheckCircle2 className="size-4" />บันทึก OCR invoice draft</Button></div> : null}
-      {lines.length ? <div className="space-y-2"><p className="text-xs font-bold tracking-[0.12em] text-[#315763] uppercase">Candidate review</p>{lines.map((line) => <div key={line.lineNo} className="space-y-2 rounded-md border border-[#dce8e9] bg-[#fbfdfd] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-[#315763]">#{line.lineNo} · {line.sourceText}</p>{matchBadge(line)}</div>{line.candidateItemIds.length ? <p className="text-xs text-[#8f5f1d]">Candidates: {line.candidateItemIds.map((id) => items.find((item) => item.id === id)?.itemCode ?? id).join(', ')}</p> : null}<div className="grid gap-2 sm:grid-cols-4"><Field label="Catalog / REF"><Input value={line.catalogNoText ?? ''} onChange={(event) => updateLine(line.lineNo, 'catalogNoText', event.target.value)} placeholder="ตรวจ/กรอก catalog" /></Field><Field label="Lot"><Input value={line.lotText ?? ''} onChange={(event) => updateLine(line.lineNo, 'lotText', event.target.value)} /></Field><Field label="Expiry"><Input value={line.expiryText ?? ''} onChange={(event) => updateLine(line.lineNo, 'expiryText', event.target.value)} /></Field><Field label="Expected qty"><Input type="number" min="0.001" step="0.001" value={line.expectedQty} onChange={(event) => updateLine(line.lineNo, 'expectedQty', event.target.value)} /></Field></div><p className="text-xs text-[#58747d]">Item Master: {line.descriptionText ?? 'ยังไม่จับคู่ — ห้ามใช้ชื่อจาก OCR เป็นชื่อสินค้า'}</p></div>)}</div> : null}
+      {lines.length ? <div className="space-y-2"><p className="text-xs font-bold tracking-[0.12em] text-[#315763] uppercase">Candidate review</p>{lines.map((line) => <div key={line.lineNo} className="space-y-2 rounded-md border border-[#dce8e9] bg-[#fbfdfd] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-[#315763]">#{line.lineNo} · {line.sourceText}</p>{matchBadge(line)}</div>{line.candidateItemIds.length ? <Field label="เลือก Item Master"><Select value={line.stockItemId ?? ''} onChange={(event) => chooseCandidate(line.lineNo, event.target.value)}><option value="">ยังไม่เลือก — draft จะคงเป็น unmatched</option>{line.candidateItemIds.map((id) => { const item = items.find((candidate) => candidate.id === id); return <option key={id} value={id}>{item ? `${item.itemCode} · ${item.name}` : id}</option> })}</Select></Field> : null}<div className="grid gap-2 sm:grid-cols-4"><Field label="Catalog / REF"><Input value={line.catalogNoText ?? ''} onChange={(event) => updateLine(line.lineNo, 'catalogNoText', event.target.value)} placeholder="ตรวจ/กรอก catalog" /></Field><Field label="Lot"><Input value={line.lotText ?? ''} onChange={(event) => updateLine(line.lineNo, 'lotText', event.target.value)} /></Field><Field label="Expiry"><Input value={line.expiryText ?? ''} onChange={(event) => updateLine(line.lineNo, 'expiryText', event.target.value)} /></Field><Field label="Expected qty"><Input type="number" min="0.001" step="0.001" value={line.expectedQty} onChange={(event) => updateLine(line.lineNo, 'expectedQty', event.target.value)} /></Field></div><p className="text-xs text-[#58747d]">Item Master: {line.descriptionText ?? 'ยังไม่จับคู่ — ห้ามใช้ชื่อจาก OCR เป็นชื่อสินค้า'}</p></div>)}</div> : null}
     </>}
   </Card>
 }

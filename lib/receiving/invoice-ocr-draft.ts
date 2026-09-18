@@ -11,7 +11,7 @@ export type InvoiceOcrDraftLine = {
   lotText: string | null
   expiryText: string | null
   stockItemId: string | null
-  matchMethod: 'exact_unique' | 'exact_ambiguous' | 'similar' | 'unmatched'
+  matchMethod: 'exact_unique' | 'exact_ambiguous' | 'similar' | 'manual' | 'unmatched'
   matchConfidence: number | null
   candidateItemIds: string[]
 }

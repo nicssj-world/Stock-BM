@@ -45,14 +45,14 @@ export async function createInvoiceOcrDraft(input: InvoiceOcrDraftInput, actor: 
   const ocrJobId = asString((jobData as RecordRow).id)
 
   const normalizedLines = input.lines.map((line) => {
-    const validUniqueItem = line.matchMethod === 'exact_unique' && line.stockItemId && itemMap.has(line.stockItemId)
+    const validSelectedItem = (line.matchMethod === 'exact_unique' || line.matchMethod === 'manual') && line.stockItemId && itemMap.has(line.stockItemId)
     return {
       ...line,
-      stockItemId: validUniqueItem ? line.stockItemId ?? null : null,
-      descriptionText: validUniqueItem ? itemMap.get(line.stockItemId ?? '') ?? null : null,
+      stockItemId: validSelectedItem ? line.stockItemId ?? null : null,
+      descriptionText: validSelectedItem ? itemMap.get(line.stockItemId ?? '') ?? null : null,
       candidateItemIds: line.candidateItemIds.filter((id) => itemMap.has(id)),
-      matchMethod: validUniqueItem ? line.matchMethod : line.matchMethod === 'exact_unique' ? 'unmatched' as const : line.matchMethod,
-      matchConfidence: validUniqueItem ? line.matchConfidence ?? 1 : line.matchMethod === 'exact_unique' ? null : line.matchConfidence ?? null,
+      matchMethod: validSelectedItem ? line.matchMethod : line.matchMethod === 'exact_unique' ? 'unmatched' as const : line.matchMethod,
+      matchConfidence: validSelectedItem ? line.matchConfidence ?? 1 : line.matchMethod === 'exact_unique' ? null : line.matchConfidence ?? null,
     }
   })
 

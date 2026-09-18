@@ -86,6 +86,19 @@ export function VendorPerformanceView({ initialPerformance }: { initialPerforman
     } finally { setBusy(false) }
   }
 
+  async function openEvaluation() {
+    setBusy(true)
+    try {
+      const result = await api<{ evaluation: { evaluation: { id: string } } }>('/api/vendor-evaluations', {
+        method: 'POST',
+        body: JSON.stringify({ vendorId: performance.vendor.id, fiscalYear: performance.fiscalYear, judgment: { summary: '', strengths: '', risks: '', actions: '' } }),
+      })
+      router.push(`/vendors/evaluations/${result.evaluation.evaluation.id}`)
+    } catch (error) {
+      setNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'เปิด annual evaluation ไม่สำเร็จ' })
+    } finally { setBusy(false) }
+  }
+
   return (
     <main className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -96,6 +109,7 @@ export function VendorPerformanceView({ initialPerformance }: { initialPerforman
         </div>
         <div className="flex flex-wrap gap-2">
           <Link href={`/vendors/${performance.vendor.id}/report?fiscalYear=${performance.fiscalYear}`} className="inline-flex min-h-11 items-center rounded-md border border-[#c9dadd] bg-white px-3.5 py-2 text-sm font-semibold text-[#244854]">พิมพ์รายงาน</Link>
+          <Button type="button" variant="secondary" disabled={busy} onClick={() => void openEvaluation()}>Annual evaluation</Button>
           <a href={`/api/vendors/${performance.vendor.id}/performance/export?fiscalYear=${performance.fiscalYear}`} className="inline-flex min-h-11 items-center rounded-md bg-[#0b7f76] px-3.5 py-2 text-sm font-semibold text-white">ส่งออก CSV</a>
         </div>
       </div>
