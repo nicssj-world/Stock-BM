@@ -6,10 +6,10 @@ const page = readFileSync(join(process.cwd(), 'app/preview/stock1-acceptance/pag
 const component = readFileSync(join(process.cwd(), 'components/receiving/stock1-preview-acceptance.tsx'), 'utf8')
 
 describe('Stock1 Preview acceptance route', () => {
-  it('is fail-closed outside Preview or explicit local development mode', () => {
+  it('is fail-closed outside Preview with the explicit acceptance flag', () => {
     expect(page).toContain("process.env.STOCK1_PREVIEW_ACCEPTANCE_MODE === 'true'")
     expect(page).toContain("process.env.VERCEL_ENV === 'preview'")
-    expect(page).toContain("process.env.NODE_ENV === 'development'")
+    expect(page).not.toContain("process.env.NODE_ENV === 'development'")
     expect(page).toContain('notFound()')
   })
 
@@ -21,6 +21,8 @@ describe('Stock1 Preview acceptance route', () => {
     expect(component).toContain('resolvePreviewPackage')
     expect(component).toContain('matchKnownLots')
     expect(component).not.toContain("'/api/receiving")
+    expect(component).not.toContain('fetch(')
+    expect(component).not.toContain('supabase')
     expect(component).not.toMatch(/receive_bm_stock|issue_bm_stock|adjust_bm_stock|\.rpc\(/)
   })
 })

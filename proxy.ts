@@ -3,6 +3,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 export async function proxy(request: NextRequest) {
   const response = NextResponse.next({ request })
+  if (request.nextUrl.pathname === '/preview/stock1-acceptance') return response
+
   const url = process.env.NEXT_PUBLIC_BM_SUPABASE_URL
   const key = process.env.NEXT_PUBLIC_BM_SUPABASE_ANON_KEY
   if (!url || !key) return NextResponse.redirect(new URL('/login', request.url))
@@ -28,6 +30,6 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/inventory/:path*', '/movements/:path*', '/issue/:path*', '/scan/:path*', '/reports/:path*', '/hpv/:path*', '/hiv-drt/:path*', '/hiv-alert/:path*', '/iqc/:path*', '/eqa/:path*', '/environment/:path*', '/equipment/:path*', '/lot-verification/:path*', '/morning-talk/:path*', '/admin/:path*', '/receiving/:path*', '/vendors/:path*'],
+  matcher: ['/dashboard/:path*', '/inventory/:path*', '/movements/:path*', '/issue/:path*', '/scan/:path*', '/reports/:path*', '/hpv/:path*', '/hiv-drt/:path*', '/hiv-alert/:path*', '/iqc/:path*', '/eqa/:path*', '/environment/:path*', '/equipment/:path*', '/lot-verification/:path*', '/morning-talk/:path*', '/admin/:path*', '/receiving/:path*', '/vendors/:path*', '/preview/stock1-acceptance'],
 }
 
