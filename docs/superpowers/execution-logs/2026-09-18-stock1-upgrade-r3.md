@@ -48,6 +48,7 @@ The local ledger assertion observed the existing fixture lot balance at 11 after
 
 - 2A OCR feasibility spike retirement: PASS — retired runtime/package references were removed, feasibility findings were preserved, and the targeted test passed.
 - 2B GS1/HIBC barcode parser: PASS — TDD fixtures cover GS1-128 FNC1, GS1 DataMatrix, `]e0`, HIBC primary/secondary, GTIN/catalog separation, and malformed all-null fallback. `npx vitest run lib/receiving/barcode.test.ts` and `npx tsc --noEmit` passed.
+- 2C scanner plumbing: PASS — the shared hook retains the existing code callback contract while exposing symbology, raw bytes, ZXing result metadata, and explicit format hints. Targeted scanner tests and `npx tsc --noEmit` passed.
 
 ## Release gate
 

@@ -4,6 +4,18 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 type ScannerControls = { stop: () => void }
 
+export type CameraScanResult = {
+  code: string
+  symbologyId: string | null
+  rawBytes: Uint8Array | null
+  resultMetadata: ReadonlyMap<unknown, unknown> | null
+  barcodeFormat: number | null
+}
+
+function symbologyIdFromCode(code: string): string | null {
+  return code.match(/^\](?:C1|d2|e0|A0|C0)/)?.[0] ?? null
+}
+
 function cameraErrorMessage(error: unknown) {
   if (typeof window !== 'undefined' && !window.isSecureContext) {
     return 'ต้องเปิดผ่าน HTTPS หรือ localhost จึงจะใช้กล้องได้'
@@ -23,7 +35,7 @@ export function useCameraScanner({
   stopOnScan = false,
   dedupeMs = 1500,
 }: {
-  onScan: (code: string) => void
+  onScan: (code: string, details?: CameraScanResult) => void
   onError: (message: string) => void
   stopOnScan?: boolean
   dedupeMs?: number
@@ -91,15 +103,43 @@ export function useCameraScanner({
       video.playsInline = true
       video.srcObject = stream
       await video.play().catch(() => undefined)
-      const { BrowserMultiFormatReader } = await import('@zxing/browser')
-      const reader = new BrowserMultiFormatReader()
+      const [{ BarcodeFormat, BrowserMultiFormatReader }, { DecodeHintType }] = await Promise.all([
+        import('@zxing/browser'),
+        import('@zxing/library'),
+      ])
+      const hints = new Map()
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+        BarcodeFormat.AZTEC,
+        BarcodeFormat.CODABAR,
+        BarcodeFormat.CODE_39,
+        BarcodeFormat.CODE_93,
+        BarcodeFormat.CODE_128,
+        BarcodeFormat.DATA_MATRIX,
+        BarcodeFormat.EAN_8,
+        BarcodeFormat.EAN_13,
+        BarcodeFormat.ITF,
+        BarcodeFormat.MAXICODE,
+        BarcodeFormat.PDF_417,
+        BarcodeFormat.QR_CODE,
+        BarcodeFormat.RSS_14,
+        BarcodeFormat.RSS_EXPANDED,
+        BarcodeFormat.UPC_A,
+        BarcodeFormat.UPC_E,
+      ])
+      const reader = new BrowserMultiFormatReader(hints)
       controlsRef.current = await reader.decodeFromStream(stream, video, (result) => {
         const code = result?.getText().trim() ?? ''
         if (!code || cancelled) return
         const now = Date.now()
         if (code === lastRef.current.code && now - lastRef.current.at < dedupeMs) return
         lastRef.current = { code, at: now }
-        onScanRef.current(code)
+        onScanRef.current(code, {
+          code,
+          symbologyId: symbologyIdFromCode(code),
+          rawBytes: result?.getRawBytes() ?? null,
+          resultMetadata: result?.getResultMetadata() ?? null,
+          barcodeFormat: result?.getBarcodeFormat() ?? null,
+        })
         if (stopOnScan) stop()
       })
       setStarting(false)
