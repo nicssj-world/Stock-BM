@@ -8,7 +8,31 @@ import type { Receipt, ReceivingWorkspace } from '@/lib/receiving/types'
 import { cumulativeReceived, deliveryCompleteness, receiptIssues } from '@/lib/receiving/rules'
 import { api, Button, Card, Field, Input, Notice, Select, StatusBadge } from '@/components/ui'
 import { AttachmentList } from '@/components/attachments'
+import type { PackageScanResponse } from '@/components/receiving/package-scan'
+import { PackageScan } from '@/components/receiving/package-scan'
 import { ReceiptLineRow } from '@/components/receiving/receipt-line-row'
+
+type ScanEvidence = {
+  raw: string | null
+  symbologyId: string | null
+  standard: string | null
+  gtin: string | null
+  lot: string | null
+  expiry: string | null
+  itemId: string | null
+  conflicts: Record<string, unknown>[]
+}
+
+const emptyScanEvidence: ScanEvidence = {
+  raw: null,
+  symbologyId: null,
+  standard: null,
+  gtin: null,
+  lot: null,
+  expiry: null,
+  itemId: null,
+  conflicts: [],
+}
 
 export function ReceiptDraft({ data, onSaved, onError }: { data: ReceivingWorkspace; onSaved: (data: ReceivingWorkspace, text: string) => void; onError: (text: string) => void }) {
   const activeVendors = data.vendors.filter((vendor) => vendor.isActive)
@@ -24,6 +48,7 @@ export function ReceiptDraft({ data, onSaved, onError }: { data: ReceivingWorksp
   const [lotNumber, setLotNumber] = useState('')
   const [expiryDate, setExpiryDate] = useState('')
   const [receivedQty, setReceivedQty] = useState('1')
+  const [scanEvidence, setScanEvidence] = useState<ScanEvidence>(emptyScanEvidence)
   const [busy, setBusy] = useState(false)
   const selectedItem = useMemo(() => activeItems.find((item) => item.id === itemId), [activeItems, itemId])
   const openInvoices = useMemo(() => data.invoices.filter((invoice) => invoice.status === 'open' && invoice.vendorId === vendorId), [data.invoices, vendorId])
@@ -53,7 +78,55 @@ export function ReceiptDraft({ data, onSaved, onError }: { data: ReceivingWorksp
     const nextLine = selectedInvoice?.lines.find((line) => line.id === nextInvoiceLineId)
     setInvoiceLineId(nextInvoiceLineId)
     setExpectedQty(nextLine ? String(nextLine.expectedQty) : '')
-    if (nextLine?.stockItemId) setItemId(nextLine.stockItemId)
+    if (nextLine?.stockItemId) chooseItem(nextLine.stockItemId)
+  }
+
+  function chooseItem(nextItemId: string) {
+    setItemId(nextItemId)
+    if (scanEvidence.itemId && scanEvidence.itemId !== nextItemId) {
+      setScanEvidence((current) => ({
+        ...current,
+        conflicts: [...current.conflicts.filter((conflict) => conflict.code !== 'barcode_item_mismatch'), { code: 'barcode_item_mismatch', message: 'Item ที่เลือกไม่ตรงกับ GTIN ของ package', target: 'stockItemId' }],
+      }))
+    } else {
+      setScanEvidence((current) => ({ ...current, conflicts: current.conflicts.filter((conflict) => conflict.code !== 'barcode_item_mismatch') }))
+    }
+  }
+
+  function applyPackageScan(result: PackageScanResponse) {
+    setScanEvidence({
+      raw: result.parsed.raw,
+      symbologyId: result.parsed.symbologyId,
+      standard: result.parsed.standard,
+      gtin: result.parsed.gtin,
+      lot: result.parsed.lot,
+      expiry: result.parsed.expiry,
+      itemId: result.itemId,
+      conflicts: result.conflicts,
+    })
+    if (result.itemId) setItemId(result.itemId)
+    if (result.parsed.lot) setLotNumber(result.parsed.lot)
+    if (result.parsed.expiry) setExpiryDate(result.parsed.expiry)
+  }
+
+  function changeLot(nextLotNumber: string) {
+    setLotNumber(nextLotNumber)
+    if (scanEvidence.lot && nextLotNumber.trim() !== scanEvidence.lot) {
+      setScanEvidence((current) => ({
+        ...current,
+        conflicts: [...current.conflicts.filter((conflict) => conflict.code !== 'barcode_lot_mismatch'), { code: 'barcode_lot_mismatch', message: 'Lot ที่กรอกไม่ตรงกับ package barcode', target: 'lotNumber' }],
+      }))
+    }
+  }
+
+  function changeExpiry(nextExpiryDate: string) {
+    setExpiryDate(nextExpiryDate)
+    if (scanEvidence.expiry && nextExpiryDate !== scanEvidence.expiry) {
+      setScanEvidence((current) => ({
+        ...current,
+        conflicts: [...current.conflicts.filter((conflict) => conflict.code !== 'barcode_expiry_mismatch'), { code: 'barcode_expiry_mismatch', message: 'วันหมดอายุที่กรอกไม่ตรงกับ package barcode', target: 'expiryDate' }],
+      }))
+    }
   }
 
   async function createDraft(event: React.FormEvent) {
@@ -64,10 +137,10 @@ export function ReceiptDraft({ data, onSaved, onError }: { data: ReceivingWorksp
     try {
       const result = await api<{ receiving: ReceivingWorkspace }>('/api/receiving/receipts', {
         method: 'POST',
-        body: JSON.stringify({ vendorId, invoiceId: invoiceId || null, receiptNo: receiptNo || null, receivedDate, packagingStatus: null, temperatureStatus: null, lines: [{ lineNo: 1, invoiceLineId: invoiceLineId || null, stockItemId: itemId, locationId, lotNumber: lotNumber || null, expiryDate: expiryDate || null, lotMode: selectedItem?.trackLot ? 'new' : 'not_tracked', expectedQty: invoiceLineId ? Number(expectedQty) : null, receivedQty: Number(receivedQty), torExpiryCompliance: computedCompliance === 'not_compliant' ? 'compliant' : computedCompliance, remainingShelfLifeDays: remainingShelfLife(expiryDate || null, receivedDate) }] }),
+        body: JSON.stringify({ vendorId, invoiceId: invoiceId || null, receiptNo: receiptNo || null, receivedDate, packagingStatus: null, temperatureStatus: null, lines: [{ lineNo: 1, invoiceLineId: invoiceLineId || null, stockItemId: itemId, locationId, lotNumber: lotNumber || null, expiryDate: expiryDate || null, lotMode: selectedItem?.trackLot ? 'new' : 'not_tracked', expectedQty: invoiceLineId ? Number(expectedQty) : null, receivedQty: Number(receivedQty), barcodeRaw: scanEvidence.raw, barcodeSymbology: scanEvidence.symbologyId, barcodeStandard: scanEvidence.standard, barcodeGtin: scanEvidence.gtin, barcodeLot: scanEvidence.lot, barcodeExpiry: scanEvidence.expiry, conflicts: scanEvidence.conflicts, torExpiryCompliance: computedCompliance === 'not_compliant' ? 'compliant' : computedCompliance, remainingShelfLifeDays: remainingShelfLife(expiryDate || null, receivedDate) }] }),
       })
       onSaved(result.receiving, 'สร้างร่างใบรับเข้าแล้ว')
-      setReceiptNo(''); setLotNumber(''); setExpiryDate(''); setReceivedQty('1')
+      setReceiptNo(''); setLotNumber(''); setExpiryDate(''); setReceivedQty('1'); setScanEvidence(emptyScanEvidence)
     } catch (error) {
       onError(error instanceof Error ? error.message : 'สร้างร่างใบรับเข้าไม่สำเร็จ')
     } finally {
@@ -90,7 +163,7 @@ export function ReceiptDraft({ data, onSaved, onError }: { data: ReceivingWorksp
   return <div className="space-y-4">
     <Card className="p-4"><form onSubmit={createDraft} className="space-y-4">
       <div className="grid gap-3 md:grid-cols-2"><div className="rounded-md border border-[#dce8e9] bg-[#f8fbfb] p-3"><p className="flex items-center gap-2 text-xs font-bold text-[#315763]"><FileText className="size-4 text-[#0b7f76]" />1. Vendor + receipt</p><div className="mt-3 space-y-3"><Field label="Vendor"><Select required value={vendorId} onChange={(event) => chooseVendor(event.target.value)}><option value="">เลือก vendor</option>{activeVendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.code} · {vendor.name}</option>)}</Select></Field><Field label="Open invoice (optional)"><Select value={invoiceId} onChange={(event) => chooseInvoice(event.target.value)}><option value="">รับเข้าโดยไม่ผูกใบส่งของ</option>{openInvoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.invoiceNo ?? invoice.id.slice(0, 8)} · {invoice.lines.length} lines</option>)}</Select></Field>{selectedInvoice ? <Field label="Invoice line"><Select required value={invoiceLineId} onChange={(event) => chooseInvoiceLine(event.target.value)}><option value="">เลือกรายการใบส่งของ</option>{selectedInvoice.lines.filter((line) => line.closureState !== 'cancelled').map((line) => <option key={line.id} value={line.id}>#{line.lineNo} · {line.descriptionText ?? line.catalogNoText ?? 'ไม่มีรายละเอียด'} · expected {line.expectedQty}</option>)}</Select></Field> : null}<Field label="เลขที่ใบรับเข้า"><Input value={receiptNo} onChange={(event) => setReceiptNo(event.target.value)} placeholder="ไม่บังคับ" /></Field></div></div>
-        <div className="rounded-md border border-[#dce8e9] bg-[#f8fbfb] p-3"><p className="flex items-center gap-2 text-xs font-bold text-[#315763]"><PackagePlus className="size-4 text-[#0b7f76]" />2. Line</p><div className="mt-3 space-y-3"><Field label="Item"><Select required value={itemId} onChange={(event) => setItemId(event.target.value)}><option value="">เลือก item</option>{activeItems.map((item) => <option key={item.id} value={item.id}>{item.itemCode} · {item.name}</option>)}</Select></Field>{selectedInvoiceLine ? <div className="rounded-md border border-[#dce8e9] bg-white px-3 py-2 text-xs text-[#58747d]">Expected {selectedInvoiceLine.expectedQty} · Received {receivedForSelectedInvoiceLine} · {deliveryCompleteness(selectedInvoiceLine.expectedQty, receivedForSelectedInvoiceLine)}</div> : null}<div className="grid gap-3 sm:grid-cols-2"><Field label="Lot"><Input value={lotNumber} onChange={(event) => setLotNumber(event.target.value)} disabled={selectedItem ? !selectedItem.trackLot : false} /></Field><Field label="จำนวน"><Input type="number" min="0.001" step="0.001" value={receivedQty} onChange={(event) => setReceivedQty(event.target.value)} required /></Field></div><Field label="Expiry"><Input type="date" value={expiryDate} onChange={(event) => setExpiryDate(event.target.value)} disabled={selectedItem ? !selectedItem.trackExpiry : false} /></Field></div></div>
+        <div className="rounded-md border border-[#dce8e9] bg-[#f8fbfb] p-3"><p className="flex items-center gap-2 text-xs font-bold text-[#315763]"><PackagePlus className="size-4 text-[#0b7f76]" />2. Line</p><div className="mt-3 space-y-3"><Field label="Item"><Select required value={itemId} onChange={(event) => chooseItem(event.target.value)}><option value="">เลือก item</option>{activeItems.map((item) => <option key={item.id} value={item.id}>{item.itemCode} · {item.name}</option>)}</Select></Field><PackageScan selectedItemId={itemId || null} disabled={busy} onUse={applyPackageScan} />{selectedInvoiceLine ? <div className="rounded-md border border-[#dce8e9] bg-white px-3 py-2 text-xs text-[#58747d]">Expected {selectedInvoiceLine.expectedQty} · Received {receivedForSelectedInvoiceLine} · {deliveryCompleteness(selectedInvoiceLine.expectedQty, receivedForSelectedInvoiceLine)}</div> : null}<div className="grid gap-3 sm:grid-cols-2"><Field label="Lot"><Input value={lotNumber} onChange={(event) => changeLot(event.target.value)} disabled={selectedItem ? !selectedItem.trackLot : false} /></Field><Field label="จำนวน"><Input type="number" min="0.001" step="0.001" value={receivedQty} onChange={(event) => setReceivedQty(event.target.value)} required /></Field></div><Field label="Expiry"><Input type="date" value={expiryDate} onChange={(event) => changeExpiry(event.target.value)} disabled={selectedItem ? !selectedItem.trackExpiry : false} /></Field></div></div>
       </div>
       <div className="grid gap-3 md:grid-cols-2"><div className="rounded-md border border-[#dce8e9] bg-[#f8fbfb] p-3"><p className="flex items-center gap-2 text-xs font-bold text-[#315763]"><MapPin className="size-4 text-[#0b7f76]" />3. Location + evidence</p><div className="mt-3 space-y-3"><Field label="Location"><Select required value={locationId} onChange={(event) => setLocationId(event.target.value)}><option value="">เลือก location</option>{activeLocations.map((location) => <option key={location.id} value={location.id}>{location.code} · {location.name}</option>)}</Select></Field><p className="text-xs text-[#81979c]">Packaging และ temperature จะถูกกรอกใน draft ก่อนยืนยัน</p></div></div><div className="rounded-md border border-[#dce8e9] bg-[#f8fbfb] p-3"><p className="flex items-center gap-2 text-xs font-bold text-[#315763]"><ClipboardCheck className="size-4 text-[#0b7f76]" />4. Review + confirm</p><p className="mt-3 text-xs leading-5 text-[#81979c]">ระบบจะตรวจ lot, expiry, TOR และ feature flag ซ้ำใน RPC ก่อนเขียนผ่าน ledger เดิม</p><Button className="mt-3" disabled={busy || !vendorId || !itemId || !locationId}><PackagePlus className="size-4" />สร้าง draft</Button></div></div>
     </form></Card>

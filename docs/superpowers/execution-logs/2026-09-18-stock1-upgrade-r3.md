@@ -50,6 +50,12 @@ The local ledger assertion observed the existing fixture lot balance at 11 after
 - 2B GS1/HIBC barcode parser: PASS — TDD fixtures cover GS1-128 FNC1, GS1 DataMatrix, `]e0`, HIBC primary/secondary, GTIN/catalog separation, and malformed all-null fallback. `npx vitest run lib/receiving/barcode.test.ts` and `npx tsc --noEmit` passed.
 - 2C scanner plumbing: PASS — the shared hook retains the existing code callback contract while exposing symbology, raw bytes, ZXing result metadata, and explicit format hints. Targeted scanner tests and `npx tsc --noEmit` passed.
 
+## Recovered approved scope amendment
+
+- Recorded as: **Recovered approved Stock1 requirement omitted from Revision 3: Invoice auto-document crop + manually adjustable four-corner perspective crop.**
+- Placement: after barcode/package-scan work and before the Tesseract.js OCR runtime/intake.
+- Required release evidence: original-image preservation, auto-detection fallback, four touch-draggable corners, true perspective rectification, explicit confirmation before OCR, skip/reset/retake flows, no stock mutation, and real iPhone Safari verification.
+
 ## Release gate
 
 Stock-BM has no staging Supabase environment. Staging reconciliation is therefore deferred to the pre-production release gate and must not be replaced by production. No production migration, deployment, or feature-flag change was performed.
