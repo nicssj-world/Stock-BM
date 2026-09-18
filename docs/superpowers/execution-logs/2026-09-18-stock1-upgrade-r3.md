@@ -44,6 +44,11 @@ The local ledger assertion observed the existing fixture lot balance at 11 after
 - Visual browser walkthrough was not available in this execution environment; the browser automation surface reported no browser.
 - Real iPhone Safari, camera scanner, OCR capture, and Vercel preview testing remain outstanding and are release/Phase 2 acceptance work.
 
+## Phase 2 implementation progress
+
+- 2A OCR feasibility spike retirement: PASS — retired runtime/package references were removed, feasibility findings were preserved, and the targeted test passed.
+- 2B GS1/HIBC barcode parser: PASS — TDD fixtures cover GS1-128 FNC1, GS1 DataMatrix, `]e0`, HIBC primary/secondary, GTIN/catalog separation, and malformed all-null fallback. `npx vitest run lib/receiving/barcode.test.ts` and `npx tsc --noEmit` passed.
+
 ## Release gate
 
 Stock-BM has no staging Supabase environment. Staging reconciliation is therefore deferred to the pre-production release gate and must not be replaced by production. No production migration, deployment, or feature-flag change was performed.
