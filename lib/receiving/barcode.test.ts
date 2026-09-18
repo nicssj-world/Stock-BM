@@ -1,6 +1,6 @@
 import { barcodeFixtures as fixtures } from './__fixtures__/barcode-fixtures'
 import { describe, expect, it } from 'vitest'
-import { parseBarcode } from './barcode'
+import { normalizeGs1DataMatrixPayload, parseBarcode, parseBarcodeWithDiagnostics } from './barcode'
 
 const emptyDecodedFields = {
   standard: null,
@@ -206,6 +206,64 @@ describe('parseBarcode', () => {
     const otherResult = parseBarcode(other.raw, other.symbologyId)
     expect(otherResult.additionalProductId).not.toBeNull()
     expect(otherResult.catalogCandidate).toBeNull()
+  })
+
+  it('parses two variable-length AIs back to back, each correctly terminated by its own GS', () => {
+    const fixture = fixtures['gs1-datamatrix-multiple-variable-fields']
+    const result = parseBarcode(fixture.raw, fixture.symbologyId)
+
+    expect(result).toMatchObject({
+      standard: 'gs1',
+      gtin: fixture.gtin,
+      lot: fixture.lot,
+      serial: fixture.serial,
+      expiry: fixture.expiry,
+      catalog: null,
+    })
+  })
+
+  it('parses correctly when ]d2 is supplied only as out-of-band metadata and the decoded text has no leading FNC1/GS at all', () => {
+    const fixture = fixtures['gs1-datamatrix-metadata-only-symbology']
+    const result = parseBarcode(fixture.raw, fixture.symbologyId)
+
+    expect(result).toMatchObject({
+      standard: 'gs1',
+      gtin: fixture.gtin,
+      expiry: fixture.expiry,
+      lot: fixture.lot,
+      catalog: null,
+    })
+  })
+
+  it('normalizeGs1DataMatrixPayload strips a leading GS run and an embedded symbology prefix, but never a mid-stream GS', () => {
+    expect(normalizeGs1DataMatrixPayload('0109501101530013')).toBe('0109501101530013')
+    expect(normalizeGs1DataMatrixPayload('0109501101530013')).toBe('0109501101530013')
+    expect(normalizeGs1DataMatrixPayload(']d20109501101530013')).toBe('0109501101530013')
+    expect(normalizeGs1DataMatrixPayload('0109501101530013')).toBe('0109501101530013')
+    // A mid-stream GS (a real field terminator) must survive normalization.
+    expect(normalizeGs1DataMatrixPayload('010950110153001317271231')).toBe('010950110153001317271231')
+  })
+
+  it('parseBarcodeWithDiagnostics surfaces the canonical payload and a specific reason on failure instead of a silent empty result', () => {
+    const fixture = fixtures['gs1-datamatrix-unrecognized-ai']
+    const diagnostics = parseBarcodeWithDiagnostics(fixture.raw, fixture.symbologyId)
+
+    expect(diagnostics.canonicalPayload).toBe('99UNKNOWNAI0109501101530013')
+    expect(diagnostics.parserError).toMatch(/Unrecognized AI/)
+    expect(diagnostics.result.gtin).toBeNull()
+  })
+
+  it('parseBarcodeWithDiagnostics reports no error and the canonical payload for a successful parse', () => {
+    const fixture = fixtures['gs1-datamatrix-real-scan']
+    const diagnostics = parseBarcodeWithDiagnostics(fixture.raw, fixture.symbologyId)
+
+    expect(diagnostics.parserError).toBeNull()
+    // The fixture's raw text has a leading GS (the decoded leading FNC1);
+    // the canonical payload has it stripped.
+    expect(diagnostics.canonicalPayload).toBe(fixture.raw.replace(/^+/, ''))
+    expect(diagnostics.result.gtin).toBe(fixture.gtin)
+    expect(diagnostics.result.lot).toBe(fixture.lot)
+    expect(diagnostics.result.expiry).toBe(fixture.expiry)
   })
 
   it('still fails safely (no partial fields) when a leading GS is followed by garbage instead of a real AI stream', () => {

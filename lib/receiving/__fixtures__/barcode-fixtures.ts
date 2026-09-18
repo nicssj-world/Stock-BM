@@ -111,4 +111,32 @@ export const barcodeFixtures = {
     expiry: '2027-05-31',
     additionalProductId: '0933',
   },
+  // Two variable-length AIs back to back (lot, then serial), each needing
+  // its own GS terminator since neither is last in the stream.
+  'gs1-datamatrix-multiple-variable-fields': {
+    raw: '01' + '00382903403837' + '10' + '06696' + '' + '21' + 'SERABC1' + '' + '17' + '270531',
+    symbologyId: ']d2',
+    gtin: '00382903403837',
+    lot: '06696',
+    serial: 'SERABC1',
+    expiry: '2027-05-31',
+  },
+  // ]d2 supplied only as out-of-band metadata (never as embedded text) with
+  // NO leading GS in the decoded text at all — the payload begins directly
+  // with a recognized AI. This is the "leading FNC1 is absent from decoded
+  // text" / "]d2 comes from metadata only" case.
+  'gs1-datamatrix-metadata-only-symbology': {
+    raw: '01' + '00382903403837' + '17' + '270531' + '10' + '06696',
+    symbologyId: ']d2',
+    gtin: '00382903403837',
+    expiry: '2027-05-31',
+    lot: '06696',
+  },
+  // A payload that starts with an AI the parser does not know about, so the
+  // diagnostic parser must fail safely and report a specific reason instead
+  // of a silent empty result.
+  'gs1-datamatrix-unrecognized-ai': {
+    raw: '99UNKNOWNAI0109501101530013',
+    symbologyId: ']d2' as string | null,
+  },
 } as const

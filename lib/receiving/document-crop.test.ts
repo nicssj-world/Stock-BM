@@ -4,6 +4,7 @@ import {
   applyCropDrag,
   beginCropDrag,
   buildPerspectiveTransform,
+  calculateLoupeViewportPosition,
   clampCropPoint,
   detectDocumentCornersFromRgba,
   displayToImagePoint,
@@ -84,6 +85,27 @@ describe('document crop geometry', () => {
     expect(clampCropPoint({ x: -0.2, y: 1.4 })).toEqual({ x: 0, y: 1 })
     expect(applyCropDrag({ x: 0.31, y: 0.42 }, { x: 0.04, y: -0.02 })).toEqual({ x: 0.35, y: expect.closeTo(0.4) })
     expect(applyCropDrag({ x: 0.02, y: 0.98 }, { x: -0.2, y: 0.3 })).toEqual({ x: 0, y: 1 })
+  })
+
+  it('places the loupe above the finger and clamps it inside the viewport, never centered over the point', () => {
+    const viewport = { width: 390, height: 844 }
+    // Plenty of room above: the loupe sits above the point with a gap, so
+    // its bottom edge never reaches the point's y coordinate.
+    const above = calculateLoupeViewportPosition({ x: 195, y: 220 }, viewport, 100, 14)
+    expect(above.top + 100).toBeLessThan(220)
+    expect(above.left).toBeGreaterThanOrEqual(8)
+    expect(above.left + 100).toBeLessThanOrEqual(390 - 8)
+
+    // Near the top edge: no room above, so it flips below — its top edge
+    // must be below the point, again never covering it.
+    const flippedBelow = calculateLoupeViewportPosition({ x: 0, y: 50 }, viewport, 100, 14)
+    expect(flippedBelow.top).toBeGreaterThan(50)
+    expect(flippedBelow.left).toBeGreaterThanOrEqual(8)
+
+    // Near the bottom-right corner of the viewport: still fully on-screen.
+    const bottomRight = calculateLoupeViewportPosition({ x: 389, y: 820 }, viewport, 100, 14)
+    expect(bottomRight.left + 100).toBeLessThanOrEqual(390)
+    expect(bottomRight.top + 100).toBeLessThanOrEqual(844)
   })
 
   it('keeps a captured pointer offset stable and ignores unrelated pointer moves', () => {

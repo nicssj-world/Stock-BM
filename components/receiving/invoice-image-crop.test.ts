@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { beginCropDrag, clampCropPoint, endCropDrag, moveCropDrag } from '@/lib/receiving/document-crop'
+import { beginCropDrag, calculateLoupeViewportPosition, clampCropPoint, endCropDrag, moveCropDrag } from '@/lib/receiving/document-crop'
 import { calculateDisplayedImageRect } from './invoice-image-crop'
 
 const source = readFileSync(join(process.cwd(), 'components/receiving/invoice-image-crop.tsx'), 'utf8')
@@ -82,20 +82,39 @@ describe('invoice image crop capture boundary', () => {
     expect(source).toContain('<Fragment key={key}>')
   })
 
-  it('highlights the active corner while dragging instead of showing a magnifier', () => {
+  it('highlights the active corner while dragging', () => {
     expect(source).toContain('dragging === key')
     expect(source).toMatch(/active \? '#f5a623' : '#0b7f76'/)
   })
 
-  it('removes the magnifier/loupe entirely rather than keeping an oversized high-zoom implementation', () => {
-    // Real-iPhone acceptance feedback: the loupe zoomed too much and removed
-    // surrounding context. Per the preferred fix, it is removed outright —
-    // the small bracket, edge lines, and active-corner highlight are enough.
-    expect(source).not.toContain('LOUPE_SIZE')
-    expect(source).not.toContain('LOUPE_MAGNIFICATION')
-    expect(source).not.toContain('calculateLoupeViewportPosition')
+  it('shows a required magnifier while dragging a corner, within the requested size and magnification range', () => {
+    // Real-iPhone acceptance: a magnifier is required while dragging (not
+    // optional) — but the earlier oversized/high-zoom version must not come
+    // back. Kept well inside the requested 90-110px / 1.7-2.0x ranges.
+    expect(source).toContain('const LOUPE_SIZE = 100')
+    expect(source).toContain('const LOUPE_MAGNIFICATION = 1.8')
+    expect(source).toContain('calculateLoupeViewportPosition')
+    expect(source).toContain('backgroundImage')
+    expect(source).toContain('backgroundSize')
+    // Rendered from the original image's own pixels (a CSS background using
+    // the original data URL), not a screenshot/canvas snapshot of the crop UI.
+    expect(source).toMatch(/backgroundImage: `url\(\$\{originalImage\}\)`/)
+  })
+
+  it('derives loupe visibility/position directly from the existing drag state (dragging + cropCorners), so it appears exactly on pointerdown and disappears exactly on pointerup/cancel', () => {
+    // No separate "is the loupe open" state to fall out of sync with
+    // dragging — it appears the instant `dragging` becomes non-null
+    // (pointerdown) and disappears the instant it becomes null again
+    // (pointerup/pointercancel, both of which already clear `dragging`).
+    expect(source).toMatch(/const activeLoupe = dragging && cropCorners/)
+    expect(source).toContain('setDragging(null)')
     expect(source).not.toContain('setLoupe')
-    expect(source).not.toContain('backgroundImage')
+  })
+
+  it('positions the crosshair at the exact crop coordinate and supports all four corners', () => {
+    expect(source).toContain('cropCorners[dragging]')
+    expect(source).toMatch(/activeLoupe\.point\.x \* imageSize\.width \* LOUPE_MAGNIFICATION/)
+    expect(source).toMatch(/activeLoupe\.point\.y \* imageSize\.height \* LOUPE_MAGNIFICATION/)
   })
 
   it('uses a static (not conditionally toggled) touch-action so iOS Safari never starts a page scroll from a corner drag', () => {
@@ -220,5 +239,37 @@ describe('real pointer drag sequence through the content rect', () => {
     const moved = moveCropDrag(drag, 'topLeft', 1, pointer)
 
     expect(moved).toEqual({ x: 0, y: 0 })
+  })
+
+  it('positions the loupe above the active corner within a letterboxed frame, tracking it through a drag sequence', () => {
+    const frame = { x: 0, y: 0, left: 0, top: 0, width: 360, height: 480, right: 360, bottom: 480, toJSON: () => ({}) } as DOMRect
+    const rect = calculateDisplayedImageRect(frame, { width: 1200, height: 1600 })
+    const viewport = { width: 390, height: 844 }
+
+    const corner = { x: 0.1, y: 0.3 }
+    const drag = beginCropDrag('topLeft', 1, corner, corner)
+
+    function loupeFor(point: { x: number; y: number }) {
+      const clientX = rect.left + point.x * rect.width
+      const clientY = rect.top + point.y * rect.height
+      return calculateLoupeViewportPosition({ x: clientX, y: clientY }, viewport, 100, 14)
+    }
+
+    const initialLoupe = loupeFor(corner)
+    // The loupe sits above the point (with a gap) — its bottom edge stays
+    // above the point's client y, so it never covers the corner itself.
+    const initialClientY = rect.top + corner.y * rect.height
+    expect(initialLoupe.top + 100).toBeLessThan(initialClientY)
+
+    // Drag the finger down-right; the loupe must follow to the new position.
+    const pointerMoveClient = { x: rect.left + rect.width * 0.15, y: rect.top + rect.height * 0.42 }
+    const pointerMoveNormalized = displayToNormalized(pointerMoveClient, rect)
+    const moved = moveCropDrag(drag, 'topLeft', 1, pointerMoveNormalized)
+    expect(moved).not.toBeNull()
+
+    const movedLoupe = loupeFor(moved!)
+    expect(movedLoupe).not.toEqual(initialLoupe)
+    const movedClientY = rect.top + moved!.y * rect.height
+    expect(movedLoupe.top + 100).toBeLessThan(movedClientY)
   })
 })

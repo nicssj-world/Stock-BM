@@ -1,4 +1,4 @@
-import { parseBarcode, type ParsedBarcode } from './barcode'
+import { parseBarcodeWithDiagnostics, type ParsedBarcode } from './barcode'
 
 const CONTROL_CHARACTER_LABELS: Record<number, string> = {
   0x1c: '<FS>',
@@ -30,11 +30,27 @@ export function bytesToHex(bytes: Uint8Array | null): string | null {
   return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join(' ')
 }
 
+/**
+ * Hex code points of the DECODED TEXT — distinct from `rawBytesHex`, which
+ * (for DataMatrix specifically) is the pre-ASCII-decode codeword stream, not
+ * the same bytes as the text. FNC1 shows as codeword 0xE8 in raw bytes but
+ * as the decoded 0x1D (GS) at the corresponding position in the text; this
+ * is exactly case D ("FNC1 represented in raw bytes but omitted/transformed
+ * in decoded text") and is why the AI parser is built to read the decoded
+ * text, not raw bytes.
+ */
+export function textCodePointsHex(value: string): string {
+  return [...value].map((char) => (char.codePointAt(0) ?? 0).toString(16).padStart(2, '0')).join(' ')
+}
+
 export type BarcodeScanDiagnostics = {
   rawEscaped: string
   rawBytesHex: string | null
+  textCodePointsHex: string
   symbologyId: string | null
   barcodeFormat: number | null
+  normalizedPayload: string | null
+  parserError: string | null
   parsed: ParsedBarcode
 }
 
@@ -44,11 +60,15 @@ export function describeBarcodeScan(input: {
   rawBytes?: Uint8Array | null
   barcodeFormat?: number | null
 }): BarcodeScanDiagnostics {
+  const diagnostics = parseBarcodeWithDiagnostics(input.raw, input.symbologyId ?? null)
   return {
     rawEscaped: escapeBarcodeText(input.raw),
     rawBytesHex: bytesToHex(input.rawBytes ?? null),
+    textCodePointsHex: textCodePointsHex(input.raw),
     symbologyId: input.symbologyId ?? null,
     barcodeFormat: input.barcodeFormat ?? null,
-    parsed: parseBarcode(input.raw, input.symbologyId ?? null),
+    normalizedPayload: diagnostics.canonicalPayload,
+    parserError: diagnostics.parserError,
+    parsed: diagnostics.result,
   }
 }

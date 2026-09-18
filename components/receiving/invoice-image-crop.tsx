@@ -5,6 +5,7 @@ import { Camera, Check, Crop, Image as ImageIcon, RotateCcw, X } from 'lucide-re
 import { Button, Card, Notice, StatusBadge } from '@/components/ui'
 import {
   beginCropDrag,
+  calculateLoupeViewportPosition,
   clampCropPoint,
   detectDocumentCorners,
   type CropCorners,
@@ -63,6 +64,12 @@ export function calculateDisplayedImageRect(frame: DOMRect, imageSize: ImageSize
 }
 
 const FILE_INPUT_CLASS = 'absolute h-px w-px overflow-hidden opacity-0'
+// Required while dragging a corner (real-iPhone acceptance): large enough to
+// see the document edge around the crosshair, small enough not to hide most
+// of the page. Kept well inside the requested 90-110px / 1.7-2.0x ranges.
+const LOUPE_SIZE = 100
+const LOUPE_MAGNIFICATION = 1.8
+const LOUPE_GAP = 14
 
 function isSupportedImageFile(file: File) {
   return file.type.toLowerCase().startsWith('image/') || /\.(?:heic|heif)$/i.test(file.name)
@@ -226,6 +233,25 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
   const previewImage = showOriginal ? originalImage : processedImage ?? originalImage
   const framePoints = cropCorners ? cornerKeys.map((key) => framePercent(cropCorners[key], displayedRect)).map((point) => `${point.left},${point.top}`).join(' ') : ''
 
+  // Required while actively dragging a corner (real-iPhone acceptance):
+  // shows a magnified view of the ORIGINAL image around the exact crop
+  // coordinate — not a screenshot of the crop UI — so the user can see both
+  // the precise corner and enough surrounding document edge to place it.
+  // Derived straight from existing state (dragging + cropCorners): it shows
+  // exactly when a corner is being dragged and disappears the instant
+  // dragging stops, with no separate state to keep in sync.
+  const activeLoupe = dragging && cropCorners && imageSize && originalImage ? (() => {
+    const point = cropCorners[dragging]
+    const displayed = framePercent(point, displayedRect)
+    const frameRect = frameRef.current?.getBoundingClientRect()
+    if (!frameRect) return null
+    const clientX = frameRect.left + (displayed.left / 100) * frameRect.width
+    const clientY = frameRect.top + (displayed.top / 100) * frameRect.height
+    const viewport = typeof window === 'undefined' ? { width: 390, height: 844 } : { width: window.innerWidth, height: window.innerHeight }
+    const position = calculateLoupeViewportPosition({ x: clientX, y: clientY }, viewport, LOUPE_SIZE, LOUPE_GAP)
+    return { point, position }
+  })() : null
+
   return <Card className="space-y-3 p-4">
     <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-xs font-bold tracking-[0.14em] text-[#0b7f76] uppercase">Invoice image capture</p><h3 className="mt-1 text-base font-bold text-[#173d50]">เตรียมภาพก่อน OCR</h3><p className="mt-1 text-xs leading-5 text-[#81979c]">ระบบจะไม่ส่งภาพต้นฉบับเข้า OCR จนกว่าจะยืนยัน crop หรือเลือก Skip Crop</p></div>{processedImage ? <StatusBadge tone="accepted" label="ยืนยันภาพสำหรับ OCR แล้ว" /> : originalImage ? <StatusBadge tone="warning" label="รอยืนยัน crop" /> : null}</div>
     <div className="flex flex-wrap gap-2" aria-label="เลือกหรือถ่ายภาพ invoice">
@@ -286,6 +312,25 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
         </> : null}
         {!showOriginal && processedImage ? <div className="absolute bottom-2 left-2 rounded-full bg-[#173d50]/85 px-2.5 py-1 text-[11px] font-semibold text-white">Preview corrected image</div> : null}
       </div>
+      {activeLoupe && imageSize && originalImage ? <div
+        aria-hidden="true"
+        className="pointer-events-none fixed z-50 overflow-hidden rounded-full border-4 border-white bg-[#173d50] shadow-2xl"
+        style={{
+          left: activeLoupe.position.left,
+          top: activeLoupe.position.top,
+          width: LOUPE_SIZE,
+          height: LOUPE_SIZE,
+          backgroundImage: `url(${originalImage})`,
+          backgroundRepeat: 'no-repeat',
+          backgroundSize: `${imageSize.width * LOUPE_MAGNIFICATION}px ${imageSize.height * LOUPE_MAGNIFICATION}px`,
+          backgroundPosition: `${LOUPE_SIZE / 2 - activeLoupe.point.x * imageSize.width * LOUPE_MAGNIFICATION}px ${LOUPE_SIZE / 2 - activeLoupe.point.y * imageSize.height * LOUPE_MAGNIFICATION}px`,
+          imageOrientation: 'from-image',
+        }}
+      >
+        <span className="pointer-events-none absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-white/80" />
+        <span className="pointer-events-none absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-white/80" />
+        <span className="pointer-events-none absolute left-1/2 top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-red-500 bg-white/30" />
+      </div> : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
       <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" disabled={busy} onClick={resetCorners}><RotateCcw className="size-4" />ใช้ Auto Crop / Reset corners</Button>{processedImage ? <Button type="button" variant="secondary" onClick={() => setShowOriginal((current) => !current)}>{showOriginal ? <ImageIcon className="size-4" /> : <Crop className="size-4" />}{showOriginal ? 'Preview corrected image' : 'Original image'}</Button> : null}<Button type="button" variant="ghost" disabled={busy} onClick={skipCrop}><X className="size-4" />Skip Crop</Button><Button type="button" disabled={busy || !cropCorners} onClick={confirmCrop}><Check className="size-4" />Confirm Crop</Button></div>
     </> : null}

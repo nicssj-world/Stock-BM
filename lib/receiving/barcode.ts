@@ -171,7 +171,10 @@ function gs1AiAt(payload: string, position: number): { ai: string; length: numbe
   return null
 }
 
-function parseGs1Stream(payload: string, raw: string, symbologyId: string | null): ParsedBarcode | null {
+/** Outcome of attempting to read AIs out of an already-canonical GS1 element string. */
+export type Gs1ParseOutcome = { ok: true; result: ParsedBarcode } | { ok: false; reason: string }
+
+function parseGs1Stream(payload: string, raw: string, symbologyId: string | null): Gs1ParseOutcome {
   const result = emptyResult(raw, symbologyId)
   result.standard = 'gs1'
   const seen = new Set<string>()
@@ -184,13 +187,15 @@ function parseGs1Stream(payload: string, raw: string, symbologyId: string | null
     }
 
     const definition = gs1AiAt(payload, position)
-    if (!definition) return null
+    if (!definition) return { ok: false, reason: `Unrecognized AI at payload position ${position}: "${payload.slice(position, position + 4)}"` }
     position += definition.ai.length
 
     let value: string
     if (definition.length > 0) {
       value = payload.slice(position, position + definition.length)
-      if (value.length !== definition.length || !/^\d+$/.test(value)) return null
+      if (value.length !== definition.length || !/^\d+$/.test(value)) {
+        return { ok: false, reason: `AI ${definition.ai} expects ${definition.length} digits but found "${value}"` }
+      }
       position += definition.length
     } else {
       const separatorPosition = payload.indexOf(GROUP_SEPARATOR, position)
@@ -200,10 +205,10 @@ function parseGs1Stream(payload: string, raw: string, symbologyId: string | null
       else position = separatorPosition + 1
     }
 
-    if (!applyGs1Ai(result, seen, definition.ai, value)) return null
+    if (!applyGs1Ai(result, seen, definition.ai, value)) return { ok: false, reason: `AI ${definition.ai} value failed validation: "${value}"` }
   }
 
-  return result
+  return { ok: true, result }
 }
 
 function parenthesizedAiAt(payload: string, position: number): { ai: string; nextPosition: number } | null {
@@ -212,7 +217,7 @@ function parenthesizedAiAt(payload: string, position: number): { ai: string; nex
   return { ai: match[1], nextPosition: position + match[0].length }
 }
 
-function parseParenthesizedGs1(payload: string, raw: string, symbologyId: string | null): ParsedBarcode | null {
+function parseParenthesizedGs1(payload: string, raw: string, symbologyId: string | null): Gs1ParseOutcome {
   const result = emptyResult(raw, symbologyId)
   result.standard = 'gs1'
   const seen = new Set<string>()
@@ -225,36 +230,53 @@ function parseParenthesizedGs1(payload: string, raw: string, symbologyId: string
     }
 
     const definition = parenthesizedAiAt(payload, position)
-    if (!definition) return null
+    if (!definition) return { ok: false, reason: `Unrecognized parenthesized AI at position ${position}: "${payload.slice(position, position + 6)}"` }
     const valueStart = definition.nextPosition
     const nextAiPosition = payload.indexOf('(', valueStart)
     const valueEnd = nextAiPosition === -1 ? payload.length : nextAiPosition
     const value = payload.slice(valueStart, valueEnd)
-    if (!value || value.includes(GROUP_SEPARATOR) || !applyGs1Ai(result, seen, definition.ai, value)) return null
+    if (!value || value.includes(GROUP_SEPARATOR)) return { ok: false, reason: `AI ${definition.ai} has an empty or invalid value` }
+    if (!applyGs1Ai(result, seen, definition.ai, value)) return { ok: false, reason: `AI ${definition.ai} value failed validation: "${value}"` }
     position = valueEnd
   }
 
-  return result
+  return { ok: true, result }
 }
 
 /**
- * A GS1 DataMatrix/QR symbol carries a leading FNC1 codeword that marks the
- * message as GS1-formatted; it is not itself data. Scanner libraries (ZXing
- * included) commonly translate every FNC1 codeword — including that leading
- * one — into a literal ASCII 29 (Group Separator) character in the decoded
- * text. Left in place, that leading GS defeats a naive "does this start with
- * a known AI" check even though the actual AI stream right behind it is
- * perfectly well-formed.
+ * The ONE canonical normalization step, run before any AI parsing, that
+ * turns whatever a scanner handed us into a clean GS1 element string:
+ *
+ *  1. Strip a literal "]d2" / "]C1" / "]e0" AIM symbology prefix if it is
+ *     embedded directly in the text (keyboard-wedge scanners and some
+ *     libraries do this; ZXing's BrowserMultiFormatReader does not — its
+ *     `getText()` never carries the prefix, and @zxing/library exposes no
+ *     separate symbology-identifier metadata for it either, which is why
+ *     the symbology identifier has to be supplied out-of-band from the
+ *     detected barcode format instead — see camera-scanner.ts).
+ *
+ *  2. Strip a LEADING run of ASCII 29 (Group Separator) characters. A GS1
+ *     DataMatrix/QR message starts with an FNC1 codeword whose only job is
+ *     to flag "this message is GS1-formatted" — it is not itself data.
+ *     ZXing's DataMatrix/QR decoders (like every AIM-compliant decoder)
+ *     translate every FNC1 codeword, including that leading one, into a
+ *     literal GS character in the decoded text. Left in place, that leading
+ *     GS defeats a naive "does this start with a known AI" check even
+ *     though the real AI stream right behind it is perfectly well-formed.
+ *
+ * This function NEVER strips a GS that isn't part of that leading run: a
+ * mid-stream GS is a real variable-length-field terminator (AI 10, 21, 240,
+ * …) and the AI parser depends on it being there to find field boundaries.
  */
-function stripLeadingGroupSeparators(value: string): string {
+export function normalizeGs1DataMatrixPayload(value: string): string {
+  const { payload } = stripSymbologyPrefix(value)
   let index = 0
-  while (value[index] === GROUP_SEPARATOR) index += 1
-  return value.slice(index)
+  while (payload[index] === GROUP_SEPARATOR) index += 1
+  return payload.slice(index)
 }
 
-function looksLikeGs1(payload: string, symbologyId: string | null): boolean {
-  const detectionPayload = stripLeadingGroupSeparators(payload)
-  return GS1_SYMBOLOGY_IDS.has(symbologyId ?? '') || detectionPayload.startsWith('(') || /^(?:01|10|11|15|17|21|30|240|310\d)/.test(detectionPayload)
+function looksLikeGs1(canonicalPayload: string, symbologyId: string | null): boolean {
+  return GS1_SYMBOLOGY_IDS.has(symbologyId ?? '') || canonicalPayload.startsWith('(') || /^(?:01|10|11|15|17|21|30|240|310\d)/.test(canonicalPayload)
 }
 
 /**
@@ -285,11 +307,12 @@ function proposeCatalogCandidate(result: ParsedBarcode): CatalogCandidate | null
   }
 }
 
-function parseGs1(raw: string, value: string, symbologyId: string | null): ParsedBarcode | null {
-  const { payload } = stripSymbologyPrefix(value)
-  const result = payload.includes('(') ? parseParenthesizedGs1(payload, raw, symbologyId) : parseGs1Stream(payload, raw, symbologyId)
-  if (result) result.catalogCandidate = proposeCatalogCandidate(result)
-  return result
+function parseGs1(canonicalPayload: string, raw: string, symbologyId: string | null): Gs1ParseOutcome {
+  const outcome = canonicalPayload.includes('(')
+    ? parseParenthesizedGs1(canonicalPayload, raw, symbologyId)
+    : parseGs1Stream(canonicalPayload, raw, symbologyId)
+  if (outcome.ok) outcome.result.catalogCandidate = proposeCatalogCandidate(outcome.result)
+  return outcome
 }
 
 function parseHibcDate(format: string, value: string): { date: string | null; valid: boolean } {
@@ -404,9 +427,13 @@ export function parseBarcode(raw: string, symbologyId?: string | null): ParsedBa
   const detected = normalizedSymbologyId(rawValue, symbologyId)
   try {
     const value = rawValue.trim()
-    const { payload } = stripSymbologyPrefix(value)
+    const canonicalGs1Payload = normalizeGs1DataMatrixPayload(value)
 
-    if (looksLikeGs1(payload, detected)) return parseGs1(rawValue, value, detected) ?? emptyResult(rawValue, detected)
+    if (looksLikeGs1(canonicalGs1Payload, detected)) {
+      const outcome = parseGs1(canonicalGs1Payload, rawValue, detected)
+      return outcome.ok ? outcome.result : emptyResult(rawValue, detected)
+    }
+    const { payload } = stripSymbologyPrefix(value)
     if (payload.startsWith('+') || detected === 'HIBC' || detected === 'hibc') {
       return parseHibc(rawValue, value, detected) ?? emptyResult(rawValue, detected)
     }
@@ -415,4 +442,35 @@ export function parseBarcode(raw: string, symbologyId?: string | null): ParsedBa
   }
 
   return emptyResult(rawValue, detected)
+}
+
+/**
+ * Preview-only: the same parse as `parseBarcode`, but surfaces the
+ * canonical (normalized) GS1 payload and, on failure, *why* — instead of a
+ * silent empty result. Never used by production callers.
+ */
+export function parseBarcodeWithDiagnostics(raw: string, symbologyId?: string | null): {
+  canonicalPayload: string | null
+  result: ParsedBarcode
+  parserError: string | null
+} {
+  const rawValue = typeof raw === 'string' ? raw : String(raw ?? '')
+  const detected = normalizedSymbologyId(rawValue, symbologyId)
+  const value = rawValue.trim()
+  const canonicalGs1Payload = normalizeGs1DataMatrixPayload(value)
+
+  if (looksLikeGs1(canonicalGs1Payload, detected)) {
+    try {
+      const outcome = parseGs1(canonicalGs1Payload, rawValue, detected)
+      return {
+        canonicalPayload: canonicalGs1Payload,
+        result: outcome.ok ? outcome.result : emptyResult(rawValue, detected),
+        parserError: outcome.ok ? null : outcome.reason,
+      }
+    } catch (error) {
+      return { canonicalPayload: canonicalGs1Payload, result: emptyResult(rawValue, detected), parserError: error instanceof Error ? error.message : 'Unknown GS1 parse error' }
+    }
+  }
+
+  return { canonicalPayload: null, result: parseBarcode(raw, symbologyId), parserError: null }
 }

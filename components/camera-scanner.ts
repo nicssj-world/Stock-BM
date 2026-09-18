@@ -31,6 +31,22 @@ const QR_CODE = 11
 const RSS_14 = 12
 const RSS_EXPANDED = 13
 
+/** Preview-only diagnostics: a human-readable label for the numeric BarcodeFormat enum. */
+export function barcodeFormatName(barcodeFormat: number | null): string | null {
+  switch (barcodeFormat) {
+    case DATA_MATRIX: return 'DATA_MATRIX'
+    case CODE_128: return 'CODE_128'
+    case RSS_14: return 'RSS_14'
+    case RSS_EXPANDED: return 'RSS_EXPANDED'
+    case QR_CODE: return 'QR_CODE'
+    case AZTEC: return 'AZTEC'
+    case PDF_417: return 'PDF_417'
+    case CODE_39: return 'CODE_39'
+    case CODABAR: return 'CODABAR'
+    default: return barcodeFormat === null ? null : `FORMAT_${barcodeFormat}`
+  }
+}
+
 function symbologyIdFromBarcodeFormat(barcodeFormat: number | null): string | null {
   switch (barcodeFormat) {
     case DATA_MATRIX: return ']d2'

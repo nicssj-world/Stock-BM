@@ -5,6 +5,7 @@ import type { ReceivingWorkspace } from '@/lib/receiving/types'
 import { matchKnownLots, type KnownLotMatch, type KnownLotMatchItem } from '@/lib/receiving/known-lot-match'
 import { parseBarcode } from '@/lib/receiving/barcode'
 import type { BarcodeScanDiagnostics } from '@/lib/receiving/barcode-diagnostics'
+import { barcodeFormatName } from '@/components/camera-scanner'
 import { matchPackageBarcode, type PackageScanCandidate } from '@/lib/receiving/package-scan'
 import { Card, Notice, PageHeader, StatusBadge } from '@/components/ui'
 import { InvoiceImageCrop, type InvoiceImageCropResult } from '@/components/receiving/invoice-image-crop'
@@ -155,7 +156,25 @@ export function Stock1PreviewAcceptance() {
       <h2 id="preview-barcode-heading" className="text-lg font-bold text-[#173d50]">3. Camera barcode / DataMatrix / GS1 / HIBC</h2>
       <PackageScan selectedItemId={null} resolveScan={resolvePreviewPackage} onScanDiagnostics={setScanDiagnostics} onUse={(result) => { setScanResult(result); setNotice('Barcode result ถูกใช้ใน draft ของ browser เท่านั้น — ไม่มีการเขียน stock') }} />
       {scanResult ? <Card className="space-y-2 border-[#b8ded8] bg-[#f4fbf9] p-4"><p className="font-semibold text-[#315763]">Parsed result</p><div className="grid gap-2 text-sm text-[#58747d] sm:grid-cols-2"><p>Standard: <span className="font-semibold">{scanResult.parsed.standard ?? 'none'}</span></p><p>Symbology: <span className="font-semibold">{scanResult.parsed.symbologyId ?? 'none'}</span></p><p>GTIN: <span className="font-semibold">{scanResult.parsed.gtin ?? 'none'}</span></p><p>Catalog / REF: <span className="font-semibold">{scanResult.parsed.catalog ?? 'none'}</span></p><p>Lot: <span className="font-semibold">{scanResult.parsed.lot ?? 'none'}</span></p><p>Expiry: <span className="font-semibold">{scanResult.parsed.expiry ?? 'none'}</span></p><p>Manufacture date: <span className="font-semibold">{scanResult.parsed.manufactureDate ?? 'none'}</span></p><p>AI 240 / Additional Product ID: <span className="font-semibold">{scanResult.parsed.additionalProductId ?? 'none'}</span></p></div>{scanResult.parsed.catalogCandidate ? <Notice tone="info">Catalog/REF candidate: <span className="mono">{scanResult.parsed.catalogCandidate.value}</span> — {scanResult.parsed.catalogCandidate.reason}</Notice> : null}<p className="text-xs text-[#81979c]">Match: {scanResult.match.kind} · conflicts: {scanResult.conflicts.length}</p></Card> : null}
-      {scanDiagnostics ? <Card className="space-y-2 border-[#b8ded8] bg-[#f4fbf9] p-4"><details><summary className="cursor-pointer text-sm font-semibold text-[#315763]">DATAMATRIX diagnostics — raw bytes / symbology / normalized GS1</summary><div className="mt-2 space-y-1 text-xs text-[#58747d]"><p>barcode format (ZXing numeric enum): {scanDiagnostics.barcodeFormat ?? 'n/a'}</p><p>symbology identifier: {scanDiagnostics.symbologyId ?? 'none — @zxing/library exposes no AIM symbology identifier; derived from barcode format instead'}</p><p>escaped raw payload: <span className="mono">{scanDiagnostics.rawEscaped}</span></p><p>raw bytes (hex): <span className="mono">{scanDiagnostics.rawBytesHex ?? 'n/a'}</span></p><p className="font-semibold text-[#315763]">Parsed GS1/HIBC AIs</p><p>standard: {scanDiagnostics.parsed.standard ?? 'none'} · GTIN: {scanDiagnostics.parsed.gtin ?? 'none'} · Lot: {scanDiagnostics.parsed.lot ?? 'none'} · Expiry: {scanDiagnostics.parsed.expiry ?? 'none'} · Manufacture date: {scanDiagnostics.parsed.manufactureDate ?? 'none'} · Catalog/REF: {scanDiagnostics.parsed.catalog ?? 'none'}</p><p>AI 240 / Additional Product ID: {scanDiagnostics.parsed.additionalProductId ?? 'none'}</p><p>Catalog/REF candidate: {scanDiagnostics.parsed.catalogCandidate ? <>{scanDiagnostics.parsed.catalogCandidate.value} — <span className="italic">{scanDiagnostics.parsed.catalogCandidate.reason}</span></> : 'none proposed'}</p></div></details></Card> : null}
+      {scanDiagnostics ? <Card className="space-y-2 border-[#b8ded8] bg-[#f4fbf9] p-4"><details open><summary className="cursor-pointer text-sm font-semibold text-[#315763]">DATAMATRIX diagnostics — raw bytes / symbology / normalized GS1</summary><div className="mt-2 space-y-1 text-xs text-[#58747d]">
+        <p>Format: <span className="mono font-semibold">{barcodeFormatName(scanDiagnostics.barcodeFormat) ?? 'n/a'}</span></p>
+        <p>Symbology: <span className="mono font-semibold">{scanDiagnostics.symbologyId ?? 'none — @zxing/library exposes no AIM symbology identifier; derived from barcode format instead'}</span></p>
+        <p>Decoded escaped: <span className="mono">{scanDiagnostics.rawEscaped}</span></p>
+        <p>Decoded text code points (hex): <span className="mono">{scanDiagnostics.textCodePointsHex}</span></p>
+        <p>Raw bytes (hex): <span className="mono">{scanDiagnostics.rawBytesHex ?? 'n/a'}</span></p>
+        <p>Normalized GS1: <span className="mono">{scanDiagnostics.normalizedPayload ?? 'n/a (not recognized as GS1)'}</span></p>
+        <p className="font-semibold text-[#315763]">Parsed</p>
+        <p>AI 01 (GTIN): {scanDiagnostics.parsed.gtin ?? 'none'}</p>
+        <p>AI 10 (Lot): {scanDiagnostics.parsed.lot ?? 'none'}</p>
+        <p>AI 17 (Expiry): {scanDiagnostics.parsed.expiry ?? 'none'}</p>
+        <p>AI 11 (Manufacture date): {scanDiagnostics.parsed.manufactureDate ?? 'none'}</p>
+        <p>AI 15 (Best before): {scanDiagnostics.parsed.bestBeforeDate ?? 'none'}</p>
+        <p>AI 21 (Serial): {scanDiagnostics.parsed.serial ?? 'none'}</p>
+        <p>AI 240 (Additional Product ID): {scanDiagnostics.parsed.additionalProductId ?? 'none'}</p>
+        <p>Catalog/REF: {scanDiagnostics.parsed.catalog ?? 'none'}</p>
+        <p>Catalog/REF candidate: {scanDiagnostics.parsed.catalogCandidate ? <>{scanDiagnostics.parsed.catalogCandidate.value} — <span className="italic">{scanDiagnostics.parsed.catalogCandidate.reason}</span></> : 'none proposed'}</p>
+        <p className="font-semibold text-[#315763]">Parser errors: <span className="font-normal">{scanDiagnostics.parserError ?? 'none'}</span></p>
+      </div></details></Card> : null}
     </section>
 
     <Card className="border-[#e7d6b0] bg-[#fffaf0] p-4 text-sm text-[#76551c]"><p className="font-semibold">Safety boundary</p><p className="mt-1">This route is runtime-gated to Vercel Preview plus <code>STOCK1_PREVIEW_ACCEPTANCE_MODE=true</code>. It is 404 in production. Do not use it to create invoices, receipts, lots, transactions, attachments, or stock changes.</p></Card>

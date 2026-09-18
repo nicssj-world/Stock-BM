@@ -84,6 +84,27 @@ export function endCropDrag(state: CropDragState, key: string, pointerId: number
   return { key: null, pointerId: null, offset: null }
 }
 
+/**
+ * Positions a fixed-size loupe above the finger, flipping below when there
+ * isn't room above, and clamping inside the viewport. Placing it fully
+ * above (or fully below) the point — never centered over it — is what keeps
+ * it from ever covering the corner it's magnifying.
+ */
+export function calculateLoupeViewportPosition(
+  pointer: CropPoint,
+  viewport: ImageSize,
+  loupeSize = 100,
+  gap = 14,
+  padding = 8,
+) {
+  const maxLeft = Math.max(padding, viewport.width - loupeSize - padding)
+  const maxTop = Math.max(padding, viewport.height - loupeSize - padding)
+  const left = clamp(pointer.x - loupeSize / 2, padding, maxLeft)
+  const preferredTop = pointer.y - loupeSize - gap
+  const top = clamp(preferredTop >= padding ? preferredTop : pointer.y + gap, padding, maxTop)
+  return { left, top }
+}
+
 function finitePoint(point: CropPoint) {
   return Number.isFinite(point.x) && Number.isFinite(point.y)
 }
