@@ -108,3 +108,15 @@ No production migration, deployment, or feature-flag change was performed.
 - `scripts/db-test.mjs` now supports `STOCK1_KEEP_LOCAL_DB=1` solely to keep the disposable local harness alive for manual `npm run dev` acceptance; it does not alter the normal cleanup behavior.
 - Production rollout runbook prepared at `docs/superpowers/release/2026-09-18-stock1-production-safe-release.md`; commands are documentation only and were not executed.
 - Browser automation surface was unavailable (`apps=[]`, `browsers=[]`), so visual browser, camera, OCR-worker, real iPhone Safari, and preview-deployment checks remain unperformed.
+
+## Final local verification and READY-FOR-PRODUCTION checkpoint
+
+- Final full `npm test`: 584 passed, 6 failed, 1 skipped across 147 test files. The six failures are the documented pre-existing baseline failures in `components/iqc-data-integrity.test.ts`, `components/iqc-equipment-source.test.ts`, `supabase/migrations/stock-lot-correction.test.ts`, `supabase/migrations/stock-p0-integrity.test.ts`, `supabase/migrations/eqa-capa-parity.test.ts`, and `app/(protected)/reports/stock-summary/report.test.ts`. The Stock1 receiving mutation-boundary test passes after excluding test fixtures from its production-source scan.
+- Final `npm run test:db`: PASS. Clean local Postgres applied 84 migrations through `202609180009_bm_vendor_evaluations.sql`; all applicable L0 checks passed, including genuine interleaved L0-16 and L0-17, L0-18 OCR isolation, L0-19 vendor performance, L0-20 vendor evaluation, partial receiving, legacy Receive, and HPV return.
+- Final `npx tsc --noEmit`: PASS.
+- Final `npm run lint`: FAIL only on the three pre-existing baseline errors in `components/admin-view.tsx:455` and `components/transaction-view.tsx:174,180`, with 16 warnings. Upgrade-owned lint errors were corrected in the vendor pages, crop/scanner UI, and generated OCR assets were excluded from source linting.
+- Final `npm run build`: PASS — Next.js 16.2.6/Turbopack compiled, typechecked, generated 121 static pages/routes, and finalized optimization successfully.
+- Final `git diff --check`: PASS.
+- Local reconciliation tooling remains verified with SELECT-only local BEFORE/AFTER snapshots and a zero-difference `--compare`. No production snapshot, migration, data write, deployment, or flag change was attempted.
+- READY-FOR-PRODUCTION checkpoint reached. Execution stops here pending explicit production-release approval; the production-safe runbook is documentation only.
+- Vercel CLI is not installed in this environment. If deployment is later approved, install it with `npm i -g vercel` before using `vercel env pull`, `vercel deploy`, or `vercel logs`.

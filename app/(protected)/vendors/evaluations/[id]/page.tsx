@@ -10,10 +10,12 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 export default async function VendorEvaluationPage({ params }: { params: Promise<{ id: string }> }) {
   await requireFullPageActor()
+  let initialEvaluation: Awaited<ReturnType<typeof getVendorEvaluationWorkspace>>
   try {
-    return <VendorEvaluationView initialEvaluation={await getVendorEvaluationWorkspace((await params).id)} />
+    initialEvaluation = await getVendorEvaluationWorkspace((await params).id)
   } catch (error) {
     if (error instanceof Error && 'status' in error && (error as { status?: number }).status === 404) notFound()
     throw error
   }
+  return <VendorEvaluationView initialEvaluation={initialEvaluation} />
 }

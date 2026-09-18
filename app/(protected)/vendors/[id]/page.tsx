@@ -14,10 +14,12 @@ export default async function VendorPerformancePage({ params, searchParams }: { 
   const { id } = await params
   const query = await searchParams
   const fiscalYear = query.fiscalYear && /^\d{4}$/.test(query.fiscalYear) ? query.fiscalYear : vendorFiscalYearFor(new Date().toISOString().slice(0, 10))
+  let initialPerformance: Awaited<ReturnType<typeof getVendorPerformance>>
   try {
-    return <VendorPerformanceView initialPerformance={await getVendorPerformance(id, fiscalYear)} />
+    initialPerformance = await getVendorPerformance(id, fiscalYear)
   } catch (error) {
     if (error instanceof Error && 'status' in error && (error as { status?: number }).status === 404) notFound()
     throw error
   }
+  return <VendorPerformanceView initialPerformance={initialPerformance} />
 }

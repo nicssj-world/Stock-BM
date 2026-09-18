@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, Crop, Image as ImageIcon, RotateCcw, Upload, X } from 'lucide-react'
 import { Button, Card, Notice, StatusBadge } from '@/components/ui'
 import {
@@ -30,6 +30,22 @@ const cornerLabels: Record<CornerKey, string> = {
   bottomLeft: 'bottom-left',
 }
 
+type DisplayedImageRect = {
+  left: number
+  top: number
+  width: number
+  height: number
+  frameWidth: number
+  frameHeight: number
+}
+
+function calculateDisplayedImageRect(frame: DOMRect, imageSize: ImageSize): DisplayedImageRect {
+  const scale = Math.min(frame.width / imageSize.width, frame.height / imageSize.height)
+  const width = imageSize.width * scale
+  const height = imageSize.height * scale
+  return { left: (frame.width - width) / 2, top: (frame.height - height) / 2, width, height, frameWidth: frame.width, frameHeight: frame.height }
+}
+
 export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: InvoiceImageCropResult) => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null)
   const sourceImageRef = useRef<HTMLImageElement | null>(null)
@@ -44,18 +60,17 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
   const [error, setError] = useState<string | null>(null)
   const [dragging, setDragging] = useState<CornerKey | null>(null)
   const [busy, setBusy] = useState(false)
+  const [displayedRect, setDisplayedRect] = useState<DisplayedImageRect | null>(null)
 
-  function clearWorkflow() {
-    setOriginalImage(null)
-    setProcessedImage(null)
-    setAutoCorners(null)
-    setCropCorners(null)
-    setImageSize(null)
-    setShowOriginal(true)
-    setDetectionMessage(null)
-    setError(null)
-    setDragging(null)
-  }
+  useEffect(() => {
+    if (!imageSize || !frameRef.current || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      const frame = frameRef.current
+      if (frame) setDisplayedRect(calculateDisplayedImageRect(frame.getBoundingClientRect(), imageSize))
+    })
+    observer.observe(frameRef.current)
+    return () => observer.disconnect()
+  }, [imageSize, originalImage])
 
   function chooseImage(file: File | null) {
     if (!file || !file.type.startsWith('image/')) {
@@ -93,17 +108,14 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
     setDetectionMessage(detected ? 'พบขอบเอกสารเบื้องต้น — ตรวจและลากมุมทั้ง 4 ได้' : 'ไม่พบขอบเอกสารอัตโนมัติ — ปรับมุมทั้ง 4 ด้วยตนเองได้')
   }
 
-  function displayedImageRect() {
+  function currentDisplayedImageRect() {
     const frame = frameRef.current?.getBoundingClientRect()
     if (!frame || !imageSize) return null
-    const scale = Math.min(frame.width / imageSize.width, frame.height / imageSize.height)
-    const width = imageSize.width * scale
-    const height = imageSize.height * scale
-    return { left: (frame.width - width) / 2, top: (frame.height - height) / 2, width, height, frameWidth: frame.width, frameHeight: frame.height }
+    return calculateDisplayedImageRect(frame, imageSize)
   }
 
   function pointerToNormalized(event: React.PointerEvent) {
-    const rect = displayedImageRect()
+    const rect = currentDisplayedImageRect()
     if (!rect) return null
     return {
       x: Math.min(1, Math.max(0, (event.clientX - (frameRef.current?.getBoundingClientRect().left ?? 0) - rect.left) / rect.width)),
@@ -111,8 +123,7 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
     }
   }
 
-  function framePercent(point: CropPoint) {
-    const rect = displayedImageRect()
+  function framePercent(point: CropPoint, rect: DisplayedImageRect | null) {
     if (!rect) return { left: point.x * 100, top: point.y * 100 }
     return { left: ((rect.left + point.x * rect.width) / rect.frameWidth) * 100, top: ((rect.top + point.y * rect.height) / rect.frameHeight) * 100 }
   }
@@ -170,7 +181,7 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
   }
 
   const previewImage = showOriginal ? originalImage : processedImage ?? originalImage
-  const framePoints = cropCorners ? cornerKeys.map((key) => framePercent(cropCorners[key])).map((point) => `${point.left},${point.top}`).join(' ') : ''
+  const framePoints = cropCorners ? cornerKeys.map((key) => framePercent(cropCorners[key], displayedRect)).map((point) => `${point.left},${point.top}`).join(' ') : ''
 
   return <Card className="space-y-3 p-4">
     <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-xs font-bold tracking-[0.14em] text-[#0b7f76] uppercase">Invoice image capture</p><h3 className="mt-1 text-base font-bold text-[#173d50]">เตรียมภาพก่อน OCR</h3><p className="mt-1 text-xs leading-5 text-[#81979c]">ระบบจะไม่ส่งภาพต้นฉบับเข้า OCR จนกว่าจะยืนยัน crop หรือเลือก Skip Crop</p></div>{processedImage ? <StatusBadge tone="accepted" label="ยืนยันภาพสำหรับ OCR แล้ว" /> : originalImage ? <StatusBadge tone="warning" label="รอยืนยัน crop" /> : null}</div>
@@ -180,7 +191,7 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
       {detectionMessage ? <Notice tone={autoCorners ? 'info' : 'warning'}>{detectionMessage}</Notice> : null}
       <div ref={frameRef} className="relative aspect-[4/3] max-h-[70vh] min-h-[220px] overflow-hidden rounded-md border border-[#c9dadd] bg-[#eff4f4] select-none">
         {previewImage ? <img src={previewImage} alt="Invoice preview" className="absolute inset-0 h-full w-full object-contain" style={{ imageOrientation: 'from-image' }} onLoad={showOriginal ? onOriginalLoad : undefined} /> : null}
-        {showOriginal && cropCorners ? <><svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true"><polyline points={framePoints} fill="rgba(11,127,118,.12)" stroke="#0b7f76" strokeWidth="0.5" /></svg>{cornerKeys.map((key) => { const point = framePercent(cropCorners[key]); return <button key={key} type="button" aria-label={`ลากมุม ${cornerLabels[key]}`} className="absolute z-10 size-11 -translate-x-1/2 -translate-y-1/2 touch-none rounded-full border-4 border-white bg-[#0b7f76] shadow-lg" style={{ left: `${point.left}%`, top: `${point.top}%` }} onPointerDown={(event) => beginDrag(key, event)} onPointerMove={(event) => moveDrag(key, event)} onPointerUp={endDrag} onPointerCancel={endDrag} /> })}</> : null}
+        {showOriginal && cropCorners ? <><svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true"><polyline points={framePoints} fill="rgba(11,127,118,.12)" stroke="#0b7f76" strokeWidth="0.5" /></svg>{cornerKeys.map((key) => { const point = framePercent(cropCorners[key], displayedRect); return <button key={key} type="button" aria-label={`ลากมุม ${cornerLabels[key]}`} className="absolute z-10 size-11 -translate-x-1/2 -translate-y-1/2 touch-none rounded-full border-4 border-white bg-[#0b7f76] shadow-lg" style={{ left: `${point.left}%`, top: `${point.top}%` }} onPointerDown={(event) => beginDrag(key, event)} onPointerMove={(event) => moveDrag(key, event)} onPointerUp={endDrag} onPointerCancel={endDrag} /> })}</> : null}
         {!showOriginal && processedImage ? <div className="absolute bottom-2 left-2 rounded-full bg-[#173d50]/85 px-2.5 py-1 text-[11px] font-semibold text-white">Preview corrected image</div> : null}
       </div>
       {error ? <Notice tone="danger">{error}</Notice> : null}
