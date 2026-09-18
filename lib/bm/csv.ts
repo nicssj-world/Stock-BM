@@ -1,6 +1,7 @@
 import { formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
 import type { StockWorkspace } from '@/lib/bm/types'
 import type { VendorPerformance } from '@/lib/vendors/types'
+import { vendorMetricLabel } from '@/lib/vendors/metric-labels'
 
 function escapeCsv(value: unknown) {
   const text = String(value ?? '')
@@ -59,25 +60,25 @@ export function buildMovementsCsv(workspace: StockWorkspace) {
 
 export function buildVendorPerformanceCsv(performance: VendorPerformance) {
   const rows: unknown[][] = [['Vendor', 'Fiscal year', 'Metric', 'Numerator', 'Denominator', 'Percent', 'Applicable population', 'Provisional']]
-  const labels: Record<string, string> = {
-    complete_delivery: 'Complete delivery',
-    shelf_life_compliance: 'Shelf-life compliance',
-    packaging_compliance: 'Packaging compliance',
-    temperature_compliance: 'Temperature compliance',
-    documentation_discrepancies: 'Documentation discrepancies',
-    complaint_resolution: 'Complaint resolution',
-  }
   for (const metric of Object.values(performance.metrics.metrics)) {
     rows.push([
       `${performance.vendor.code} · ${performance.vendor.name}`,
       performance.fiscalYear,
-      labels[metric.key] ?? metric.key,
+      vendorMetricLabel(metric.key),
       metric.numerator,
       metric.denominator ?? '',
       metric.percent == null ? '' : metric.percent.toFixed(1),
       metric.applicablePopulation,
       metric.provisional ? 'yes' : 'no',
     ])
+  }
+  rows.push([])
+  const quantity = performance.metrics.quantityVsExpected
+  rows.push(['Quantity vs expected (informational)', quantity.linesWithExpected, quantity.reachedExpected, quantity.partiallyReceived, quantity.notYetReceived, quantity.label])
+  rows.push([])
+  rows.push(['Metric', 'Source kind', 'Source id', 'Receipt id', 'Flagged'])
+  for (const metric of Object.values(performance.metrics.metrics)) {
+    for (const source of metric.sources) rows.push([vendorMetricLabel(metric.key), source.kind, source.id, source.receiptId ?? '', source.flagged ? 'yes' : 'no'])
   }
   rows.push([])
   rows.push(['Delivery Lead Time', performance.metrics.deliveryLeadTime.sampleSize, performance.metrics.deliveryLeadTime.meanDays ?? '', performance.metrics.deliveryLeadTime.medianDays ?? '', performance.metrics.deliveryLeadTime.label])

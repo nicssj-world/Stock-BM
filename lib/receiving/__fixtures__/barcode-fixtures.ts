@@ -132,11 +132,11 @@ export const barcodeFixtures = {
     expiry: '2027-05-31',
     lot: '06696',
   },
-  // A payload that starts with an AI the parser does not know about, so the
+  // A payload that starts with digits that are not an assigned GS1 AI ("55"), so the
   // diagnostic parser must fail safely and report a specific reason instead
   // of a silent empty result.
   'gs1-datamatrix-unrecognized-ai': {
-    raw: '99UNKNOWNAI0109501101530013',
+    raw: '55UNKNOWNAI0109501101530013',
     symbologyId: ']d2' as string | null,
   },
 } as const

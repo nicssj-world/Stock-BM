@@ -12,5 +12,5 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  return respond(async () => ({ receiving: await createReceiptDraft(await readJson(request, receiptCreateSchema), await requireStockOperator()) }))
+  return respond(async () => createReceiptDraft(await readJson(request, receiptCreateSchema), await requireStockOperator()))
 }

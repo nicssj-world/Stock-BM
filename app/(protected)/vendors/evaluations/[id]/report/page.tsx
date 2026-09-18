@@ -2,21 +2,13 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { PrintButton } from '@/components/print-button'
+import { vendorMetricLabel } from '@/lib/vendors/metric-labels'
 import { formatThaiDateTime } from '@/lib/bm/thai-date'
 import { getVendorEvaluationWorkspace } from '@/lib/server/vendor-evaluation'
 import { vendorFiscalYearLabel } from '@/lib/vendors/fiscal-year'
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   return { title: `Annual Vendor Evaluation Report ${(await params).id}` }
-}
-
-const labels: Record<string, string> = {
-  complete_delivery: 'Complete Delivery',
-  shelf_life_compliance: 'Shelf-life compliance',
-  packaging_compliance: 'Packaging compliance',
-  temperature_compliance: 'Temperature compliance',
-  documentation_discrepancies: 'Documentation discrepancies',
-  complaint_resolution: 'Complaint resolution',
 }
 
 export default async function VendorEvaluationReportPage({ params }: { params: Promise<{ id: string }> }) {
@@ -29,7 +21,7 @@ export default async function VendorEvaluationReportPage({ params }: { params: P
   const currentApprovals = workspace.approvals.filter((approval) => approval.revision === workspace.documentState.revision)
   return <main className="vendor-evaluation-report-page"><div className="toolbar print-hidden"><Link href={`/vendors/evaluations/${id}`} className="back-link">กลับ evaluation</Link><PrintButton /></div><section className="sheet"><header className="report-header"><div><p className="eyebrow">MOLECULAR-CBH QMS · STOCK1</p><h1>Annual Vendor Evaluation</h1><p>{workspace.vendor.code} · {workspace.vendor.name}</p></div><div className="report-code"><span>รอบปีงบประมาณ</span><strong>{vendorFiscalYearLabel(workspace.evaluation.fiscalYear)}</strong><small>Revision {workspace.documentState.revision} · {workspace.documentState.status}</small></div></header>
     <section className="notice"><strong>{workspace.evaluation.resultLabel ?? 'ยังไม่ได้กำหนดสูตรคะแนน — รออนุมัติ'}</strong><span>ผลลัพธ์ numeric จะคงเป็น null จนกว่าจะมี policy ที่อนุมัติสำหรับ P-13/P-14</span></section>
-    <section className="section"><h2>Metrics snapshot</h2><div className="metric-grid">{Object.values(workspace.evaluation.metricsSnapshot.metrics).map((metric) => <div key={metric.key} className="metric-card"><p>{labels[metric.key] ?? metric.key}</p><strong>{metric.display === 'count' ? metric.numerator : metric.denominator == null ? '-' : `${metric.numerator}/${metric.denominator}`}</strong><small>{metric.applicablePopulation}{metric.provisional ? ' · provisional' : ''}</small></div>)}</div><p className="caption">Delivery Lead Time: {workspace.evaluation.metricsSnapshot.deliveryLeadTime.meanDays == null ? '-' : `${workspace.evaluation.metricsSnapshot.deliveryLeadTime.meanDays.toFixed(1)} วันเฉลี่ย / ${workspace.evaluation.metricsSnapshot.deliveryLeadTime.medianDays?.toFixed(1) ?? '-'} วันมัธยฐาน`} · {workspace.evaluation.metricsSnapshot.deliveryLeadTime.label}</p></section>
+    <section className="section"><h2>Metrics snapshot</h2><div className="metric-grid">{Object.values(workspace.evaluation.metricsSnapshot.metrics).map((metric) => <div key={metric.key} className="metric-card"><p>{vendorMetricLabel(metric.key)}</p><strong>{metric.display === 'count' ? metric.numerator : metric.denominator == null ? '-' : `${metric.numerator}/${metric.denominator}`}</strong><small>{metric.applicablePopulation}{metric.provisional ? ' · provisional' : ''}</small></div>)}</div><p className="caption">Delivery Lead Time: {workspace.evaluation.metricsSnapshot.deliveryLeadTime.meanDays == null ? '-' : `${workspace.evaluation.metricsSnapshot.deliveryLeadTime.meanDays.toFixed(1)} วันเฉลี่ย / ${workspace.evaluation.metricsSnapshot.deliveryLeadTime.medianDays?.toFixed(1) ?? '-'} วันมัธยฐาน`} · {workspace.evaluation.metricsSnapshot.deliveryLeadTime.label}</p></section>
     <section className="section judgment"><h2>Judgment</h2><div><h3>สรุปการประเมิน</h3><p>{workspace.evaluation.judgment.summary || '-'}</p></div><div><h3>จุดแข็ง</h3><p>{workspace.evaluation.judgment.strengths || '-'}</p></div><div><h3>ความเสี่ยง / ประเด็นต้องติดตาม</h3><p>{workspace.evaluation.judgment.risks || '-'}</p></div><div><h3>แผนการติดตาม</h3><p>{workspace.evaluation.judgment.actions || '-'}</p></div></section>
     <section className="section"><h2>Significant events</h2>{workspace.evaluation.significantEventsSnapshot.length ? <table><thead><tr><th>วันที่</th><th>ระดับ</th><th>ประเภท</th><th>รายละเอียด</th></tr></thead><tbody>{workspace.evaluation.significantEventsSnapshot.map((event) => <tr key={event.id}><td>{event.eventDate}</td><td>{event.severity}</td><td>{event.eventType}</td><td>{event.description}</td></tr>)}</tbody></table> : <p className="empty">ไม่มี significant event ใน snapshot นี้</p>}</section>
     <section className="section"><h2>Signature blocks</h2><div className="signature-grid">{(['evaluator', 'reviewer', 'approver'] as const).map((role) => { const approval = currentApprovals.find((item) => item.approvalRole === role); return <div className="signature-box" key={role}><p>{role}</p>{approval?.signatureAttachmentId ? <img src={`/api/attachments/${approval.signatureAttachmentId}`} alt={`ลายเซ็น ${role}`} /> : <div className="signature-empty">รอลงนาม</div>}<strong>{approval?.signerName ?? '-'}</strong><small>{approval ? new Date(approval.approvedAt).toLocaleDateString('th-TH') : '-'}</small></div> })}</div></section>

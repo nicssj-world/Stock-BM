@@ -6,7 +6,8 @@ const line = (overrides: Partial<ReceiptLine> = {}): ReceiptLine => ({
   id: 'line-1', receiptId: 'receipt-1', lineNo: 1, invoiceLineId: null, stockItemId: 'item-1', stockLotId: null,
   lotNumber: 'LOT-1', expiryDate: '2028-12-31', lotMode: 'new', locationId: 'location-1', expectedQty: 5,
   receivedQty: 5, barcodeRaw: null, barcodeSymbology: null, barcodeStandard: null, barcodeGtin: null, barcodeLot: null,
-  barcodeExpiry: null, torThresholdMonths: 6, torExpiryCompliance: 'compliant', remainingShelfLifeDays: 900,
+  barcodeExpiry: null, barcodeAdditionalProductId: null, barcodeManufactureDate: null, barcodeBestBefore: null, barcodeSerial: null,
+  torThresholdMonths: 6, torExpiryCompliance: 'compliant', remainingShelfLifeDays: 900,
   receiptDecision: 'accepted', acceptanceReasonCode: null, acceptanceReasonNote: null, acceptedBy: null, acceptedAt: null,
   conflicts: [], sortOrder: 0, createdAt: '2027-01-01T00:00:00Z', updatedAt: '2027-01-01T00:00:00Z', ...overrides,
 })
@@ -20,10 +21,11 @@ const receipt = (overrides: Partial<Receipt> = {}): Receipt => ({
 })
 
 describe('receiving rules', () => {
-  it('blocks missing lines, required packaging/temperature, unresolved conflicts, and incomplete exceptions', () => {
+  it('blocks missing lines, unresolved conflicts, and incomplete exceptions; packaging/temperature move to the post-receipt assessment', () => {
     expect(receiptReadiness(receipt({ lines: [] }))).toContain('ต้องมีรายการรับเข้าอย่างน้อย 1 รายการ')
-    expect(receiptIssues(receipt({ packagingStatus: null }))).toContainEqual(expect.objectContaining({ target: 'packagingStatus' }))
-    expect(receiptIssues(receipt({ temperatureStatus: null }))).toContainEqual(expect.objectContaining({ target: 'temperatureStatus' }))
+    expect(receiptIssues(receipt({ packagingStatus: null }))).not.toContainEqual(expect.objectContaining({ target: 'packagingStatus' }))
+    expect(receiptIssues(receipt({ temperatureStatus: null }))).not.toContainEqual(expect.objectContaining({ target: 'temperatureStatus' }))
+    expect(receiptIssues(receipt({ lines: [line({ lotNumber: null })] }))).toContainEqual(expect.objectContaining({ target: 'lines.0.lotNumber' }))
     expect(receiptIssues(receipt({ lines: [line({ conflicts: [{ code: 'ambiguous' }] })] }))).toContainEqual(expect.objectContaining({ target: 'lines.0.conflicts' }))
     expect(receiptIssues(receipt({ lines: [line({ torExpiryCompliance: 'not_compliant' })] }))).toContainEqual(expect.objectContaining({ target: 'lines.0.receiptDecision' }))
     expect(receiptIssues(receipt({ lines: [line({ torExpiryCompliance: 'not_compliant', receiptDecision: 'accepted_with_justification', acceptanceReasonCode: 'other' })] }), { expiryExceptionEnabled: true })).toContainEqual(expect.objectContaining({ target: 'lines.0.acceptanceReasonNote' }))

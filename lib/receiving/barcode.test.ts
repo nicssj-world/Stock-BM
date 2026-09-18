@@ -17,6 +17,7 @@ const emptyDecodedFields = {
   netWeightKg: null,
   hibcPrimary: null,
   hibcSecondary: null,
+  otherAis: {},
 }
 
 describe('parseBarcode', () => {
@@ -248,7 +249,7 @@ describe('parseBarcode', () => {
     const fixture = fixtures['gs1-datamatrix-unrecognized-ai']
     const diagnostics = parseBarcodeWithDiagnostics(fixture.raw, fixture.symbologyId)
 
-    expect(diagnostics.canonicalPayload).toBe('99UNKNOWNAI0109501101530013')
+    expect(diagnostics.canonicalPayload).toBe('55UNKNOWNAI0109501101530013')
     expect(diagnostics.parserError).toMatch(/Unrecognized AI/)
     expect(diagnostics.result.gtin).toBeNull()
   })

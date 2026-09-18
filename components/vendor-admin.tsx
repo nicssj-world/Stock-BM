@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { Building2, Plus, X } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import type { SupplierCandidate, Vendor } from '@/lib/receiving/types'
@@ -131,6 +132,11 @@ export function VendorAdmin({
           />
           {!vendors.length ? <p className="py-8 text-center text-sm text-[#81979c]">ยังไม่มี vendor</p> : null}
         </div>
+        {vendors.length ? <div className="border-t border-[#e5eeee] p-4">
+          <h3 className="text-sm font-bold text-[#315763]">Vendor Performance / Annual Evaluation</h3>
+          <p className="mt-1 text-xs text-[#81979c]">หลักฐานจากใบรับเข้าและ Receipt Assessment ตามปีงบประมาณ (1 ต.ค. – 30 ก.ย.) · ไม่มีคะแนน</p>
+          <ul className="mt-2 flex flex-wrap gap-2">{vendors.map((vendor) => <li key={vendor.id}><Link href={`/vendors/${vendor.id}`} className="inline-flex min-h-11 items-center rounded-md border border-[#c9dadd] bg-white px-3 text-xs font-semibold text-[#0b7f76] hover:bg-[#f4fbf9]">{vendor.code}{vendor.isActive ? '' : ' (inactive)'}</Link></li>)}</ul>
+        </div> : null}
         <div className="border-t border-[#e5eeee] bg-[#fbfdfd] p-4">
           <h3 className="text-sm font-bold text-[#315763]">รายการ supplier เดิมที่รอตรวจทาน</h3>
           <p className="mt-1 text-xs leading-5 text-[#81979c]">ระบบไม่แปลงข้อความ supplier เดิมเป็น vendor อัตโนมัติ ผู้ดูแลต้องสร้างและยืนยันเอง</p>

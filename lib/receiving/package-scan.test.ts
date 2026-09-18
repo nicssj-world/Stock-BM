@@ -31,6 +31,15 @@ describe('matchPackageBarcode', () => {
     expect(result.conflicts[0]?.code).toBe('ambiguous_gtin')
   })
 
+  it('accepts an ambiguous GTIN only when the user already chose one of its exact candidates', () => {
+    const parsed = parseBarcode(fixtureData['gs1-128'].raw, fixtureData['gs1-128'].symbologyId)
+    const result = matchPackageBarcode(parsed, candidates, 'item-2')
+
+    expect(result.itemId).toBe('item-2')
+    expect(result.conflicts).toEqual([])
+    expect(matchPackageBarcode(parsed, candidates, 'item-9').conflicts[0]?.code).toBe('ambiguous_gtin')
+  })
+
   it('blocks using a unique barcode when it conflicts with the selected item', () => {
     const parsed = parseBarcode(fixtureData['gs1-128'].raw, fixtureData['gs1-128'].symbologyId)
     const result = matchPackageBarcode(parsed, candidates.slice(0, 1), 'item-2')

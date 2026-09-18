@@ -9,7 +9,14 @@ describe('package scan capture panel', () => {
     expect(source).toContain('useCameraScanner')
     expect(source).toContain("'/api/receiving/scan/parse'")
     expect(source).toContain('Raw payload')
-    expect(source).toContain('ใช้ข้อมูลนี้')
+    expect(source).toContain('ใช้ Item นี้')
+  })
+
+  it('auto-fills Lot/Expiry only from a clean parse and only proposes (never forces) an Item', () => {
+    expect(source).toContain('response.conflicts.length === 0')
+    expect(source).toContain('onUse(response)')
+    expect(source).toContain('resolveScanPayload(')
+    expect(source).toContain('ไม่ใช้แทน Catalog/REF')
   })
 
   it('contains no stock mutation shortcut', () => {

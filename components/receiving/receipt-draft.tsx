@@ -1,203 +1,158 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { ClipboardCheck, FileText, MapPin, PackagePlus } from 'lucide-react'
+import { useState } from 'react'
+import Link from 'next/link'
+import { ClipboardCheck, ClipboardList } from 'lucide-react'
 import { remainingShelfLife, torExpiryCompliance } from '@/lib/bm/shelf-life'
-import { todayBangkok } from '@/lib/bm/rules'
+import { receiptQuantitySummary, type ReceiptAssessmentAnswers } from '@/lib/receiving/assessment'
+import { cumulativeReceived, receiptIssues } from '@/lib/receiving/rules'
 import type { Receipt, ReceivingWorkspace } from '@/lib/receiving/types'
-import { cumulativeReceived, deliveryCompleteness, receiptIssues } from '@/lib/receiving/rules'
-import { api, Button, Card, Field, Input, Notice, Select, StatusBadge } from '@/components/ui'
+import { api, Button, Card, Notice, StatusBadge } from '@/components/ui'
 import { AttachmentList } from '@/components/attachments'
-import type { PackageScanResponse } from '@/components/receiving/package-scan'
-import { PackageScan } from '@/components/receiving/package-scan'
+import { ReceiptAssessmentDialog, type ReceiptAssessmentContext } from '@/components/receiving/receipt-assessment-dialog'
 import { ReceiptLineRow } from '@/components/receiving/receipt-line-row'
+import { ReceiveDraftSavedError, ReceiveWizard, type ReceiveAdapter } from '@/components/receiving/receive-wizard'
 
-type ScanEvidence = {
-  raw: string | null
-  symbologyId: string | null
-  standard: string | null
-  gtin: string | null
-  lot: string | null
-  expiry: string | null
-  itemId: string | null
-  conflicts: Record<string, unknown>[]
-}
+export const INVOICE_EVIDENCE_KIND = 'invoice-image'
 
-const emptyScanEvidence: ScanEvidence = {
-  raw: null,
-  symbologyId: null,
-  standard: null,
-  gtin: null,
-  lot: null,
-  expiry: null,
-  itemId: null,
-  conflicts: [],
+/** Quantity block for an already-confirmed receipt, derived from receipt data only. */
+export function assessmentContextForReceipt(receipt: Receipt, data: ReceivingWorkspace): ReceiptAssessmentContext {
+  const vendor = data.vendors.find((item) => item.id === receipt.vendorId)
+  const confirmedUpTo = data.receipts.filter((candidate) => candidate.status === 'confirmed' && (candidate.confirmedAt ?? '') <= (receipt.confirmedAt ?? '\uffff'))
+  const priorLines = confirmedUpTo.flatMap((candidate) => candidate.lines)
+  return {
+    receiptId: receipt.id,
+    receiptLabel: receipt.receiptNo ?? receipt.id.slice(0, 8),
+    vendorLabel: vendor ? `${vendor.code} · ${vendor.name}` : receipt.vendorId,
+    receivedDate: receipt.receivedDate,
+    quantity: receiptQuantitySummary(receipt.lines.map((line) => {
+      const item = data.items.find((candidate) => candidate.id === line.stockItemId)
+      const invoiceLine = receipt.invoiceId ? data.invoices.find((invoice) => invoice.id === receipt.invoiceId)?.lines.find((candidate) => candidate.id === line.invoiceLineId) : null
+      return {
+        lineNo: line.lineNo,
+        itemLabel: item ? `${item.catalogNo ? `REF ${item.catalogNo} · ` : ''}${item.name}` : line.stockItemId,
+        unit: item?.unit ?? '',
+        receivedQty: line.receivedQty,
+        expectedQty: invoiceLine?.expectedQty ?? line.expectedQty,
+        cumulativeReceivedQty: line.invoiceLineId ? cumulativeReceived(priorLines.filter((candidate) => candidate.invoiceLineId === line.invoiceLineId)) : null,
+      }
+    })),
+  }
 }
 
 export function ReceiptDraft({ data, onSaved, onError }: { data: ReceivingWorkspace; onSaved: (data: ReceivingWorkspace, text: string) => void; onError: (text: string) => void }) {
-  const activeVendors = data.vendors.filter((vendor) => vendor.isActive)
-  const activeItems = data.items
-  const activeLocations = data.locations.filter((location) => location.isActive)
-  const [vendorId, setVendorId] = useState(activeVendors[0]?.id ?? '')
-  const [invoiceId, setInvoiceId] = useState('')
-  const [invoiceLineId, setInvoiceLineId] = useState('')
-  const [expectedQty, setExpectedQty] = useState('')
-  const [receiptNo, setReceiptNo] = useState('')
-  const [itemId, setItemId] = useState(activeItems[0]?.id ?? '')
-  const [locationId, setLocationId] = useState(activeLocations[0]?.id ?? '')
-  const [lotNumber, setLotNumber] = useState('')
-  const [expiryDate, setExpiryDate] = useState('')
-  const [receivedQty, setReceivedQty] = useState('1')
-  const [scanEvidence, setScanEvidence] = useState<ScanEvidence>(emptyScanEvidence)
   const [busy, setBusy] = useState(false)
-  const selectedItem = useMemo(() => activeItems.find((item) => item.id === itemId), [activeItems, itemId])
-  const openInvoices = useMemo(() => data.invoices.filter((invoice) => invoice.status === 'open' && invoice.vendorId === vendorId), [data.invoices, vendorId])
-  const selectedInvoice = useMemo(() => data.invoices.find((invoice) => invoice.id === invoiceId), [data.invoices, invoiceId])
-  const selectedInvoiceLine = useMemo(() => selectedInvoice?.lines.find((line) => line.id === invoiceLineId), [invoiceLineId, selectedInvoice])
-  const receivedForSelectedInvoiceLine = useMemo(() => selectedInvoiceLine
-    ? cumulativeReceived(data.receipts.filter((receipt) => receipt.status === 'confirmed').flatMap((receipt) => receipt.lines.filter((line) => line.invoiceLineId === selectedInvoiceLine.id).map((line) => ({ receivedQty: line.receivedQty }))))
-    : 0, [data.receipts, selectedInvoiceLine])
+  const [assessment, setAssessment] = useState<ReceiptAssessmentContext | null>(null)
   const drafts = data.receipts.filter((receipt) => receipt.status === 'draft')
+  const pending = data.assessments.filter((item) => item.status === 'pending')
 
-  function chooseVendor(nextVendorId: string) {
-    setVendorId(nextVendorId)
-    setInvoiceId('')
-    setInvoiceLineId('')
-    setExpectedQty('')
-  }
-
-  function chooseInvoice(nextInvoiceId: string) {
-    const nextInvoice = data.invoices.find((invoice) => invoice.id === nextInvoiceId)
-    setInvoiceId(nextInvoiceId)
-    setInvoiceLineId('')
-    setExpectedQty('')
-    if (nextInvoice) setVendorId(nextInvoice.vendorId)
-  }
-
-  function chooseInvoiceLine(nextInvoiceLineId: string) {
-    const nextLine = selectedInvoice?.lines.find((line) => line.id === nextInvoiceLineId)
-    setInvoiceLineId(nextInvoiceLineId)
-    setExpectedQty(nextLine ? String(nextLine.expectedQty) : '')
-    if (nextLine?.stockItemId) chooseItem(nextLine.stockItemId)
-  }
-
-  function chooseItem(nextItemId: string) {
-    setItemId(nextItemId)
-    if (scanEvidence.itemId && scanEvidence.itemId !== nextItemId) {
-      setScanEvidence((current) => ({
-        ...current,
-        conflicts: [...current.conflicts.filter((conflict) => conflict.code !== 'barcode_item_mismatch'), { code: 'barcode_item_mismatch', message: 'Item ที่เลือกไม่ตรงกับ GTIN ของ package', target: 'stockItemId' }],
-      }))
-    } else {
-      setScanEvidence((current) => ({ ...current, conflicts: current.conflicts.filter((conflict) => conflict.code !== 'barcode_item_mismatch') }))
-    }
-  }
-
-  function applyPackageScan(result: PackageScanResponse) {
-    setScanEvidence({
-      raw: result.parsed.raw,
-      symbologyId: result.parsed.symbologyId,
-      standard: result.parsed.standard,
-      gtin: result.parsed.gtin,
-      lot: result.parsed.lot,
-      expiry: result.parsed.expiry,
-      itemId: result.itemId,
-      conflicts: result.conflicts,
-    })
-    if (result.itemId) setItemId(result.itemId)
-    if (result.parsed.lot) setLotNumber(result.parsed.lot)
-    if (result.parsed.expiry) setExpiryDate(result.parsed.expiry)
-  }
-
-  function changeLot(nextLotNumber: string) {
-    setLotNumber(nextLotNumber)
-    if (scanEvidence.lot && nextLotNumber.trim() !== scanEvidence.lot) {
-      setScanEvidence((current) => ({
-        ...current,
-        conflicts: [...current.conflicts.filter((conflict) => conflict.code !== 'barcode_lot_mismatch'), { code: 'barcode_lot_mismatch', message: 'Lot ที่กรอกไม่ตรงกับ package barcode', target: 'lotNumber' }],
-      }))
-    }
-  }
-
-  function changeExpiry(nextExpiryDate: string) {
-    setExpiryDate(nextExpiryDate)
-    if (scanEvidence.expiry && nextExpiryDate !== scanEvidence.expiry) {
-      setScanEvidence((current) => ({
-        ...current,
-        conflicts: [...current.conflicts.filter((conflict) => conflict.code !== 'barcode_expiry_mismatch'), { code: 'barcode_expiry_mismatch', message: 'วันหมดอายุที่กรอกไม่ตรงกับ package barcode', target: 'expiryDate' }],
-      }))
-    }
-  }
-
-  async function createDraft(event: React.FormEvent) {
-    event.preventDefault()
-    setBusy(true)
-    const receivedDate = todayBangkok()
-    const computedCompliance = torExpiryCompliance(expiryDate || null, receivedDate)
-    try {
-      const result = await api<{ receiving: ReceivingWorkspace }>('/api/receiving/receipts', {
+  const adapter: ReceiveAdapter = {
+    async submit(submission) {
+      const created = await api<{ receiptId: string; receiving: ReceivingWorkspace }>('/api/receiving/receipts', {
         method: 'POST',
-        body: JSON.stringify({ vendorId, invoiceId: invoiceId || null, receiptNo: receiptNo || null, receivedDate, packagingStatus: null, temperatureStatus: null, lines: [{ lineNo: 1, invoiceLineId: invoiceLineId || null, stockItemId: itemId, locationId, lotNumber: lotNumber || null, expiryDate: expiryDate || null, lotMode: selectedItem?.trackLot ? 'new' : 'not_tracked', expectedQty: invoiceLineId ? Number(expectedQty) : null, receivedQty: Number(receivedQty), barcodeRaw: scanEvidence.raw, barcodeSymbology: scanEvidence.symbologyId, barcodeStandard: scanEvidence.standard, barcodeGtin: scanEvidence.gtin, barcodeLot: scanEvidence.lot, barcodeExpiry: scanEvidence.expiry, conflicts: scanEvidence.conflicts, torExpiryCompliance: computedCompliance === 'not_compliant' ? 'compliant' : computedCompliance, remainingShelfLifeDays: remainingShelfLife(expiryDate || null, receivedDate) }] }),
+        body: JSON.stringify({
+          vendorId: submission.vendorId,
+          invoiceId: submission.invoiceId,
+          receiptNo: submission.receiptNo,
+          receivedDate: submission.receivedDate,
+          source: submission.lines.some((line) => line.barcodeRaw) ? 'scan' : 'manual',
+          lines: submission.lines,
+        }),
       })
-      onSaved(result.receiving, 'สร้างร่างใบรับเข้าแล้ว')
-      setReceiptNo(''); setLotNumber(''); setExpiryDate(''); setReceivedQty('1'); setScanEvidence(emptyScanEvidence)
+      onSaved(created.receiving, 'สร้างร่างใบรับเข้าแล้ว — กำลังยืนยัน')
+      if (submission.evidence) {
+        const form = new FormData()
+        form.append('file', submission.evidence.file)
+        form.append('module', 'stock')
+        form.append('entityType', 'stock-receipt')
+        form.append('entityId', created.receiptId)
+        form.append('kind', INVOICE_EVIDENCE_KIND)
+        try {
+          await api('/api/attachments', { method: 'POST', body: form })
+        } catch (error) {
+          throw new ReceiveDraftSavedError(`แนบรูปใบส่งของไม่สำเร็จ (${error instanceof Error ? error.message : 'upload failed'}) — ร่างใบรับเข้าถูกบันทึกไว้ด้านล่าง ยังไม่เขียน stock แนบรูปแล้วกดยืนยันอีกครั้ง`)
+        }
+      }
+      try {
+        const confirmed = await api<{ receiving: ReceivingWorkspace }>(`/api/receiving/receipts/${created.receiptId}/confirm`, { method: 'POST', body: '{}' })
+        onSaved(confirmed.receiving, 'ยืนยันรับสินค้าและบันทึก stock แล้ว')
+      } catch (error) {
+        throw new ReceiveDraftSavedError(`${error instanceof Error ? error.message : 'ยืนยันรับสินค้าไม่สำเร็จ'} — ร่างใบรับเข้าถูกบันทึกไว้ด้านล่าง ยังไม่เขียน stock`)
+      }
+      return { receiptId: created.receiptId }
+    },
+  }
+
+  async function submitAssessment(receiptId: string, answers: ReceiptAssessmentAnswers) {
+    const result = await api<{ receiving: ReceivingWorkspace }>(`/api/receiving/receipts/${receiptId}/assessment`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        productCondition: answers.productCondition,
+        documentation: answers.documentation,
+        itemCorrectness: answers.itemCorrectness,
+        coldChainApplicable: answers.coldChainApplicable,
+        coldChainCondition: answers.coldChainCondition,
+        hasComplaint: answers.hasComplaint,
+        note: answers.note || null,
+      }),
+    })
+    onSaved(result.receiving, 'บันทึกการประเมินการรับสินค้าแล้ว')
+    setAssessment(null)
+  }
+
+  async function confirmDraft(id: string) {
+    setBusy(true)
+    try {
+      const result = await api<{ receiving: ReceivingWorkspace }>(`/api/receiving/receipts/${id}/confirm`, { method: 'POST', body: '{}' })
+      onSaved(result.receiving, 'ยืนยันรับสินค้าและบันทึก stock แล้ว')
+      const receipt = result.receiving.receipts.find((item) => item.id === id)
+      if (receipt) setAssessment(assessmentContextForReceipt(receipt, result.receiving))
     } catch (error) {
-      onError(error instanceof Error ? error.message : 'สร้างร่างใบรับเข้าไม่สำเร็จ')
+      onError(error instanceof Error ? error.message : 'ยืนยันรับสินค้าไม่สำเร็จ')
     } finally {
       setBusy(false)
     }
   }
 
-  async function confirm(id: string) {
+  async function cancelDraft(id: string) {
     setBusy(true)
     try {
-      const result = await api<{ receiving: ReceivingWorkspace }>(`/api/receiving/receipts/${id}/confirm`, { method: 'POST', body: '{}' })
-      onSaved(result.receiving, 'ยืนยันรับเข้าและเขียน ledger แล้ว')
+      const result = await api<{ receiving: ReceivingWorkspace }>(`/api/receiving/receipts/${id}`, { method: 'DELETE' })
+      onSaved(result.receiving, 'ยกเลิกร่างใบรับเข้าแล้ว')
     } catch (error) {
-      onError(error instanceof Error ? error.message : 'ยืนยันรับเข้าไม่สำเร็จ')
+      onError(error instanceof Error ? error.message : 'ยกเลิกร่างไม่สำเร็จ')
     } finally {
       setBusy(false)
     }
   }
 
   return <div className="space-y-4">
-    <Card className="p-4"><form onSubmit={createDraft} className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2"><div className="rounded-md border border-[#dce8e9] bg-[#f8fbfb] p-3"><p className="flex items-center gap-2 text-xs font-bold text-[#315763]"><FileText className="size-4 text-[#0b7f76]" />1. Vendor + receipt</p><div className="mt-3 space-y-3"><Field label="Vendor"><Select required value={vendorId} onChange={(event) => chooseVendor(event.target.value)}><option value="">เลือก vendor</option>{activeVendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.code} · {vendor.name}</option>)}</Select></Field><Field label="Open invoice (optional)"><Select value={invoiceId} onChange={(event) => chooseInvoice(event.target.value)}><option value="">รับเข้าโดยไม่ผูกใบส่งของ</option>{openInvoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.invoiceNo ?? invoice.id.slice(0, 8)} · {invoice.lines.length} lines</option>)}</Select></Field>{selectedInvoice ? <Field label="Invoice line"><Select required value={invoiceLineId} onChange={(event) => chooseInvoiceLine(event.target.value)}><option value="">เลือกรายการใบส่งของ</option>{selectedInvoice.lines.filter((line) => line.closureState !== 'cancelled').map((line) => <option key={line.id} value={line.id}>#{line.lineNo} · {line.descriptionText ?? line.catalogNoText ?? 'ไม่มีรายละเอียด'} · expected {line.expectedQty}</option>)}</Select></Field> : null}<Field label="เลขที่ใบรับเข้า"><Input value={receiptNo} onChange={(event) => setReceiptNo(event.target.value)} placeholder="ไม่บังคับ" /></Field></div></div>
-        <div className="rounded-md border border-[#dce8e9] bg-[#f8fbfb] p-3"><p className="flex items-center gap-2 text-xs font-bold text-[#315763]"><PackagePlus className="size-4 text-[#0b7f76]" />2. Line</p><div className="mt-3 space-y-3"><Field label="Item"><Select required value={itemId} onChange={(event) => chooseItem(event.target.value)}><option value="">เลือก item</option>{activeItems.map((item) => <option key={item.id} value={item.id}>{item.itemCode} · {item.name}</option>)}</Select></Field><PackageScan selectedItemId={itemId || null} disabled={busy} onUse={applyPackageScan} />{selectedInvoiceLine ? <div className="rounded-md border border-[#dce8e9] bg-white px-3 py-2 text-xs text-[#58747d]">Expected {selectedInvoiceLine.expectedQty} · Received {receivedForSelectedInvoiceLine} · {deliveryCompleteness(selectedInvoiceLine.expectedQty, receivedForSelectedInvoiceLine)}</div> : null}<div className="grid gap-3 sm:grid-cols-2"><Field label="Lot"><Input value={lotNumber} onChange={(event) => changeLot(event.target.value)} disabled={selectedItem ? !selectedItem.trackLot : false} /></Field><Field label="จำนวน"><Input type="number" min="0.001" step="0.001" value={receivedQty} onChange={(event) => setReceivedQty(event.target.value)} required /></Field></div><Field label="Expiry"><Input type="date" value={expiryDate} onChange={(event) => changeExpiry(event.target.value)} disabled={selectedItem ? !selectedItem.trackExpiry : false} /></Field></div></div>
-      </div>
-      <div className="grid gap-3 md:grid-cols-2"><div className="rounded-md border border-[#dce8e9] bg-[#f8fbfb] p-3"><p className="flex items-center gap-2 text-xs font-bold text-[#315763]"><MapPin className="size-4 text-[#0b7f76]" />3. Location + evidence</p><div className="mt-3 space-y-3"><Field label="Location"><Select required value={locationId} onChange={(event) => setLocationId(event.target.value)}><option value="">เลือก location</option>{activeLocations.map((location) => <option key={location.id} value={location.id}>{location.code} · {location.name}</option>)}</Select></Field><p className="text-xs text-[#81979c]">Packaging และ temperature จะถูกกรอกใน draft ก่อนยืนยัน</p></div></div><div className="rounded-md border border-[#dce8e9] bg-[#f8fbfb] p-3"><p className="flex items-center gap-2 text-xs font-bold text-[#315763]"><ClipboardCheck className="size-4 text-[#0b7f76]" />4. Review + confirm</p><p className="mt-3 text-xs leading-5 text-[#81979c]">ระบบจะตรวจ lot, expiry, TOR และ feature flag ซ้ำใน RPC ก่อนเขียนผ่าน ledger เดิม</p><Button className="mt-3" disabled={busy || !vendorId || !itemId || !locationId}><PackagePlus className="size-4" />สร้าง draft</Button></div></div>
-    </form></Card>
-    {drafts.map((receipt) => {
-      const viewReceipt = { ...receipt, lines: receipt.lines.map((line) => ({ ...line, torExpiryCompliance: torExpiryCompliance(line.expiryDate, receipt.receivedDate), remainingShelfLifeDays: remainingShelfLife(line.expiryDate, receipt.receivedDate) })) }
-      const issues = receiptIssues(viewReceipt, { expiryExceptionEnabled: data.policy.expiryExceptionEnabled })
-      return <Card key={receipt.id} className="space-y-3 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold tracking-[0.14em] text-[#0b7f76] uppercase">Draft receipt</p><h2 className="mt-1 text-lg font-bold text-[#173d50]">{receipt.receiptNo ?? receipt.id.slice(0, 8)}</h2><p className="text-xs text-[#81979c]">{receipt.lines.length} line · received date {receipt.receivedDate}</p></div><StatusBadge tone="warning" label="draft" /></div><ReceiptEvidence receipt={receipt} onSaved={(next) => onSaved(next, 'บันทึก packaging และ temperature แล้ว')} /><AttachmentList module="stock" entityType="stock-receipt" entityId={receipt.id} kind="receipt-evidence" label="หลักฐานใบรับเข้า / Receipt evidence" /><div className="grid gap-2">{receipt.lines.map((line) => <ReceiptLineRow key={line.id} line={line} receivedDate={receipt.receivedDate} data={data} onUpdated={(next) => onSaved(next, 'บันทึกเหตุผล TOR แล้ว')} />)}</div>{issues.length ? <Notice tone={issues.some((issue) => issue.target.includes('receiptDecision')) ? 'danger' : 'warning'}>{issues[0].message}</Notice> : <Notice tone="success">ข้อมูลพร้อมยืนยันรับสินค้า — ระบบจะตรวจสอบซ้ำในฐานข้อมูลก่อนเขียน ledger</Notice>}<Button disabled={busy || issues.length > 0 || !receipt.lines.length} onClick={() => confirm(receipt.id)}><ClipboardCheck className="size-4" />ยืนยันรับสินค้า</Button></Card>
-    })}
-    {!drafts.length ? <Card className="p-8 text-center text-sm text-[#81979c]">ยังไม่มี draft ใบรับเข้า — สร้างจากแบบฟอร์มด้านบน</Card> : null}
+    {pending.length ? <Card className="space-y-2 border-[#eed4a6] bg-[#fffaf0] p-4">
+      <p className="flex items-center gap-2 text-sm font-bold text-[#8f5f1d]"><ClipboardList className="size-4" />การประเมินที่รอดำเนินการ (Pending) · {pending.length}</p>
+      <ul className="divide-y divide-[#f1e2c4]">{pending.map((item) => {
+        const receipt = data.receipts.find((candidate) => candidate.id === item.receiptId)
+        const vendor = data.vendors.find((candidate) => candidate.id === item.vendorId)
+        return <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"><span className="text-[#76551c]">{receipt?.receiptNo ?? item.receiptId.slice(0, 8)} · {vendor?.name ?? '-'} · {receipt?.receivedDate ?? ''}</span>{receipt ? <Button type="button" variant="secondary" onClick={() => setAssessment(assessmentContextForReceipt(receipt, data))}>ประเมิน</Button> : null}</li>
+      })}</ul>
+    </Card> : null}
+
+    <ReceiveWizard data={data} adapter={adapter} onError={onError} onReceived={({ assessment: context }) => setAssessment(context)} />
+
+    {drafts.length ? <div className="space-y-3">
+      <p className="text-xs font-bold tracking-[0.14em] text-[#58747d] uppercase">ร่างที่ยังไม่ยืนยัน (ยังไม่เขียน stock)</p>
+      {drafts.map((receipt) => {
+        const viewReceipt = { ...receipt, lines: receipt.lines.map((line) => ({ ...line, torExpiryCompliance: torExpiryCompliance(line.expiryDate, receipt.receivedDate), remainingShelfLifeDays: remainingShelfLife(line.expiryDate, receipt.receivedDate) })) }
+        const issues = receiptIssues(viewReceipt, { expiryExceptionEnabled: data.policy.expiryExceptionEnabled })
+        return <Card key={receipt.id} className="space-y-3 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold tracking-[0.14em] text-[#0b7f76] uppercase">Draft receipt</p><h2 className="mt-1 text-lg font-bold text-[#173d50]">{receipt.receiptNo ?? receipt.id.slice(0, 8)}</h2><p className="text-xs text-[#81979c]">{receipt.lines.length} line · received date {receipt.receivedDate}</p></div><StatusBadge tone="warning" label="draft" /></div>
+          <AttachmentList module="stock" entityType="stock-receipt" entityId={receipt.id} kind={INVOICE_EVIDENCE_KIND} accept="image/*" label="รูปใบส่งของ / Invoice evidence" />
+          <div className="grid gap-2">{receipt.lines.map((line) => <ReceiptLineRow key={line.id} line={line} receivedDate={receipt.receivedDate} data={data} onUpdated={(next) => onSaved(next, 'บันทึกเหตุผล TOR แล้ว')} />)}</div>
+          {issues.length ? <Notice tone={issues.some((issue) => issue.target.includes('receiptDecision')) ? 'danger' : 'warning'}>{issues[0].message}</Notice> : <Notice tone="success">ข้อมูลพร้อมยืนยันรับสินค้า — ระบบจะตรวจสอบซ้ำในฐานข้อมูลก่อนเขียน ledger</Notice>}
+          <div className="flex flex-wrap gap-2"><Button disabled={busy || issues.length > 0 || !receipt.lines.length} onClick={() => void confirmDraft(receipt.id)}><ClipboardCheck className="size-4" />ยืนยันรับสินค้า</Button><Button variant="ghost" disabled={busy} onClick={() => void cancelDraft(receipt.id)}>ยกเลิกร่าง</Button><Link href={`/receiving/receipts/${receipt.id}/report`} className="inline-flex min-h-11 items-center px-2 text-sm font-semibold text-[#0b7f76] underline">ดูรายงาน</Link></div>
+        </Card>
+      })}
+    </div> : null}
+
+    {assessment ? <ReceiptAssessmentDialog key={assessment.receiptId} context={assessment} onSubmit={(answers) => submitAssessment(assessment.receiptId, answers)} onDismiss={() => setAssessment(null)} /> : null}
   </div>
-}
-
-function ReceiptEvidence({ receipt, onSaved }: { receipt: Receipt; onSaved: (data: ReceivingWorkspace) => void }) {
-  const [temperatureValueC, setTemperatureValueC] = useState(receipt.temperatureValueC == null ? '' : String(receipt.temperatureValueC))
-  const [busy, setBusy] = useState(false)
-
-  async function save(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    setBusy(true)
-    try {
-      const result = await api<{ receiving: ReceivingWorkspace }>(`/api/receiving/receipts/${receipt.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          packagingStatus: String(form.get('packagingStatus') || '') || null,
-          temperatureStatus: String(form.get('temperatureStatus') || '') || null,
-          temperatureValueC: temperatureValueC === '' ? null : Number(temperatureValueC),
-        }),
-      })
-      onSaved(result.receiving)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return <form onSubmit={save} className="grid gap-3 rounded-md border border-[#dce8e9] bg-[#f8fbfb] p-3 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end"><Field label="Packaging"><Select name="packagingStatus" defaultValue={receipt.packagingStatus ?? ''}><option value="">เลือกสถานะ</option><option value="acceptable">acceptable / ปกติ</option><option value="damaged">damaged / ชำรุด</option><option value="not_applicable">not applicable</option></Select></Field><Field label="Temperature"><Select name="temperatureStatus" defaultValue={receipt.temperatureStatus ?? ''}><option value="">เลือกสถานะ</option><option value="acceptable">acceptable / ปกติ</option><option value="out_of_range">out of range</option><option value="not_applicable">not applicable</option></Select></Field><Field label="Temperature °C" hint="กรอกเมื่อมีการวัดอุณหภูมิ"><Input type="number" step="0.1" value={temperatureValueC} onChange={(event) => setTemperatureValueC(event.target.value)} /></Field><Button variant="secondary" disabled={busy}>บันทึกหลักฐาน</Button></form>
 }

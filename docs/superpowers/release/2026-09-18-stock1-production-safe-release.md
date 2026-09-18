@@ -49,7 +49,12 @@ The approved new files, in filename order, are:
 202609180007_bm_ocr.sql
 202609180008_bm_vendor_performance.sql
 202609180009_bm_vendor_evaluations.sql
+202609180010_bm_receipt_assessments.sql
 ```
+
+`202609180007_bm_ocr.sql` stays in the list only to keep migration history
+linear; `202609180010` drops its two unused tables forward-only (owner removed
+OCR from the approved Stock1 scope after real-iPhone acceptance testing).
 
 ## 3. Read-only BEFORE snapshot and flag check
 

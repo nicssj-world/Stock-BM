@@ -43,9 +43,9 @@ describe('barcode scan diagnostics (Preview-only)', () => {
   })
 
   it('surfaces a parser error and the normalized payload when a scan does not parse', () => {
-    const diagnostics = describeBarcodeScan({ raw: '99UNKNOWNAI0109501101530013', symbologyId: ']d2' })
+    const diagnostics = describeBarcodeScan({ raw: '55UNKNOWNAI0109501101530013', symbologyId: ']d2' })
 
-    expect(diagnostics.normalizedPayload).toBe('99UNKNOWNAI0109501101530013')
+    expect(diagnostics.normalizedPayload).toBe('55UNKNOWNAI0109501101530013')
     expect(diagnostics.parserError).toMatch(/Unrecognized AI/)
     expect(diagnostics.parsed.gtin).toBeNull()
   })

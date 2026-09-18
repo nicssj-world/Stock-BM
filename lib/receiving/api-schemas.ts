@@ -58,7 +58,7 @@ export const invoiceCreateSchema = z.object({
   invoiceNo: optionalText(120),
   invoiceDate: isoDate.nullable().optional(),
   status: z.enum(['draft', 'open']).optional(),
-  source: z.enum(['manual', 'ocr']).optional(),
+  source: z.enum(['manual']).optional(),
   note: optionalText(2000),
   lines: z.array(invoiceLineInputSchema).max(500).optional(),
 })
@@ -85,6 +85,10 @@ export const receiptLineInputSchema = z.object({
   barcodeGtin: optionalText(180),
   barcodeLot: optionalText(180),
   barcodeExpiry: isoDate.nullable().optional(),
+  barcodeAdditionalProductId: optionalText(180),
+  barcodeManufactureDate: isoDate.nullable().optional(),
+  barcodeBestBefore: isoDate.nullable().optional(),
+  barcodeSerial: optionalText(180),
   torExpiryCompliance: z.enum(['compliant', 'not_compliant', 'not_applicable']).optional(),
   remainingShelfLifeDays: z.number().int().nullable().optional(),
   receiptDecision: z.enum(['accepted', 'accepted_with_justification']).optional(),
@@ -106,7 +110,7 @@ export const receiptCreateSchema = z.object({
   temperatureValueC: z.number().finite().nullable().optional(),
   temperatureNote: optionalText(2000),
   coldChainApplicable: z.boolean().optional(),
-  source: z.enum(['manual', 'ocr', 'scan']).optional(),
+  source: z.enum(['manual', 'scan']).optional(),
   note: optionalText(2000),
   lines: z.array(receiptLineInputSchema).max(500).optional(),
 })
@@ -115,6 +119,17 @@ export const receiptUpdateSchema = receiptCreateSchema.partial()
 export const receiptLineUpdateSchema = receiptLineInputSchema.partial()
 export const confirmReceiptSchema = z.object({})
 
+// No quantity field: completeness is derived from the receipt lines.
+export const receiptAssessmentSchema = z.object({
+  productCondition: z.enum(['normal', 'abnormal']),
+  documentation: z.enum(['complete', 'incomplete']),
+  itemCorrectness: z.enum(['correct', 'problem']),
+  coldChainApplicable: z.boolean(),
+  coldChainCondition: z.enum(['appropriate', 'inappropriate']).nullable().optional(),
+  hasComplaint: z.boolean(),
+  note: z.string().trim().max(4000).nullable().optional(),
+}).strict()
+
 export type InvoiceCreateInput = z.infer<typeof invoiceCreateSchema>
 export type InvoiceUpdateInput = z.infer<typeof invoiceUpdateSchema>
 export type InvoiceLineUpdateInput = z.infer<typeof invoiceLineUpdateSchema>
@@ -122,3 +137,4 @@ export type ReceiptCreateInput = z.infer<typeof receiptCreateSchema>
 export type ReceiptLineInput = z.infer<typeof receiptLineInputSchema>
 export type ReceiptUpdateInput = z.infer<typeof receiptUpdateSchema>
 export type ReceiptLineUpdateInput = z.infer<typeof receiptLineUpdateSchema>
+export type ReceiptAssessmentInput = z.infer<typeof receiptAssessmentSchema>

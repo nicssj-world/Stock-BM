@@ -1,3 +1,4 @@
+import type { ReceiptAssessment } from './assessment'
 export interface Vendor {
   id: string
   code: string
@@ -64,6 +65,7 @@ export interface VendorSignificantEvent {
 }
 
 export type InvoiceStatus = 'draft' | 'open' | 'closed' | 'cancelled'
+// 'ocr' remains allowed by the historical column check but is no longer written.
 export type InvoiceSource = 'manual' | 'ocr'
 export type ReceiptStatus = 'draft' | 'confirmed' | 'cancelled'
 export type ReceiptSource = 'manual' | 'ocr' | 'scan'
@@ -102,7 +104,6 @@ export interface Invoice {
   invoiceDate: string | null
   status: InvoiceStatus
   source: InvoiceSource
-  ocrJobId: string | null
   note: string | null
   createdBy: string
   createdAt: string
@@ -129,6 +130,10 @@ export interface ReceiptLine {
   barcodeGtin: string | null
   barcodeLot: string | null
   barcodeExpiry: string | null
+  barcodeAdditionalProductId: string | null
+  barcodeManufactureDate: string | null
+  barcodeBestBefore: string | null
+  barcodeSerial: string | null
   torThresholdMonths: number
   torExpiryCompliance: TorCompliance
   remainingShelfLifeDays: number | null
@@ -191,6 +196,7 @@ export interface ReceivingWorkspace {
   receipts: Receipt[]
   items: { id: string; itemCode: string; name: string; unit: string; trackLot: boolean; trackExpiry: boolean; catalogNo?: string | null; manufacturer?: string | null; supplier?: string | null }[]
   locations: { id: string; code: string; name: string; isActive: boolean }[]
+  assessments: ReceiptAssessment[]
   policy: ReceivingPolicy
 }
 

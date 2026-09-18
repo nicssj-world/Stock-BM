@@ -1,5 +1,10 @@
 # OCR feasibility findings — Revision 3
 
+> **Status: OCR removed from Stock1.** Owner removed OCR from approved Stock1
+> scope after real-iPhone acceptance testing (2026-09-18). The later
+> Tesseract.js runtime, OCR intake and OCR tables were also retired; these
+> findings are kept as history only.
+
 This record retires the throwaway OCR feasibility spike before the production receiving workflow is extended.
 The archive remains available on `origin/spike/ocr-v3`.
 

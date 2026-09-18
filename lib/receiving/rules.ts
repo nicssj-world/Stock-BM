@@ -5,14 +5,15 @@ type QuantityLine = { expectedQty: number | null; receivedQty: number }
 export function receiptIssues(receipt: Receipt, options: { expiryExceptionEnabled?: boolean } = {}) {
   const issues: { message: string; target: string }[] = []
   if (!receipt.lines.length) issues.push({ message: 'ต้องมีรายการรับเข้าอย่างน้อย 1 รายการ', target: 'lines' })
-  if (!receipt.packagingStatus) issues.push({ message: 'กรุณาระบุสภาพบรรจุภัณฑ์', target: 'packagingStatus' })
-  if (!receipt.temperatureStatus) issues.push({ message: 'กรุณาระบุสถานะอุณหภูมิ', target: 'temperatureStatus' })
+  // Packaging, documentation and cold-chain condition are captured by the
+  // Receipt Assessment after confirmation, so they no longer gate confirm.
   if (receipt.status !== 'draft') issues.push({ message: 'ใบรับเข้านี้ไม่อยู่ในสถานะร่าง', target: 'status' })
 
   receipt.lines.forEach((line, index) => {
     const target = `lines.${index}`
     if (!line.stockItemId) issues.push({ message: 'กรุณาเลือก item', target: `${target}.stockItemId` })
     if (!line.locationId) issues.push({ message: 'กรุณาเลือก location', target: `${target}.locationId` })
+    if (!line.lotNumber?.trim() && line.lotMode !== 'not_tracked') issues.push({ message: 'กรุณาระบุ Lot', target: `${target}.lotNumber` })
     if (!Number.isFinite(line.receivedQty) || line.receivedQty <= 0) issues.push({ message: 'จำนวนรับต้องมากกว่า 0', target: `${target}.receivedQty` })
     if (line.conflicts.length) issues.push({ message: 'ต้องแก้ไขข้อมูลที่ขัดแย้งก่อนยืนยัน', target: `${target}.conflicts` })
     if (line.torThresholdMonths !== 6) issues.push({ message: 'เกณฑ์ TOR ต้องเป็น 6 เดือนตามนโยบายกลาง', target: `${target}.torThresholdMonths` })

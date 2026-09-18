@@ -12,8 +12,8 @@ const protectedRoutes = [
   'app/api/receiving/receipts/[id]/lines/route.ts',
   'app/api/receiving/receipts/[id]/lines/[lineId]/route.ts',
   'app/api/receiving/receipts/[id]/confirm/route.ts',
+  'app/api/receiving/receipts/[id]/assessment/route.ts',
   'app/api/receiving/scan/parse/route.ts',
-  'app/api/receiving/ocr/jobs/route.ts',
 ]
 
 describe('receiving API access control', () => {

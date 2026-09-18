@@ -120,3 +120,73 @@ No production migration, deployment, or feature-flag change was performed.
 - Local reconciliation tooling remains verified with SELECT-only local BEFORE/AFTER snapshots and a zero-difference `--compare`. No production snapshot, migration, data write, deployment, or flag change was attempted.
 - READY-FOR-PRODUCTION checkpoint reached. Execution stops here pending explicit production-release approval; the production-safe runbook is documentation only.
 - Vercel CLI is not installed in this environment. If deployment is later approved, install it with `npm i -g vercel` before using `vercel env pull`, `vercel deploy`, or `vercel logs`.
+
+## Final scope change — OCR removed (single-phase final implementation)
+
+**Owner removed OCR from approved Stock1 scope after real-iPhone acceptance testing.**
+
+Final approved workflow: select Vendor → upload/photograph invoice → simple
+rectangular crop → select Item / Catalog-REF from Item Master → scan
+DataMatrix → Lot/Expiry auto-fill → actual received quantity → review →
+confirm (existing `confirm_bm_receipt` path) → Receipt Assessment popup →
+assessment feeds Vendor Performance and the Annual Vendor Evaluation.
+
+### Removed / retired
+
+- Tesseract.js dependency, `public/ocr/**` worker/core/wasm/traineddata, OCR
+  worker and multi-pass preprocessing, OCR candidate extraction and Catalog
+  fuzzy matching, known-lot OCR matching, OCR draft intake, the
+  `/api/receiving/ocr/jobs` route, OCR Preview sections and their tests.
+- Auto document detection, four-corner perspective crop, corner loupe and
+  quadrilateral geometry (`lib/receiving/document-crop.ts`).
+- `bm_ocr_jobs` / `bm_ocr_candidates`: migration `202609180007` is left
+  unchanged in history; `202609180010` drops the two unused tables
+  forward-only. The additive `source`/`ocr_job_id` columns stay as harmless
+  history; the API no longer accepts `source: 'ocr'`.
+- `lib/receiving/ocr-removed.test.ts` guards against reintroduction.
+
+### Added / completed
+
+- Invoice image = evidence only: library pick or rear-camera capture,
+  EXIF-upright decode, touch rectangular crop (pan + corner resize), Reset,
+  Skip Crop, Confirm Crop, replace before confirmation. Uploaded through the
+  existing attachment route as `stock-receipt` / `invoice-image` before confirm
+  and shown on the receipt report.
+- Item Master picker (Catalog/REF first; GTIN never matches Catalog/REF).
+- GS1 normalization: `]d2` embedded or metadata-only, leading FNC1, ASCII 29,
+  textual `<GS>`/`{FNC1}`/`\x1d`/U+241D notations, full GS1 AI-length table so
+  extra AIs (91–99, 7003 …) no longer fail a label, empty variable fields
+  rejected, DataMatrix raw-codeword fallback. Real fixtures A (Roche TPUC3) and
+  B pass; AI 240 is stored as evidence and never copied to Catalog/REF.
+- Receiving wizard + production adapter (draft → evidence upload → existing
+  confirm RPC). A failed confirm leaves a draft (no duplicate re-submit).
+  Packaging/temperature no longer gate confirmation; they moved to the
+  post-receipt assessment.
+- Receipt Assessment (`bm_receipt_assessments`): created Pending by trigger when
+  a receipt becomes confirmed; completed via `PUT
+  /api/receiving/receipts/[id]/assessment` (conditional pending→completed
+  update). No quantity question — quantity/completeness is read from receipt
+  lines. DB constraints enforce the conditional cold-chain answer and the
+  abnormal-note rule.
+- Vendor Performance now derives product condition, documentation, item
+  correctness, cold chain (provisional while P-12 unapproved) and complaints
+  from completed assessments; pending assessments are excluded and reported;
+  every metric carries drill-down sources; received-vs-expected quantity is
+  informational counts only. Complete Delivery stays closure-based and
+  provisional (P-06/P-09). Annual evaluation snapshots freeze the same
+  metrics + sources; result stays null (P-13/P-14 unapproved).
+- Vendor Registry links to each vendor's performance page.
+- `/preview/stock1-acceptance` rebuilt around the real wizard, assessment
+  dialog and metrics panel with browser-only fixtures (simulated confirm).
+
+### Local verification
+
+- `npx vitest run`: 646 passed, 6 failed (the six documented baseline
+  failures only), 1 skipped.
+- `npm run test:db`: PASS — all migrations incl. `202609180010`, L0-21
+  receipt assessment, legacy Receive, HPV return, partial receiving,
+  interleaved L0-12/L0-16/L0-17.
+- `npx tsc --noEmit`: PASS. `npm run build`: PASS.
+- `npm run lint`: only the three pre-existing baseline errors
+  (`components/admin-view.tsx:455`, `components/transaction-view.tsx:174,180`).
+- No production migration, data, deployment or flag change.

@@ -1,0 +1,373 @@
+'use client'
+
+import { useMemo, useRef, useState } from 'react'
+import { ArrowLeft, ClipboardCheck, FileText, PackagePlus, ScanLine, Trash2 } from 'lucide-react'
+import { remainingShelfLife, torExpiryCompliance } from '@/lib/bm/shelf-life'
+import { todayBangkok } from '@/lib/bm/rules'
+import type { ReceiptLineInput } from '@/lib/receiving/api-schemas'
+import { receiptQuantitySummary } from '@/lib/receiving/assessment'
+import { cumulativeReceived } from '@/lib/receiving/rules'
+import type { AcceptanceReasonCode, ReceiptDecision, ReceivingWorkspace, TorCompliance } from '@/lib/receiving/types'
+import { Button, Card, Field, Input, Notice, Select, StatusBadge } from '@/components/ui'
+import { ExpiryException } from '@/components/receiving/expiry-exception'
+import { InvoiceImageCrop, type InvoiceEvidenceImage } from '@/components/receiving/invoice-image-crop'
+import { ItemPicker } from '@/components/receiving/item-picker'
+import { PackageScan, type PackageScanResolver, type PackageScanResponse } from '@/components/receiving/package-scan'
+import type { ReceiptAssessmentContext } from '@/components/receiving/receipt-assessment-dialog'
+import type { BarcodeScanDiagnostics } from '@/lib/receiving/barcode-diagnostics'
+
+type ScanEvidence = {
+  raw: string
+  symbologyId: string | null
+  standard: string | null
+  gtin: string | null
+  lot: string | null
+  expiry: string | null
+  manufactureDate: string | null
+  bestBeforeDate: string | null
+  serial: string | null
+  additionalProductId: string | null
+  matchedItemId: string | null
+}
+
+export type ReceiveLineDraft = {
+  key: string
+  itemId: string
+  invoiceLineId: string | null
+  expectedQty: number | null
+  locationId: string
+  lotNumber: string
+  expiryDate: string
+  receivedQty: number
+  scan: ScanEvidence | null
+  compliance: TorCompliance
+  remainingShelfLifeDays: number | null
+  receiptDecision: ReceiptDecision
+  acceptanceReasonCode: AcceptanceReasonCode | null
+  acceptanceReasonNote: string | null
+}
+
+export type ReceiveSubmission = {
+  vendorId: string
+  invoiceId: string | null
+  receiptNo: string | null
+  receivedDate: string
+  lines: ReceiptLineInput[]
+  evidence: InvoiceEvidenceImage | null
+}
+
+/**
+ * Production posts to the existing draft → evidence → confirm_bm_receipt
+ * path; Preview supplies an in-browser simulation. The wizard itself never
+ * calls an API and never mutates stock.
+ */
+export type ReceiveAdapter = {
+  resolveScan?: PackageScanResolver
+  /** Preview-only scan diagnostics (raw bytes, normalized GS1, parser errors). */
+  onScanDiagnostics?: (diagnostics: BarcodeScanDiagnostics) => void
+  submit: (submission: ReceiveSubmission) => Promise<{ receiptId: string; receiptLabel?: string }>
+}
+
+/** Thrown by an adapter when a draft was saved but not confirmed, so the form must not re-submit it. */
+export class ReceiveDraftSavedError extends Error {
+  readonly draftSaved = true
+}
+
+type EditorState = {
+  itemId: string | null
+  proposedItemId: string | null
+  invoiceLineId: string
+  locationId: string
+  lotNumber: string
+  expiryDate: string
+  receivedQty: string
+  scan: ScanEvidence | null
+  receiptDecision: ReceiptDecision
+  acceptanceReasonCode: AcceptanceReasonCode | null
+  acceptanceReasonNote: string | null
+}
+
+const blankEditor = (locationId: string): EditorState => ({
+  itemId: null,
+  proposedItemId: null,
+  invoiceLineId: '',
+  locationId,
+  lotNumber: '',
+  expiryDate: '',
+  receivedQty: '',
+  scan: null,
+  receiptDecision: 'accepted',
+  acceptanceReasonCode: null,
+  acceptanceReasonNote: null,
+})
+
+export function ReceiveWizard({ data, adapter, onReceived, onError }: {
+  data: ReceivingWorkspace
+  adapter: ReceiveAdapter
+  onReceived: (result: { receiptId: string; assessment: ReceiptAssessmentContext }) => void
+  onError?: (message: string) => void
+}) {
+  const activeVendors = data.vendors.filter((vendor) => vendor.isActive)
+  const activeLocations = data.locations.filter((location) => location.isActive)
+  const defaultLocation = activeLocations[0]?.id ?? ''
+  const [vendorId, setVendorId] = useState('')
+  const [invoiceId, setInvoiceId] = useState('')
+  const [receiptNo, setReceiptNo] = useState('')
+  const [evidence, setEvidence] = useState<InvoiceEvidenceImage | null>(null)
+  const [editor, setEditor] = useState<EditorState>(() => blankEditor(defaultLocation))
+  const [lines, setLines] = useState<ReceiveLineDraft[]>([])
+  const [stage, setStage] = useState<'edit' | 'review'>('edit')
+  const [lineError, setLineError] = useState<string | null>(null)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const lineKeySeed = useRef(0)
+  const receivedDate = todayBangkok()
+
+  const openInvoices = useMemo(() => data.invoices.filter((invoice) => invoice.status === 'open' && invoice.vendorId === vendorId), [data.invoices, vendorId])
+  const selectedInvoice = data.invoices.find((invoice) => invoice.id === invoiceId) ?? null
+  const selectedItem = data.items.find((item) => item.id === editor.itemId) ?? null
+  const proposedItem = data.items.find((item) => item.id === editor.proposedItemId) ?? null
+  const vendor = data.vendors.find((item) => item.id === vendorId) ?? null
+  const confirmedLines = useMemo(() => data.receipts.filter((receipt) => receipt.status === 'confirmed').flatMap((receipt) => receipt.lines), [data.receipts])
+
+  const liveCompliance = torExpiryCompliance(editor.expiryDate || null, receivedDate)
+  const lotMismatch = Boolean(editor.scan?.lot && editor.lotNumber.trim() !== editor.scan.lot)
+  const expiryMismatch = Boolean(editor.scan?.expiry && editor.expiryDate !== editor.scan.expiry)
+  const itemMismatch = Boolean(editor.scan?.matchedItemId && editor.itemId && editor.scan.matchedItemId !== editor.itemId)
+
+  function patchEditor(next: Partial<EditorState>) {
+    setEditor((current) => ({ ...current, ...next }))
+    setLineError(null)
+  }
+
+  function chooseVendor(next: string) {
+    setVendorId(next)
+    setInvoiceId('')
+    setLines((current) => current.map((line) => ({ ...line, invoiceLineId: null, expectedQty: null })))
+    patchEditor({ invoiceLineId: '' })
+  }
+
+  function chooseInvoiceLine(lineId: string) {
+    const invoiceLine = selectedInvoice?.lines.find((line) => line.id === lineId)
+    patchEditor({ invoiceLineId: lineId, ...(invoiceLine?.stockItemId ? { itemId: invoiceLine.stockItemId } : {}) })
+  }
+
+  function applyScan(result: PackageScanResponse) {
+    const parsed = result.parsed
+    const scan: ScanEvidence = {
+      raw: parsed.raw,
+      symbologyId: parsed.symbologyId,
+      standard: parsed.standard,
+      gtin: parsed.gtin,
+      lot: parsed.lot,
+      expiry: parsed.expiry,
+      manufactureDate: parsed.manufactureDate,
+      bestBeforeDate: parsed.bestBeforeDate,
+      serial: parsed.serial,
+      additionalProductId: parsed.additionalProductId,
+      matchedItemId: result.itemId,
+    }
+    patchEditor({
+      scan,
+      ...(parsed.lot ? { lotNumber: parsed.lot } : {}),
+      ...(parsed.expiry ? { expiryDate: parsed.expiry } : {}),
+      // An exact unique GTIN mapping only proposes an Item; the user accepts it.
+      proposedItemId: !editor.itemId && result.itemId ? result.itemId : null,
+    })
+  }
+
+  function addLine() {
+    const qty = Number(editor.receivedQty)
+    if (!editor.itemId || !selectedItem) return setLineError('กรุณาเลือก Item / Catalog-REF จาก Item Master')
+    if (!editor.locationId) return setLineError('กรุณาเลือก location')
+    if (selectedItem.trackLot && !editor.lotNumber.trim()) return setLineError('กรุณาระบุ Lot')
+    if (selectedItem.trackExpiry && !editor.expiryDate) return setLineError('กรุณาระบุวันหมดอายุ')
+    if (!editor.receivedQty.trim() || !Number.isFinite(qty) || qty <= 0) return setLineError('กรุณาระบุจำนวนที่ได้รับจริง (มากกว่า 0)')
+    if (itemMismatch) return setLineError('GTIN ของ package ผูกกับ Item อื่น — ตรวจสอบ Item หรือสแกนใหม่')
+    if (lotMismatch || expiryMismatch) return setLineError('Lot/Expiry ไม่ตรงกับ barcode — แก้ให้ตรง หรือกด “ล้างข้อมูล barcode”')
+    if (selectedInvoice && !editor.invoiceLineId) return setLineError('กรุณาเลือกรายการในใบส่งของ หรือเลือก “ไม่ผูกใบส่งของ”')
+    if (liveCompliance === 'not_compliant') {
+      if (!data.policy.expiryExceptionEnabled) return setLineError('ยังไม่เปิดใช้งานการรับสินค้าที่ไม่ผ่านเกณฑ์ TOR — รออนุมัติผู้มีสิทธิ์ (P-01/P-02)')
+      if (editor.receiptDecision !== 'accepted_with_justification' || !editor.acceptanceReasonCode || (editor.acceptanceReasonCode === 'other' && !editor.acceptanceReasonNote?.trim())) {
+        return setLineError('กรุณาระบุเหตุผลการยอมรับสินค้าที่ไม่ผ่านเกณฑ์ TOR ให้ครบ')
+      }
+    }
+    const invoiceLine = selectedInvoice?.lines.find((line) => line.id === editor.invoiceLineId) ?? null
+    lineKeySeed.current += 1
+    setLines((current) => [...current, {
+      key: `line-${lineKeySeed.current}`,
+      itemId: editor.itemId!,
+      invoiceLineId: invoiceLine?.id ?? null,
+      expectedQty: invoiceLine?.expectedQty ?? null,
+      locationId: editor.locationId,
+      lotNumber: selectedItem.trackLot ? editor.lotNumber.trim() : '',
+      expiryDate: selectedItem.trackExpiry ? editor.expiryDate : '',
+      receivedQty: qty,
+      scan: editor.scan,
+      compliance: liveCompliance,
+      remainingShelfLifeDays: remainingShelfLife(editor.expiryDate || null, receivedDate),
+      receiptDecision: liveCompliance === 'not_compliant' ? 'accepted_with_justification' : 'accepted',
+      acceptanceReasonCode: liveCompliance === 'not_compliant' ? editor.acceptanceReasonCode : null,
+      acceptanceReasonNote: liveCompliance === 'not_compliant' ? editor.acceptanceReasonNote : null,
+    }])
+    setEditor(blankEditor(editor.locationId))
+  }
+
+  function itemName(itemId: string) {
+    const item = data.items.find((candidate) => candidate.id === itemId)
+    return item ? `${item.catalogNo ? `REF ${item.catalogNo} · ` : ''}${item.name}` : itemId
+  }
+
+  function toSubmissionLines(): ReceiptLineInput[] {
+    return lines.map((line, index) => {
+      const item = data.items.find((candidate) => candidate.id === line.itemId)
+      return {
+        lineNo: index + 1,
+        invoiceLineId: line.invoiceLineId,
+        stockItemId: line.itemId,
+        locationId: line.locationId,
+        lotNumber: line.lotNumber || null,
+        expiryDate: line.expiryDate || null,
+        lotMode: item?.trackLot ? 'new' : 'not_tracked',
+        expectedQty: line.expectedQty,
+        receivedQty: line.receivedQty,
+        barcodeRaw: line.scan?.raw ?? null,
+        barcodeSymbology: line.scan?.symbologyId ?? null,
+        barcodeStandard: line.scan?.standard ?? null,
+        barcodeGtin: line.scan?.gtin ?? null,
+        barcodeLot: line.scan?.lot ?? null,
+        barcodeExpiry: line.scan?.expiry ?? null,
+        barcodeAdditionalProductId: line.scan?.additionalProductId ?? null,
+        barcodeManufactureDate: line.scan?.manufactureDate ?? null,
+        barcodeBestBefore: line.scan?.bestBeforeDate ?? null,
+        barcodeSerial: line.scan?.serial ?? null,
+        conflicts: [],
+        torExpiryCompliance: line.compliance,
+        remainingShelfLifeDays: line.remainingShelfLifeDays,
+        receiptDecision: line.receiptDecision,
+        acceptanceReasonCode: line.acceptanceReasonCode,
+        acceptanceReasonNote: line.acceptanceReasonNote,
+        sortOrder: index + 1,
+      }
+    })
+  }
+
+  function assessmentContext(receiptId: string, receiptLabel: string): ReceiptAssessmentContext {
+    return {
+      receiptId,
+      receiptLabel,
+      vendorLabel: vendor ? `${vendor.code} · ${vendor.name}` : vendorId,
+      receivedDate,
+      quantity: receiptQuantitySummary(lines.map((line, index) => {
+        const item = data.items.find((candidate) => candidate.id === line.itemId)
+        const previous = line.invoiceLineId ? cumulativeReceived(confirmedLines.filter((candidate) => candidate.invoiceLineId === line.invoiceLineId)) : null
+        const sameReceipt = line.invoiceLineId ? cumulativeReceived(lines.filter((candidate) => candidate.invoiceLineId === line.invoiceLineId)) : null
+        return {
+          lineNo: index + 1,
+          itemLabel: itemName(line.itemId),
+          unit: item?.unit ?? '',
+          receivedQty: line.receivedQty,
+          expectedQty: line.expectedQty,
+          cumulativeReceivedQty: previous == null || sameReceipt == null ? null : previous + sameReceipt,
+        }
+      })),
+    }
+  }
+
+  async function confirmReceipt() {
+    if (!vendorId || !lines.length || busy) return
+    setBusy(true)
+    setSubmitError(null)
+    try {
+      const submission: ReceiveSubmission = { vendorId, invoiceId: invoiceId || null, receiptNo: receiptNo.trim() || null, receivedDate, lines: toSubmissionLines(), evidence }
+      const result = await adapter.submit(submission)
+      const context = assessmentContext(result.receiptId, result.receiptLabel ?? (receiptNo.trim() || result.receiptId.slice(0, 8)))
+      setLines([])
+      setEvidence(null)
+      setReceiptNo('')
+      setInvoiceId('')
+      setStage('edit')
+      setEditor(blankEditor(editor.locationId))
+      onReceived({ receiptId: result.receiptId, assessment: context })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'ยืนยันรับสินค้าไม่สำเร็จ'
+      if (error instanceof ReceiveDraftSavedError) {
+        // The draft now lives in the drafts list; clearing avoids a duplicate draft on retry.
+        setLines([])
+        setEvidence(null)
+        setStage('edit')
+      }
+      setSubmitError(message)
+      onError?.(message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const stepTitle = (step: number, title: string, done: boolean) => <p className="flex items-center gap-2 text-sm font-bold text-[#173d50]"><span className={`grid size-6 place-items-center rounded-full text-xs ${done ? 'bg-[#0b7f76] text-white' : 'bg-[#e4eff0] text-[#315763]'}`}>{step}</span>{title}</p>
+
+  if (stage === 'review') {
+    return <Card className="space-y-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-xs font-bold tracking-[0.14em] text-[#0b7f76] uppercase">ตรวจสอบก่อนยืนยัน</p><h2 className="mt-1 text-lg font-bold text-[#173d50]">Review receipt</h2></div><StatusBadge tone="warning" label="ยังไม่บันทึก stock" /></div>
+      <dl className="grid gap-2 rounded-md border border-[#dce8e9] bg-[#f8fbfb] p-3 text-sm sm:grid-cols-2">
+        <div><dt className="text-xs text-[#81979c]">Vendor</dt><dd className="font-semibold text-[#173d50]">{vendor ? `${vendor.code} · ${vendor.name}` : '-'}</dd></div>
+        <div><dt className="text-xs text-[#81979c]">ใบส่งของ (Expected)</dt><dd className="font-semibold text-[#173d50]">{selectedInvoice ? selectedInvoice.invoiceNo ?? selectedInvoice.id.slice(0, 8) : 'ไม่ผูก'}</dd></div>
+        <div><dt className="text-xs text-[#81979c]">วันที่รับ</dt><dd className="font-semibold text-[#173d50]">{receivedDate}</dd></div>
+        <div><dt className="text-xs text-[#81979c]">หลักฐานใบส่งของ</dt><dd className="font-semibold text-[#173d50]">{evidence ? `แนบรูป (${evidence.skipped ? 'ภาพเต็ม' : 'crop แล้ว'})` : 'ไม่มีรูป'}</dd></div>
+      </dl>
+      <ul className="space-y-2">{lines.map((line, index) => {
+        const item = data.items.find((candidate) => candidate.id === line.itemId)
+        return <li key={line.key} className="rounded-md border border-[#dce8e9] p-3 text-sm"><p className="font-semibold text-[#173d50]">#{index + 1} {itemName(line.itemId)}</p><p className="mt-1 text-xs text-[#58747d]">Lot <span className="mono">{line.lotNumber || '—'}</span> · Exp <span className="mono">{line.expiryDate || '—'}</span> · รับจริง <b>{line.receivedQty} {item?.unit ?? ''}</b>{line.expectedQty != null ? ` · expected ${line.expectedQty}` : ''}{line.scan ? ' · จาก barcode' : ''}</p></li>
+      })}</ul>
+      {submitError ? <Notice tone="danger">{submitError}</Notice> : null}
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="secondary" disabled={busy} onClick={() => setStage('edit')}><ArrowLeft className="size-4" />กลับไปแก้ไข</Button>
+        <Button type="button" disabled={busy || !lines.length || !vendorId} onClick={() => void confirmReceipt()}><ClipboardCheck className="size-4" />{busy ? 'กำลังบันทึก…' : 'ยืนยันรับสินค้า'}</Button>
+      </div>
+      <p className="text-xs text-[#81979c]">ระบบจะตรวจ lot, expiry, TOR และ feature flag ซ้ำในฐานข้อมูลก่อนเขียนผ่าน ledger เดิม</p>
+    </Card>
+  }
+
+  return <div className="space-y-4">
+    <Card className="space-y-3 p-4">
+      {stepTitle(1, 'เลือก Vendor', Boolean(vendorId))}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Vendor"><Select required value={vendorId} onChange={(event) => chooseVendor(event.target.value)}><option value="">เลือก vendor จาก Vendor Registry</option>{activeVendors.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}</Select></Field>
+        <Field label="เลขที่ใบรับเข้า" hint="ไม่บังคับ"><Input value={receiptNo} onChange={(event) => setReceiptNo(event.target.value)} /></Field>
+        {vendorId && openInvoices.length ? <Field label="ใบส่งของที่รอรับ (Expected receipt)" hint="ไม่บังคับ — ใช้ติดตามรับบางส่วน"><Select value={invoiceId} onChange={(event) => { setInvoiceId(event.target.value); patchEditor({ invoiceLineId: '' }) }}><option value="">ไม่ผูกใบส่งของ</option>{openInvoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.invoiceNo ?? invoice.id.slice(0, 8)} · {invoice.lines.length} รายการ</option>)}</Select></Field> : null}
+      </div>
+    </Card>
+
+    <div>{stepTitle(2, 'รูปใบส่งของ (หลักฐาน)', Boolean(evidence))}<div className="mt-2"><InvoiceImageCrop value={evidence} onChange={setEvidence} disabled={busy} /></div></div>
+
+    <Card className="space-y-4 p-4">
+      {stepTitle(3, 'เพิ่มรายการรับ: Item → Scan → Lot/Expiry → จำนวน', lines.length > 0)}
+      <Field label="Item / Catalog-REF">
+        <ItemPicker items={data.items} value={editor.itemId} onChange={(itemId) => patchEditor({ itemId, proposedItemId: null })} disabled={busy} />
+      </Field>
+      {proposedItem && !editor.itemId ? <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#b8ded8] bg-[#f4fbf9] p-3 text-sm"><p className="text-[#315763]">GTIN ตรงกับ Item เดียวใน Item Master: <b>{itemName(proposedItem.id)}</b></p><Button type="button" variant="secondary" onClick={() => patchEditor({ itemId: proposedItem.id, proposedItemId: null })}>ใช้ Item นี้</Button></div> : null}
+      {selectedInvoice ? <Field label="รายการในใบส่งของ"><Select value={editor.invoiceLineId} onChange={(event) => chooseInvoiceLine(event.target.value)}><option value="">เลือกรายการ</option>{selectedInvoice.lines.filter((line) => line.closureState !== 'cancelled').map((line) => <option key={line.id} value={line.id}>#{line.lineNo} · {line.catalogNoText ?? line.descriptionText ?? 'ไม่มีรายละเอียด'} · expected {line.expectedQty}</option>)}</Select></Field> : null}
+      <PackageScan key={editor.itemId ?? 'no-item'} selectedItemId={editor.itemId} disabled={busy} onUse={applyScan} resolveScan={adapter.resolveScan} onScanDiagnostics={adapter.onScanDiagnostics} />
+      {editor.scan ? <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#58747d]"><span className="flex items-center gap-1"><ScanLine className="size-4" />ใช้ข้อมูลจาก barcode {editor.scan.standard?.toUpperCase()}</span><button type="button" className="min-h-11 px-2 font-semibold text-[#0b7f76] underline" onClick={() => patchEditor({ scan: null })}>ล้างข้อมูล barcode</button></div> : null}
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label={`Lot${selectedItem && !selectedItem.trackLot ? ' (ไม่ติดตาม)' : ''}`}><Input value={editor.lotNumber} onChange={(event) => patchEditor({ lotNumber: event.target.value })} disabled={busy || Boolean(selectedItem && !selectedItem.trackLot)} className={`mono ${lotMismatch ? 'border-[#d9534f]' : ''}`} autoCapitalize="characters" /></Field>
+        <Field label={`วันหมดอายุ${selectedItem && !selectedItem.trackExpiry ? ' (ไม่ติดตาม)' : ''}`}><Input type="date" value={editor.expiryDate} onChange={(event) => patchEditor({ expiryDate: event.target.value })} disabled={busy || Boolean(selectedItem && !selectedItem.trackExpiry)} className={expiryMismatch ? 'border-[#d9534f]' : ''} /></Field>
+        <Field label={`จำนวนที่ได้รับจริง${selectedItem ? ` (${selectedItem.unit})` : ''}`}><Input type="number" inputMode="decimal" min="0.001" step="0.001" value={editor.receivedQty} onChange={(event) => patchEditor({ receivedQty: event.target.value })} disabled={busy} required /></Field>
+      </div>
+      {lotMismatch || expiryMismatch ? <p className="text-xs font-semibold text-[#a83541]">Lot/Expiry ที่แก้ไม่ตรงกับ barcode</p> : null}
+      <Field label="Location"><Select value={editor.locationId} onChange={(event) => patchEditor({ locationId: event.target.value })}><option value="">เลือก location</option>{activeLocations.map((location) => <option key={location.id} value={location.id}>{location.code} · {location.name}</option>)}</Select></Field>
+      {editor.expiryDate ? <p className="text-xs"><StatusBadge tone={liveCompliance === 'compliant' ? 'accepted' : liveCompliance === 'not_compliant' ? 'warning' : 'neutral'} label={liveCompliance === 'compliant' ? '✓ ผ่านเกณฑ์ TOR (> 6 เดือน)' : liveCompliance === 'not_compliant' ? '⚠ ไม่ผ่าน TOR' : 'ไม่ประเมิน TOR'} /></p> : null}
+      {liveCompliance === 'not_compliant' && editor.expiryDate ? <ExpiryException lineId="new-line" expiry={editor.expiryDate} received={receivedDate} enabled={data.policy.expiryExceptionEnabled} decision={editor.receiptDecision} reasonCode={editor.acceptanceReasonCode} reasonNote={editor.acceptanceReasonNote} onDecisionChange={(value) => patchEditor({ receiptDecision: value })} onReasonChange={(value) => patchEditor({ acceptanceReasonCode: value, receiptDecision: 'accepted_with_justification' })} onReasonNoteChange={(value) => patchEditor({ acceptanceReasonNote: value })} /> : null}
+      {lineError ? <Notice tone="danger">{lineError}</Notice> : null}
+      <Button type="button" variant="secondary" disabled={busy} onClick={addLine}><PackagePlus className="size-4" />เพิ่มรายการนี้</Button>
+    </Card>
+
+    <Card className="space-y-3 p-4">
+      {stepTitle(4, `รายการที่จะรับ (${lines.length})`, lines.length > 0)}
+      {lines.length ? <ul className="space-y-2">{lines.map((line, index) => <li key={line.key} className="flex items-start justify-between gap-2 rounded-md border border-[#dce8e9] p-3 text-sm"><div className="min-w-0"><p className="font-semibold text-[#173d50]">#{index + 1} {itemName(line.itemId)}</p><p className="text-xs text-[#58747d]">Lot <span className="mono">{line.lotNumber || '—'}</span> · Exp <span className="mono">{line.expiryDate || '—'}</span> · รับจริง <b>{line.receivedQty}</b>{line.expectedQty != null ? ` / expected ${line.expectedQty}` : ''}</p></div><Button type="button" variant="ghost" aria-label={`ลบรายการ ${index + 1}`} disabled={busy} onClick={() => setLines((current) => current.filter((candidate) => candidate.key !== line.key))}><Trash2 className="size-4" /></Button></li>)}</ul> : <p className="text-sm text-[#81979c]">ยังไม่มีรายการ — เพิ่มจากขั้นตอนที่ 3</p>}
+      {submitError ? <Notice tone="danger">{submitError}</Notice> : null}
+      {!vendorId && lines.length ? <Notice tone="warning">กรุณาเลือก Vendor ก่อนตรวจสอบ</Notice> : null}
+      <Button type="button" disabled={busy || !vendorId || !lines.length} onClick={() => setStage('review')}><FileText className="size-4" />ตรวจสอบก่อนยืนยัน</Button>
+    </Card>
+  </div>
+}

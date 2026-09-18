@@ -6,17 +6,9 @@ import type { VendorEvaluationApproval, VendorEvaluationRole, VendorEvaluationWo
 import { VENDOR_EVALUATION_ROLES } from '@/lib/vendors/evaluation-types'
 import { api, Button, Card, Field, Notice, Textarea } from '@/components/ui'
 import { SignaturePad, type SignaturePadHandle } from '@/components/signature-pad'
+import { VendorMetricsPanel } from '@/components/vendors/vendor-metrics-panel'
 
 const roleLabels: Record<VendorEvaluationRole, string> = { evaluator: 'Evaluator', reviewer: 'Reviewer', approver: 'Approver' }
-
-const metricLabels: Record<string, string> = {
-  complete_delivery: 'Complete Delivery',
-  shelf_life_compliance: 'Shelf-life compliance',
-  packaging_compliance: 'Packaging compliance',
-  temperature_compliance: 'Temperature compliance',
-  documentation_discrepancies: 'Documentation discrepancies',
-  complaint_resolution: 'Complaint resolution',
-}
 
 export function VendorEvaluationView({ initialEvaluation }: { initialEvaluation: VendorEvaluationWorkspace }) {
   const [workspace, setWorkspace] = useState(initialEvaluation)
@@ -88,7 +80,7 @@ export function VendorEvaluationView({ initialEvaluation }: { initialEvaluation:
       {notice ? <Notice tone={notice.tone === 'success' ? 'success' : 'danger'}>{notice.text}</Notice> : null}
       {!workspace.policy.isApproved ? <Notice tone="warning">ยังไม่ได้กำหนดสูตรคะแนน — รออนุมัติ P-13/P-14 · result จะคงเป็น null</Notice> : <Notice tone="info">มี policy row ที่อนุมัติแล้ว แต่การคำนวณผลจะอ่านจาก policy ที่อนุมัติเท่านั้น</Notice>}
 
-      <section><div className="mb-3"><p className="text-[11px] font-bold tracking-[0.14em] text-[#0b7f76] uppercase">Frozen evidence</p><h2 className="mt-1 text-xl font-bold text-[#173d50]">Metrics snapshot ของร่างฉบับนี้</h2><p className="mt-1 text-xs text-[#81979c]">snapshot ถูกตรึงตอนสร้าง/สร้าง revision ใหม่ ไม่เปลี่ยนตาม receipt ภายหลังโดยอัตโนมัติ</p></div><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{Object.values(workspace.evaluation.metricsSnapshot.metrics).map((metric) => <Card key={metric.key} className="p-4"><p className="text-sm font-bold text-[#315763]">{metricLabels[metric.key] ?? metric.key}</p><p className="mono mt-2 text-2xl font-bold text-[#173d50]">{metric.display === 'count' ? metric.numerator : metric.denominator == null ? '-' : `${metric.numerator}/${metric.denominator}`}</p><p className="mt-1 text-xs text-[#81979c]">{metric.applicablePopulation}{metric.provisional ? ' · provisional' : ''}</p></Card>)}</div></section>
+      <section><div className="mb-3"><p className="text-[11px] font-bold tracking-[0.14em] text-[#0b7f76] uppercase">Frozen evidence</p><h2 className="mt-1 text-xl font-bold text-[#173d50]">Metrics snapshot ของร่างฉบับนี้</h2><p className="mt-1 text-xs text-[#81979c]">snapshot (รวมผล Receipt Assessment, ข้อมูลจำนวนรับ และ issue พร้อมที่มา) ถูกตรึงตอนสร้าง/สร้าง revision ใหม่ ไม่เปลี่ยนตาม receipt ภายหลังโดยอัตโนมัติ · ไม่มีคะแนน น้ำหนัก หรือเกณฑ์ผ่าน/ไม่ผ่าน</p></div><VendorMetricsPanel metrics={workspace.evaluation.metricsSnapshot} /></section>
 
       <Card className="p-4"><div><p className="text-[11px] font-bold tracking-[0.14em] text-[#0b7f76] uppercase">Judgment</p><h2 className="mt-1 text-xl font-bold text-[#173d50]">ข้อพิจารณาและแผนติดตาม</h2><p className="mt-1 text-xs text-[#81979c]">การบันทึกใหม่จะสร้าง revision ใหม่และเก็บลายเซ็นเดิมไว้เป็น audit</p></div><div className="mt-4 grid gap-3 md:grid-cols-2"><Field label="สรุปการประเมิน"><Textarea rows={4} value={judgment.summary} onChange={(event) => setJudgment({ ...judgment, summary: event.target.value })} /></Field><Field label="จุดแข็ง"><Textarea rows={4} value={judgment.strengths} onChange={(event) => setJudgment({ ...judgment, strengths: event.target.value })} /></Field><Field label="ความเสี่ยง / ประเด็นต้องติดตาม"><Textarea rows={4} value={judgment.risks} onChange={(event) => setJudgment({ ...judgment, risks: event.target.value })} /></Field><Field label="แผนการติดตาม"><Textarea rows={4} value={judgment.actions} onChange={(event) => setJudgment({ ...judgment, actions: event.target.value })} /></Field></div><Button type="button" className="mt-3" disabled={busy || !judgment.summary.trim()} onClick={() => void regenerate()}>บันทึกร่างใหม่ / สร้าง revision</Button></Card>
 

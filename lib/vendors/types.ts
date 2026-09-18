@@ -1,5 +1,5 @@
 import type { Vendor, VendorIssue, VendorSignificantEvent } from '@/lib/receiving/types'
-import type { VendorMetricKey } from './metrics'
+import type { AssessmentEvidence, VendorMetricKey } from './metrics'
 
 export type VendorMetrics = ReturnType<typeof import('./metrics').buildVendorMetrics>
 
@@ -13,13 +13,13 @@ export type VendorPerformance = {
   significantEvents: VendorSignificantEvent[]
   receiptSources: Array<{
     id: string
+    receiptNo: string | null
     invoiceId: string | null
     receivedDate: string
     status: string
-    packagingStatus: string | null
-    temperatureStatus: string | null
-    coldChainApplicable: boolean
+    assessmentStatus: 'pending' | 'completed' | null
   }>
+  assessmentSources: Array<AssessmentEvidence & { note: string | null; assessedAt: string | null }>
   receiptLineSources: Array<{
     id: string
     receiptId: string

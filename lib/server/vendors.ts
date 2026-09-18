@@ -237,7 +237,7 @@ export async function getVendorPerformance(vendorId: string, fiscalYear: string)
   const admin = getAdminClient()
   const [{ data: invoiceData, error: invoiceError }, { data: receiptData, error: receiptError }, { data: issueData, error: issueError }, { data: eventData, error: eventError }, { data: mappingData, error: mappingError }] = await Promise.all([
     admin.from('bm_invoices').select('id,invoice_date,status').eq('vendor_id', vendorId).gte('invoice_date', bounds.from).lte('invoice_date', bounds.to),
-    admin.from('bm_receipts').select('id,invoice_id,received_date,status,packaging_status,temperature_status,cold_chain_applicable').eq('vendor_id', vendorId).gte('received_date', bounds.from).lte('received_date', bounds.to),
+    admin.from('bm_receipts').select('id,receipt_no,invoice_id,received_date,status').eq('vendor_id', vendorId).gte('received_date', bounds.from).lte('received_date', bounds.to),
     admin.from('bm_vendor_issues').select('*').eq('vendor_id', vendorId).gte('opened_at', `${bounds.from}T00:00:00Z`).lte('opened_at', `${bounds.to}T23:59:59Z`).order('opened_at', { ascending: false }),
     admin.from('bm_vendor_significant_events').select('*').eq('vendor_id', vendorId).gte('event_date', bounds.from).lte('event_date', bounds.to).order('event_date', { ascending: false }),
     admin.from('bm_receiving_cold_chain_mappings').select('is_approved'),
@@ -247,24 +247,52 @@ export async function getVendorPerformance(vendorId: string, fiscalYear: string)
   const invoices = (invoiceData ?? []) as RecordRow[]
   const receipts = (receiptData ?? []) as RecordRow[]
   const invoiceIds = invoices.map((row) => asString(row.id)).filter(Boolean)
-  const receiptIds = receipts.map((row) => asString(row.id)).filter(Boolean)
-  const [{ data: invoiceLineData, error: invoiceLineError }, { data: receiptLineData, error: receiptLineError }] = await Promise.all([
-    invoiceIds.length ? admin.from('bm_invoice_lines').select('id,invoice_id,line_no,closure_state').in('invoice_id', invoiceIds) : Promise.resolve({ data: [], error: null }),
-    receiptIds.length ? admin.from('bm_receipt_lines').select('id,receipt_id,invoice_line_id,tor_expiry_compliance').in('receipt_id', receiptIds) : Promise.resolve({ data: [], error: null }),
+  const confirmedReceipts = receipts.filter((row) => asString(row.status) === 'confirmed')
+  const confirmedReceiptIds = confirmedReceipts.map((row) => asString(row.id)).filter(Boolean)
+  const [{ data: invoiceLineData, error: invoiceLineError }, { data: receiptLineData, error: receiptLineError }, { data: assessmentData, error: assessmentError }] = await Promise.all([
+    invoiceIds.length ? admin.from('bm_invoice_lines').select('id,invoice_id,line_no,closure_state,expected_qty').in('invoice_id', invoiceIds) : Promise.resolve({ data: [], error: null }),
+    confirmedReceiptIds.length ? admin.from('bm_receipt_lines').select('id,receipt_id,invoice_line_id,tor_expiry_compliance').in('receipt_id', confirmedReceiptIds) : Promise.resolve({ data: [], error: null }),
+    confirmedReceiptIds.length ? admin.from('bm_receipt_assessments').select('*').in('receipt_id', confirmedReceiptIds) : Promise.resolve({ data: [], error: null }),
   ])
-  fail(invoiceLineError); fail(receiptLineError)
+  fail(invoiceLineError); fail(receiptLineError); fail(assessmentError)
+
+  const invoiceLineIds = ((invoiceLineData ?? []) as RecordRow[]).map((row) => asString(row.id)).filter(Boolean)
+  // Received quantity per expected line comes from every confirmed receipt of
+  // that line, even one received after the fiscal year closed.
+  const { data: fulfilmentData, error: fulfilmentError } = invoiceLineIds.length
+    ? await admin.from('bm_receipt_lines').select('invoice_line_id,received_qty,bm_receipts!inner(status)').in('invoice_line_id', invoiceLineIds).eq('bm_receipts.status', 'confirmed')
+    : { data: [], error: null }
+  fail(fulfilmentError)
+  const receivedByInvoiceLine = new Map<string, number>()
+  for (const row of (fulfilmentData ?? []) as RecordRow[]) {
+    const lineId = asString(row.invoice_line_id)
+    receivedByInvoiceLine.set(lineId, (receivedByInvoiceLine.get(lineId) ?? 0) + asNumber(row.received_qty))
+  }
 
   const invoiceDates = new Map(invoices.map((row) => [asString(row.id), nullableString(row.invoice_date)]))
   const issueRows = ((issueData ?? []) as RecordRow[]).map(toVendorIssue)
   const eventRows = ((eventData ?? []) as RecordRow[]).map(toSignificantEvent)
+  const assessmentRows = ((assessmentData ?? []) as RecordRow[]).map((row) => ({
+    id: asString(row.id),
+    receiptId: asString(row.receipt_id),
+    status: (asString(row.status) === 'completed' ? 'completed' : 'pending') as 'pending' | 'completed',
+    productCondition: nullableString(row.product_condition) as 'normal' | 'abnormal' | null,
+    documentation: nullableString(row.documentation) as 'complete' | 'incomplete' | null,
+    itemCorrectness: nullableString(row.item_correctness) as 'correct' | 'problem' | null,
+    coldChainApplicable: row.cold_chain_applicable == null ? null : Boolean(row.cold_chain_applicable),
+    coldChainCondition: nullableString(row.cold_chain_condition) as 'appropriate' | 'inappropriate' | null,
+    hasComplaint: row.has_complaint == null ? null : Boolean(row.has_complaint),
+    note: nullableString(row.note),
+    assessedAt: nullableString(row.assessed_at),
+  }))
+  const assessmentByReceipt = new Map(assessmentRows.map((row) => [row.receiptId, row]))
   const receiptRows = receipts.map((row) => ({
     id: asString(row.id),
+    receiptNo: nullableString(row.receipt_no),
     invoiceId: nullableString(row.invoice_id),
     receivedDate: asString(row.received_date),
     status: asString(row.status),
-    packagingStatus: nullableString(row.packaging_status),
-    temperatureStatus: nullableString(row.temperature_status),
-    coldChainApplicable: Boolean(row.cold_chain_applicable),
+    assessmentStatus: assessmentByReceipt.get(asString(row.id))?.status ?? null,
   }))
   const receiptLineRows = ((receiptLineData ?? []) as RecordRow[]).map((row) => ({
     id: asString(row.id),
@@ -277,14 +305,16 @@ export async function getVendorPerformance(vendorId: string, fiscalYear: string)
     invoiceId: asString(row.invoice_id),
     lineNo: asNumber(row.line_no),
     closureState: asString(row.closure_state) as 'open' | 'complete' | 'short_closed' | 'cancelled',
+    expectedQty: asNumber(row.expected_qty),
   }))
   const metrics = buildVendorMetrics({
     fiscalYear,
-    completeDelivery: invoiceLineRows,
-    shelfLife: receiptLineRows.map((row) => ({ compliance: row.compliance })),
-    receipts: receiptRows.map((row) => ({ ...row, status: row.status as 'draft' | 'confirmed' | 'cancelled', packagingStatus: row.packagingStatus as 'acceptable' | 'damaged' | 'not_applicable' | null, temperatureStatus: row.temperatureStatus as 'acceptable' | 'out_of_range' | 'not_applicable' | null })),
-    issues: issueRows.map((row) => ({ issueType: row.issueType, resolutionStatus: row.resolutionStatus, openedAt: row.openedAt })),
-    deliveryDates: receiptRows.map((row) => ({ invoiceDate: row.invoiceId ? invoiceDates.get(row.invoiceId) ?? null : null, receivedDate: row.receivedDate })),
+    completeDelivery: invoiceLineRows.map((row) => ({ id: row.id, closureState: row.closureState })),
+    shelfLife: receiptLineRows.map((row) => ({ id: row.id, receiptId: row.receiptId, compliance: row.compliance })),
+    assessments: assessmentRows,
+    quantityLines: invoiceLineRows.filter((row) => row.closureState !== 'cancelled').map((row) => ({ id: row.id, expectedQty: row.expectedQty, receivedQty: receivedByInvoiceLine.get(row.id) ?? 0 })),
+    issues: issueRows.map((row) => ({ id: row.id, receiptId: row.receiptId, issueType: row.issueType, resolutionStatus: row.resolutionStatus, openedAt: row.openedAt })),
+    deliveryDates: receiptRows.filter((row) => row.status === 'confirmed').map((row) => ({ invoiceDate: row.invoiceId ? invoiceDates.get(row.invoiceId) ?? null : null, receivedDate: row.receivedDate })),
     coldChainMappingApproved: (mappingData ?? []).length > 0 && (mappingData ?? []).every((row) => Boolean((row as RecordRow).is_approved)),
   })
 
@@ -297,6 +327,7 @@ export async function getVendorPerformance(vendorId: string, fiscalYear: string)
     issues: issueRows,
     significantEvents: eventRows,
     receiptSources: receiptRows,
+    assessmentSources: assessmentRows,
     receiptLineSources: receiptLineRows,
     invoiceLineSources: invoiceLineRows,
     metricKeys: Object.values(metrics.metrics).map((metric) => metric.key),

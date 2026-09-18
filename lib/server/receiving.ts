@@ -10,6 +10,7 @@ import type {
   ReceivingPolicy,
   ReceivingWorkspace,
 } from '@/lib/receiving/types'
+import { assessmentIssues, normalizeAssessmentAnswers, type ReceiptAssessment } from '@/lib/receiving/assessment'
 import type {
   InvoiceCreateInput,
   InvoiceLineUpdateInput,
@@ -18,6 +19,7 @@ import type {
   ReceiptLineInput,
   ReceiptLineUpdateInput,
   ReceiptUpdateInput,
+  ReceiptAssessmentInput,
 } from '@/lib/receiving/api-schemas'
 import { writeAudit } from '@/lib/server/audit'
 import { HttpError } from '@/lib/server/errors'
@@ -115,7 +117,6 @@ function toInvoice(row: RecordRow, lines: InvoiceLine[]): Invoice {
     invoiceDate: nullableString(row.invoice_date),
     status: asString(row.status) as Invoice['status'],
     source: asString(row.source) as Invoice['source'],
-    ocrJobId: nullableString(row.ocr_job_id),
     note: nullableString(row.note),
     createdBy: asString(row.created_by),
     createdAt: asString(row.created_at),
@@ -144,6 +145,10 @@ function toReceiptLine(row: RecordRow): ReceiptLine {
     barcodeGtin: nullableString(row.barcode_gtin),
     barcodeLot: nullableString(row.barcode_lot),
     barcodeExpiry: nullableString(row.barcode_expiry),
+    barcodeAdditionalProductId: nullableString(row.barcode_additional_product_id),
+    barcodeManufactureDate: nullableString(row.barcode_manufacture_date),
+    barcodeBestBefore: nullableString(row.barcode_best_before),
+    barcodeSerial: nullableString(row.barcode_serial),
     torThresholdMonths: number(row.tor_threshold_months),
     torExpiryCompliance: asString(row.tor_expiry_compliance) as ReceiptLine['torExpiryCompliance'],
     remainingShelfLifeDays: row.remaining_shelf_life_days == null ? null : number(row.remaining_shelf_life_days),
@@ -187,10 +192,30 @@ function toReceipt(row: RecordRow, lines: ReceiptLine[]): Receipt {
   }
 }
 
+function toAssessment(row: RecordRow): ReceiptAssessment {
+  return {
+    id: asString(row.id),
+    receiptId: asString(row.receipt_id),
+    vendorId: asString(row.vendor_id),
+    status: asString(row.status) === 'completed' ? 'completed' : 'pending',
+    productCondition: nullableString(row.product_condition) as ReceiptAssessment['productCondition'],
+    documentation: nullableString(row.documentation) as ReceiptAssessment['documentation'],
+    itemCorrectness: nullableString(row.item_correctness) as ReceiptAssessment['itemCorrectness'],
+    coldChainApplicable: row.cold_chain_applicable == null ? null : Boolean(row.cold_chain_applicable),
+    coldChainCondition: nullableString(row.cold_chain_condition) as ReceiptAssessment['coldChainCondition'],
+    hasComplaint: row.has_complaint == null ? null : Boolean(row.has_complaint),
+    note: nullableString(row.note),
+    assessedBy: nullableString(row.assessed_by),
+    assessedAt: nullableString(row.assessed_at),
+    createdAt: asString(row.created_at),
+    updatedAt: asString(row.updated_at),
+  }
+}
+
 export async function getReceivingWorkspace(_actor: BmActor): Promise<ReceivingWorkspace> {
   const policy = await assertReceivingEnabled()
   const admin = getAdminClient()
-  const [vendors, { data: invoiceData, error: invoiceError }, { data: invoiceLineData, error: invoiceLineError }, { data: receiptData, error: receiptError }, { data: receiptLineData, error: receiptLineError }, { data: itemData, error: itemError }, { data: locationData, error: locationError }] = await Promise.all([
+  const [vendors, { data: invoiceData, error: invoiceError }, { data: invoiceLineData, error: invoiceLineError }, { data: receiptData, error: receiptError }, { data: receiptLineData, error: receiptLineError }, { data: itemData, error: itemError }, { data: locationData, error: locationError }, { data: assessmentData, error: assessmentError }] = await Promise.all([
     listVendors(),
     admin.from('bm_invoices').select('*').order('created_at', { ascending: false }),
     admin.from('bm_invoice_lines').select('*').order('sort_order').order('line_no'),
@@ -198,6 +223,7 @@ export async function getReceivingWorkspace(_actor: BmActor): Promise<ReceivingW
     admin.from('bm_receipt_lines').select('*').order('sort_order').order('line_no'),
     admin.from('bm_stock_items').select('id,item_code,name,unit,track_lot,track_expiry,catalog_no,manufacturer,supplier').eq('is_active', true).order('item_code'),
     admin.from('bm_stock_locations').select('id,code,name,is_active').eq('is_active', true).order('code'),
+    admin.from('bm_receipt_assessments').select('*').order('created_at', { ascending: false }),
   ])
   fail(invoiceError)
   fail(invoiceLineError)
@@ -205,6 +231,7 @@ export async function getReceivingWorkspace(_actor: BmActor): Promise<ReceivingW
   fail(receiptLineError)
   fail(itemError)
   fail(locationError)
+  fail(assessmentError)
 
   const invoiceLinesByInvoice = new Map<string, InvoiceLine[]>()
   for (const row of (invoiceLineData ?? []) as RecordRow[]) {
@@ -222,6 +249,7 @@ export async function getReceivingWorkspace(_actor: BmActor): Promise<ReceivingW
     receipts: ((receiptData ?? []) as RecordRow[]).map((row) => toReceipt(row, receiptLinesByReceipt.get(asString(row.id)) ?? [])),
     items: ((itemData ?? []) as RecordRow[]).map((row) => ({ id: asString(row.id), itemCode: asString(row.item_code), name: asString(row.name), unit: asString(row.unit), trackLot: Boolean(row.track_lot), trackExpiry: Boolean(row.track_expiry), catalogNo: nullableString(row.catalog_no), manufacturer: nullableString(row.manufacturer), supplier: nullableString(row.supplier) })),
     locations: ((locationData ?? []) as RecordRow[]).map((row) => ({ id: asString(row.id), code: asString(row.code), name: asString(row.name), isActive: Boolean(row.is_active) })),
+    assessments: ((assessmentData ?? []) as RecordRow[]).map(toAssessment),
     policy,
   }
 }
@@ -347,6 +375,10 @@ function receiptLineRow(receiptId: string, input: ReceiptLineInput) {
     barcode_gtin: clean(input.barcodeGtin),
     barcode_lot: clean(input.barcodeLot),
     barcode_expiry: input.barcodeExpiry ?? null,
+    barcode_additional_product_id: clean(input.barcodeAdditionalProductId),
+    barcode_manufacture_date: input.barcodeManufactureDate ?? null,
+    barcode_best_before: input.barcodeBestBefore ?? null,
+    barcode_serial: clean(input.barcodeSerial),
     tor_expiry_compliance: input.torExpiryCompliance ?? 'not_applicable',
     remaining_shelf_life_days: input.remainingShelfLifeDays ?? null,
     receipt_decision: input.receiptDecision ?? 'accepted',
@@ -415,9 +447,16 @@ export async function createReceiptDraft(input: ReceiptCreateInput, actor: BmAct
   if (error?.code === '23505') throw new HttpError(409, 'เลขที่ใบรับเข้านี้ซ้ำ')
   fail(error)
   const id = asString((data as RecordRow).id)
-  await insertReceiptLines(id, input.lines)
+  try {
+    await insertReceiptLines(id, input.lines)
+  } catch (error) {
+    // Keep the draft list clean when a line fails validation: the header
+    // row was just created by this request and has no ledger effect.
+    await getAdminClient().from('bm_receipts').delete().eq('id', id).eq('status', 'draft')
+    throw error
+  }
   await writeAudit(actor, 'receiving.receipt.create', 'stock-receipt', id, { vendorId: input.vendorId })
-  return getReceivingWorkspace(actor)
+  return { receiptId: id, receiving: await getReceivingWorkspace(actor) }
 }
 
 async function assertDraftReceipt(id: string) {
@@ -513,6 +552,10 @@ export async function updateReceiptLine(lineId: string, input: ReceiptLineUpdate
   if (input.barcodeGtin !== undefined) updates.barcode_gtin = clean(input.barcodeGtin)
   if (input.barcodeLot !== undefined) updates.barcode_lot = clean(input.barcodeLot)
   if (input.barcodeExpiry !== undefined) updates.barcode_expiry = input.barcodeExpiry
+  if (input.barcodeAdditionalProductId !== undefined) updates.barcode_additional_product_id = clean(input.barcodeAdditionalProductId)
+  if (input.barcodeManufactureDate !== undefined) updates.barcode_manufacture_date = input.barcodeManufactureDate
+  if (input.barcodeBestBefore !== undefined) updates.barcode_best_before = input.barcodeBestBefore
+  if (input.barcodeSerial !== undefined) updates.barcode_serial = clean(input.barcodeSerial)
   if (input.torExpiryCompliance !== undefined) updates.tor_expiry_compliance = input.torExpiryCompliance
   if (input.remainingShelfLifeDays !== undefined) updates.remaining_shelf_life_days = input.remainingShelfLifeDays
   if (input.receiptDecision !== undefined) updates.receipt_decision = input.receiptDecision
@@ -584,5 +627,56 @@ export async function confirmReceipt(id: string, actor: BmActor) {
     fail(error)
   }
   await writeAudit(actor, 'receiving.receipt.confirm', 'stock-receipt', id, { stockTransactionId: data, expiryExceptionEnabled: policy.expiryExceptionEnabled })
+  return getReceivingWorkspace(actor)
+}
+
+/**
+ * Completes the Pending assessment of an already-confirmed receipt. The stock
+ * transaction was committed at confirmation; nothing here can undo or change
+ * it. The conditional update makes a second submission a 409 instead of a
+ * silent overwrite.
+ */
+export async function completeReceiptAssessment(receiptId: string, input: ReceiptAssessmentInput, actor: BmActor) {
+  await assertReceivingEnabled()
+  const answers = normalizeAssessmentAnswers({
+    productCondition: input.productCondition,
+    documentation: input.documentation,
+    itemCorrectness: input.itemCorrectness,
+    coldChainApplicable: input.coldChainApplicable,
+    coldChainCondition: input.coldChainCondition ?? null,
+    hasComplaint: input.hasComplaint,
+    note: input.note ?? '',
+  })
+  const issues = assessmentIssues(answers)
+  if (issues.length) throw new HttpError(400, issues[0].message)
+
+  const admin = getAdminClient()
+  const { data: receipt, error: receiptError } = await admin.from('bm_receipts').select('id,status,vendor_id').eq('id', receiptId).maybeSingle()
+  fail(receiptError)
+  if (!receipt) throw new HttpError(404, 'ไม่พบใบรับเข้า')
+  if (asString((receipt as RecordRow).status) !== 'confirmed') throw new HttpError(409, 'ประเมินได้เฉพาะใบรับเข้าที่ยืนยันแล้ว')
+
+  const now = new Date().toISOString()
+  const { data, error } = await admin.from('bm_receipt_assessments').update({
+    status: 'completed',
+    product_condition: answers.productCondition,
+    documentation: answers.documentation,
+    item_correctness: answers.itemCorrectness,
+    cold_chain_applicable: answers.coldChainApplicable,
+    cold_chain_condition: answers.coldChainCondition,
+    has_complaint: answers.hasComplaint,
+    note: answers.note || null,
+    assessed_by: actor.id,
+    assessed_at: now,
+    updated_at: now,
+  }).eq('receipt_id', receiptId).eq('status', 'pending').select('id,vendor_id').maybeSingle()
+  fail(error)
+  if (!data) throw new HttpError(409, 'การประเมินนี้บันทึกแล้ว หรือไม่พบการประเมินที่รอดำเนินการ')
+  const row = data as RecordRow
+  await writeAudit(actor, 'receiving.assessment.complete', 'stock-receipt-assessment', asString(row.id), {
+    receiptId,
+    vendorId: asString(row.vendor_id),
+    ...answers,
+  })
   return getReceivingWorkspace(actor)
 }

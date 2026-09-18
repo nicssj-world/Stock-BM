@@ -34,6 +34,11 @@ export function matchPackageBarcode(parsed: ParsedBarcode, candidates: PackageSc
   }
 
   if (uniqueCandidates.length > 1) {
+    // The user already chose one of the exact candidates from Item Master:
+    // the barcode is consistent with that choice, nothing is guessed.
+    if (selectedItemId && uniqueCandidates.some((candidate) => candidate.itemId === selectedItemId)) {
+      return { parsed, itemId: selectedItemId, match: { kind: 'exact_ambiguous', itemId: selectedItemId, candidates: uniqueCandidates }, conflicts: [] }
+    }
     return {
       parsed,
       itemId: null,

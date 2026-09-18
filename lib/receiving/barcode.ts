@@ -36,6 +36,8 @@ export type ParsedBarcode = {
   netWeightKg: number | null
   hibcPrimary: string | null
   hibcSecondary: string | null
+  /** Recognised GS1 AIs that receiving does not use (e.g. 91–99, 7003), kept verbatim for audit. */
+  otherAis: Record<string, string>
 }
 
 type Gs1Result = ParsedBarcode
@@ -57,20 +59,26 @@ const emptyResult = (raw: string, symbologyId: string | null): ParsedBarcode => 
   netWeightKg: null,
   hibcPrimary: null,
   hibcSecondary: null,
+  otherAis: {},
 })
 
-const fixedGs1Ais: Record<string, number> = {
-  '01': 14,
-  '11': 6,
-  '15': 6,
-  '17': 6,
-}
+// GS1 General Specifications: the first two digits of an AI decide how many
+// digits the AI itself has, and a small set of AIs carry predefined
+// fixed-length data. Every other AI is variable-length and ends at FNC1/GS
+// or at the end of the message. Knowing the full length table lets a label
+// that carries extra AIs (91–99, 7003, 422 …) still yield Lot/Expiry.
+const AI_DIGITS_BY_PREFIX: Record<string, 2 | 3 | 4> = {}
+for (const prefix of ['00', '01', '02', '03', '04', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '30', '37', '90', '91', '92', '93', '94', '95', '96', '97', '98', '99']) AI_DIGITS_BY_PREFIX[prefix] = 2
+for (const prefix of ['23', '24', '25', '40', '41', '42', '71']) AI_DIGITS_BY_PREFIX[prefix] = 3
+for (const prefix of ['31', '32', '33', '34', '35', '36', '39', '43', '70', '72', '80', '81', '82']) AI_DIGITS_BY_PREFIX[prefix] = 4
 
-const variableGs1Ais = new Set(['10', '21', '30'])
-// AI 240 (Additional Product Identification) is a 3-digit AI, unlike the
-// 2-digit AIs above — it needs its own check in gs1AiAt so it isn't
-// mistaken for (or masked by) a 2-digit AI reading of the same leading digits.
-const threeDigitVariableGs1Ais = new Set(['240'])
+const FIXED_DATA_LENGTH_BY_PREFIX: Record<string, number> = {
+  '00': 18, '01': 14, '02': 14, '03': 14, '04': 16,
+  '11': 6, '12': 6, '13': 6, '14': 6, '15': 6, '16': 6, '17': 6, '18': 6, '19': 6,
+  '20': 2,
+  '31': 6, '32': 6, '33': 6, '34': 6, '35': 6, '36': 6,
+  '41': 13,
+}
 
 function detectedSymbologyId(value: string): string | null {
   return value.match(GS1_PREFIX)?.[0] ?? value.match(HIBC_SYMBOLOGY_PREFIX)?.[0] ?? null
@@ -152,23 +160,24 @@ function applyGs1Ai(result: Gs1Result, seen: Set<string>, ai: string, value: str
       result.quantity = Number(value)
       return Number.isSafeInteger(result.quantity)
     default:
-      if (!/^310\d$/.test(ai) || !/^\d{6}$/.test(value)) return false
-      result.netWeightKg = Number(value) / 10 ** Number(ai.slice(3))
-      return Number.isFinite(result.netWeightKg)
+      if (/^310\d$/.test(ai)) {
+        if (!/^\d{6}$/.test(value)) return false
+        result.netWeightKg = Number(value) / 10 ** Number(ai.slice(3))
+        return Number.isFinite(result.netWeightKg)
+      }
+      if (!isValidPrintable(value)) return false
+      result.otherAis[ai] = value
+      return true
   }
 }
 
 function gs1AiAt(payload: string, position: number): { ai: string; length: number } | null {
-  const weightAi = payload.slice(position, position + 4)
-  if (/^310\d$/.test(weightAi)) return { ai: weightAi, length: 6 }
-
-  const threeDigitAi = payload.slice(position, position + 3)
-  if (threeDigitVariableGs1Ais.has(threeDigitAi)) return { ai: threeDigitAi, length: 0 }
-
-  const ai = payload.slice(position, position + 2)
-  if (ai in fixedGs1Ais) return { ai, length: fixedGs1Ais[ai] }
-  if (variableGs1Ais.has(ai)) return { ai, length: 0 }
-  return null
+  const prefix = payload.slice(position, position + 2)
+  const digits = AI_DIGITS_BY_PREFIX[prefix]
+  if (!digits) return null
+  const ai = payload.slice(position, position + digits)
+  if (ai.length !== digits || !/^\d+$/.test(ai)) return null
+  return { ai, length: FIXED_DATA_LENGTH_BY_PREFIX[prefix] ?? 0 }
 }
 
 /** Outcome of attempting to read AIs out of an already-canonical GS1 element string. */
@@ -201,6 +210,7 @@ function parseGs1Stream(payload: string, raw: string, symbologyId: string | null
       const separatorPosition = payload.indexOf(GROUP_SEPARATOR, position)
       const end = separatorPosition === -1 ? payload.length : separatorPosition
       value = payload.slice(position, end)
+      if (!value) return { ok: false, reason: `AI ${definition.ai} has an empty variable-length value` }
       if (separatorPosition === -1) position = end
       else position = separatorPosition + 1
     }
@@ -212,8 +222,8 @@ function parseGs1Stream(payload: string, raw: string, symbologyId: string | null
 }
 
 function parenthesizedAiAt(payload: string, position: number): { ai: string; nextPosition: number } | null {
-  const match = payload.slice(position).match(/^\((310\d|240|01|10|11|15|17|21|30)\)/)
-  if (!match) return null
+  const match = payload.slice(position).match(/^\((\d{2,4})\)/)
+  if (!match || AI_DIGITS_BY_PREFIX[match[1].slice(0, 2)] !== match[1].length) return null
   return { ai: match[1], nextPosition: position + match[0].length }
 }
 
@@ -243,6 +253,16 @@ function parseParenthesizedGs1(payload: string, raw: string, symbologyId: string
   return { ok: true, result }
 }
 
+// Human/keyboard-wedge spellings of FNC1 or the Group Separator. Only these
+// explicit tokens are rewritten to ASCII 29; nothing else is touched.
+// U+241D is the visible GS symbol some tools print in place of the real separator.
+const SEPARATOR_NOTATIONS = /<GS>|\{GS\}|\[GS\]|<FNC1>|\{FNC1\}|\[FNC1\]|\\x1[dD]|\\u001[dD]|\u241D/g
+
+/** Rewrites textual FNC1/GS notations ("<GS>", "{FNC1}", a literal backslash-x1d, "␝" …) to ASCII 29. */
+export function normalizeSeparatorNotation(value: string): string {
+  return value.replace(SEPARATOR_NOTATIONS, GROUP_SEPARATOR)
+}
+
 /**
  * The ONE canonical normalization step, run before any AI parsing, that
  * turns whatever a scanner handed us into a clean GS1 element string:
@@ -269,14 +289,14 @@ function parseParenthesizedGs1(payload: string, raw: string, symbologyId: string
  * …) and the AI parser depends on it being there to find field boundaries.
  */
 export function normalizeGs1DataMatrixPayload(value: string): string {
-  const { payload } = stripSymbologyPrefix(value)
+  const { payload } = stripSymbologyPrefix(normalizeSeparatorNotation(value))
   let index = 0
   while (payload[index] === GROUP_SEPARATOR) index += 1
   return payload.slice(index)
 }
 
 function looksLikeGs1(canonicalPayload: string, symbologyId: string | null): boolean {
-  return GS1_SYMBOLOGY_IDS.has(symbologyId ?? '') || canonicalPayload.startsWith('(') || /^(?:01|10|11|15|17|21|30|240|310\d)/.test(canonicalPayload)
+  return GS1_SYMBOLOGY_IDS.has(symbologyId ?? '') || /^\(\d{2,4}\)/.test(canonicalPayload) || /^(?:01\d{14}|17\d{6}|11\d{6}|15\d{6}|10[ -~]|21[ -~]|240[ -~]|30\d|310\d)/.test(canonicalPayload)
 }
 
 /**
@@ -429,11 +449,15 @@ export function parseBarcode(raw: string, symbologyId?: string | null): ParsedBa
     const value = rawValue.trim()
     const canonicalGs1Payload = normalizeGs1DataMatrixPayload(value)
 
+    const { payload } = stripSymbologyPrefix(value)
     if (looksLikeGs1(canonicalGs1Payload, detected)) {
       const outcome = parseGs1(canonicalGs1Payload, rawValue, detected)
-      return outcome.ok ? outcome.result : emptyResult(rawValue, detected)
+      if (outcome.ok) return outcome.result
+      // The camera infers "]d2"/"]C1" from the barcode format alone, so a
+      // HIBC label printed as Data Matrix or Code 128 still arrives here.
+      if (payload.startsWith('+')) return parseHibc(rawValue, value, detected) ?? emptyResult(rawValue, detected)
+      return emptyResult(rawValue, detected)
     }
-    const { payload } = stripSymbologyPrefix(value)
     if (payload.startsWith('+') || detected === 'HIBC' || detected === 'hibc') {
       return parseHibc(rawValue, value, detected) ?? emptyResult(rawValue, detected)
     }

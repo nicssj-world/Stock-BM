@@ -1,5 +1,11 @@
 # Recovered approved Stock1 requirement
 
+> **SUPERSEDED (2026-09-18, owner final decision).** Owner removed OCR from
+> approved Stock1 scope after real-iPhone acceptance testing. The auto-document
+> crop and four-corner perspective crop below were replaced by a simple
+> rectangular crop of the invoice photo, which is kept as receipt evidence
+> only. This file is kept as history.
+
 This execution-scope amendment records the requirement recovered from the user’s
 execution correction:
 
