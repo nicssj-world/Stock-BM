@@ -196,7 +196,7 @@ export async function getReceivingWorkspace(_actor: BmActor): Promise<ReceivingW
     admin.from('bm_invoice_lines').select('*').order('sort_order').order('line_no'),
     admin.from('bm_receipts').select('*').order('created_at', { ascending: false }),
     admin.from('bm_receipt_lines').select('*').order('sort_order').order('line_no'),
-    admin.from('bm_stock_items').select('id,item_code,name,unit,track_lot,track_expiry').eq('is_active', true).order('item_code'),
+    admin.from('bm_stock_items').select('id,item_code,name,unit,track_lot,track_expiry,catalog_no,manufacturer,supplier').eq('is_active', true).order('item_code'),
     admin.from('bm_stock_locations').select('id,code,name,is_active').eq('is_active', true).order('code'),
   ])
   fail(invoiceError)
@@ -220,7 +220,7 @@ export async function getReceivingWorkspace(_actor: BmActor): Promise<ReceivingW
     vendors,
     invoices: ((invoiceData ?? []) as RecordRow[]).map((row) => toInvoice(row, invoiceLinesByInvoice.get(asString(row.id)) ?? [])),
     receipts: ((receiptData ?? []) as RecordRow[]).map((row) => toReceipt(row, receiptLinesByReceipt.get(asString(row.id)) ?? [])),
-    items: ((itemData ?? []) as RecordRow[]).map((row) => ({ id: asString(row.id), itemCode: asString(row.item_code), name: asString(row.name), unit: asString(row.unit), trackLot: Boolean(row.track_lot), trackExpiry: Boolean(row.track_expiry) })),
+    items: ((itemData ?? []) as RecordRow[]).map((row) => ({ id: asString(row.id), itemCode: asString(row.item_code), name: asString(row.name), unit: asString(row.unit), trackLot: Boolean(row.track_lot), trackExpiry: Boolean(row.track_expiry), catalogNo: nullableString(row.catalog_no), manufacturer: nullableString(row.manufacturer), supplier: nullableString(row.supplier) })),
     locations: ((locationData ?? []) as RecordRow[]).map((row) => ({ id: asString(row.id), code: asString(row.code), name: asString(row.name), isActive: Boolean(row.is_active) })),
     policy,
   }

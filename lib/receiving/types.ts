@@ -147,7 +147,7 @@ export interface ReceivingWorkspace {
   vendors: Vendor[]
   invoices: Invoice[]
   receipts: Receipt[]
-  items: { id: string; itemCode: string; name: string; unit: string; trackLot: boolean; trackExpiry: boolean }[]
+  items: { id: string; itemCode: string; name: string; unit: string; trackLot: boolean; trackExpiry: boolean; catalogNo?: string | null; manufacturer?: string | null; supplier?: string | null }[]
   locations: { id: string; code: string; name: string; isActive: boolean }[]
   policy: ReceivingPolicy
 }

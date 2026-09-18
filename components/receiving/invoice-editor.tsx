@@ -6,6 +6,7 @@ import type { Invoice, ReceivingWorkspace } from '@/lib/receiving/types'
 import { cumulativeReceived, deliveryCompleteness } from '@/lib/receiving/rules'
 import { api, Button, Card, Field, Input, StatusBadge } from '@/components/ui'
 import { InvoiceImageCrop, type InvoiceImageCropResult } from '@/components/receiving/invoice-image-crop'
+import { InvoiceOcr } from '@/components/receiving/invoice-ocr'
 
 type DraftLine = { lineNo: number; catalogNoText: string; descriptionText: string; expectedQty: string }
 
@@ -71,9 +72,18 @@ export function InvoiceEditor({ data, onSaved, onError }: { data: ReceivingWorks
     }
   }
 
+  function onOcrSaved(next: ReceivingWorkspace, text: string) {
+    setInvoiceImage(null)
+    setInvoiceNo('')
+    setInvoiceDate('')
+    setLines([blankLine(1)])
+    onSaved(next, text)
+  }
+
   return <div className="space-y-4">
     <InvoiceImageCrop onConfirmed={setInvoiceImage} />
     {invoiceImage ? <p className="text-xs text-[#58747d]">ภาพ invoice ที่ยืนยันแล้วพร้อมสำหรับ OCR draft — ระบบยังไม่เขียน stock จากภาพนี้</p> : null}
+    <InvoiceOcr processedImage={invoiceImage?.processedImage ?? null} vendorId={vendorId} invoiceNo={invoiceNo} invoiceDate={invoiceDate} items={data.items} onSaved={onOcrSaved} onError={onError} />
     <Card className="p-4">
       <form onSubmit={createInvoice} className="space-y-4">
         <div className="grid gap-3 md:grid-cols-3">
