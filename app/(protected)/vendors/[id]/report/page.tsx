@@ -1,0 +1,41 @@
+import type { Metadata } from 'next'
+import Link from 'next/link'
+import { notFound } from 'next/navigation'
+import { PrintButton } from '@/components/print-button'
+import { formatThaiDateTime } from '@/lib/bm/thai-date'
+import { getVendorPerformance } from '@/lib/server/vendors'
+import { vendorFiscalYearFor, vendorFiscalYearLabel } from '@/lib/vendors/fiscal-year'
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  return { title: `Vendor Performance Report ${(await params).id}` }
+}
+
+const labels: Record<string, string> = {
+  complete_delivery: 'Complete Delivery',
+  shelf_life_compliance: 'Shelf-life compliance',
+  packaging_compliance: 'Packaging compliance',
+  temperature_compliance: 'Temperature compliance',
+  documentation_discrepancies: 'Documentation discrepancies',
+  complaint_resolution: 'Complaint resolution',
+}
+
+export default async function VendorPerformanceReportPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ fiscalYear?: string }> }) {
+  const { id } = await params
+  const query = await searchParams
+  const fiscalYear = query.fiscalYear && /^\d{4}$/.test(query.fiscalYear) ? query.fiscalYear : vendorFiscalYearFor(new Date().toISOString().slice(0, 10))
+  let performance
+  try { performance = await getVendorPerformance(id, fiscalYear) } catch (error) {
+    if (error instanceof Error && 'status' in error && (error as { status?: number }).status === 404) notFound()
+    throw error
+  }
+
+  return <main className="vendor-report-page"><div className="toolbar print-hidden"><Link href={`/vendors/${id}?fiscalYear=${fiscalYear}`} className="back-link">กลับ Vendor Performance</Link><PrintButton /></div><section className="sheet"><header className="report-header"><div><p className="eyebrow">MOLECULAR-CBH QMS · STOCK1</p><h1>Vendor Performance</h1><p>{performance.vendor.code} · {performance.vendor.name}</p></div><div className="report-code"><span>รอบปีงบประมาณ</span><strong>{vendorFiscalYearLabel(performance.fiscalYear)}</strong><small>{performance.from} — {performance.to}</small></div></header>
+    <section className="notice"><strong>รายงานหลักฐานและ metrics</strong><span>Phase 3 ไม่มีการคำนวณคะแนน · Complete Delivery / Temperature อาจเป็น provisional ตาม policy ที่ยังไม่อนุมัติ</span></section>
+    <section className="metric-grid">{Object.values(performance.metrics.metrics).map((metric) => <div key={metric.key} className="metric-card"><div><p>{labels[metric.key] ?? metric.key}</p><strong>{metric.display === 'count' ? metric.numerator : metric.denominator == null ? '-' : `${metric.numerator}/${metric.denominator}`}</strong></div>{metric.percent != null ? <span>{metric.percent.toFixed(1)}%</span> : null}<small>{metric.applicablePopulation}{metric.provisional ? ' · provisional' : ''}</small>{metric.excluded.length ? <small>{metric.excluded.map((item) => `${item.reason}: ${item.count}`).join(' · ')}</small> : null}</div>)}</section>
+    <section className="lead-time"><p>Delivery Lead Time</p><strong>{performance.metrics.deliveryLeadTime.meanDays == null ? '-' : `${performance.metrics.deliveryLeadTime.meanDays.toFixed(1)} วันเฉลี่ย / ${performance.metrics.deliveryLeadTime.medianDays?.toFixed(1) ?? '-'} วันมัธยฐาน`}</strong><span>{performance.metrics.deliveryLeadTime.label} · sample {performance.metrics.deliveryLeadTime.sampleSize}</span></section>
+    <section className="section"><h2>Complaint / issue resolution</h2><table><thead><tr><th>ประเภท</th><th>สถานะ</th><th>เปิดเมื่อ</th><th>รายละเอียด</th></tr></thead><tbody>{performance.issues.map((issue) => <tr key={issue.id}><td>{issue.issueType}</td><td>{issue.resolutionStatus}</td><td>{issue.openedAt.slice(0, 10)}</td><td>{issue.description}{issue.resolutionNote ? ` · ${issue.resolutionNote}` : ''}</td></tr>)}{!performance.issues.length ? <tr><td colSpan={4}>ไม่มี issue ในรอบนี้</td></tr> : null}</tbody></table></section>
+    <section className="section"><h2>Receipt evidence</h2><table><thead><tr><th>Receipt</th><th>วันที่รับ</th><th>สถานะ</th><th>Packaging</th><th>Temperature</th></tr></thead><tbody>{performance.receiptSources.map((receipt) => <tr key={receipt.id}><td>{receipt.id}</td><td>{receipt.receivedDate}</td><td>{receipt.status}</td><td>{receipt.packagingStatus ?? '-'}</td><td>{receipt.temperatureStatus ?? '-'}{receipt.coldChainApplicable ? ' · cold-chain' : ''}</td></tr>)}{!performance.receiptSources.length ? <tr><td colSpan={5}>ไม่มี receipt ในรอบนี้</td></tr> : null}</tbody></table></section>
+    <section className="section"><h2>Significant events</h2>{performance.significantEvents.length ? <table><thead><tr><th>วันที่</th><th>ระดับ</th><th>ประเภท</th><th>รายละเอียด</th></tr></thead><tbody>{performance.significantEvents.map((event) => <tr key={event.id}><td>{event.eventDate}</td><td>{event.severity}</td><td>{event.eventType}</td><td>{event.description}</td></tr>)}</tbody></table> : <p className="empty">ไม่มี significant event ในรอบนี้</p>}</section>
+    <footer className="report-footer"><span>พิมพ์เมื่อ {formatThaiDateTime(new Date())}</span><span>หลักฐานอ้างอิงได้จาก receipt / invoice / issue ที่แสดงในระบบ · ไม่ใช่ผลคะแนน</span></footer>
+  </section><style>{`@page{size:A4 portrait;margin:12mm}body{background:#e9eef0}.vendor-report-page{color:#173d50;font-family:"Noto Sans Thai",Arial,sans-serif}.toolbar{display:flex;justify-content:space-between;align-items:center;max-width:794px;margin:0 auto 12px}.back-link,#print-report{border:1px solid #b8c8cc;border-radius:7px;background:#fff;color:#173d50;padding:8px 12px;font-size:13px;font-weight:700;text-decoration:none}.sheet{width:794px;min-height:1123px;margin:0 auto;padding:28px 32px 36px;background:#fff;box-shadow:0 10px 40px rgba(20,64,72,.16);-webkit-print-color-adjust:exact;print-color-adjust:exact}.report-header{display:flex;justify-content:space-between;gap:24px;padding-bottom:16px;border-bottom:2px solid #173d50}.eyebrow{margin:0;color:#0b7f76;font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}.report-header h1{margin:5px 0 2px;font-size:24px}.report-header p:not(.eyebrow){margin:0;color:#55727c;font-size:12px}.report-code{text-align:right}.report-code span,.report-code small{display:block;color:#789097;font-size:10px}.report-code strong{display:block;margin:4px 0;font-family:"IBM Plex Mono",monospace;font-size:16px}.notice{display:flex;flex-direction:column;gap:3px;margin:16px 0;padding:10px 12px;border:1px solid #eed4a6;border-radius:7px;background:#fff9ed;color:#8b5c0b;font-size:11px}.notice span{color:#99601b}.metric-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.metric-card{padding:10px 12px;border:1px solid #d8e4e5;border-radius:7px;background:#fbfdfd}.metric-card p{margin:0;color:#55727c;font-size:10px;font-weight:700}.metric-card strong{display:block;margin-top:3px;font-family:"IBM Plex Mono",monospace;font-size:19px}.metric-card>span{display:block;color:#0b7f76;font-size:11px;font-weight:700}.metric-card small{display:block;margin-top:3px;color:#789097;font-size:9px;line-height:1.4}.lead-time{display:flex;align-items:baseline;gap:10px;margin-top:10px;padding:9px 12px;border:1px solid #d8e4e5;border-radius:7px;background:#f7fafa}.lead-time p{margin:0;color:#55727c;font-size:10px;font-weight:700}.lead-time strong{font-size:12px}.lead-time span{color:#789097;font-size:9px}.section{margin-top:18px}.section h2{margin:0 0 7px;font-size:15px}.section table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:10px}.section th,.section td{border:1px solid #cfdde0;padding:6px 5px;vertical-align:top;text-align:left}.section th{background:#eef4f4;color:#45636b;font-size:9px}.section td{word-break:break-word}.empty{padding:9px;border:1px solid #d8e4e5;color:#789097;font-size:10px}.report-footer{display:flex;justify-content:space-between;gap:14px;margin-top:22px;padding-top:10px;border-top:1px solid #cfdde0;color:#789097;font-size:8px;line-height:1.5}@media(max-width:820px){.sheet{width:auto;min-height:0;margin:0;padding:18px}.metric-grid{grid-template-columns:1fr}.section{overflow-x:auto}.section table{min-width:650px}}@media print{body{background:#fff}.print-hidden{display:none!important}.sheet{width:auto;min-height:0;margin:0;padding:0;box-shadow:none}}`}</style></main>
+}

@@ -21,6 +21,48 @@ export interface SupplierCandidate {
   itemCodes: string[]
 }
 
+export const VENDOR_ISSUE_TYPES = [
+  'complaint',
+  'documentation_discrepancy',
+  'packaging_damage',
+  'temperature_out_of_range',
+  'quantity_discrepancy',
+  'expiry_non_compliant',
+  'other',
+] as const
+export type VendorIssueType = (typeof VENDOR_ISSUE_TYPES)[number]
+export type VendorIssueResolutionStatus = 'open' | 'resolved' | 'cancelled'
+
+export interface VendorIssue {
+  id: string
+  vendorId: string
+  receiptId: string | null
+  receiptLineId: string | null
+  issueType: VendorIssueType
+  description: string
+  resolutionStatus: VendorIssueResolutionStatus
+  resolutionNote: string | null
+  openedBy: string
+  openedAt: string
+  resolvedBy: string | null
+  resolvedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface VendorSignificantEvent {
+  id: string
+  vendorId: string
+  eventType: string
+  severity: 'significant' | 'critical'
+  eventDate: string
+  description: string
+  receiptId: string | null
+  issueId: string | null
+  createdBy: string
+  createdAt: string
+}
+
 export type InvoiceStatus = 'draft' | 'open' | 'closed' | 'cancelled'
 export type InvoiceSource = 'manual' | 'ocr'
 export type ReceiptStatus = 'draft' | 'confirmed' | 'cancelled'

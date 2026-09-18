@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 const nullableText = (max: number) => z.string().trim().max(max).nullable().optional()
+const optionalText = (max: number) => z.string().trim().max(max).nullable().optional()
 
 export const vendorCreateSchema = z.object({
   code: z.string().trim().min(1).max(80),
@@ -20,9 +21,22 @@ export const vendorUpdateSchema = vendorCreateSchema.partial().extend({
 export type VendorCreateInput = z.infer<typeof vendorCreateSchema>
 export type VendorUpdateInput = z.infer<typeof vendorUpdateSchema>
 
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'วันที่ต้องเป็นรูปแบบ YYYY-MM-DD')
-const optionalText = (max: number) => z.string().trim().max(max).nullable().optional()
+export const vendorIssueCreateSchema = z.object({
+  issueType: z.enum(['complaint', 'documentation_discrepancy', 'packaging_damage', 'temperature_out_of_range', 'quantity_discrepancy', 'expiry_non_compliant', 'other']),
+  description: z.string().trim().min(1).max(4000),
+  receiptId: z.string().uuid().nullable().optional(),
+  receiptLineId: z.string().uuid().nullable().optional(),
+})
 
+export const vendorIssueUpdateSchema = z.object({
+  resolutionStatus: z.enum(['open', 'resolved', 'cancelled']),
+  resolutionNote: optionalText(4000),
+})
+
+export type VendorIssueCreateInput = z.infer<typeof vendorIssueCreateSchema>
+export type VendorIssueUpdateInput = z.infer<typeof vendorIssueUpdateSchema>
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'วันที่ต้องเป็นรูปแบบ YYYY-MM-DD')
 export const invoiceLineInputSchema = z.object({
   lineNo: z.number().int().min(1).max(10000),
   stockItemId: z.string().uuid().nullable().optional(),

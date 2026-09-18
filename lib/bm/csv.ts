@@ -1,5 +1,6 @@
 import { formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
 import type { StockWorkspace } from '@/lib/bm/types'
+import type { VendorPerformance } from '@/lib/vendors/types'
 
 function escapeCsv(value: unknown) {
   const text = String(value ?? '')
@@ -53,6 +54,38 @@ export function buildMovementsCsv(workspace: StockWorkspace) {
       ])
     })
   })
+  return csv(rows)
+}
+
+export function buildVendorPerformanceCsv(performance: VendorPerformance) {
+  const rows: unknown[][] = [['Vendor', 'Fiscal year', 'Metric', 'Numerator', 'Denominator', 'Percent', 'Applicable population', 'Provisional']]
+  const labels: Record<string, string> = {
+    complete_delivery: 'Complete delivery',
+    shelf_life_compliance: 'Shelf-life compliance',
+    packaging_compliance: 'Packaging compliance',
+    temperature_compliance: 'Temperature compliance',
+    documentation_discrepancies: 'Documentation discrepancies',
+    complaint_resolution: 'Complaint resolution',
+  }
+  for (const metric of Object.values(performance.metrics.metrics)) {
+    rows.push([
+      `${performance.vendor.code} · ${performance.vendor.name}`,
+      performance.fiscalYear,
+      labels[metric.key] ?? metric.key,
+      metric.numerator,
+      metric.denominator ?? '',
+      metric.percent == null ? '' : metric.percent.toFixed(1),
+      metric.applicablePopulation,
+      metric.provisional ? 'yes' : 'no',
+    ])
+  }
+  rows.push([])
+  rows.push(['Delivery Lead Time', performance.metrics.deliveryLeadTime.sampleSize, performance.metrics.deliveryLeadTime.meanDays ?? '', performance.metrics.deliveryLeadTime.medianDays ?? '', performance.metrics.deliveryLeadTime.label])
+  rows.push([])
+  rows.push(['Issue ID', 'Issue type', 'Status', 'Opened at', 'Description', 'Resolution note'])
+  for (const issue of performance.issues) {
+    rows.push([issue.id, issue.issueType, issue.resolutionStatus, issue.openedAt, issue.description, issue.resolutionNote ?? ''])
+  }
   return csv(rows)
 }
 

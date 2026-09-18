@@ -1,11 +1,16 @@
 import 'server-only'
 
 import type { BmActor } from '@/lib/bm/types'
-import type { SupplierCandidate, Vendor } from '@/lib/receiving/types'
+import type { SupplierCandidate, Vendor, VendorIssue, VendorSignificantEvent } from '@/lib/receiving/types'
 import { writeAudit } from '@/lib/server/audit'
 import { HttpError } from '@/lib/server/errors'
-import type { VendorCreateInput, VendorUpdateInput } from '@/lib/receiving/api-schemas'
+import type {
+  VendorCreateInput, VendorIssueCreateInput, VendorIssueUpdateInput, VendorUpdateInput,
+} from '@/lib/receiving/api-schemas'
 import { getAdminClient } from '@/lib/supabase/admin'
+import { buildVendorMetrics } from '@/lib/vendors/metrics'
+import { vendorFiscalYearBounds } from '@/lib/vendors/fiscal-year'
+import type { VendorPerformance } from '@/lib/vendors/types'
 
 type RecordRow = Record<string, unknown>
 type SupabaseError = { code?: string; message: string }
@@ -28,6 +33,56 @@ function clean(value: string | null | undefined) {
 
 function normalizeCode(value: string) {
   return value.trim().toUpperCase()
+}
+
+function asNumber(value: unknown) {
+  return typeof value === 'number' ? value : Number(value ?? 0)
+}
+
+function asIssueType(value: unknown): VendorIssue['issueType'] {
+  const issueType = asString(value)
+  return ['complaint', 'documentation_discrepancy', 'packaging_damage', 'temperature_out_of_range', 'quantity_discrepancy', 'expiry_non_compliant', 'other'].includes(issueType)
+    ? issueType as VendorIssue['issueType']
+    : 'other'
+}
+
+function asIssueStatus(value: unknown): VendorIssue['resolutionStatus'] {
+  const status = asString(value)
+  return status === 'resolved' || status === 'cancelled' ? status : 'open'
+}
+
+function toVendorIssue(row: RecordRow): VendorIssue {
+  return {
+    id: asString(row.id),
+    vendorId: asString(row.vendor_id),
+    receiptId: nullableString(row.receipt_id),
+    receiptLineId: nullableString(row.receipt_line_id),
+    issueType: asIssueType(row.issue_type),
+    description: asString(row.description),
+    resolutionStatus: asIssueStatus(row.resolution_status),
+    resolutionNote: nullableString(row.resolution_note),
+    openedBy: asString(row.opened_by),
+    openedAt: asString(row.opened_at),
+    resolvedBy: nullableString(row.resolved_by),
+    resolvedAt: nullableString(row.resolved_at),
+    createdAt: asString(row.created_at),
+    updatedAt: asString(row.updated_at),
+  }
+}
+
+function toSignificantEvent(row: RecordRow): VendorSignificantEvent {
+  return {
+    id: asString(row.id),
+    vendorId: asString(row.vendor_id),
+    eventType: asString(row.event_type),
+    severity: asString(row.severity) === 'critical' ? 'critical' : 'significant',
+    eventDate: asString(row.event_date),
+    description: asString(row.description),
+    receiptId: nullableString(row.receipt_id),
+    issueId: nullableString(row.issue_id),
+    createdBy: asString(row.created_by),
+    createdAt: asString(row.created_at),
+  }
 }
 
 function toVendor(row: RecordRow, itemCount: number): Vendor {
@@ -131,4 +186,119 @@ export async function deleteVendor(id: string, actor: BmActor) {
   fail(error)
   await writeAudit(actor, 'vendor.delete', 'stock-vendor', id, {})
   return listVendors()
+}
+
+export async function listVendorIssues(vendorId: string) {
+  const { data, error } = await getAdminClient()
+    .from('bm_vendor_issues')
+    .select('*')
+    .eq('vendor_id', vendorId)
+    .order('opened_at', { ascending: false })
+  fail(error)
+  return ((data ?? []) as RecordRow[]).map(toVendorIssue)
+}
+
+export async function createVendorIssue(vendorId: string, input: VendorIssueCreateInput, actor: BmActor) {
+  const { data, error } = await getAdminClient().from('bm_vendor_issues').insert({
+    vendor_id: vendorId,
+    issue_type: input.issueType,
+    description: input.description.trim(),
+    receipt_id: input.receiptId ?? null,
+    receipt_line_id: input.receiptLineId ?? null,
+    opened_by: actor.id,
+  }).select('*').single()
+  if (error?.code === '23503') throw new HttpError(404, 'ไม่พบ vendor หรือ receipt ที่ผูกไว้')
+  fail(error)
+  await writeAudit(actor, 'vendor.issue.create', 'stock-vendor-issue', asString((data as RecordRow).id), { vendorId, issueType: input.issueType })
+  return listVendorIssues(vendorId)
+}
+
+export async function updateVendorIssue(vendorId: string, issueId: string, input: VendorIssueUpdateInput, actor: BmActor) {
+  const now = new Date().toISOString()
+  const { data, error } = await getAdminClient().from('bm_vendor_issues').update({
+    resolution_status: input.resolutionStatus,
+    resolution_note: input.resolutionNote ?? null,
+    resolved_by: input.resolutionStatus === 'open' ? null : actor.id,
+    resolved_at: input.resolutionStatus === 'open' ? null : now,
+    updated_at: now,
+  }).eq('id', issueId).eq('vendor_id', vendorId).select('id').maybeSingle()
+  fail(error)
+  if (!data) throw new HttpError(404, 'ไม่พบ issue ของ vendor นี้')
+  await writeAudit(actor, 'vendor.issue.resolve', 'stock-vendor-issue', issueId, { vendorId, resolutionStatus: input.resolutionStatus })
+  return listVendorIssues(vendorId)
+}
+
+export async function getVendorPerformance(vendorId: string, fiscalYear: string): Promise<VendorPerformance> {
+  const vendors = await listVendors()
+  const vendor = vendors.find((item) => item.id === vendorId)
+  if (!vendor) throw new HttpError(404, 'ไม่พบ vendor ที่ต้องการดูผลการปฏิบัติงาน')
+
+  const bounds = vendorFiscalYearBounds(fiscalYear)
+  const admin = getAdminClient()
+  const [{ data: invoiceData, error: invoiceError }, { data: receiptData, error: receiptError }, { data: issueData, error: issueError }, { data: eventData, error: eventError }, { data: mappingData, error: mappingError }] = await Promise.all([
+    admin.from('bm_invoices').select('id,invoice_date,status').eq('vendor_id', vendorId).gte('invoice_date', bounds.from).lte('invoice_date', bounds.to),
+    admin.from('bm_receipts').select('id,invoice_id,received_date,status,packaging_status,temperature_status,cold_chain_applicable').eq('vendor_id', vendorId).gte('received_date', bounds.from).lte('received_date', bounds.to),
+    admin.from('bm_vendor_issues').select('*').eq('vendor_id', vendorId).gte('opened_at', `${bounds.from}T00:00:00Z`).lte('opened_at', `${bounds.to}T23:59:59Z`).order('opened_at', { ascending: false }),
+    admin.from('bm_vendor_significant_events').select('*').eq('vendor_id', vendorId).gte('event_date', bounds.from).lte('event_date', bounds.to).order('event_date', { ascending: false }),
+    admin.from('bm_receiving_cold_chain_mappings').select('is_approved'),
+  ])
+  fail(invoiceError); fail(receiptError); fail(issueError); fail(eventError); fail(mappingError)
+
+  const invoices = (invoiceData ?? []) as RecordRow[]
+  const receipts = (receiptData ?? []) as RecordRow[]
+  const invoiceIds = invoices.map((row) => asString(row.id)).filter(Boolean)
+  const receiptIds = receipts.map((row) => asString(row.id)).filter(Boolean)
+  const [{ data: invoiceLineData, error: invoiceLineError }, { data: receiptLineData, error: receiptLineError }] = await Promise.all([
+    invoiceIds.length ? admin.from('bm_invoice_lines').select('id,invoice_id,line_no,closure_state').in('invoice_id', invoiceIds) : Promise.resolve({ data: [], error: null }),
+    receiptIds.length ? admin.from('bm_receipt_lines').select('id,receipt_id,invoice_line_id,tor_expiry_compliance').in('receipt_id', receiptIds) : Promise.resolve({ data: [], error: null }),
+  ])
+  fail(invoiceLineError); fail(receiptLineError)
+
+  const invoiceDates = new Map(invoices.map((row) => [asString(row.id), nullableString(row.invoice_date)]))
+  const issueRows = ((issueData ?? []) as RecordRow[]).map(toVendorIssue)
+  const eventRows = ((eventData ?? []) as RecordRow[]).map(toSignificantEvent)
+  const receiptRows = receipts.map((row) => ({
+    id: asString(row.id),
+    invoiceId: nullableString(row.invoice_id),
+    receivedDate: asString(row.received_date),
+    status: asString(row.status),
+    packagingStatus: nullableString(row.packaging_status),
+    temperatureStatus: nullableString(row.temperature_status),
+    coldChainApplicable: Boolean(row.cold_chain_applicable),
+  }))
+  const receiptLineRows = ((receiptLineData ?? []) as RecordRow[]).map((row) => ({
+    id: asString(row.id),
+    receiptId: asString(row.receipt_id),
+    invoiceLineId: nullableString(row.invoice_line_id),
+    compliance: asString(row.tor_expiry_compliance) as 'compliant' | 'not_compliant' | 'not_applicable',
+  }))
+  const invoiceLineRows = ((invoiceLineData ?? []) as RecordRow[]).map((row) => ({
+    id: asString(row.id),
+    invoiceId: asString(row.invoice_id),
+    lineNo: asNumber(row.line_no),
+    closureState: asString(row.closure_state) as 'open' | 'complete' | 'short_closed' | 'cancelled',
+  }))
+  const metrics = buildVendorMetrics({
+    fiscalYear,
+    completeDelivery: invoiceLineRows,
+    shelfLife: receiptLineRows.map((row) => ({ compliance: row.compliance })),
+    receipts: receiptRows.map((row) => ({ ...row, status: row.status as 'draft' | 'confirmed' | 'cancelled', packagingStatus: row.packagingStatus as 'acceptable' | 'damaged' | 'not_applicable' | null, temperatureStatus: row.temperatureStatus as 'acceptable' | 'out_of_range' | 'not_applicable' | null })),
+    issues: issueRows.map((row) => ({ issueType: row.issueType, resolutionStatus: row.resolutionStatus, openedAt: row.openedAt })),
+    deliveryDates: receiptRows.map((row) => ({ invoiceDate: row.invoiceId ? invoiceDates.get(row.invoiceId) ?? null : null, receivedDate: row.receivedDate })),
+    coldChainMappingApproved: (mappingData ?? []).length > 0 && (mappingData ?? []).every((row) => Boolean((row as RecordRow).is_approved)),
+  })
+
+  return {
+    vendor,
+    fiscalYear,
+    from: bounds.from,
+    to: bounds.to,
+    metrics,
+    issues: issueRows,
+    significantEvents: eventRows,
+    receiptSources: receiptRows,
+    receiptLineSources: receiptLineRows,
+    invoiceLineSources: invoiceLineRows,
+    metricKeys: Object.values(metrics.metrics).map((metric) => metric.key),
+  }
 }
