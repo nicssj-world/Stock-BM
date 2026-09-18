@@ -58,6 +58,7 @@ The local ledger assertion observed the existing fixture lot balance at 11 after
 - Required release evidence: original-image preservation, auto-detection fallback, four touch-draggable corners, true perspective rectification, explicit confirmation before OCR, skip/reset/retake flows, no stock mutation, and real iPhone Safari verification.
 - Invoice image capture/crop implementation: local unit tests PASS for coordinate scaling, corner ordering/reset, perspective input validation, high-contrast detection/fallback, and EXIF orientation mapping. The capture panel is integrated into the invoice editor; real device and preview verification remain outstanding.
 - Amended Phase 2 sequencing: this recovered crop requirement is tracked as 2E; the original plan's OCR runtime, dictionary matching, and invoice intake are consequently tracked as 2F, 2G, and 2H for execution evidence. The OCR hand-off is only the confirmed `processedImage` (or an explicitly user-selected skip-crop original), never the unconfirmed original.
+- 2F self-hosted browser OCR runtime: PASS — `tesseract.js` 7.0.0 is installed; worker/core and Thai/English LSTM data are copied under `public/ocr/`; the OCR path has same-origin asset tests with no CDN/esm.sh references; downscaling is capped at 1600px; progress and cancellation are wired; and a local Node smoke run recognized an image using the copied language data. Browser-worker and iPhone verification remain outstanding.
 
 ## Release gate
 
