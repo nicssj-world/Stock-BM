@@ -5,6 +5,7 @@ import { ClipboardList, Plus, Trash2 } from 'lucide-react'
 import type { Invoice, ReceivingWorkspace } from '@/lib/receiving/types'
 import { cumulativeReceived, deliveryCompleteness } from '@/lib/receiving/rules'
 import { api, Button, Card, Field, Input, StatusBadge } from '@/components/ui'
+import { InvoiceImageCrop, type InvoiceImageCropResult } from '@/components/receiving/invoice-image-crop'
 
 type DraftLine = { lineNo: number; catalogNoText: string; descriptionText: string; expectedQty: string }
 
@@ -18,6 +19,7 @@ export function InvoiceEditor({ data, onSaved, onError }: { data: ReceivingWorks
   const [invoiceNo, setInvoiceNo] = useState('')
   const [invoiceDate, setInvoiceDate] = useState('')
   const [lines, setLines] = useState<DraftLine[]>([blankLine(1)])
+  const [invoiceImage, setInvoiceImage] = useState<InvoiceImageCropResult | null>(null)
   const [busy, setBusy] = useState(false)
 
   function patchLine(index: number, key: keyof DraftLine, value: string) {
@@ -70,6 +72,8 @@ export function InvoiceEditor({ data, onSaved, onError }: { data: ReceivingWorks
   }
 
   return <div className="space-y-4">
+    <InvoiceImageCrop onConfirmed={setInvoiceImage} />
+    {invoiceImage ? <p className="text-xs text-[#58747d]">ภาพ invoice ที่ยืนยันแล้วพร้อมสำหรับ OCR draft — ระบบยังไม่เขียน stock จากภาพนี้</p> : null}
     <Card className="p-4">
       <form onSubmit={createInvoice} className="space-y-4">
         <div className="grid gap-3 md:grid-cols-3">

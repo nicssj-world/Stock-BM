@@ -49,12 +49,15 @@ The local ledger assertion observed the existing fixture lot balance at 11 after
 - 2A OCR feasibility spike retirement: PASS — retired runtime/package references were removed, feasibility findings were preserved, and the targeted test passed.
 - 2B GS1/HIBC barcode parser: PASS — TDD fixtures cover GS1-128 FNC1, GS1 DataMatrix, `]e0`, HIBC primary/secondary, GTIN/catalog separation, and malformed all-null fallback. `npx vitest run lib/receiving/barcode.test.ts` and `npx tsc --noEmit` passed.
 - 2C scanner plumbing: PASS — the shared hook retains the existing code callback contract while exposing symbology, raw bytes, ZXing result metadata, and explicit format hints. Targeted scanner tests and `npx tsc --noEmit` passed.
+- 2D package barcode scan: PASS — the protected parse route is read-only and flag-gated; GS1/HIBC payloads populate draft-only evidence, unique/ambiguous/no-match outcomes are explicit, and conflicts block use/confirmation. Targeted package-scan tests and `npx tsc --noEmit` passed.
 
 ## Recovered approved scope amendment
 
 - Recorded as: **Recovered approved Stock1 requirement omitted from Revision 3: Invoice auto-document crop + manually adjustable four-corner perspective crop.**
 - Placement: after barcode/package-scan work and before the Tesseract.js OCR runtime/intake.
 - Required release evidence: original-image preservation, auto-detection fallback, four touch-draggable corners, true perspective rectification, explicit confirmation before OCR, skip/reset/retake flows, no stock mutation, and real iPhone Safari verification.
+- Invoice image capture/crop implementation: local unit tests PASS for coordinate scaling, corner ordering/reset, perspective input validation, high-contrast detection/fallback, and EXIF orientation mapping. The capture panel is integrated into the invoice editor; real device and preview verification remain outstanding.
+- Amended Phase 2 sequencing: this recovered crop requirement is tracked as 2E; the original plan's OCR runtime, dictionary matching, and invoice intake are consequently tracked as 2F, 2G, and 2H for execution evidence. The OCR hand-off is only the confirmed `processedImage` (or an explicitly user-selected skip-crop original), never the unconfirmed original.
 
 ## Release gate
 
