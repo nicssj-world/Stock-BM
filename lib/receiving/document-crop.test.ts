@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   applyPerspectiveTransform,
+  applyCropDrag,
   buildPerspectiveTransform,
+  calculateLoupeViewportPosition,
+  clampCropPoint,
   detectDocumentCornersFromRgba,
   displayToImagePoint,
   imageToDisplayPoint,
@@ -27,12 +30,61 @@ function rgba(width: number, height: number, fill: (x: number, y: number) => num
   return data
 }
 
+type FixturePoint = { x: number; y: number }
+
+function insidePolygon(x: number, y: number, points: FixturePoint[]) {
+  const signs = points.map((point, index) => {
+    const next = points[(index + 1) % points.length]
+    return (next.x - point.x) * (y - point.y) - (next.y - point.y) * (x - point.x)
+  })
+  return signs.every((value) => value >= 0) || signs.every((value) => value <= 0)
+}
+
+function photoLikeFixture(width: number, height: number, documentPoints: FixturePoint[], options: { unevenLighting?: boolean; clutter?: boolean } = {}) {
+  return rgba(width, height, (x, y) => {
+    const lighting = options.unevenLighting ? (x / width) * 38 + (y / height) * 24 : 0
+    const backgroundTexture = ((x * 17 + y * 11) % 19) - 9
+    const clutter = options.clutter && (x % 19 === 0 || y % 23 === 0) ? 38 : 0
+    if (!insidePolygon(x + 0.5, y + 0.5, documentPoints)) return Math.max(10, Math.round(52 + lighting * 0.45 + backgroundTexture + clutter))
+    const documentTexture = ((x * 7 + y * 5) % 13) - 6
+    return Math.min(245, Math.max(150, Math.round(222 - lighting + documentTexture)))
+  })
+}
+
+function edgeOnlyDocumentFixture(width: number, height: number, documentPoints: FixturePoint[]) {
+  function distanceToSegment(x: number, y: number, start: FixturePoint, end: FixturePoint) {
+    const dx = end.x - start.x
+    const dy = end.y - start.y
+    const lengthSquared = dx * dx + dy * dy || 1
+    const t = Math.max(0, Math.min(1, ((x - start.x) * dx + (y - start.y) * dy) / lengthSquared))
+    return Math.hypot(x - (start.x + t * dx), y - (start.y + t * dy))
+  }
+
+  return rgba(width, height, (x, y) => {
+    const background = 146 + ((x * 19 + y * 23) % 17) - 8
+    const inside = insidePolygon(x + 0.5, y + 0.5, documentPoints)
+    const boundary = documentPoints.some((point, index) => distanceToSegment(x + 0.5, y + 0.5, point, documentPoints[(index + 1) % documentPoints.length]) < 2.2)
+    if (boundary) return 238
+    if (inside) return 148 + ((x * 5 + y * 3) % 11) - 5
+    return background
+  })
+}
+
 describe('document crop geometry', () => {
   it('maps display coordinates to original image pixels and back', () => {
     const image = { width: 1200, height: 800 }
     const display = { width: 300, height: 200 }
     expect(displayToImagePoint({ x: 150, y: 100 }, display, image)).toEqual({ x: 600, y: 400 })
     expect(imageToDisplayPoint({ x: 600, y: 400 }, image, display)).toEqual({ x: 150, y: 100 })
+  })
+
+  it('clamps normalized crop points and keeps the loupe inside the viewport above the finger', () => {
+    expect(clampCropPoint({ x: -0.2, y: 1.4 })).toEqual({ x: 0, y: 1 })
+    expect(applyCropDrag({ x: 0.31, y: 0.42 }, { x: 0.04, y: -0.02 })).toEqual({ x: 0.35, y: expect.closeTo(0.4) })
+    expect(applyCropDrag({ x: 0.02, y: 0.98 }, { x: -0.2, y: 0.3 })).toEqual({ x: 0, y: 1 })
+    expect(calculateLoupeViewportPosition({ x: 195, y: 220 }, { width: 390, height: 844 })).toEqual({ left: 127, top: 66 })
+    expect(calculateLoupeViewportPosition({ x: 0, y: 50 }, { width: 390, height: 844 })).toEqual({ left: 8, top: 68 })
+    expect(calculateLoupeViewportPosition({ x: 389, y: 820 }, { width: 390, height: 844 })).toEqual({ left: 246, top: 666 })
   })
 
   it('orders four corners consistently from arbitrary input order', () => {
@@ -99,6 +151,76 @@ describe('document crop geometry', () => {
     expect(detected?.topLeft.x).toBeGreaterThan(0.1)
     expect(detected?.topLeft.y).toBeGreaterThan(0.05)
     expect(detectDocumentCornersFromRgba(rgba(100, 100, () => 120), 100, 100)).toBeNull()
+  })
+
+  it('detects portrait and perspective-skewed invoice fixtures with uneven lighting and clutter', () => {
+    const portrait = [
+      { x: 26, y: 18 },
+      { x: 98, y: 11 },
+      { x: 108, y: 166 },
+      { x: 17, y: 172 },
+    ]
+    const skewed = [
+      { x: 34, y: 28 },
+      { x: 194, y: 16 },
+      { x: 211, y: 132 },
+      { x: 18, y: 146 },
+    ]
+    const portraitDetected = detectDocumentCornersFromRgba(photoLikeFixture(125, 185, portrait, { unevenLighting: true, clutter: true }), 125, 185)
+    const skewedDetected = detectDocumentCornersFromRgba(photoLikeFixture(230, 170, skewed, { unevenLighting: true, clutter: true }), 230, 170)
+    expect(portraitDetected).not.toBeNull()
+    expect(skewedDetected).not.toBeNull()
+    expect(portraitDetected?.topLeft.x).toBeCloseTo(portrait[0].x / 124, 1)
+    expect(portraitDetected?.topRight.x).toBeCloseTo(portrait[1].x / 124, 1)
+    expect(skewedDetected?.bottomLeft.y).toBeCloseTo(skewed[3].y / 169, 1)
+  })
+
+  it('rejects a cluttered portrait background when no document quadrilateral exists', () => {
+    const noDocument = rgba(160, 220, (x, y) => {
+      const gradient = (x / 160) * 70 + (y / 220) * 45
+      const texture = Math.sin(x / 4.7) * 15 + Math.cos(y / 6.3) * 13 + Math.sin((x + y) / 9) * 8
+      const localClutter = Math.sin(x / 2.1 + y / 3.4) * Math.cos(y / 5.2) * 9
+      return Math.max(10, Math.min(245, Math.round(105 + gradient + texture + localClutter)))
+    })
+    const detected = detectDocumentCornersFromRgba(noDocument, 160, 220)
+    expect(detected).toBeNull()
+  })
+
+  it('falls back to manual corners instead of fabricating missing corners for a partial document', () => {
+    const partial = [
+      { x: -24, y: 28 },
+      { x: 148, y: 16 },
+      { x: 166, y: 202 },
+      { x: -18, y: 214 },
+    ]
+    expect(detectDocumentCornersFromRgba(photoLikeFixture(160, 220, partial, { unevenLighting: true }), 160, 220)).toBeNull()
+  })
+
+  it('finds a document from boundary edges when document and background tones are nearly identical', () => {
+    const points = [
+      { x: 34, y: 29 },
+      { x: 202, y: 17 },
+      { x: 215, y: 142 },
+      { x: 19, y: 153 },
+    ]
+    const detected = detectDocumentCornersFromRgba(edgeOnlyDocumentFixture(235, 180, points), 235, 180)
+    expect(detected).not.toBeNull()
+    expect(detected?.topLeft.x).toBeCloseTo(points[0].x / 234, 1)
+    expect(detected?.topRight.y).toBeCloseTo(points[1].y / 179, 1)
+    expect(detected?.bottomRight.x).toBeCloseTo(points[2].x / 234, 1)
+  })
+
+  it('keeps normalized detection coordinates stable for a rotated portrait working copy', () => {
+    const rotated = [
+      { x: 30, y: 24 },
+      { x: 130, y: 16 },
+      { x: 142, y: 194 },
+      { x: 20, y: 202 },
+    ]
+    const detected = detectDocumentCornersFromRgba(photoLikeFixture(160, 230, rotated, { unevenLighting: true }), 160, 230)
+    expect(detected).not.toBeNull()
+    expect(detected?.bottomRight.x).toBeCloseTo(rotated[2].x / 159, 1)
+    expect(detected?.bottomRight.y).toBeCloseTo(rotated[2].y / 229, 1)
   })
 
   it('keeps coordinate handling correct for rotated EXIF orientations', () => {

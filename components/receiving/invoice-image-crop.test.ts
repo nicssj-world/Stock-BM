@@ -52,6 +52,26 @@ describe('invoice image crop capture boundary', () => {
     expect(source).toContain('rectifyPerspectiveImage')
   })
 
+  it('uses a smaller visible corner with a larger touch hitbox and an active-corner loupe', () => {
+    expect(source).toContain('LOUPE_SIZE = 136')
+    expect(source).toContain('LOUPE_MAGNIFICATION = 2.75')
+    expect(source).toContain('calculateLoupeViewportPosition')
+    expect(source).toContain('backgroundImage')
+    expect(source).toContain('backgroundSize')
+    expect(source).toContain('pointer-events-none')
+    expect(source).toContain('setLoupe(null)')
+    expect(source).toContain('onPointerCancel={endDrag}')
+    expect(source).toMatch(/className="[^"]*size-12[^"]*"[^>]*>[\s\S]*?className="[^"]*size-7[^"]*"/)
+  })
+
+  it('preserves touch offset, clamps corner movement, and disables scrolling only during active drag', () => {
+    expect(source).toContain('dragOffsetRef')
+    expect(source).toContain('clampCropPoint')
+    expect(source).toContain('touchAction')
+    expect(source).toContain('setLoupe({')
+    expect(source).toContain('onPointerUp={endDrag}')
+  })
+
   it('requires explicit crop/skip confirmation and supports reset, original preview, and replacement', () => {
     expect(source).toContain('ใช้ Auto Crop / Reset corners')
     expect(source).toContain('Original image')
