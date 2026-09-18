@@ -1,6 +1,15 @@
 'use client'
 
-export const OCR_MAX_EDGE = 1600
+// 1600px was tuned as a generic "iPhone-safe" ceiling, but a dense A4
+// invoice photographed at typical phone-camera resolution puts many
+// catalog/lot rows within a few pixels of each other; at 1600px long-edge
+// those rows blur together and small alphanumeric catalog tokens become
+// unreadable. 2200px keeps a single working canvas well within what an
+// iPhone Safari canvas/WASM heap handles (~19MB RGBA for a 2200x2200
+// buffer) while giving Tesseract meaningfully more pixels per character on
+// the "full page" pass. The line-item and numeric passes already scale up
+// further from this base (capped at 3200) for the densest text.
+export const OCR_MAX_EDGE = 2200
 
 export const OCR_ASSET_PATHS = {
   workerPath: '/ocr/worker.min.js',
@@ -40,6 +49,18 @@ export type OcrPassResult = {
   text: string
   confidence: number | null
   lines: OcrLineEvidence[]
+  inputWidth: number
+  inputHeight: number
+  durationMs: number
+}
+
+/** Preview-only diagnostics (section M): never expose secrets — this is pixel/timing metadata only. */
+export type OcrDiagnostics = {
+  originalWidth: number
+  originalHeight: number
+  languages: string
+  workerLoadMs: number | null
+  totalDurationMs: number
 }
 
 export type OcrMergedLine = {
@@ -55,6 +76,7 @@ export type OcrResult = {
   preparedImage: PreparedOcrImage
   passes: OcrPassResult[]
   lines: OcrMergedLine[]
+  diagnostics: OcrDiagnostics
 }
 
 export type OcrOptions = {
@@ -182,7 +204,10 @@ async function prepareOcrPassImages(source: string | Blob, maxEdge: number) {
     Math.min(3200, Math.round(maxEdge * pass.maxEdgeMultiplier)),
     pass.variant,
   )))
-  return OCR_PASS_CONFIG.map((pass, index) => ({ pass, image: prepared[index] }))
+  return {
+    inputImage: { width: image.naturalWidth, height: image.naturalHeight },
+    passes: OCR_PASS_CONFIG.map((pass, index) => ({ pass, image: prepared[index] })),
+  }
 }
 
 function progressStatus(status: string) {
@@ -279,8 +304,9 @@ function parseTsvLines(tsv: string | null, fallbackText: string, confidence: num
 
 export async function recognizeProcessedInvoiceImage(source: string | Blob, options: OcrOptions = {}): Promise<OcrResult> {
   const { signal, onProgress, maxEdge = OCR_MAX_EDGE } = options
+  const startedAt = Date.now()
   throwIfAborted(signal)
-  const preparedPasses = await prepareOcrPassImages(source, maxEdge)
+  const { inputImage, passes: preparedPasses } = await prepareOcrPassImages(source, maxEdge)
   throwIfAborted(signal)
 
   const { createWorker, OEM } = await import('tesseract.js')
@@ -296,6 +322,7 @@ export async function recognizeProcessedInvoiceImage(source: string | Blob, opti
   signal?.addEventListener('abort', abortListener, { once: true })
 
   try {
+    const workerLoadStartedAt = Date.now()
     worker = await createWorker('tha+eng', OEM.LSTM_ONLY, {
       ...OCR_ASSET_PATHS,
       workerBlobURL: false,
@@ -303,6 +330,7 @@ export async function recognizeProcessedInvoiceImage(source: string | Blob, opti
       cacheMethod: 'none',
       logger: (message) => onProgress?.({ status: progressStatus(message.status), progress: Math.max(0, Math.min(1, message.progress / OCR_PASS_CONFIG.length)) }),
     })
+    const workerLoadMs = Date.now() - workerLoadStartedAt
     throwIfAborted(signal)
     const passes: OcrPassResult[] = []
     for (const [index, prepared] of preparedPasses.entries()) {
@@ -316,7 +344,18 @@ export async function recognizeProcessedInvoiceImage(source: string | Blob, opti
         user_defined_dpi: '300',
       })
       onProgress?.({ status: pass.label, progress: index / OCR_PASS_CONFIG.length })
-      const recognition = worker.recognize(prepared.image.blob, { rotateAuto: true }, { text: true, tsv: true })
+      const passStartedAt = Date.now()
+      // The image handed to Tesseract here is already perspective-corrected
+      // and EXIF-orientation-normalized upstream (see document-crop.ts), so
+      // we deliberately do not ask Tesseract to auto-detect and re-rotate.
+      // That built-in skew detection re-runs its own layout/line finder
+      // under a temporarily forced automatic page-segmentation mode before
+      // every pass, including the numeric/whitelist pass — on a heavily
+      // binarized, mostly-digits working image that pass's own
+      // preprocessing produces, that detector has little real text
+      // structure to key off and can introduce a spurious small rotation
+      // right before the whitelist-constrained recognition runs.
+      const recognition = worker.recognize(prepared.image.blob, {}, { text: true, tsv: true })
       const result = signal
         ? await Promise.race([
           recognition,
@@ -325,11 +364,27 @@ export async function recognizeProcessedInvoiceImage(source: string | Blob, opti
         : await recognition
       throwIfAborted(signal)
       const confidence = Number.isFinite(result.data.confidence) ? result.data.confidence : null
-      passes.push({ id: pass.id, label: pass.label, text: result.data.text, confidence, lines: parseTsvLines(result.data.tsv, result.data.text, confidence) })
+      passes.push({
+        id: pass.id,
+        label: pass.label,
+        text: result.data.text,
+        confidence,
+        lines: parseTsvLines(result.data.tsv, result.data.text, confidence),
+        inputWidth: prepared.image.width,
+        inputHeight: prepared.image.height,
+        durationMs: Date.now() - passStartedAt,
+      })
       onProgress?.({ status: `${pass.label} เสร็จแล้ว`, progress: (index + 1) / OCR_PASS_CONFIG.length })
     }
     const merged = mergeOcrPasses(passes)
-    return { text: merged.text, confidence: merged.confidence, preparedImage: preparedPasses[0].image, passes, lines: merged.lines }
+    const diagnostics: OcrDiagnostics = {
+      originalWidth: inputImage.width,
+      originalHeight: inputImage.height,
+      languages: 'tha+eng',
+      workerLoadMs,
+      totalDurationMs: Date.now() - startedAt,
+    }
+    return { text: merged.text, confidence: merged.confidence, preparedImage: preparedPasses[0].image, passes, lines: merged.lines, diagnostics }
   } finally {
     signal?.removeEventListener('abort', abortListener)
     if (!terminated) {

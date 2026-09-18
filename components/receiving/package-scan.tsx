@@ -5,6 +5,7 @@ import { Camera, CheckCircle2, ScanLine, X } from 'lucide-react'
 import type { CameraScanResult } from '@/components/camera-scanner'
 import { useCameraScanner } from '@/components/camera-scanner'
 import type { ParsedBarcode } from '@/lib/receiving/barcode'
+import { describeBarcodeScan, type BarcodeScanDiagnostics } from '@/lib/receiving/barcode-diagnostics'
 import type { PackageScanResolution } from '@/lib/receiving/package-scan'
 import { api, Button, Field, Input, Notice, StatusBadge } from '@/components/ui'
 
@@ -19,11 +20,14 @@ export function PackageScan({
   disabled = false,
   onUse,
   resolveScan,
+  onScanDiagnostics,
 }: {
   selectedItemId: string | null
   disabled?: boolean
   onUse: (result: PackageScanResponse) => void
   resolveScan?: PackageScanResolver
+  /** Preview-only: raw/escaped payload, hex bytes, symbology, and parsed AIs for a camera scan. Never used by production callers. */
+  onScanDiagnostics?: (diagnostics: BarcodeScanDiagnostics) => void
 }) {
   const [raw, setRaw] = useState('')
   const [symbologyId, setSymbologyId] = useState<string | null>(null)
@@ -59,6 +63,12 @@ export function PackageScan({
       const identifier = details?.symbologyId ?? null
       setRaw(code)
       setSymbologyId(identifier)
+      onScanDiagnostics?.(describeBarcodeScan({
+        raw: code,
+        symbologyId: identifier,
+        rawBytes: details?.rawBytes ?? null,
+        barcodeFormat: details?.barcodeFormat ?? null,
+      }))
       void parse(code, identifier)
     },
     onError: setError,

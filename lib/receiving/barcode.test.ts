@@ -1,4 +1,4 @@
-import fixtures from './__fixtures__/barcode-fixtures.json'
+import { barcodeFixtures as fixtures } from './__fixtures__/barcode-fixtures'
 import { describe, expect, it } from 'vitest'
 import { parseBarcode } from './barcode'
 
@@ -101,6 +101,46 @@ describe('parseBarcode', () => {
       catalog: null,
       gtin: null,
     })
+  })
+
+  it('parses a real iPhone/ZXing DataMatrix scan shape: leading FNC1 rendered as a literal ASCII 29 GS before the AI stream', () => {
+    // ZXing (and every AIM-compliant scanner) translates the DataMatrix
+    // message's leading FNC1 codeword into a literal GS character. It is a
+    // "this message is GS1-formatted" flag, not data, and the scanner never
+    // gives us the "]d2" symbology identifier as text or metadata — this is
+    // exactly what a real camera scan handed to parseBarcode looks like.
+    const fixture = fixtures['gs1-datamatrix-real-scan']
+    const result = parseBarcode(fixture.raw, fixture.symbologyId)
+
+    expect(result).toMatchObject({
+      raw: fixture.raw,
+      standard: 'gs1',
+      gtin: fixture.gtin,
+      expiry: fixture.expiry,
+      lot: fixture.lot,
+      catalog: null,
+    })
+  })
+
+  it('parses a real-scan-shaped payload with a mid-stream GS terminating a variable-length lot before a fixed expiry and trailing serial', () => {
+    const fixture = fixtures['gs1-datamatrix-real-scan-mid-stream-gs']
+    const result = parseBarcode(fixture.raw, fixture.symbologyId)
+
+    expect(result).toMatchObject({
+      raw: fixture.raw,
+      standard: 'gs1',
+      gtin: fixture.gtin,
+      lot: fixture.lot,
+      expiry: fixture.expiry,
+      serial: fixture.serial,
+      catalog: null,
+    })
+  })
+
+  it('still fails safely (no partial fields) when a leading GS is followed by garbage instead of a real AI stream', () => {
+    const raw = 'not-a-valid-ai-stream'
+    expect(() => parseBarcode(raw, null)).not.toThrow()
+    expect(parseBarcode(raw, null)).toEqual({ raw, symbologyId: null, ...emptyDecodedFields })
   })
 
   it('returns the raw malformed payload without throwing or returning partial decoded values', () => {

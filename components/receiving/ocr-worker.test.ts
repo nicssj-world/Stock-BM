@@ -7,10 +7,22 @@ const workerSource = readFileSync(join(process.cwd(), 'components/receiving/ocr-
 
 describe('self-hosted invoice OCR worker boundary', () => {
   it('keeps the longest image edge at or below the iPhone-safe limit without upscaling', () => {
-    expect(downscaledImageSize(4000, 2000)).toEqual({ width: 1600, height: 800 })
+    expect(downscaledImageSize(4000, 2000)).toEqual({ width: 2200, height: 1100 })
     expect(downscaledImageSize(800, 1200)).toEqual({ width: 800, height: 1200 })
     expect(downscaledImageSize(0, 1200)).toEqual({ width: 0, height: 0 })
-    expect(OCR_MAX_EDGE).toBe(1600)
+    // Raised from the original 1600px: a dense A4 invoice's catalog/lot rows
+    // were losing legibility at that resolution (section G).
+    expect(OCR_MAX_EDGE).toBe(2200)
+  })
+
+  it('does not re-run Tesseract auto-rotation on an already perspective-corrected image', () => {
+    // The crop pipeline already produces an upright, perspective-corrected
+    // image (document-crop.ts). Re-running Tesseract's own rotateAuto skew
+    // detection before every pass — including the binarized numeric pass,
+    // which has little real text structure for FindLines to key off — risks
+    // introducing a spurious rotation right before whitelist-constrained
+    // recognition runs.
+    expect(workerSource).not.toContain('rotateAuto')
   })
 
   it('uses only same-origin self-hosted worker, core, and language paths', () => {

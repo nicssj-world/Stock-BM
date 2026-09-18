@@ -12,8 +12,38 @@ export type CameraScanResult = {
   barcodeFormat: number | null
 }
 
-function symbologyIdFromCode(code: string): string | null {
-  return code.match(/^\](?:C1|d2|e0|A0|C0)/)?.[0] ?? null
+/**
+ * @zxing/library's ResultMetadataType enum has no SYMBOLOGY_IDENTIFIER entry
+ * (unlike zxing-java/zxing-cpp), and BrowserMultiFormatReader's decoded text
+ * never carries an embedded "]d2"-style AIM prefix either — so neither
+ * `getResultMetadata()` nor the decoded text can tell us the real symbology
+ * identifier. The best available signal is the detected barcode format
+ * (a stable numeric enum — see @zxing/library's BarcodeFormat), which we map
+ * to the AIM identifier GS1/HIBC parsing conventionally expects.
+ */
+const AZTEC = 0
+const CODABAR = 1
+const CODE_39 = 2
+const CODE_128 = 4
+const DATA_MATRIX = 5
+const PDF_417 = 10
+const QR_CODE = 11
+const RSS_14 = 12
+const RSS_EXPANDED = 13
+
+function symbologyIdFromBarcodeFormat(barcodeFormat: number | null): string | null {
+  switch (barcodeFormat) {
+    case DATA_MATRIX: return ']d2'
+    case CODE_128: return ']C1'
+    case RSS_14:
+    case RSS_EXPANDED: return ']e0'
+    case QR_CODE: return ']Q1'
+    case AZTEC: return ']z1'
+    case PDF_417: return ']L1'
+    case CODE_39: return ']A0'
+    case CODABAR: return ']F0'
+    default: return null
+  }
 }
 
 function cameraErrorMessage(error: unknown) {
@@ -133,12 +163,13 @@ export function useCameraScanner({
         const now = Date.now()
         if (code === lastRef.current.code && now - lastRef.current.at < dedupeMs) return
         lastRef.current = { code, at: now }
+        const barcodeFormat = result?.getBarcodeFormat() ?? null
         onScanRef.current(code, {
           code,
-          symbologyId: symbologyIdFromCode(code),
+          symbologyId: symbologyIdFromBarcodeFormat(barcodeFormat),
           rawBytes: result?.getRawBytes() ?? null,
           resultMetadata: result?.getResultMetadata() ?? null,
-          barcodeFormat: result?.getBarcodeFormat() ?? null,
+          barcodeFormat,
         })
         if (stopOnScan) stop()
       })

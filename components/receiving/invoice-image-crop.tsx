@@ -1,10 +1,9 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { Camera, Check, Crop, Image as ImageIcon, RotateCcw, X } from 'lucide-react'
 import { Button, Card, Notice, StatusBadge } from '@/components/ui'
 import {
-  calculateLoupeViewportPosition,
   beginCropDrag,
   clampCropPoint,
   detectDocumentCorners,
@@ -20,18 +19,14 @@ import {
 
 type CornerKey = keyof CropCorners
 
-type LoupeState = {
-  key: CornerKey
-  point: CropPoint
-  clientX: number
-  clientY: number
-}
-
 export type InvoiceImageCropResult = {
   originalImage: string
   cropCorners: CropCorners | null
   processedImage: string
   skipped: boolean
+  /** Preview-only diagnostics (section M): original pixel dimensions and whether corners came from auto-detection. */
+  imageSize: ImageSize | null
+  autoDetected: boolean
 }
 
 const cornerKeys: CornerKey[] = ['topLeft', 'topRight', 'bottomRight', 'bottomLeft']
@@ -41,8 +36,17 @@ const cornerLabels: Record<CornerKey, string> = {
   bottomRight: 'bottom-right',
   bottomLeft: 'bottom-left',
 }
+// The visible bracket is drawn once for the top-left corner (an "L" opening
+// toward the inside of the quadrilateral) and rotated 90 degrees per corner
+// going clockwise, rather than drawing four separate paths.
+const cornerBracketRotation: Record<CornerKey, number> = {
+  topLeft: 0,
+  topRight: 90,
+  bottomRight: 180,
+  bottomLeft: 270,
+}
 
-type DisplayedImageRect = {
+export type DisplayedImageRect = {
   left: number
   top: number
   width: number
@@ -51,7 +55,7 @@ type DisplayedImageRect = {
   frameHeight: number
 }
 
-function calculateDisplayedImageRect(frame: DOMRect, imageSize: ImageSize): DisplayedImageRect {
+export function calculateDisplayedImageRect(frame: DOMRect, imageSize: ImageSize): DisplayedImageRect {
   const scale = Math.min(frame.width / imageSize.width, frame.height / imageSize.height)
   const width = imageSize.width * scale
   const height = imageSize.height * scale
@@ -59,9 +63,6 @@ function calculateDisplayedImageRect(frame: DOMRect, imageSize: ImageSize): Disp
 }
 
 const FILE_INPUT_CLASS = 'absolute h-px w-px overflow-hidden opacity-0'
-const LOUPE_SIZE = 104
-const LOUPE_MAGNIFICATION = 2
-const LOUPE_GAP = 14
 
 function isSupportedImageFile(file: File) {
   return file.type.toLowerCase().startsWith('image/') || /\.(?:heic|heif)$/i.test(file.name)
@@ -81,7 +82,6 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
   const [dragging, setDragging] = useState<CornerKey | null>(null)
   const [busy, setBusy] = useState(false)
   const [displayedRect, setDisplayedRect] = useState<DisplayedImageRect | null>(null)
-  const [loupe, setLoupe] = useState<LoupeState | null>(null)
   const dragOffsetRef = useRef<{ key: string | null; pointerId: number | null; offset: CropPoint | null }>({ key: null, pointerId: null, offset: null })
 
   useEffect(() => {
@@ -112,7 +112,6 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
       setCropCorners(null)
       setImageSize(null)
       setShowOriginal(true)
-      setLoupe(null)
       dragOffsetRef.current = { key: null, pointerId: null, offset: null }
       setDragging(null)
       setDetectionMessage('กำลังตรวจหาขอบเอกสาร…')
@@ -167,10 +166,8 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
     event.preventDefault()
     event.stopPropagation()
     event.currentTarget.setPointerCapture(event.pointerId)
-    event.currentTarget.style.touchAction = 'none'
     dragOffsetRef.current = beginCropDrag(key, event.pointerId, currentPoint, pointer ?? currentPoint)
     setDragging(key)
-    setLoupe({ key, point: currentPoint, clientX: event.clientX, clientY: event.clientY })
   }
 
   function moveDrag(key: CornerKey, event: React.PointerEvent<HTMLButtonElement>) {
@@ -182,22 +179,18 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
     const next = moveCropDrag(activeDrag, key, event.pointerId, pointer)
     if (!next) return
     setCropCorners((current) => current ? { ...current, [key]: next } : current)
-    setLoupe({ key, point: next, clientX: event.clientX, clientY: event.clientY })
   }
 
   function endDrag(event: React.PointerEvent<HTMLButtonElement>) {
     if (dragOffsetRef.current.key !== null) event.preventDefault()
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
-    event.currentTarget.style.touchAction = 'pan-y'
     const activeKey = dragOffsetRef.current.key
     dragOffsetRef.current = endCropDrag(dragOffsetRef.current, activeKey ?? '', event.pointerId)
     setDragging(null)
-    setLoupe(null)
   }
 
   function resetCorners() {
     setCropCorners(resetCropCorners(autoCorners))
-    setLoupe(null)
     setError(null)
   }
 
@@ -205,9 +198,8 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
     if (!originalImage) return
     setProcessedImage(originalImage)
     setShowOriginal(false)
-    setLoupe(null)
     setError(null)
-    onConfirmed?.({ originalImage, cropCorners: null, processedImage: originalImage, skipped: true })
+    onConfirmed?.({ originalImage, cropCorners: null, processedImage: originalImage, skipped: true, imageSize, autoDetected: false })
   }
 
   function confirmCrop() {
@@ -223,8 +215,7 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
       const rectified = rectifyPerspectiveImage(sourceImageRef.current, cropCorners)
       setProcessedImage(rectified.dataUrl)
       setShowOriginal(false)
-      setLoupe(null)
-      onConfirmed?.({ originalImage, cropCorners, processedImage: rectified.dataUrl, skipped: false })
+      onConfirmed?.({ originalImage, cropCorners, processedImage: rectified.dataUrl, skipped: false, imageSize, autoDetected: autoCorners !== null })
     } catch (rectifyError) {
       setError(rectifyError instanceof Error ? rectifyError.message : 'แก้ภาพ perspective ไม่สำเร็จ')
     } finally {
@@ -234,12 +225,6 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
 
   const previewImage = showOriginal ? originalImage : processedImage ?? originalImage
   const framePoints = cropCorners ? cornerKeys.map((key) => framePercent(cropCorners[key], displayedRect)).map((point) => `${point.left},${point.top}`).join(' ') : ''
-  const loupePosition = loupe ? calculateLoupeViewportPosition(
-    { x: loupe.clientX, y: loupe.clientY },
-    typeof window === 'undefined' ? { width: 390, height: 844 } : { width: window.innerWidth, height: window.innerHeight },
-    LOUPE_SIZE,
-    LOUPE_GAP,
-  ) : null
 
   return <Card className="space-y-3 p-4">
     <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-xs font-bold tracking-[0.14em] text-[#0b7f76] uppercase">Invoice image capture</p><h3 className="mt-1 text-base font-bold text-[#173d50]">เตรียมภาพก่อน OCR</h3><p className="mt-1 text-xs leading-5 text-[#81979c]">ระบบจะไม่ส่งภาพต้นฉบับเข้า OCR จนกว่าจะยืนยัน crop หรือเลือก Skip Crop</p></div>{processedImage ? <StatusBadge tone="accepted" label="ยืนยันภาพสำหรับ OCR แล้ว" /> : originalImage ? <StatusBadge tone="warning" label="รอยืนยัน crop" /> : null}</div>
@@ -251,12 +236,56 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
     </div>
     {originalImage ? <>
       {detectionMessage ? <Notice tone={autoCorners ? 'info' : 'warning'}>{detectionMessage}</Notice> : null}
-      <div ref={frameRef} className="relative aspect-[4/3] max-h-[70vh] min-h-[220px] overflow-hidden rounded-md border border-[#c9dadd] bg-[#eff4f4] select-none" style={{ touchAction: dragging ? 'none' : 'pan-y' }}>
+      {/*
+        touch-action on the frame is a static "pan-y" — it never toggles.
+        Each corner's own touch target below is statically touch-none instead
+        (via the `touch-none` class, not an inline style flipped by React
+        state). iOS Safari decides whether a touch gesture starts a page
+        scroll from the touch-action value in effect at the moment the touch
+        begins, before any of our event handlers run — flipping it reactively
+        in a pointerdown handler is consistently too late on Safari. A static
+        per-element value sidesteps that entirely: drags starting on a
+        corner's touch target never scroll the page, and touches anywhere
+        else on the frame still pan normally.
+      */}
+      <div ref={frameRef} className="relative aspect-[4/3] max-h-[70vh] min-h-[220px] touch-pan-y select-none overflow-hidden rounded-md border border-[#c9dadd] bg-[#eff4f4]">
         {previewImage ? <img src={previewImage} alt="Invoice preview" className="absolute inset-0 h-full w-full object-contain" style={{ imageOrientation: 'from-image' }} onLoad={showOriginal ? onOriginalLoad : undefined} /> : null}
-         {showOriginal && cropCorners ? <><svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true"><polyline points={framePoints} fill="rgba(11,127,118,.12)" stroke="#0b7f76" strokeWidth="0.5" /></svg>{cornerKeys.map((key) => { const point = framePercent(cropCorners[key], displayedRect); return <button key={key} type="button" aria-label={`ลากมุม ${cornerLabels[key]}`} className="absolute z-10 flex size-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-0 bg-transparent p-0" style={{ left: `${point.left}%`, top: `${point.top}%`, touchAction: dragging === key ? 'none' : 'pan-y' }} onPointerDown={(event) => beginDrag(key, event)} onPointerMove={(event) => moveDrag(key, event)} onPointerUp={endDrag} onPointerCancel={endDrag}><span aria-hidden="true" className="pointer-events-none size-5 rounded-full border-2 border-white bg-[#0b7f76] shadow-[0_1px_5px_rgba(0,0,0,.45)]" /></button> })}</> : null}
+        {showOriginal && cropCorners ? <>
+          <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <polyline points={framePoints} fill="rgba(11,127,118,.10)" stroke="#0b7f76" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
+          </svg>
+          {cornerKeys.map((key) => {
+            const point = framePercent(cropCorners[key], displayedRect)
+            const active = dragging === key
+            return <Fragment key={key}>
+              {/* Visible bracket: a small high-contrast "L" corner grip, not a large circle. Purely decorative — pointer-events-none — and kept well under the touch target below so it never covers invoice text. */}
+              <svg
+                aria-hidden="true"
+                width="26"
+                height="26"
+                viewBox="0 0 26 26"
+                className="pointer-events-none absolute z-10 drop-shadow-[0_1px_2px_rgba(0,0,0,.65)]"
+                style={{ left: `${point.left}%`, top: `${point.top}%`, transform: `translate(-50%, -50%) rotate(${cornerBracketRotation[key]}deg)` }}
+              >
+                <path d="M4 15V4H15" fill="none" stroke="#ffffff" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M4 15V4H15" fill="none" stroke={active ? '#f5a623' : '#0b7f76'} strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              {/* Invisible 48px touch target, separate from the visible bracket so the grip itself can stay small. */}
+              <button
+                type="button"
+                aria-label={`ลากมุม ${cornerLabels[key]}`}
+                className="absolute z-20 size-12 -translate-x-1/2 -translate-y-1/2 touch-none rounded-full border-0 bg-transparent p-0"
+                style={{ left: `${point.left}%`, top: `${point.top}%` }}
+                onPointerDown={(event) => beginDrag(key, event)}
+                onPointerMove={(event) => moveDrag(key, event)}
+                onPointerUp={endDrag}
+                onPointerCancel={endDrag}
+              />
+            </Fragment>
+          })}
+        </> : null}
         {!showOriginal && processedImage ? <div className="absolute bottom-2 left-2 rounded-full bg-[#173d50]/85 px-2.5 py-1 text-[11px] font-semibold text-white">Preview corrected image</div> : null}
       </div>
-      {showOriginal && loupe && originalImage && imageSize && loupePosition ? <div aria-hidden="true" className="pointer-events-none fixed z-50 overflow-hidden rounded-full border-4 border-white bg-[#173d50] shadow-2xl" style={{ left: loupePosition.left, top: loupePosition.top, width: LOUPE_SIZE, height: LOUPE_SIZE, backgroundImage: `url(${originalImage})`, backgroundRepeat: 'no-repeat', backgroundSize: `${imageSize.width * LOUPE_MAGNIFICATION}px ${imageSize.height * LOUPE_MAGNIFICATION}px`, backgroundPosition: `${LOUPE_SIZE / 2 - loupe.point.x * imageSize.width * LOUPE_MAGNIFICATION}px ${LOUPE_SIZE / 2 - loupe.point.y * imageSize.height * LOUPE_MAGNIFICATION}px`, imageOrientation: 'from-image' }}><span className="pointer-events-none absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-white/80" /><span className="pointer-events-none absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-white/80" /><span className="pointer-events-none absolute left-1/2 top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-red-500 bg-white/30" /></div> : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
       <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" disabled={busy} onClick={resetCorners}><RotateCcw className="size-4" />ใช้ Auto Crop / Reset corners</Button>{processedImage ? <Button type="button" variant="secondary" onClick={() => setShowOriginal((current) => !current)}>{showOriginal ? <ImageIcon className="size-4" /> : <Crop className="size-4" />}{showOriginal ? 'Preview corrected image' : 'Original image'}</Button> : null}<Button type="button" variant="ghost" disabled={busy} onClick={skipCrop}><X className="size-4" />Skip Crop</Button><Button type="button" disabled={busy || !cropCorners} onClick={confirmCrop}><Check className="size-4" />Confirm Crop</Button></div>
     </> : null}

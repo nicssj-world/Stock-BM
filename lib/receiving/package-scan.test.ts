@@ -1,4 +1,4 @@
-import fixtureData from './__fixtures__/barcode-fixtures.json'
+import { barcodeFixtures as fixtureData } from './__fixtures__/barcode-fixtures'
 import { describe, expect, it } from 'vitest'
 import { parseBarcode } from './barcode'
 import { matchPackageBarcode } from './package-scan'

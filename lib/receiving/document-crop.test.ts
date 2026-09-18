@@ -4,7 +4,6 @@ import {
   applyCropDrag,
   beginCropDrag,
   buildPerspectiveTransform,
-  calculateLoupeViewportPosition,
   clampCropPoint,
   detectDocumentCornersFromRgba,
   displayToImagePoint,
@@ -81,13 +80,10 @@ describe('document crop geometry', () => {
     expect(imageToDisplayPoint({ x: 600, y: 400 }, image, display)).toEqual({ x: 150, y: 100 })
   })
 
-  it('clamps normalized crop points and keeps the loupe inside the viewport above the finger', () => {
+  it('clamps normalized crop points to the image bounds', () => {
     expect(clampCropPoint({ x: -0.2, y: 1.4 })).toEqual({ x: 0, y: 1 })
     expect(applyCropDrag({ x: 0.31, y: 0.42 }, { x: 0.04, y: -0.02 })).toEqual({ x: 0.35, y: expect.closeTo(0.4) })
     expect(applyCropDrag({ x: 0.02, y: 0.98 }, { x: -0.2, y: 0.3 })).toEqual({ x: 0, y: 1 })
-    expect(calculateLoupeViewportPosition({ x: 195, y: 220 }, { width: 390, height: 844 })).toEqual({ left: 143, top: 102 })
-    expect(calculateLoupeViewportPosition({ x: 0, y: 50 }, { width: 390, height: 844 })).toEqual({ left: 8, top: 64 })
-    expect(calculateLoupeViewportPosition({ x: 389, y: 820 }, { width: 390, height: 844 })).toEqual({ left: 278, top: 702 })
   })
 
   it('keeps a captured pointer offset stable and ignores unrelated pointer moves', () => {
@@ -232,6 +228,23 @@ describe('document crop geometry', () => {
     expect(detected).not.toBeNull()
     expect(detected?.bottomRight.x).toBeCloseTo(rotated[2].x / 159, 1)
     expect(detected?.bottomRight.y).toBeCloseTo(rotated[2].y / 229, 1)
+  })
+
+  it('detects a document that fills nearly the entire frame instead of only documents with a wide margin', () => {
+    // The most common real-world composition is a user filling the frame
+    // with the invoice, so its corners sit at or very near the photo
+    // boundary. A prior version of this detector hard-rejected any
+    // candidate whose corners were within ~2-2.5% of the frame edge (in
+    // both the region flood-fill and Hough candidate generators), and also
+    // skipped Hough entirely whenever the flood-filled region touched the
+    // boundary — so this extremely common composition never produced a
+    // detection at all.
+    const detected = detectDocumentCornersFromRgba(rgba(100, 100, (x, y) => x >= 2 && x <= 97 && y >= 2 && y <= 97 ? 235 : 20), 100, 100)
+    expect(detected).not.toBeNull()
+    expect(detected?.topLeft.x).toBeLessThan(0.05)
+    expect(detected?.topLeft.y).toBeLessThan(0.05)
+    expect(detected?.bottomRight.x).toBeGreaterThan(0.95)
+    expect(detected?.bottomRight.y).toBeGreaterThan(0.95)
   })
 
   it('keeps coordinate handling correct for rotated EXIF orientations', () => {

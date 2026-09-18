@@ -209,8 +209,24 @@ function parseParenthesizedGs1(payload: string, raw: string, symbologyId: string
   return result
 }
 
+/**
+ * A GS1 DataMatrix/QR symbol carries a leading FNC1 codeword that marks the
+ * message as GS1-formatted; it is not itself data. Scanner libraries (ZXing
+ * included) commonly translate every FNC1 codeword — including that leading
+ * one — into a literal ASCII 29 (Group Separator) character in the decoded
+ * text. Left in place, that leading GS defeats a naive "does this start with
+ * a known AI" check even though the actual AI stream right behind it is
+ * perfectly well-formed.
+ */
+function stripLeadingGroupSeparators(value: string): string {
+  let index = 0
+  while (value[index] === GROUP_SEPARATOR) index += 1
+  return value.slice(index)
+}
+
 function looksLikeGs1(payload: string, symbologyId: string | null): boolean {
-  return GS1_SYMBOLOGY_IDS.has(symbologyId ?? '') || payload.startsWith('(') || /^(?:01|10|11|15|17|21|30|310\d)/.test(payload)
+  const detectionPayload = stripLeadingGroupSeparators(payload)
+  return GS1_SYMBOLOGY_IDS.has(symbologyId ?? '') || detectionPayload.startsWith('(') || /^(?:01|10|11|15|17|21|30|310\d)/.test(detectionPayload)
 }
 
 function parseGs1(raw: string, value: string, symbologyId: string | null): ParsedBarcode | null {

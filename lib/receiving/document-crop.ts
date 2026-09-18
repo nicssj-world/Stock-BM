@@ -84,21 +84,6 @@ export function endCropDrag(state: CropDragState, key: string, pointerId: number
   return { key: null, pointerId: null, offset: null }
 }
 
-export function calculateLoupeViewportPosition(
-  pointer: CropPoint,
-  viewport: ImageSize,
-  loupeSize = 104,
-  gap = 14,
-  padding = 8,
-) {
-  const maxLeft = Math.max(padding, viewport.width - loupeSize - padding)
-  const maxTop = Math.max(padding, viewport.height - loupeSize - padding)
-  const left = clamp(pointer.x - loupeSize / 2, padding, maxLeft)
-  const preferredTop = pointer.y - loupeSize - gap
-  const top = clamp(preferredTop >= padding ? preferredTop : pointer.y + gap, padding, maxTop)
-  return { left, top }
-}
-
 function finitePoint(point: CropPoint) {
   return Number.isFinite(point.x) && Number.isFinite(point.y)
 }
@@ -116,6 +101,29 @@ function polygonArea(points: CropPoint[]) {
 
 function cross(a: CropPoint, b: CropPoint, c: CropPoint) {
   return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+/**
+ * A real document edge is essentially never both axis-aligned AND flush
+ * against the same photo boundary along a long stretch — that specific
+ * combination is what happens when a document extends past the frame and a
+ * detector (region flood fill or Hough line pairing) substitutes the image's
+ * own border for the missing real edge. A document that legitimately fills
+ * the frame has corners near the edges, but each corner sits near a
+ * *different* point along the boundary (the page is rarely perfectly
+ * axis-aligned and edge-to-edge), so this only fires on the fabricated case.
+ */
+function hasBoundarySubstitutedEdge(corners: CropCorners): boolean {
+  const epsilon = 0.015
+  const minSpanFraction = 0.3
+  const points = cornersPoints(corners)
+  return points.some((point, index) => {
+    const next = points[(index + 1) % points.length]
+    const bothNear = (a: number, b: number, target: number) => Math.abs(a - target) < epsilon && Math.abs(b - target) < epsilon
+    const isVerticalBoundaryEdge = (bothNear(point.x, next.x, 0) || bothNear(point.x, next.x, 1)) && Math.abs(point.y - next.y) > minSpanFraction
+    const isHorizontalBoundaryEdge = (bothNear(point.y, next.y, 0) || bothNear(point.y, next.y, 1)) && Math.abs(point.x - next.x) > minSpanFraction
+    return isVerticalBoundaryEdge || isHorizontalBoundaryEdge
+  })
 }
 
 export function orderCorners(points: CropPoint[]): CropCorners | null {
@@ -467,58 +475,16 @@ function detectRegionCorners(gray: Float32Array, width: number, height: number):
     bottomRight: { x: clamp01(ordered.bottomRight.x / Math.max(1, width - 1)), y: clamp01(ordered.bottomRight.y / Math.max(1, height - 1)) },
     bottomLeft: { x: clamp01(ordered.bottomLeft.x / Math.max(1, width - 1)), y: clamp01(ordered.bottomLeft.y / Math.max(1, height - 1)) },
   }
-  if (cornersPoints(normalized).some((point) => point.x <= 0.02 || point.x >= 0.98 || point.y <= 0.02 || point.y >= 0.98)) return null
+  // A document partially outside the frame has its true corner off-photo, so
+  // the visible region's boundary runs along the frame edge for a stretch
+  // instead of converging on a real corner there — see
+  // `hasBoundarySubstitutedEdge`. Reject that rather than fabricate the
+  // missing corner at the frame edge; a document that legitimately fills the
+  // frame does not trigger this (its corners sit near, but not exactly
+  // pinned to, the boundary on both ends of a side).
+  if (hasBoundarySubstitutedEdge(normalized)) return null
+  if (edgeToneTransitionScore(normalized, gray, width, height) < 0.5) return null
   return validatePerspectiveInput(normalized, { width: 1, height: 1 }).ok ? normalized : null
-}
-
-function regionTouchesImageBoundary(gray: Float32Array, width: number, height: number) {
-  const borderSize = Math.max(1, Math.floor(Math.min(width, height) * 0.05))
-  const border: number[] = []
-  const center: number[] = []
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const value = gray[y * width + x]
-      if (x < borderSize || y < borderSize || x >= width - borderSize || y >= height - borderSize) border.push(value)
-      if (x >= width * 0.25 && x <= width * 0.75 && y >= height * 0.25 && y <= height * 0.75) center.push(value)
-    }
-  }
-  const borderMedian = median(border)
-  const centerMedian = median(center)
-  if (Math.abs(centerMedian - borderMedian) < 18) return false
-  const brightPage = centerMedian > borderMedian
-  const threshold = borderMedian + (centerMedian - borderMedian) * 0.45
-  const matches = (value: number) => brightPage ? value >= threshold : value <= threshold
-  let seed = -1
-  let seedDistance = Number.POSITIVE_INFINITY
-  for (let y = Math.floor(height * 0.2); y <= Math.ceil(height * 0.8); y += 1) {
-    for (let x = Math.floor(width * 0.2); x <= Math.ceil(width * 0.8); x += 1) {
-      const index = y * width + x
-      const distanceFromCenterTone = Math.abs(gray[index] - centerMedian)
-      if (matches(gray[index]) && distanceFromCenterTone < seedDistance) {
-        seed = index
-        seedDistance = distanceFromCenterTone
-      }
-    }
-  }
-  if (seed < 0) return false
-  const visited = new Uint8Array(width * height)
-  const queue = [seed]
-  let queueIndex = 0
-  visited[seed] = 1
-  while (queueIndex < queue.length) {
-    const index = queue[queueIndex++]
-    const x = index % width
-    const y = Math.floor(index / width)
-    if (x === 0 || y === 0 || x === width - 1 || y === height - 1) return true
-    for (const next of [index - 1, index + 1, index - width, index + width]) {
-      if (next < 0 || next >= width * height || visited[next]) continue
-      const nextX = next % width
-      if (Math.abs(nextX - x) > 1 || !matches(gray[next])) continue
-      visited[next] = 1
-      queue.push(next)
-    }
-  }
-  return false
 }
 
 type HoughLine = { theta: number; rho: number; strength: number }
@@ -581,8 +547,14 @@ function intersectLines(first: HoughLine, second: HoughLine): CropPoint | null {
 }
 
 function normalizedCandidate(points: CropPoint[], width: number, height: number) {
-  if (points.some((point) => point.x < -width * 0.06 || point.x > width * 1.06 || point.y < -height * 0.06 || point.y > height * 1.06)) return null
-  if (points.some((point) => point.x < width * 0.025 || point.x > width * 0.95 || point.y < height * 0.025 || point.y > height * 0.95)) return null
+  // Hough line intersections can fall slightly outside the photo when an edge
+  // is only partially visible near a corner; a modest allowance keeps that
+  // candidate alive while still rejecting lines that intersect far outside
+  // the frame (which are almost always spurious). Unlike the removed check
+  // that used to follow this, a document that fills the frame — corners at
+  // or touching the photo boundary — is a normal, common composition and
+  // must not be rejected for lack of margin from the edge.
+  if (points.some((point) => point.x < -width * 0.015 || point.x > width * 1.015 || point.y < -height * 0.015 || point.y > height * 1.015)) return null
   const ordered = orderCorners(points)
   if (!ordered) return null
   const normalized: CropCorners = {
@@ -623,15 +595,65 @@ function quadrilateralSurfaceScore(corners: CropCorners, gray: Float32Array, wid
   return clamp01(1 - Math.sqrt(variance) / 46)
 }
 
-function pixelEdgeSupport(corners: CropCorners, magnitude: Float32Array, width: number, height: number, threshold: number) {
+/**
+ * Gradient magnitude alone cannot tell a real document boundary from dense
+ * interior texture (both produce "edge-like" pixels along a line drawn
+ * through them). A real boundary additionally has a genuine tone transition
+ * across it — background on one side, page on the other — while a line
+ * drawn entirely through the page interior does not, even where fine
+ * texture happens to produce enough local gradient to look like edge
+ * support. Sampling just inside vs. just outside each candidate edge and
+ * requiring a real brightness step is what actually distinguishes "this
+ * line is the page boundary" from "this line merely crosses busy texture".
+ */
+function edgeToneTransitionScore(corners: CropCorners, gray: Float32Array, width: number, height: number): number {
   const points = cornersPoints(corners).map((point) => ({ x: point.x * (width - 1), y: point.y * (height - 1) }))
+  const center = {
+    x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+    y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+  }
+  const offset = Math.max(2, Math.round(Math.min(width, height) * 0.02))
   let hits = 0
   let samples = 0
   for (let index = 0; index < points.length; index += 1) {
     const start = points[index]
     const end = points[(index + 1) % points.length]
+    const dx = end.x - start.x
+    const dy = end.y - start.y
+    const length = Math.max(1, Math.hypot(dx, dy))
+    let normalX = -dy / length
+    let normalY = dx / length
+    const midX = (start.x + end.x) / 2
+    const midY = (start.y + end.y) / 2
+    if ((midX - center.x) * normalX + (midY - center.y) * normalY < 0) {
+      normalX = -normalX
+      normalY = -normalY
+    }
+    const steps = Math.max(10, Math.round(length / 4))
+    for (let step = 1; step < steps; step += 1) {
+      const t = step / steps
+      const x = start.x + dx * t
+      const y = start.y + dy * t
+      const insideX = Math.round(x - normalX * offset)
+      const insideY = Math.round(y - normalY * offset)
+      const outsideX = Math.round(x + normalX * offset)
+      const outsideY = Math.round(y + normalY * offset)
+      if (insideX < 0 || insideX >= width || insideY < 0 || insideY >= height) continue
+      if (outsideX < 0 || outsideX >= width || outsideY < 0 || outsideY >= height) continue
+      samples += 1
+      if (Math.abs(gray[insideY * width + insideX] - gray[outsideY * width + outsideX]) >= 16) hits += 1
+    }
+  }
+  return samples ? hits / samples : 0
+}
+
+function perEdgeSupport(corners: CropCorners, magnitude: Float32Array, width: number, height: number, threshold: number) {
+  const points = cornersPoints(corners).map((point) => ({ x: point.x * (width - 1), y: point.y * (height - 1) }))
+  return points.map((start, index) => {
+    const end = points[(index + 1) % points.length]
     const length = Math.max(1, Math.hypot(end.x - start.x, end.y - start.y))
     const steps = Math.max(14, Math.round(length / 2))
+    let hits = 0
     for (let step = 0; step <= steps; step += 1) {
       const t = step / steps
       const x = start.x + (end.x - start.x) * t
@@ -646,10 +668,14 @@ function pixelEdgeSupport(corners: CropCorners, magnitude: Float32Array, width: 
         }
       }
       if (localMaximum >= threshold * 0.55) hits += 1
-      samples += 1
     }
-  }
-  return samples ? hits / samples : 0
+    return hits / (steps + 1)
+  })
+}
+
+function pixelEdgeSupport(corners: CropCorners, magnitude: Float32Array, width: number, height: number, threshold: number) {
+  const perEdge = perEdgeSupport(corners, magnitude, width, height, threshold)
+  return perEdge.reduce((sum, value) => sum + value, 0) / perEdge.length
 }
 
 function candidateScore(corners: CropCorners, magnitude: Float32Array, width: number, height: number, threshold: number) {
@@ -698,8 +724,16 @@ function houghCandidates(gray: Float32Array, magnitude: Float32Array, width: num
               if (!topLeft || !topRight || !bottomRight || !bottomLeft) continue
               const corners = normalizedCandidate([topLeft, topRight, bottomRight, bottomLeft], width, height)
               if (!corners) continue
-              if (polygonArea(cornersPoints(corners)) < 0.12) continue
+              // A document is the reason for the photo, not an incidental
+              // detail in it — a genuine candidate covers a substantial
+              // share of the frame. This also rejects small, coincidentally
+              // well-supported quads that Hough line pairing can construct
+              // from fragments of real edges/texture without corresponding
+              // to the actual document at all.
+              if (polygonArea(cornersPoints(corners)) < 0.35) continue
               if (quadrilateralSurfaceScore(corners, gray, width, height) < 0.58) continue
+              if (hasBoundarySubstitutedEdge(corners)) continue
+              if (edgeToneTransitionScore(corners, gray, width, height) < 0.5) continue
               candidates.push({ corners, score: candidateScore(corners, magnitude, width, height, threshold) })
             }
           }
@@ -728,9 +762,16 @@ export function detectDocumentCornersFromRgba(data: Uint8ClampedArray | Uint8Arr
   const thresholds = [...new Set([0.52, 0.68, 0.82].map((ratio) => Math.max(10, percentile(edgeSamples, ratio))))]
   const candidates: { corners: CropCorners; score: number }[] = []
   addCandidate(candidates, detectRegionCorners(gray, width, height), magnitude, width, height, thresholds[0])
-  if (!regionTouchesImageBoundary(gray, width, height)) {
-    for (const threshold of thresholds) candidates.push(...houghCandidates(gray, magnitude, width, height, threshold))
-  }
+  // Line-based (Hough) detection is independent of the region flood fill and
+  // handles exactly the case the flood fill struggles with: a document that
+  // fills the frame, where its edges run to (or past) the photo boundary.
+  // Previously this ran only when the flood-filled region did NOT touch the
+  // boundary, which meant the two most common failure modes — "document
+  // fills the frame" (region touches boundary) and "low contrast against a
+  // similar-toned background" (flood fill can't seed at all) — left no
+  // detector active at the same time. Always attempt it as an independent
+  // candidate source; scoring below rejects weak/spurious quads either way.
+  for (const threshold of thresholds) candidates.push(...houghCandidates(gray, magnitude, width, height, threshold))
   candidates.sort((first, second) => second.score - first.score)
   return candidates[0]?.score >= 0.5 ? candidates[0].corners : null
 }
@@ -739,7 +780,15 @@ export function detectDocumentCorners(source: CanvasImageSource): CropCorners | 
   if (typeof document === 'undefined') return null
   const size = sourceSize(source)
   if (!size.width || !size.height) return null
-  const scale = Math.min(1, 360 / Math.max(size.width, size.height))
+  // 360px was too aggressive a downscale for detection: at that size a
+  // document's edges become only a couple of gradient pixels wide, which
+  // the Hough vote and region flood fill both struggle to resolve reliably
+  // once any perspective skew or uneven lighting is present. 640px keeps the
+  // detection pass cheap (it is a working copy discarded after detection —
+  // the returned corners are normalized [0,1] and mapped back onto the full
+  // original image / canvas for cropping) while giving edges enough pixel
+  // support to detect consistently.
+  const scale = Math.min(1, 640 / Math.max(size.width, size.height))
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(16, Math.round(size.width * scale))
   canvas.height = Math.max(16, Math.round(size.height * scale))
