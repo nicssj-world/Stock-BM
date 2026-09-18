@@ -17,7 +17,6 @@
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "@fontsource/noto-sans-thai": "^5.2.8",
-    "@paddleocr/paddleocr-js": "^0.4.2",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.106.2",
     "@zxing/browser": "^0.1.5",
