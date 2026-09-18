@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Check, Crop, Image as ImageIcon, RotateCcw, Upload, X } from 'lucide-react'
+import { Camera, Check, Crop, Image as ImageIcon, RotateCcw, X } from 'lucide-react'
 import { Button, Card, Notice, StatusBadge } from '@/components/ui'
 import {
   detectDocumentCorners,
@@ -46,8 +46,13 @@ function calculateDisplayedImageRect(frame: DOMRect, imageSize: ImageSize): Disp
   return { left: (frame.width - width) / 2, top: (frame.height - height) / 2, width, height, frameWidth: frame.width, frameHeight: frame.height }
 }
 
+const FILE_INPUT_CLASS = 'absolute h-px w-px overflow-hidden opacity-0'
+
+function isSupportedImageFile(file: File) {
+  return file.type.toLowerCase().startsWith('image/') || /\.(?:heic|heif)$/i.test(file.name)
+}
+
 export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: InvoiceImageCropResult) => void }) {
-  const inputRef = useRef<HTMLInputElement | null>(null)
   const sourceImageRef = useRef<HTMLImageElement | null>(null)
   const frameRef = useRef<HTMLDivElement | null>(null)
   const [originalImage, setOriginalImage] = useState<string | null>(null)
@@ -73,7 +78,7 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
   }, [imageSize, originalImage])
 
   function chooseImage(file: File | null) {
-    if (!file || !file.type.startsWith('image/')) {
+    if (!file || !isSupportedImageFile(file)) {
       setError('กรุณาเลือกไฟล์ภาพ invoice')
       return
     }
@@ -95,6 +100,13 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
     }
     reader.onerror = () => setError('อ่านไฟล์ภาพไม่สำเร็จ')
     reader.readAsDataURL(file)
+  }
+
+  function handleFileSelection(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0] ?? null
+    if (!file) return
+    chooseImage(file)
+    event.currentTarget.value = ''
   }
 
   function onOriginalLoad(event: React.SyntheticEvent<HTMLImageElement>) {
@@ -185,8 +197,12 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
 
   return <Card className="space-y-3 p-4">
     <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-xs font-bold tracking-[0.14em] text-[#0b7f76] uppercase">Invoice image capture</p><h3 className="mt-1 text-base font-bold text-[#173d50]">เตรียมภาพก่อน OCR</h3><p className="mt-1 text-xs leading-5 text-[#81979c]">ระบบจะไม่ส่งภาพต้นฉบับเข้า OCR จนกว่าจะยืนยัน crop หรือเลือก Skip Crop</p></div>{processedImage ? <StatusBadge tone="accepted" label="ยืนยันภาพสำหรับ OCR แล้ว" /> : originalImage ? <StatusBadge tone="warning" label="รอยืนยัน crop" /> : null}</div>
-    <input ref={inputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(event) => { chooseImage(event.target.files?.[0] ?? null); event.currentTarget.value = '' }} />
-    {!originalImage ? <Button type="button" onClick={() => inputRef.current?.click()}><Upload className="size-4" />Capture / Select Invoice Image</Button> : null}
+    <div className="flex flex-wrap gap-2" aria-label="เลือกหรือถ่ายภาพ invoice">
+      <label htmlFor="invoice-image-library" className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-[#b8d8d5] bg-white px-3 py-2 text-sm font-semibold text-[#0b7f76] shadow-sm hover:bg-[#f4fbf9] focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[#0b7f76]"><ImageIcon className="size-4" aria-hidden="true" />เลือกรูปจากคลังภาพ</label>
+      <label htmlFor="invoice-image-camera" className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md bg-[#0b7f76] px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#096b64] focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[#0b7f76]"><Camera className="size-4" aria-hidden="true" />ถ่ายรูปใหม่</label>
+      <input id="invoice-image-library" type="file" accept="image/*" className={FILE_INPUT_CLASS} onChange={handleFileSelection} />
+      <input id="invoice-image-camera" type="file" accept="image/*" capture="environment" className={FILE_INPUT_CLASS} onChange={handleFileSelection} />
+    </div>
     {originalImage ? <>
       {detectionMessage ? <Notice tone={autoCorners ? 'info' : 'warning'}>{detectionMessage}</Notice> : null}
       <div ref={frameRef} className="relative aspect-[4/3] max-h-[70vh] min-h-[220px] overflow-hidden rounded-md border border-[#c9dadd] bg-[#eff4f4] select-none">
@@ -195,7 +211,7 @@ export function InvoiceImageCrop({ onConfirmed }: { onConfirmed?: (result: Invoi
         {!showOriginal && processedImage ? <div className="absolute bottom-2 left-2 rounded-full bg-[#173d50]/85 px-2.5 py-1 text-[11px] font-semibold text-white">Preview corrected image</div> : null}
       </div>
       {error ? <Notice tone="danger">{error}</Notice> : null}
-      <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" disabled={busy} onClick={resetCorners}><RotateCcw className="size-4" />ใช้ Auto Crop / Reset corners</Button>{processedImage ? <Button type="button" variant="secondary" onClick={() => setShowOriginal((current) => !current)}>{showOriginal ? <ImageIcon className="size-4" /> : <Crop className="size-4" />}{showOriginal ? 'Preview corrected image' : 'Original image'}</Button> : null}<Button type="button" variant="secondary" disabled={busy} onClick={() => inputRef.current?.click()}><Upload className="size-4" />Retake / Choose another image</Button><Button type="button" variant="ghost" disabled={busy} onClick={skipCrop}><X className="size-4" />Skip Crop</Button><Button type="button" disabled={busy || !cropCorners} onClick={confirmCrop}><Check className="size-4" />Confirm Crop</Button></div>
+      <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" disabled={busy} onClick={resetCorners}><RotateCcw className="size-4" />ใช้ Auto Crop / Reset corners</Button>{processedImage ? <Button type="button" variant="secondary" onClick={() => setShowOriginal((current) => !current)}>{showOriginal ? <ImageIcon className="size-4" /> : <Crop className="size-4" />}{showOriginal ? 'Preview corrected image' : 'Original image'}</Button> : null}<Button type="button" variant="ghost" disabled={busy} onClick={skipCrop}><X className="size-4" />Skip Crop</Button><Button type="button" disabled={busy || !cropCorners} onClick={confirmCrop}><Check className="size-4" />Confirm Crop</Button></div>
     </> : null}
   </Card>
 }
