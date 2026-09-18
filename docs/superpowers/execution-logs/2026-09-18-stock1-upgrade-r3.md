@@ -62,4 +62,8 @@ The local ledger assertion observed the existing fixture lot balance at 11 after
 
 ## Release gate
 
-Stock-BM has no staging Supabase environment. Staging reconciliation is therefore deferred to the pre-production release gate and must not be replaced by production. No production migration, deployment, or feature-flag change was performed.
+Owner policy update recorded: Stock-BM will not create or use a staging Supabase environment. The owner explicitly waived staging and accepted the associated deployment risk. This waiver does not authorize production work during implementation.
+
+The release gate is now production-safe and fail-closed: before any production migration, explicitly confirm the target is production; verify a recoverable production database backup; capture the approved read-only BEFORE reconciliation snapshot; keep the receiving feature flag and `expiry_exception_enabled` false; apply only the approved verified migrations in filename order; capture AFTER; run `--compare`; require zero unexpected differences in existing item/lot integrity, balances, transaction history/counts, movement lines, lot expiry, legacy `manufacturer_barcode` data, and referential integrity; then run legacy Receive, HPV return, and stock-report smoke tests. Any unexpected difference stops release. The production feature flag and expiry exceptions are never enabled automatically.
+
+No production migration, deployment, or feature-flag change was performed.
