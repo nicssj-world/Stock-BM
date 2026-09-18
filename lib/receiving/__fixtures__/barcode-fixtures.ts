@@ -72,4 +72,43 @@ export const barcodeFixtures = {
     expiry: '2027-12-31',
     serial: 'SER9',
   },
+  // Real product label: Roche cobas TPUC3, REF 08058679190. AI order as
+  // printed/scanned on this real label: (240) REF-style additional product
+  // ID, (01) GTIN, (10) lot, plus (17) expiry and (11) manufacture date,
+  // which the label also encodes. AI 240 here is NOT copied into `catalog`
+  // — it only becomes a proposed `catalogCandidate`, and only because this
+  // GTIN prefix is a known Roche cobas one (see
+  // AI240_CATALOG_CANDIDATE_GTIN_PREFIXES in barcode.ts).
+  'gs1-datamatrix-roche-cobas-tpuc3': {
+    raw: '240' + '08058679190' + '' + '01' + '07613336121535' + '10' + '94146701' + '' + '17' + '270531' + '11' + '251229',
+    symbologyId: ']d2',
+    gtin: '07613336121535',
+    lot: '94146701',
+    expiry: '2027-05-31',
+    manufactureDate: '2025-12-29',
+    additionalProductId: '08058679190',
+    catalogCandidateValue: '08058679190',
+  },
+  // Real product label (second reagent), given AI order (01)(17)(10)(240).
+  // This GTIN prefix has no known AI-240-as-REF manufacturer mapping, so
+  // AI 240 must surface only as `additionalProductId` — no catalogCandidate.
+  'gs1-datamatrix-second-reagent': {
+    raw: '01' + '00382903403837' + '17' + '270531' + '10' + '06696' + '' + '240' + '0933',
+    symbologyId: ']d2',
+    gtin: '00382903403837',
+    lot: '06696',
+    expiry: '2027-05-31',
+    additionalProductId: '0933',
+  },
+  // Same fields as the second reagent fixture above, but with AI 240 first
+  // and a different overall order — the parser must reach the same result
+  // regardless of AI ordering.
+  'gs1-datamatrix-second-reagent-reordered': {
+    raw: '240' + '0933' + '' + '10' + '06696' + '' + '01' + '00382903403837' + '17' + '270531',
+    symbologyId: ']d2',
+    gtin: '00382903403837',
+    lot: '06696',
+    expiry: '2027-05-31',
+    additionalProductId: '0933',
+  },
 } as const

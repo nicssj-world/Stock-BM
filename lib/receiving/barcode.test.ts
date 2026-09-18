@@ -6,6 +6,8 @@ const emptyDecodedFields = {
   standard: null,
   gtin: null,
   catalog: null,
+  additionalProductId: null,
+  catalogCandidate: null,
   lot: null,
   expiry: null,
   manufactureDate: null,
@@ -135,6 +137,75 @@ describe('parseBarcode', () => {
       serial: fixture.serial,
       catalog: null,
     })
+  })
+
+  it('parses AI 240 (Additional Product Identification) as its own field, never copied into catalog', () => {
+    const fixture = fixtures['gs1-datamatrix-second-reagent']
+    const result = parseBarcode(fixture.raw, fixture.symbologyId)
+
+    expect(result).toMatchObject({
+      standard: 'gs1',
+      gtin: fixture.gtin,
+      lot: fixture.lot,
+      expiry: fixture.expiry,
+      additionalProductId: fixture.additionalProductId,
+      catalog: null,
+    })
+    // No manufacturer-specific rule matches this GTIN prefix, so AI 240 must
+    // not be proposed as a Catalog/REF candidate either.
+    expect(result.catalogCandidate).toBeNull()
+  })
+
+  it('does not depend on AI ordering: the same fields parse the same way regardless of AI order', () => {
+    const given = parseBarcode(fixtures['gs1-datamatrix-second-reagent'].raw, fixtures['gs1-datamatrix-second-reagent'].symbologyId)
+    const reordered = parseBarcode(fixtures['gs1-datamatrix-second-reagent-reordered'].raw, fixtures['gs1-datamatrix-second-reagent-reordered'].symbologyId)
+
+    expect(reordered).toMatchObject({
+      standard: 'gs1',
+      gtin: given.gtin,
+      lot: given.lot,
+      expiry: given.expiry,
+      additionalProductId: given.additionalProductId,
+      catalog: null,
+      catalogCandidate: null,
+    })
+  })
+
+  it('parses a real Roche cobas TPUC3 label: GTIN, lot, expiry, manufacture date, and AI 240 kept separate from GTIN and catalog', () => {
+    const fixture = fixtures['gs1-datamatrix-roche-cobas-tpuc3']
+    const result = parseBarcode(fixture.raw, fixture.symbologyId)
+
+    expect(result).toMatchObject({
+      standard: 'gs1',
+      gtin: fixture.gtin,
+      lot: fixture.lot,
+      expiry: fixture.expiry,
+      manufactureDate: fixture.manufactureDate,
+      additionalProductId: fixture.additionalProductId,
+      catalog: null,
+    })
+    expect(result.gtin).not.toBe(result.additionalProductId)
+  })
+
+  it('proposes AI 240 as a Catalog/REF candidate only for the Roche cobas label — not as a general GS1 rule', () => {
+    const roche = fixtures['gs1-datamatrix-roche-cobas-tpuc3']
+    const rocheResult = parseBarcode(roche.raw, roche.symbologyId)
+
+    expect(rocheResult.catalogCandidate).toEqual({
+      value: roche.catalogCandidateValue,
+      source: 'ai240',
+      reason: expect.stringContaining('Roche'),
+    })
+    // The proposal is only ever a *candidate* — `catalog` itself is never
+    // auto-populated from it.
+    expect(rocheResult.catalog).toBeNull()
+
+    // The second reagent fixture also has AI 240 present, but its GTIN
+    // prefix is not a known Roche cobas one, so no candidate is proposed.
+    const other = fixtures['gs1-datamatrix-second-reagent']
+    const otherResult = parseBarcode(other.raw, other.symbologyId)
+    expect(otherResult.additionalProductId).not.toBeNull()
+    expect(otherResult.catalogCandidate).toBeNull()
   })
 
   it('still fails safely (no partial fields) when a leading GS is followed by garbage instead of a real AI stream', () => {

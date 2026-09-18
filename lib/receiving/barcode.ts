@@ -6,12 +6,27 @@ const HIBC_SYMBOLOGY_PREFIX = /^\](?:A0|C0)/
 
 type BarcodeStandard = 'gs1' | 'hibc'
 
+export type CatalogCandidate = {
+  value: string
+  source: 'ai240'
+  reason: string
+}
+
 export type ParsedBarcode = {
   raw: string
   symbologyId: string | null
   standard: BarcodeStandard | null
   gtin: string | null
   catalog: string | null
+  /** AI 240 — Additional Product Identification. Kept separate from `catalog`: never auto-copied into it. */
+  additionalProductId: string | null
+  /**
+   * A *proposed* Catalog/REF value with the reason it was proposed — never
+   * auto-applied to `catalog`. AI 240 is only manufacturer-meaningful as a
+   * REF stand-in for labels known to print it that way (see
+   * `AI240_CATALOG_CANDIDATE_GTIN_PREFIXES`); it is not a general GS1 rule.
+   */
+  catalogCandidate: CatalogCandidate | null
   lot: string | null
   expiry: string | null
   manufactureDate: string | null
@@ -31,6 +46,8 @@ const emptyResult = (raw: string, symbologyId: string | null): ParsedBarcode => 
   standard: null,
   gtin: null,
   catalog: null,
+  additionalProductId: null,
+  catalogCandidate: null,
   lot: null,
   expiry: null,
   manufactureDate: null,
@@ -50,6 +67,10 @@ const fixedGs1Ais: Record<string, number> = {
 }
 
 const variableGs1Ais = new Set(['10', '21', '30'])
+// AI 240 (Additional Product Identification) is a 3-digit AI, unlike the
+// 2-digit AIs above — it needs its own check in gs1AiAt so it isn't
+// mistaken for (or masked by) a 2-digit AI reading of the same leading digits.
+const threeDigitVariableGs1Ais = new Set(['240'])
 
 function detectedSymbologyId(value: string): string | null {
   return value.match(GS1_PREFIX)?.[0] ?? value.match(HIBC_SYMBOLOGY_PREFIX)?.[0] ?? null
@@ -122,6 +143,10 @@ function applyGs1Ai(result: Gs1Result, seen: Set<string>, ai: string, value: str
       if (!isValidPrintable(value)) return false
       result.serial = value
       return true
+    case '240':
+      if (!isValidPrintable(value)) return false
+      result.additionalProductId = value
+      return true
     case '30':
       if (!/^\d+$/.test(value)) return false
       result.quantity = Number(value)
@@ -136,6 +161,9 @@ function applyGs1Ai(result: Gs1Result, seen: Set<string>, ai: string, value: str
 function gs1AiAt(payload: string, position: number): { ai: string; length: number } | null {
   const weightAi = payload.slice(position, position + 4)
   if (/^310\d$/.test(weightAi)) return { ai: weightAi, length: 6 }
+
+  const threeDigitAi = payload.slice(position, position + 3)
+  if (threeDigitVariableGs1Ais.has(threeDigitAi)) return { ai: threeDigitAi, length: 0 }
 
   const ai = payload.slice(position, position + 2)
   if (ai in fixedGs1Ais) return { ai, length: fixedGs1Ais[ai] }
@@ -179,7 +207,7 @@ function parseGs1Stream(payload: string, raw: string, symbologyId: string | null
 }
 
 function parenthesizedAiAt(payload: string, position: number): { ai: string; nextPosition: number } | null {
-  const match = payload.slice(position).match(/^\((310\d|01|10|11|15|17|21|30)\)/)
+  const match = payload.slice(position).match(/^\((310\d|240|01|10|11|15|17|21|30)\)/)
   if (!match) return null
   return { ai: match[1], nextPosition: position + match[0].length }
 }
@@ -226,13 +254,42 @@ function stripLeadingGroupSeparators(value: string): string {
 
 function looksLikeGs1(payload: string, symbologyId: string | null): boolean {
   const detectionPayload = stripLeadingGroupSeparators(payload)
-  return GS1_SYMBOLOGY_IDS.has(symbologyId ?? '') || detectionPayload.startsWith('(') || /^(?:01|10|11|15|17|21|30|310\d)/.test(detectionPayload)
+  return GS1_SYMBOLOGY_IDS.has(symbologyId ?? '') || detectionPayload.startsWith('(') || /^(?:01|10|11|15|17|21|30|240|310\d)/.test(detectionPayload)
+}
+
+/**
+ * AI 240 (Additional Product Identification) has no universal GS1 meaning
+ * as a "catalog number" — GS1 does not define it that way, and most
+ * manufacturers use it for internal/proprietary identifiers unrelated to
+ * REF. It is only useful as a Catalog/REF *candidate* for labels that are
+ * independently known to print it that way. Each entry here must be backed
+ * by a real, confirmed label — this is not a general "AI 240 = Catalog"
+ * rule, and nothing here changes `catalog` itself (only `catalogCandidate`,
+ * which is always presented as a suggestion for manual confirmation).
+ */
+const AI240_CATALOG_CANDIDATE_GTIN_PREFIXES: { prefix: string; manufacturer: string }[] = [
+  // Roche cobas-style reagent labels (e.g. cobas TPUC3, REF 08058679190,
+  // GTIN 07613336121535) print AI 240 directly beside the human-readable
+  // REF field.
+  { prefix: '07613336', manufacturer: 'Roche cobas' },
+]
+
+function proposeCatalogCandidate(result: ParsedBarcode): CatalogCandidate | null {
+  if (!result.additionalProductId || !result.gtin) return null
+  const match = AI240_CATALOG_CANDIDATE_GTIN_PREFIXES.find((entry) => result.gtin!.startsWith(entry.prefix))
+  if (!match) return null
+  return {
+    value: result.additionalProductId,
+    source: 'ai240',
+    reason: `${match.manufacturer} labels print AI 240 next to REF on this GTIN prefix — confirm before using as Catalog/REF`,
+  }
 }
 
 function parseGs1(raw: string, value: string, symbologyId: string | null): ParsedBarcode | null {
   const { payload } = stripSymbologyPrefix(value)
-  if (payload.includes('(')) return parseParenthesizedGs1(payload, raw, symbologyId)
-  return parseGs1Stream(payload, raw, symbologyId)
+  const result = payload.includes('(') ? parseParenthesizedGs1(payload, raw, symbologyId) : parseGs1Stream(payload, raw, symbologyId)
+  if (result) result.catalogCandidate = proposeCatalogCandidate(result)
+  return result
 }
 
 function parseHibcDate(format: string, value: string): { date: string | null; valid: boolean } {
