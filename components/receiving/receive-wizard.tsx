@@ -14,6 +14,7 @@ import { InvoiceImageCrop, type InvoiceEvidenceImage } from '@/components/receiv
 import { ItemPicker } from '@/components/receiving/item-picker'
 import { PackageScan, type PackageScanResolver, type PackageScanResponse } from '@/components/receiving/package-scan'
 import type { ReceiptAssessmentContext } from '@/components/receiving/receipt-assessment-dialog'
+import { ScanTextField } from '@/components/receiving/scan-text-field'
 import type { BarcodeScanDiagnostics } from '@/lib/receiving/barcode-diagnostics'
 
 type ScanEvidence = {
@@ -333,7 +334,7 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
       {stepTitle(1, 'เลือก Vendor', Boolean(vendorId))}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Vendor"><Select required value={vendorId} onChange={(event) => chooseVendor(event.target.value)}><option value="">เลือก vendor จาก Vendor Registry</option>{activeVendors.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}</Select></Field>
-        <Field label="เลขที่ใบรับเข้า" hint="ไม่บังคับ"><Input value={receiptNo} onChange={(event) => setReceiptNo(event.target.value)} /></Field>
+        <ScanTextField label="เลขที่ใบรับเข้า" hint="ไม่บังคับ — พิมพ์หรือสแกนบาร์โค้ด/QR บนเอกสารได้" value={receiptNo} onChange={setReceiptNo} disabled={busy} scanLabel="สแกนเลขที่ใบรับเข้าด้วยกล้อง" />
         {vendorId && openInvoices.length ? <Field label="ใบส่งของที่รอรับ (Expected receipt)" hint="ไม่บังคับ — ใช้ติดตามรับบางส่วน"><Select value={invoiceId} onChange={(event) => { setInvoiceId(event.target.value); patchEditor({ invoiceLineId: '' }) }}><option value="">ไม่ผูกใบส่งของ</option>{openInvoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.invoiceNo ?? invoice.id.slice(0, 8)} · {invoice.lines.length} รายการ</option>)}</Select></Field> : null}
       </div>
     </Card>

@@ -18,6 +18,13 @@ describe('final receiving workflow', () => {
     expect([...flow].sort((a, b) => a - b)).toEqual(flow)
   })
 
+  it('lets the operator scan the receipt number with the camera as well as type it', () => {
+    expect(wizard).toContain('<ScanTextField')
+    expect(wizard).toContain('label="เลขที่ใบรับเข้า"')
+    expect(wizard).toContain('value={receiptNo}')
+    expect(wizard).toContain('onChange={setReceiptNo}')
+  })
+
   it('never mutates or calls the network from the wizard itself — only through the injected adapter', () => {
     expect(wizard).not.toMatch(/fetch\(|api\(|\/api\/|\.rpc\(|supabase/)
     expect(wizard).toContain('adapter.submit(')
