@@ -12,14 +12,18 @@ export type PackageScanResponse = PackageScanResolution & {
   parsed: ParsedBarcode & { itemId: string | null }
 }
 
+export type PackageScanResolver = (input: { raw: string; symbologyId: string | null; stockItemId: string | null }) => Promise<PackageScanResponse>
+
 export function PackageScan({
   selectedItemId,
   disabled = false,
   onUse,
+  resolveScan,
 }: {
   selectedItemId: string | null
   disabled?: boolean
   onUse: (result: PackageScanResponse) => void
+  resolveScan?: PackageScanResolver
 }) {
   const [raw, setRaw] = useState('')
   const [symbologyId, setSymbologyId] = useState<string | null>(null)
@@ -34,10 +38,12 @@ export function PackageScan({
     setBusy(true)
     setError(null)
     try {
-      const response = await api<PackageScanResponse>('/api/receiving/scan/parse', {
-        method: 'POST',
-        body: JSON.stringify({ raw: nextRaw, symbologyId: identifier, stockItemId: selectedItemId || null }),
-      })
+      const response = resolveScan
+        ? await resolveScan({ raw: nextRaw, symbologyId: identifier, stockItemId: selectedItemId || null })
+        : await api<PackageScanResponse>('/api/receiving/scan/parse', {
+          method: 'POST',
+          body: JSON.stringify({ raw: nextRaw, symbologyId: identifier, stockItemId: selectedItemId || null }),
+        })
       setResult(response)
       setCandidateChoice(null)
     } catch (requestError) {
