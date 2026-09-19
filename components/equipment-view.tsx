@@ -528,11 +528,12 @@ function Registry({
   const [editingTechnicianId, setEditingTechnicianId] = useState<string | null>(
     null,
   );
+  // Classification is its own field (matches the portal), never the
+  // equipment's free-text name/model description — only real classification
+  // values (the standard vocabulary plus any legacy category text already on
+  // an equipment record) belong in this list.
   const classificationOptions = equipmentClassificationOptions(
-    workspace.equipment.flatMap((item) => [
-      item.category,
-      ...(item.category?.trim() ? [] : [item.name]),
-    ]),
+    workspace.equipment.map((item) => item.category),
   );
   const filtered = workspace.equipment.filter((item) => {
     if (
@@ -763,7 +764,7 @@ function Registry({
                     className="mt-1 line-clamp-2 text-xs leading-4 text-[#789097]"
                     title={`${item.name} · ${item.location ?? "-"}`}
                   >
-                    ประเภทเครื่องมือ: {item.name} · {item.location ?? "-"}
+                    ชื่อ: {item.name} · {item.location ?? "-"}
                   </p>
                 </div>
                 <EquipmentStatusBadge status={item.status} />
@@ -798,7 +799,7 @@ function Registry({
                     {equipmentPrimaryName(selected)}
                   </h2>
                   <p className="mt-2 max-w-3xl text-sm leading-5 text-[#c5dfe3]">
-                    ประเภทเครื่องมือ: {selected.name}
+                    ชื่อเครื่องมือ: {selected.name}
                   </p>
                   <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[#b7d7dc]">
                     <span>{selected.portalDepartmentName ?? "ยังไม่ระบุหน่วยงานจาก Portal"}</span>

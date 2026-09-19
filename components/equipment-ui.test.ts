@@ -86,10 +86,20 @@ describe("equipment interface", () => {
     expect(view).toContain("{item.code}");
     expect(view).toContain("{equipmentPrimaryName(item)}");
     expect(view).toContain("whitespace-normal break-words");
-    expect(view).toContain("ประเภทเครื่องมือ: {item.name}");
-    expect(view).toContain("ประเภทเครื่องมือ: {selected.name}");
+    expect(view).toContain("ชื่อ: {item.name}");
+    expect(view).toContain("ชื่อเครื่องมือ: {selected.name}");
     expect(view).toContain("const equipmentPrimary = equipmentPrimaryName({");
     expect(view).toContain("{equipmentCode} · {equipmentPrimary}");
+  });
+
+  it("keeps the equipment's own name out of the Classification filter — only the real classification field belongs there", () => {
+    // The name/model description (e.g. "Refigurated Centrifuge") and the
+    // Classification (e.g. "Centrifuge") are separate fields, matching the
+    // portal; the filter dropdown must only ever offer real classification
+    // values, never fall back to an equipment's free-text name.
+    expect(view).toContain("workspace.equipment.map((item) => item.category)");
+    expect(view).not.toMatch(/classificationOptions[\s\S]{0,120}item\.name/);
+    expect(view).not.toContain("ประเภทเครื่องมือ:");
   });
 
   it("hides IQC and EQA items already linked to the selected equipment", () => {
