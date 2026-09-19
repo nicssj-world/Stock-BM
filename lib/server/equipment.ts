@@ -721,6 +721,37 @@ export async function updateEquipmentLocation(
   return getEquipmentWorkspace(actor);
 }
 
+/**
+ * Classification is Stock-BM-local, same as location: the portal's sync API
+ * does not currently send its own separate Classification value (only a
+ * free-text equipment_type, which becomes `name`), so this is a manual
+ * override — sync never writes this column, so it's never clobbered.
+ */
+export async function updateEquipmentClassification(
+  id: string,
+  category: string | null,
+  actor: BmActor,
+) {
+  assertAccess(actor);
+  const admin = getAdminClient();
+  const { data, error } = await admin
+    .from("bm_equipment")
+    .update({
+      category: category?.trim() || null,
+      updated_by: actor.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+  fail(error);
+  if (!data) throw new HttpError(404, "ไม่พบเครื่องมือ");
+  await writeAudit(actor, "equipment.classification.update", "equipment", id, {
+    category,
+  });
+  return getEquipmentWorkspace(actor);
+}
+
 export async function rotateEquipmentToken(id: string, actor: BmActor) {
   assertAdmin(actor);
   const token = crypto.randomUUID().replaceAll("-", "");

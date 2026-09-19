@@ -530,16 +530,23 @@ function Registry({
   );
   // Classification is its own field (matches the portal) — only real
   // classification values (the standard vocabulary plus any legacy category
-  // text already on an equipment record) are offered as options, never an
-  // equipment's free-text name/model description. A class stays hidden until
-  // selecting it would actually return something: this uses the exact same
-  // matchesEquipmentClassification check as the filter itself (which also
-  // loosely matches by name, e.g. "Centrifuge" matching an item named
-  // "Refigurated Centrifuge"), so an option's visibility here always agrees
-  // with whether picking it produces results.
-  const classificationOptions = equipmentClassificationOptions(
+  // text already on an equipment record) are ever offered, never an
+  // equipment's free-text name/model description. This full list is what an
+  // operator assigns a classification FROM (must include every standard
+  // class, even ones nothing is classified into yet — otherwise a class
+  // could never be picked for the first time).
+  const allClassificationOptions = equipmentClassificationOptions(
     workspace.equipment.map((item) => item.category),
-  ).filter((option) => workspace.equipment.some((item) => matchesEquipmentClassification(option, [item.category, item.name])));
+  );
+  // The FILTER dropdown narrows that down further: a class stays hidden
+  // there until selecting it would actually return something, using the
+  // exact same matchesEquipmentClassification check the filter itself runs
+  // (which also loosely matches by name, e.g. "Centrifuge" matching an item
+  // named "Refigurated Centrifuge") — so a filter option's visibility always
+  // agrees with whether picking it produces results.
+  const classificationOptions = allClassificationOptions.filter((option) =>
+    workspace.equipment.some((item) => matchesEquipmentClassification(option, [item.category, item.name])),
+  );
   const filtered = workspace.equipment.filter((item) => {
     if (
       !matchesEquipmentClassification(classification, [
@@ -679,6 +686,17 @@ function Registry({
         body: JSON.stringify({ locationId: locationId || null }),
       },
       "บันทึกสถานที่ใช้งานใน Stock-BM แล้ว",
+    );
+  }
+  async function saveLocalClassification(category: string) {
+    if (!selected) return;
+    await mutate(
+      `/api/equipment/items/${selected.id}/classification`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ category: category || null }),
+      },
+      "บันทึก Classification แล้ว",
     );
   }
   return (
@@ -877,10 +895,27 @@ function Registry({
                       : null
                   }
                 />
-                <Info label="ประเภท / Classification" value={selected.category} />
                 <Info label="หมายเหตุ" value={selected.note} />
               </div>
               <div className="grid gap-3 border-t border-[#edf2f2] p-4 sm:grid-cols-2">
+                <Field
+                  label="Classification (Stock-BM)"
+                  hint="Portal ยังไม่ส่งค่า Classification แยกมาให้ (ส่งมาแค่ชื่อเครื่องมือด้านบน) — กำหนดเองที่นี่ Sync จะไม่เขียนทับ"
+                >
+                  <Select
+                    value={selected.category ?? ""}
+                    disabled={busy}
+                    onChange={(event) => void saveLocalClassification(event.target.value)}
+                  >
+                    <option value="">ยังไม่ระบุ Classification</option>
+                    {allClassificationOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <div />
                 <Field
                   label="สถานที่ใช้งานภายใน Stock-BM"
                   hint="ข้อมูลนี้เป็นของ Stock-BM และ Sync จาก Portal จะไม่เขียนทับ"

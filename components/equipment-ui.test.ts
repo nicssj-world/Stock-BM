@@ -92,26 +92,40 @@ describe("equipment interface", () => {
     expect(view).toContain("{equipmentCode} · {equipmentPrimary}");
   });
 
-  it("keeps the equipment's own name out of the Classification filter's option *values* — only the real classification field seeds them", () => {
+  it("keeps the equipment's own name out of the Classification option *values* — only the real classification field seeds them", () => {
     // The name/model description (e.g. "Refigurated Centrifuge") and the
     // Classification (e.g. "Centrifuge") are separate fields, matching the
-    // portal; the option strings offered by the dropdown must only ever come
-    // from item.category, never from an equipment's free-text name.
-    const optionsCall = view.slice(view.indexOf("const classificationOptions ="), view.indexOf(".filter((option) =>"));
+    // portal; the option strings offered anywhere must only ever come from
+    // item.category, never from an equipment's free-text name.
+    const optionsCall = view.slice(view.indexOf("const allClassificationOptions ="), view.indexOf("const classificationOptions ="));
     expect(optionsCall).toContain("equipmentClassificationOptions(");
     expect(optionsCall).toContain("workspace.equipment.map((item) => item.category)");
     expect(optionsCall).not.toContain("item.name");
     expect(view).not.toContain("ประเภทเครื่องมือ:");
   });
 
-  it("hides a Classification from the filter only when picking it would return nothing — using the same loose name-or-category match the filter itself uses", () => {
+  it("hides a Classification from the FILTER only when picking it would return nothing — using the same loose name-or-category match the filter itself uses", () => {
     // A class like "Centrifuge" must stay visible even when no equipment has
     // category === "Centrifuge" exactly, as long as it would still match by
     // name (e.g. an item named "Refigurated Centrifuge") — visibility must
     // never be stricter than what selecting the option would actually return.
     expect(view).toContain(
-      ".filter((option) => workspace.equipment.some((item) => matchesEquipmentClassification(option, [item.category, item.name])))",
+      "const classificationOptions = allClassificationOptions.filter((option) =>",
     );
+    expect(view).toContain(
+      "workspace.equipment.some((item) => matchesEquipmentClassification(option, [item.category, item.name]))",
+    );
+  });
+
+  it("lets an operator assign a Classification locally, from the FULL (unfiltered) option list — a class must be pickable even before anything uses it", () => {
+    // The edit dropdown must never reuse the filter's narrowed list, or a
+    // standard class like "Refrigerator" could never be assigned in the
+    // first place (nothing has it set yet, so the filter hides it).
+    expect(view).toContain("{allClassificationOptions.map((option) =>");
+    expect(view).not.toContain("{classificationOptions.map((option) =>");
+    expect(view).toContain("saveLocalClassification");
+    expect(view).toContain('/api/equipment/items/${selected.id}/classification');
+    expect(view).toContain("Sync จะไม่เขียนทับ");
   });
 
   it("hides IQC and EQA items already linked to the selected equipment", () => {
