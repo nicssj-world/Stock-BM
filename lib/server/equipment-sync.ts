@@ -45,6 +45,10 @@ export const portalEquipmentSchema = z.object({
   department_code: z.enum(DEPARTMENT_CODES),
   department_name: z.string(),
   equipment_type: z.string().trim().min(1),
+  // Portal's own standard classification (e.g. "Refrigerator"), separate
+  // from equipment_type/name above. Optional: older/uncached Portal
+  // deployments may not send it yet.
+  classification: z.string().nullable().optional(),
   cbh_code: z.string().nullable().optional(),
   hospital_asset_no: z.string().nullable().optional(),
   serial_number: z.string().nullable().optional(),

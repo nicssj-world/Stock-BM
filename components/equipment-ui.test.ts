@@ -125,7 +125,7 @@ describe("equipment interface", () => {
     expect(view).not.toContain("{classificationOptions.map((option) =>");
     expect(view).toContain("saveLocalClassification");
     expect(view).toContain('/api/equipment/items/${selected.id}/classification');
-    expect(view).toContain("Sync จะไม่เขียนทับ");
+    expect(view).toContain("ระบบจะไม่เขียนทับค่าที่กำหนดเองไว้ที่นี่");
   });
 
   it("hides IQC and EQA items already linked to the selected equipment", () => {

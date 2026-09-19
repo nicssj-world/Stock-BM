@@ -900,7 +900,7 @@ function Registry({
               <div className="grid gap-3 border-t border-[#edf2f2] p-4 sm:grid-cols-2">
                 <Field
                   label="Classification (Stock-BM)"
-                  hint="Portal ยังไม่ส่งค่า Classification แยกมาให้ (ส่งมาแค่ชื่อเครื่องมือด้านบน) — กำหนดเองที่นี่ Sync จะไม่เขียนทับ"
+                  hint="Sync จาก Portal จะเติม/อัปเดตค่านี้ให้อัตโนมัติเมื่อ Portal ส่ง Classification มา ถ้า Portal ยังไม่มีค่า ระบบจะไม่เขียนทับค่าที่กำหนดเองไว้ที่นี่"
                 >
                   <Select
                     value={selected.category ?? ""}
