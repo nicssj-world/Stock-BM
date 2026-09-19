@@ -66,7 +66,7 @@ export function AppShell({ actor, receivingEnabled, children }: { actor: BmActor
   const router = useRouter()
   const sections: NavSection[] = actor.role === 'Assistant'
     ? [assistantManagementSection]
-    : [homeSection, { ...stockSection, items: receivingEnabled ? [...stockSection.items, receivingItem] : stockSection.items }, managementSection, qualitySection, monitoringSection]
+    : [homeSection, { ...stockSection, items: receivingEnabled ? [stockSection.items[0], receivingItem, ...stockSection.items.slice(1)] : stockSection.items }, managementSection, qualitySection, monitoringSection]
   if (actor.role === 'Admin') sections.push({ title: 'System', items: [{ href: '/admin', label: 'Admin', icon: Settings }] })
   const mobileItems: NavItem[] = actor.role === 'Assistant'
     ? assistantManagementSection.items
