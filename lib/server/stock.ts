@@ -94,7 +94,11 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
   fail(equipmentError)
   fail(itemEquipmentLinkError)
   fail(itemLocationLinkError)
-  fail(itemVendorLinkError)
+  // bm_stock_item_vendors is a later, optional addition (vendor mapping).
+  // A page that has nothing to do with vendors should never go down just
+  // because that table isn't migrated yet in some environment: degrade to
+  // "no vendor links" instead of failing this whole widely-shared loader.
+  const itemVendorLinkRows = itemVendorLinkError ? [] : ((itemVendorLinkData ?? []) as RecordRow[])
 
   const categoryRows = (categoryData ?? []) as RecordRow[]
   const locationRows = (locationData ?? []) as RecordRow[]
@@ -123,7 +127,7 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
     locationIdsByItem.set(itemId, [...(locationIdsByItem.get(itemId) ?? []), locationId])
   }
   const vendorIdsByItem = new Map<string, string[]>()
-  for (const row of (itemVendorLinkData ?? []) as RecordRow[]) {
+  for (const row of itemVendorLinkRows) {
     const itemId = asString(row.stock_item_id)
     const vendorId = asString(row.vendor_id)
     if (!itemId || !vendorId) continue
