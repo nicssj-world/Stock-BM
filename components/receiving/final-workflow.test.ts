@@ -10,8 +10,11 @@ const server = read('lib/server/receiving.ts')
 const assessmentRoute = read('app/api/receiving/receipts/[id]/assessment/route.ts')
 
 describe('final receiving workflow', () => {
-  it('follows Vendor → invoice image → Item → scan → Lot/Expiry → Qty → review → confirm', () => {
-    const order = ['เลือก Vendor', '<InvoiceImageCrop', '<ItemPicker', '<PackageScan', 'วันหมดอายุ', 'จำนวนที่ได้รับจริง', 'ตรวจสอบก่อนยืนยัน']
+  it('follows Vendor → invoice image → Scan/Item → Lot/Expiry → Qty → review → confirm', () => {
+    // Scan leads: it can resolve item + lot + expiry (and add the line) in
+    // one action. The Item Master search stays right below it as the
+    // always-available fallback for ambiguous/no-match scans and barcode-less items.
+    const order = ['เลือก Vendor', '<InvoiceImageCrop', '<PackageScan', '<ItemPicker', 'วันหมดอายุ', 'จำนวนที่ได้รับจริง', 'ตรวจสอบก่อนยืนยัน']
     const positions = order.map((marker) => wizard.lastIndexOf(marker))
     positions.forEach((position, index) => expect(position, order[index]).toBeGreaterThan(-1))
     const flow = order.slice(0, 6).map((marker) => wizard.indexOf(marker, wizard.indexOf('return <div className="space-y-4">')))
@@ -30,11 +33,32 @@ describe('final receiving workflow', () => {
     expect(wizard).toContain('adapter.submit(')
   })
 
-  it('selects the Item from Item Master; a barcode can only propose it', () => {
-    expect(wizard).toContain('proposedItemId')
-    expect(wizard).toContain('ใช้ Item นี้')
-    expect(wizard).toContain("!editor.itemId && result.itemId ? result.itemId : null")
+  it('resolves the Item straight from Item Master via an exact, unique, already-registered scan match — never a guess', () => {
+    expect(wizard).toContain("result.match.kind === 'exact_unique'")
+    expect(wizard).toContain('data.items.find((item) => item.id === resolvedItemId)')
     expect(wizard).not.toMatch(/catalogNo\s*[:=]\s*[^\n]*gtin/i)
+  })
+
+  it('scans straight into a receiving line (new or incremented) only when every requirement is already met, and never bypasses the TOR gate', () => {
+    const scanFn = wizard.slice(wizard.indexOf('function applyScan'), wizard.indexOf('function addLine'))
+    expect(scanFn).toContain('eligibleForAutoAdd')
+    // Every one of these must gate auto-add — none may be skipped for a scan.
+    expect(scanFn).toContain('!(editor.itemId && editor.itemId !== resolvedItemId)') // no silent item override
+    expect(scanFn).toContain('!resolvedItem.trackLot || parsed.lot') // lot required when tracked
+    expect(scanFn).toContain('!resolvedItem.trackExpiry || parsed.expiry') // expiry required when tracked
+    expect(scanFn).toContain('!(selectedInvoice && !editor.invoiceLineId)') // invoice line still required when bound
+    expect(scanFn).toContain("!== 'not_compliant'") // TOR/expiry-exception gate never bypassed by a scan
+    // Repeat-scan of the same item/lot/location increments quantity instead of duplicating a line.
+    expect(scanFn).toContain('line.receivedQty + 1')
+    // Ineligible scans still fall back to prefilling the form for manual completion — nothing is silently dropped.
+    expect(scanFn).toContain('scannedItemId && !editor.itemId ? { itemId: scannedItemId }')
+  })
+
+  it('gives the operator clear, immediate, accessible feedback when a scan adds or increments a line', () => {
+    expect(wizard).toContain('aria-live="polite"')
+    expect(wizard).toContain('showScanFeedback(')
+    expect(wizard).toContain('เพิ่มรายการแล้ว')
+    expect(wizard).toContain('เพิ่มจำนวน')
   })
 
   it('auto-fills Lot/Expiry from the scan and keeps manual entry when the barcode lacks them', () => {
