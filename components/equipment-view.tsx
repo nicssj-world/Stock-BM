@@ -528,20 +528,18 @@ function Registry({
   const [editingTechnicianId, setEditingTechnicianId] = useState<string | null>(
     null,
   );
-  // Classification is its own field (matches the portal), never the
-  // equipment's free-text name/model description — only real classification
-  // values (the standard vocabulary plus any legacy category text already on
-  // an equipment record) belong in this list. A class with no equipment on
-  // it yet stays hidden from the filter — it reappears on its own the
-  // moment something is classified into it.
-  const equipmentCountByCategory = new Map<string, number>();
-  for (const item of workspace.equipment) {
-    const category = item.category?.trim();
-    if (category) equipmentCountByCategory.set(category, (equipmentCountByCategory.get(category) ?? 0) + 1);
-  }
+  // Classification is its own field (matches the portal) — only real
+  // classification values (the standard vocabulary plus any legacy category
+  // text already on an equipment record) are offered as options, never an
+  // equipment's free-text name/model description. A class stays hidden until
+  // selecting it would actually return something: this uses the exact same
+  // matchesEquipmentClassification check as the filter itself (which also
+  // loosely matches by name, e.g. "Centrifuge" matching an item named
+  // "Refigurated Centrifuge"), so an option's visibility here always agrees
+  // with whether picking it produces results.
   const classificationOptions = equipmentClassificationOptions(
     workspace.equipment.map((item) => item.category),
-  ).filter((option) => equipmentCountByCategory.has(option));
+  ).filter((option) => workspace.equipment.some((item) => matchesEquipmentClassification(option, [item.category, item.name])));
   const filtered = workspace.equipment.filter((item) => {
     if (
       !matchesEquipmentClassification(classification, [

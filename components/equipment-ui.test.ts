@@ -92,19 +92,26 @@ describe("equipment interface", () => {
     expect(view).toContain("{equipmentCode} · {equipmentPrimary}");
   });
 
-  it("keeps the equipment's own name out of the Classification filter — only the real classification field belongs there", () => {
+  it("keeps the equipment's own name out of the Classification filter's option *values* — only the real classification field seeds them", () => {
     // The name/model description (e.g. "Refigurated Centrifuge") and the
     // Classification (e.g. "Centrifuge") are separate fields, matching the
-    // portal; the filter dropdown must only ever offer real classification
-    // values, never fall back to an equipment's free-text name.
-    expect(view).toContain("workspace.equipment.map((item) => item.category)");
-    expect(view).not.toMatch(/classificationOptions[\s\S]{0,120}item\.name/);
+    // portal; the option strings offered by the dropdown must only ever come
+    // from item.category, never from an equipment's free-text name.
+    const optionsCall = view.slice(view.indexOf("const classificationOptions ="), view.indexOf(".filter((option) =>"));
+    expect(optionsCall).toContain("equipmentClassificationOptions(");
+    expect(optionsCall).toContain("workspace.equipment.map((item) => item.category)");
+    expect(optionsCall).not.toContain("item.name");
     expect(view).not.toContain("ประเภทเครื่องมือ:");
   });
 
-  it("hides an empty Classification from the filter until something is actually classified into it", () => {
-    expect(view).toContain("equipmentCountByCategory.has(option)");
-    expect(view).toContain("equipmentCountByCategory.set(category, (equipmentCountByCategory.get(category) ?? 0) + 1)");
+  it("hides a Classification from the filter only when picking it would return nothing — using the same loose name-or-category match the filter itself uses", () => {
+    // A class like "Centrifuge" must stay visible even when no equipment has
+    // category === "Centrifuge" exactly, as long as it would still match by
+    // name (e.g. an item named "Refigurated Centrifuge") — visibility must
+    // never be stricter than what selecting the option would actually return.
+    expect(view).toContain(
+      ".filter((option) => workspace.equipment.some((item) => matchesEquipmentClassification(option, [item.category, item.name])))",
+    );
   });
 
   it("hides IQC and EQA items already linked to the selected equipment", () => {
