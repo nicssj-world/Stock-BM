@@ -531,10 +531,17 @@ function Registry({
   // Classification is its own field (matches the portal), never the
   // equipment's free-text name/model description — only real classification
   // values (the standard vocabulary plus any legacy category text already on
-  // an equipment record) belong in this list.
+  // an equipment record) belong in this list. A class with no equipment on
+  // it yet stays hidden from the filter — it reappears on its own the
+  // moment something is classified into it.
+  const equipmentCountByCategory = new Map<string, number>();
+  for (const item of workspace.equipment) {
+    const category = item.category?.trim();
+    if (category) equipmentCountByCategory.set(category, (equipmentCountByCategory.get(category) ?? 0) + 1);
+  }
   const classificationOptions = equipmentClassificationOptions(
     workspace.equipment.map((item) => item.category),
-  );
+  ).filter((option) => equipmentCountByCategory.has(option));
   const filtered = workspace.equipment.filter((item) => {
     if (
       !matchesEquipmentClassification(classification, [

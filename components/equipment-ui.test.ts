@@ -102,6 +102,11 @@ describe("equipment interface", () => {
     expect(view).not.toContain("ประเภทเครื่องมือ:");
   });
 
+  it("hides an empty Classification from the filter until something is actually classified into it", () => {
+    expect(view).toContain("equipmentCountByCategory.has(option)");
+    expect(view).toContain("equipmentCountByCategory.set(category, (equipmentCountByCategory.get(category) ?? 0) + 1)");
+  });
+
   it("hides IQC and EQA items already linked to the selected equipment", () => {
     expect(view).toContain("const linkedEntityIds = new Set(");
     expect(view).toContain("links.filter((link) => link.module === linkModule)");
