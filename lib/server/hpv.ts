@@ -100,6 +100,10 @@ function distributionFromRow(row: RecordRow, names: Map<string, string>, linesBy
     note: nullableString(row.note),
     createdByName: names.get(asString(row.created_by)) ?? null,
     createdAt: asString(row.created_at),
+    isReversed: false,
+    reversalTransactionId: null,
+    reversalNote: null,
+    reversedAt: null,
     lines: lines.length ? lines : [{
       id: null,
       distributionId: asString(row.id),
@@ -268,6 +272,17 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
   const sampleRows = (sampleData ?? []) as RecordRow[]
   const boxRows = (boxData ?? []) as RecordRow[]
   const deliveryRows = deliveryError ? [] : (deliveryData ?? []) as RecordRow[]
+  const distributionTransactionIds = [...new Set(distributionRows.map((row) => asString(row.stock_transaction_id)).filter(Boolean))]
+  const { data: reversalData, error: reversalError } = distributionTransactionIds.length
+    ? await admin
+      .from('bm_stock_transactions')
+      .select('id,source_transaction_id,note,created_at')
+      .in('source_transaction_id', distributionTransactionIds)
+    : { data: [], error: null }
+  fail(reversalError)
+  const reversalBySource = new Map(
+    ((reversalData ?? []) as RecordRow[]).map((row) => [asString(row.source_transaction_id), row]),
+  )
   const names = await getNameMap([
     ...distributionRows.map((row) => asString(row.created_by)),
     ...kitReturnRows.map((row) => asString(row.created_by)),
@@ -332,7 +347,17 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
     }
     linesByReturn.set(returnId, [...(linesByReturn.get(returnId) ?? []), line])
   }
-  const distributions = distributionRows.map((row) => distributionFromRow(row, names, linesByDistribution))
+  const distributions = distributionRows.map((row) => {
+    const distribution = distributionFromRow(row, names, linesByDistribution)
+    const reversal = reversalBySource.get(distribution.stockTransactionId)
+    return {
+      ...distribution,
+      isReversed: Boolean(reversal),
+      reversalTransactionId: reversal ? asString(reversal.id) : null,
+      reversalNote: reversal ? nullableString(reversal.note) : null,
+      reversedAt: reversal ? asString(reversal.created_at) : null,
+    }
+  })
   const kitReturns = kitReturnRows.map((row) => kitReturnFromRow(row, names, linesByReturn))
   const receipts = receiptRows.map((row) => receiptFromRow(row, names))
   const summaryMap = summarizeHpvSites(distributions, receipts, kitReturns)
@@ -403,18 +428,22 @@ export async function cancelHpvDistribution(id: string, reason: string, actor: B
     .eq('source_transaction_id', stockTransactionId)
     .maybeSingle()
   fail(revCheckError)
-  if (alreadyReversed) throw new HttpError(409, 'Stock transaction ถูก reverse ไปแล้ว')
-
-  const { error: reverseError } = await admin.rpc('reverse_bm_stock_transaction', {
-    p_transaction: stockTransactionId,
-    p_reason: `ยกเลิก HPV distribution: ${reason.trim()}`,
-    p_actor: actor.id,
-  })
-  fail(reverseError)
+  if (!alreadyReversed) {
+    const { error: reverseError } = await admin.rpc('reverse_bm_stock_transaction', {
+      p_transaction: stockTransactionId,
+      p_reason: `ยกเลิก HPV distribution: ${reason.trim()}`,
+      p_actor: actor.id,
+    })
+    fail(reverseError)
+  }
 
   const { error } = await admin.from('bm_hpv_kit_distributions').delete().eq('id', id)
   fail(error)
-  await writeAudit(actor, 'hpv.distribution.cancel', 'hpv-distribution', id, { reason })
+  await writeAudit(actor, 'hpv.distribution.cancel', 'hpv-distribution', id, {
+    reason,
+    stockAlreadyReversed: Boolean(alreadyReversed),
+    reversalTransactionId: alreadyReversed ? asString((alreadyReversed as RecordRow).id) : null,
+  })
   return getHpvWorkspace(actor)
 }
 

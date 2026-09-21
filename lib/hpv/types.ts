@@ -35,6 +35,10 @@ export interface HpvKitDistribution {
   note: string | null
   createdByName: string | null
   createdAt: string
+  isReversed: boolean
+  reversalTransactionId: string | null
+  reversalNote: string | null
+  reversedAt: string | null
   lines: HpvKitDistributionLine[]
 }
 

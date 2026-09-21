@@ -310,13 +310,14 @@ function DistributionTab({
   }
 
   async function cancelDistribution(dist: HpvKitDistribution) {
-    const reason = window.prompt(`ยืนยันยกเลิกการเบิก ${dist.quantity} ชุดให้ "${dist.siteName}"?\n\nระบุเหตุผล (จำเป็น):`)
+    const action = dist.isReversed ? 'ลบประวัติการเบิกที่ Reverse แล้ว' : 'ยกเลิกการเบิก'
+    const reason = window.prompt(`ยืนยัน${action} ${dist.quantity} ชุดให้ "${dist.siteName}"?\n\nระบุเหตุผล (จำเป็น):`)
     if (reason === null) return
     if (!reason.trim()) return onNotice({ tone: 'danger', text: 'กรุณาระบุเหตุผล' })
     setBusy(true)
     try {
       const result = await api<{ workspace: HpvWorkspace }>(`/api/hpv/distributions/${dist.id}?reason=${encodeURIComponent(reason.trim())}`, { method: 'DELETE' })
-      onWorkspace(result.workspace, `ยกเลิกการเบิกให้ ${dist.siteName} แล้ว Stock คืนแล้ว`)
+      onWorkspace(result.workspace, dist.isReversed ? `ลบประวัติการเบิกให้ ${dist.siteName} แล้ว` : `ยกเลิกการเบิกให้ ${dist.siteName} แล้ว Stock คืนแล้ว`)
     } catch (error) {
       onNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'ยกเลิกไม่สำเร็จ' })
     } finally {
@@ -325,7 +326,7 @@ function DistributionTab({
   }
 
   function exportDistributions() {
-    const headers = ['วันที่', 'หน่วยงาน', 'หมวด', 'รายการในชุด', 'Lot', 'Location', 'จำนวนชุด', 'Note', 'บันทึกโดย']
+    const headers = ['วันที่', 'หน่วยงาน', 'หมวด', 'รายการในชุด', 'Lot', 'Location', 'จำนวนชุด', 'สถานะ', 'เหตุผล Reverse', 'Note', 'บันทึกโดย']
     const rows = data.distributions.map((d) => [
       d.distributedOn,
       d.siteName,
@@ -334,6 +335,8 @@ function DistributionTab({
       d.lines.map((line) => line.lotNumber ?? '-').join('; '),
       d.lines.map((line) => line.locationCode ?? '-').join('; '),
       String(d.quantity),
+      d.isReversed ? 'ยกเลิกแล้ว' : 'ปกติ',
+      d.reversalNote ?? '',
       d.note ?? '',
       d.createdByName ?? '',
     ])
@@ -532,8 +535,9 @@ function DistributionTab({
                 <td className="px-3 py-2.5 text-xs text-[#8ba0a5]">{dist.createdByName ?? '-'}</td>
                 <td className="px-3 py-2.5">
                   <div className="flex items-center gap-1.5">
+                    {dist.isReversed ? <span className="rounded border border-[#d6e0e1] bg-[#f3f6f6] px-2 py-1 text-[10px] font-bold text-[#71878c]">ยกเลิกแล้ว</span> : null}
                     <DistributionAttachmentActions distributionId={dist.id} canDelete={actor.role === 'Admin'} onError={(text) => onNotice({ tone: 'danger', text })} />
-                    {actor.role === 'Admin' ? <button onClick={() => cancelDistribution(dist)} disabled={busy} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-500 hover:bg-red-100 disabled:opacity-40"><X className="size-3" /> ยกเลิก</button> : null}
+                    {actor.role === 'Admin' ? <button onClick={() => cancelDistribution(dist)} disabled={busy} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-500 hover:bg-red-100 disabled:opacity-40"><X className="size-3" /> {dist.isReversed ? 'ลบประวัติ' : 'ยกเลิก'}</button> : null}
                   </div>
                 </td>
               </tr>
@@ -766,7 +770,7 @@ function ReturnsTab({ data, onWorkspace, onNotice }: {
   }, [data.kitReturns])
 
   const candidates = useMemo(() => data.distributions
-    .filter((distribution) => distribution.siteId === form.siteId)
+    .filter((distribution) => distribution.siteId === form.siteId && !distribution.isReversed)
     .flatMap((distribution) => distribution.lines.map((line) => {
       const alreadyReturned = line.id ? (returnedByDistributionLine.get(line.id) ?? 0) : 0
       const remaining = line.quantity - alreadyReturned

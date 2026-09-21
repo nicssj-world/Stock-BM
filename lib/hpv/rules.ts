@@ -6,6 +6,7 @@ export const HPV_BOX_CAPACITY = 25
 export interface HpvDistributionLike {
   siteId: string
   quantity: number
+  isReversed?: boolean
 }
 
 export interface HpvReceiptLike {
@@ -101,6 +102,7 @@ export function summarizeHpvSites(distributions: HpvDistributionLike[], receipts
   }
 
   for (const distribution of distributions) {
+    if (distribution.isReversed) continue
     const summary = ensure(distribution.siteId)
     summary.issued += distribution.quantity
   }

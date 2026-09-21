@@ -87,6 +87,15 @@ describe('HPV site summary rules', () => {
     expect(summaries.a.receivedSelfSupplied).toBe(6)
     expect(summaries.a.outstanding).toBe(11)
   })
+
+  it('does not count a reversed distribution as issued or outstanding', () => {
+    const summaries = summarizeHpvSites(
+      [{ siteId: 'a', quantity: 10 }, { siteId: 'a', quantity: 5, isReversed: true }],
+      [{ siteId: 'a', sampleCount: 4 }],
+    )
+    expect(summaries.a.issued).toBe(10)
+    expect(summaries.a.outstanding).toBe(6)
+  })
 })
 
 describe('HPV checkout hand-over filter', () => {
