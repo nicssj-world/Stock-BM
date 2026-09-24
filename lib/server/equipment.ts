@@ -1349,6 +1349,7 @@ export async function resolvePublicEquipment(
       model: equipment.model,
       serialNumber: equipment.serialNumber,
       status: equipment.status,
+      portalEquipmentId: equipment.portalEquipmentId,
     },
     plans: ((planResult.data ?? []) as RecordRow[])
       .map(mapPlan)

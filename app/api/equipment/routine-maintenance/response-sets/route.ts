@@ -1,3 +1,4 @@
+import { respondEquipmentWrite } from '@/lib/server/equipment-archive'
 import { z } from 'zod'
 import { requireActor } from '@/lib/server/auth'
 import { createResponseSet, deleteResponseSet, getResponseSetsCatalog, updateResponseSet } from '@/lib/server/routine-maintenance'
@@ -23,7 +24,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  return respond(async () => {
+  return respondEquipmentWrite(async () => {
     const actor = await requireActor()
     const body = await readJson(request, schema)
     if (body.action === 'create-set') return createResponseSet(body, actor)

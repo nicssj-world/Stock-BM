@@ -24,7 +24,10 @@ LINE_CHANNEL_SECRET=
 PORTAL_EQUIPMENT_API_URL=
 PORTAL_PUBLIC_BASE_URL=
 STOCK_BM_INTEGRATION_TOKEN=
+EQUIPMENT_ARCHIVE_MODE=0
 ```
+
+`EQUIPMENT_ARCHIVE_MODE` ต้องคงเป็น `0` จนกว่าการย้ายประวัติเครื่องมือจะผ่าน reconciliation และผู้ดูแลอนุญาตให้เปิด archive mode; เมื่อเปิดเป็น `1` API เขียนงานเครื่องมือจะตอบ 410 และ QR เครื่องมือเก่าที่เชื่อม Portal แล้วจะพาไป `/e/{portal_equipment_id}` บน Portal
 
 `PORTAL_EQUIPMENT_API_URL`, `PORTAL_PUBLIC_BASE_URL` และ `STOCK_BM_INTEGRATION_TOKEN`
 ใช้สำหรับดึงข้อมูลเครื่องมือจาก Portal แบบ server-to-server เท่านั้น ห้ามใส่เป็น

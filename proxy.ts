@@ -4,6 +4,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 export async function proxy(request: NextRequest) {
   const response = NextResponse.next({ request })
   if (request.nextUrl.pathname === '/preview/stock1-acceptance') return response
+  if (process.env.EQUIPMENT_ARCHIVE_MODE === '1'
+    && /^\/equipment\/routine\/(?:qr\/)?[^/]+\/?$/.test(request.nextUrl.pathname)) return response
 
   const url = process.env.NEXT_PUBLIC_BM_SUPABASE_URL
   const key = process.env.NEXT_PUBLIC_BM_SUPABASE_ANON_KEY

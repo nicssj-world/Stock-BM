@@ -6,6 +6,8 @@ import {
 } from "@/lib/server/attachments";
 import { HttpError } from "@/lib/server/errors";
 import { respond } from "@/lib/server/route";
+import { assertEquipmentWriteAllowed, equipmentArchiveModeEnabled } from "@/lib/server/equipment-archive";
+import { getAdminClient } from "@/lib/supabase/admin";
 
 // The route remains authenticated, but its immutable attachment URL can be
 // cached privately by the current browser. This avoids a new signed URL and
@@ -43,7 +45,13 @@ export async function DELETE(
 ) {
   return respond(async () => {
     const actor = await requireActor();
-    await deleteAttachment((await params).id, actor);
+    const id = (await params).id;
+    if (equipmentArchiveModeEnabled()) {
+      const { data, error } = await getAdminClient().from("bm_attachments").select("module").eq("id", id).maybeSingle();
+      if (error) throw new HttpError(500, "ตรวจสอบไฟล์แนบไม่สำเร็จ");
+      if (data?.module === "equipment") assertEquipmentWriteAllowed();
+    }
+    await deleteAttachment(id, actor);
     return { ok: true };
   });
 }
