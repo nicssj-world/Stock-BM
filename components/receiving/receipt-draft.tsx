@@ -94,6 +94,8 @@ export function ReceiptDraft({ data, onSaved, onError }: { data: ReceivingWorksp
         coldChainCondition: answers.coldChainCondition,
         hasComplaint: answers.hasComplaint,
         note: answers.note || null,
+        reasonCodes: answers.reasonCodes,
+        otherReasonDetail: answers.otherReasonDetail || null,
       }),
     })
     onSaved(result.receiving, 'บันทึกการประเมินการรับสินค้าแล้ว')

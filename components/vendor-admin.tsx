@@ -10,7 +10,9 @@ import { ManagedList } from '@/components/managed-list'
 type VendorForm = {
   code: string
   name: string
+  legalName: string
   taxId: string
+  taxBranchCode: string
   address: string
   phone: string
   email: string
@@ -21,7 +23,9 @@ type VendorForm = {
 const emptyForm: VendorForm = {
   code: '',
   name: '',
+  legalName: '',
   taxId: '',
+  taxBranchCode: '00000',
   address: '',
   phone: '',
   email: '',
@@ -55,7 +59,9 @@ export function VendorAdmin({
     setForm({
       code: vendor.code,
       name: vendor.name,
+      legalName: vendor.legalName ?? '',
       taxId: vendor.taxId ?? '',
+      taxBranchCode: vendor.taxBranchCode,
       address: vendor.address ?? '',
       phone: vendor.phone ?? '',
       email: vendor.email ?? '',
@@ -70,7 +76,8 @@ export function VendorAdmin({
     try {
       const result = await api<{ vendors: Vendor[] }>(editingId ? `/api/vendors/${editingId}` : '/api/vendors', {
         method: editingId ? 'PATCH' : 'POST',
-        body: JSON.stringify(form),
+        // expectedUpdatedAt lets the database refuse the save if someone else edited this vendor after the form was opened.
+        body: JSON.stringify(editingVendor ? { ...form, expectedUpdatedAt: editingVendor.updatedAt } : form),
       })
       onSaved(result.vendors, editingId ? 'อัปเดต vendor แล้ว' : 'เพิ่ม vendor แล้ว')
       reset()
@@ -82,8 +89,11 @@ export function VendorAdmin({
   }
 
   async function toggle(id: string, isActive: boolean) {
+    // Closing a vendor needs a reason, which the audit trail keeps (LABCBH rule).
+    const deactivateNote = isActive ? undefined : window.prompt('เหตุผลที่ปิดใช้งานผู้ขาย')?.trim()
+    if (!isActive && !deactivateNote) { onError('กรุณาระบุเหตุผลที่ปิดใช้งานผู้ขาย'); return false }
     try {
-      const result = await api<{ vendors: Vendor[] }>(`/api/vendors/${id}`, { method: 'PATCH', body: JSON.stringify({ isActive }) })
+      const result = await api<{ vendors: Vendor[] }>(`/api/vendors/${id}`, { method: 'PATCH', body: JSON.stringify({ isActive, deactivateNote }) })
       onSaved(result.vendors, isActive ? 'เปิดใช้ vendor แล้ว' : 'ปิดใช้งาน vendor แล้ว')
       return true
     } catch (error) {
@@ -133,8 +143,8 @@ export function VendorAdmin({
           {!vendors.length ? <p className="py-8 text-center text-sm text-[#81979c]">ยังไม่มี vendor</p> : null}
         </div>
         {vendors.length ? <div className="border-t border-[#e5eeee] p-4">
-          <h3 className="text-sm font-bold text-[#315763]">Vendor Performance / Annual Evaluation</h3>
-          <p className="mt-1 text-xs text-[#81979c]">หลักฐานจากใบรับเข้าและ Receipt Assessment ตามปีงบประมาณ (1 ต.ค. – 30 ก.ย.) · ไม่มีคะแนน</p>
+          <h3 className="text-sm font-bold text-[#315763]">ผลงานผู้ขาย / รายงานประเมินประจำปี</h3>
+          <p className="mt-1 text-xs text-[#81979c]">ผลตรวจรับ ปัญหา และรายงานประเมิน 8 เกณฑ์ตามปีงบประมาณ (1 ต.ค. – 30 ก.ย.) · <Link href="/vendors/evaluation-policy" className="font-semibold text-[#0b7f76] underline">นโยบายประเมินผู้ขาย</Link> · <Link href="/vendors/my-signature" className="font-semibold text-[#0b7f76] underline">ตำแหน่งและลายเซ็นของฉัน</Link></p>
           <ul className="mt-2 flex flex-wrap gap-2">{vendors.map((vendor) => <li key={vendor.id}><Link href={`/vendors/${vendor.id}`} className="inline-flex min-h-11 items-center rounded-md border border-[#c9dadd] bg-white px-3 text-xs font-semibold text-[#0b7f76] hover:bg-[#f4fbf9]">{vendor.code}{vendor.isActive ? '' : ' (inactive)'}</Link></li>)}</ul>
         </div> : null}
         <div className="border-t border-[#e5eeee] bg-[#fbfdfd] p-4">
@@ -165,8 +175,12 @@ export function VendorAdmin({
             <Field label="Vendor code"><Input required value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })} /></Field>
             <Field label="ชื่อ vendor"><Input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></Field>
           </div>
+          <Field label="ชื่อตามหนังสือรับรอง"><Input value={form.legalName} onChange={(event) => setForm({ ...form, legalName: event.target.value })} /></Field>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Tax ID"><Input value={form.taxId} onChange={(event) => setForm({ ...form, taxId: event.target.value })} /></Field>
+            <Field label="เลขประจำตัวผู้เสียภาษี" hint="ตัวเลข 13 หลัก"><Input inputMode="numeric" maxLength={13} value={form.taxId} onChange={(event) => setForm({ ...form, taxId: event.target.value })} /></Field>
+            <Field label="รหัสสาขา" hint="5 หลัก · สำนักงานใหญ่ = 00000"><Input inputMode="numeric" maxLength={5} value={form.taxBranchCode} onChange={(event) => setForm({ ...form, taxBranchCode: event.target.value })} /></Field>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
             <Field label="ผู้ติดต่อ"><Input value={form.contactPerson} onChange={(event) => setForm({ ...form, contactPerson: event.target.value })} /></Field>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">

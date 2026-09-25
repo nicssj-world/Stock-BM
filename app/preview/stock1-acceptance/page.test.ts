@@ -16,9 +16,7 @@ describe('Stock1 Preview acceptance route', () => {
   it('demonstrates the final workflow with the real production components', () => {
     expect(component).toContain('<ReceiveWizard')
     expect(component).toContain('<ReceiptAssessmentDialog')
-    expect(component).toContain('<VendorMetricsPanel')
     expect(component).toContain('Vendor Registry')
-    expect(component).toContain('Annual Vendor Evaluation')
     expect(component).toContain('resolvePreviewPackage')
     expect(component).toContain('SIMULATED CONFIRM')
   })
@@ -34,8 +32,8 @@ describe('Stock1 Preview acceptance route', () => {
     expect(component).not.toMatch(/ocr|tesseract|perspective|four-corner|auto-detect|detectDocument/i)
   })
 
-  it('shows no vendor score while P-13/P-14 are unapproved', () => {
-    expect(component).toContain('ยังไม่ได้กำหนดสูตรคะแนน')
+  it('never invents a vendor score: evaluation lives in the real vendor pages, not the browser-only preview', () => {
+    expect(component).not.toContain('VendorMetricsPanel')
     expect(component).not.toMatch(/\bscore\s*[:=]|weights?\s*[:=]/i)
   })
 })

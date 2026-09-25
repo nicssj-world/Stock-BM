@@ -10,7 +10,9 @@ import type {
   ReceivingPolicy,
   ReceivingWorkspace,
 } from '@/lib/receiving/types'
-import { assessmentIssues, normalizeAssessmentAnswers, type ReceiptAssessment } from '@/lib/receiving/assessment'
+import { assessmentIssues, normalizeAssessmentAnswers } from '@/lib/receiving/assessment'
+import { toAssessment } from '@/lib/server/assessment-mapper'
+import { throwRpcError } from '@/lib/server/vendor-errors'
 import type {
   InvoiceCreateInput,
   InvoiceLineUpdateInput,
@@ -116,6 +118,9 @@ function toInvoice(row: RecordRow, lines: InvoiceLine[]): Invoice {
     invoiceNo: nullableString(row.invoice_no),
     invoiceDate: nullableString(row.invoice_date),
     status: asString(row.status) as Invoice['status'],
+    closedAt: nullableString(row.closed_at),
+    closedShortAt: nullableString(row.closed_short_at),
+    closedShortReason: nullableString(row.closed_short_reason),
     source: asString(row.source) as Invoice['source'],
     note: nullableString(row.note),
     createdBy: asString(row.created_by),
@@ -192,26 +197,6 @@ function toReceipt(row: RecordRow, lines: ReceiptLine[]): Receipt {
   }
 }
 
-function toAssessment(row: RecordRow): ReceiptAssessment {
-  return {
-    id: asString(row.id),
-    receiptId: asString(row.receipt_id),
-    vendorId: asString(row.vendor_id),
-    status: asString(row.status) === 'completed' ? 'completed' : 'pending',
-    productCondition: nullableString(row.product_condition) as ReceiptAssessment['productCondition'],
-    documentation: nullableString(row.documentation) as ReceiptAssessment['documentation'],
-    itemCorrectness: nullableString(row.item_correctness) as ReceiptAssessment['itemCorrectness'],
-    coldChainApplicable: row.cold_chain_applicable == null ? null : Boolean(row.cold_chain_applicable),
-    coldChainCondition: nullableString(row.cold_chain_condition) as ReceiptAssessment['coldChainCondition'],
-    hasComplaint: row.has_complaint == null ? null : Boolean(row.has_complaint),
-    note: nullableString(row.note),
-    assessedBy: nullableString(row.assessed_by),
-    assessedAt: nullableString(row.assessed_at),
-    createdAt: asString(row.created_at),
-    updatedAt: asString(row.updated_at),
-  }
-}
-
 export async function getReceivingWorkspace(_actor: BmActor): Promise<ReceivingWorkspace> {
   const policy = await assertReceivingEnabled()
   const admin = getAdminClient()
@@ -266,7 +251,8 @@ function invoiceLineRow(invoiceId: string, input: NonNullable<InvoiceCreateInput
     expiry_text: clean(input.expiryText),
     match_method: input.matchMethod ?? null,
     match_confidence: input.matchConfidence ?? null,
-    closure_state: input.closureState ?? 'open',
+    // A line becomes complete when receipts fulfil it and short_closed when an Admin closes the invoice short; never by hand.
+    closure_state: input.closureState === 'cancelled' ? 'cancelled' : 'open',
     short_reason_code: clean(input.shortReasonCode),
     short_reason_note: clean(input.shortReasonNote),
     sort_order: input.sortOrder ?? input.lineNo,
@@ -301,8 +287,15 @@ export async function createInvoice(input: InvoiceCreateInput, actor: BmActor) {
 
 export async function updateInvoice(id: string, input: InvoiceUpdateInput, actor: BmActor) {
   await assertReceivingEnabled()
-  if (input.status === 'closed') throw new HttpError(501, 'รอการอนุมัติ policy การปิดใบส่งของ')
+  // A full receipt closes the invoice by itself; closing with goods outstanding goes through closeInvoiceShort.
+  if (input.status === 'closed') throw new HttpError(409, 'ใบส่งของปิดเองเมื่อรับครบ หากรับไม่ครบให้ใช้ปุ่ม “ปิดแบบรับไม่ครบ”')
   const admin = getAdminClient()
+  if (input.status !== undefined) {
+    // A closed invoice stays closed: it is the evidence behind delivery and vendor issues, and nothing reopens it.
+    const { data: current, error: currentError } = await admin.from('bm_invoices').select('status').eq('id', id).maybeSingle()
+    fail(currentError)
+    if (current && asString((current as RecordRow).status) === 'closed') throw new HttpError(409, 'ใบส่งของที่ปิดแล้วเปิดใหม่ไม่ได้')
+  }
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (input.vendorId !== undefined) updates.vendor_id = input.vendorId
   if (input.invoiceNo !== undefined) updates.invoice_no = clean(input.invoiceNo)
@@ -346,9 +339,11 @@ export async function updateInvoiceLine(lineId: string, input: InvoiceLineUpdate
   if (input.expiryText !== undefined) updates.expiry_text = clean(input.expiryText)
   if (input.matchMethod !== undefined) updates.match_method = input.matchMethod
   if (input.matchConfidence !== undefined) updates.match_confidence = input.matchConfidence
+  // Delivery figures for vendor evaluation come from these states, so they are only set by receipts and by closing short.
+  if (input.closureState === 'complete' || input.closureState === 'short_closed' || input.shortReasonCode !== undefined || input.shortReasonNote !== undefined) {
+    throw new HttpError(409, 'สถานะรับครบ/ปิดแบบรับไม่ครบตั้งเองไม่ได้ ระบบตั้งให้จากการรับเข้า หรือใช้ปุ่ม “ปิดแบบรับไม่ครบ” ของใบส่งของ')
+  }
   if (input.closureState !== undefined) updates.closure_state = input.closureState
-  if (input.shortReasonCode !== undefined) updates.short_reason_code = clean(input.shortReasonCode)
-  if (input.shortReasonNote !== undefined) updates.short_reason_note = clean(input.shortReasonNote)
   if (input.sortOrder !== undefined) updates.sort_order = input.sortOrder
   const { error } = await admin.from('bm_invoice_lines').update(updates).eq('id', lineId)
   fail(error)
@@ -646,37 +641,41 @@ export async function completeReceiptAssessment(receiptId: string, input: Receip
     coldChainCondition: input.coldChainCondition ?? null,
     hasComplaint: input.hasComplaint,
     note: input.note ?? '',
+    reasonCodes: input.reasonCodes ?? [],
+    otherReasonDetail: input.otherReasonDetail ?? '',
   })
   const issues = assessmentIssues(answers)
   if (issues.length) throw new HttpError(400, issues[0].message)
+  const { error } = await getAdminClient().rpc('complete_bm_receipt_assessment', { p_actor: actor.id, p_receipt: receiptId, p_data: answers })
+  throwRpcError(error)
+  return getReceivingWorkspace(actor)
+}
 
-  const admin = getAdminClient()
-  const { data: receipt, error: receiptError } = await admin.from('bm_receipts').select('id,status,vendor_id').eq('id', receiptId).maybeSingle()
-  fail(receiptError)
-  if (!receipt) throw new HttpError(404, 'ไม่พบใบรับเข้า')
-  if (asString((receipt as RecordRow).status) !== 'confirmed') throw new HttpError(409, 'ประเมินได้เฉพาะใบรับเข้าที่ยืนยันแล้ว')
-
-  const now = new Date().toISOString()
-  const { data, error } = await admin.from('bm_receipt_assessments').update({
-    status: 'completed',
-    product_condition: answers.productCondition,
-    documentation: answers.documentation,
-    item_correctness: answers.itemCorrectness,
-    cold_chain_applicable: answers.coldChainApplicable,
-    cold_chain_condition: answers.coldChainCondition,
-    has_complaint: answers.hasComplaint,
-    note: answers.note || null,
-    assessed_by: actor.id,
-    assessed_at: now,
-    updated_at: now,
-  }).eq('receipt_id', receiptId).eq('status', 'pending').select('id,vendor_id').maybeSingle()
-  fail(error)
-  if (!data) throw new HttpError(409, 'การประเมินนี้บันทึกแล้ว หรือไม่พบการประเมินที่รอดำเนินการ')
-  const row = data as RecordRow
-  await writeAudit(actor, 'receiving.assessment.complete', 'stock-receipt-assessment', asString(row.id), {
-    receiptId,
-    vendorId: asString(row.vendor_id),
-    ...answers,
+/** Admin only: corrects a completed assessment. The database keeps every revision and reconciles the issues. */
+export async function reviseReceiptAssessment(assessmentId: string, input: ReceiptAssessmentInput, actor: BmActor) {
+  await assertReceivingEnabled()
+  const answers = normalizeAssessmentAnswers({
+    productCondition: input.productCondition,
+    documentation: input.documentation,
+    itemCorrectness: input.itemCorrectness,
+    coldChainApplicable: input.coldChainApplicable,
+    coldChainCondition: input.coldChainCondition ?? null,
+    hasComplaint: input.hasComplaint,
+    note: input.note ?? '',
+    reasonCodes: input.reasonCodes ?? [],
+    otherReasonDetail: input.otherReasonDetail ?? '',
   })
+  const issues = assessmentIssues(answers)
+  if (issues.length) throw new HttpError(400, issues[0].message)
+  const { error } = await getAdminClient().rpc('revise_bm_receipt_assessment', { p_actor: actor.id, p_assessment: assessmentId, p_data: answers })
+  throwRpcError(error)
+  return getReceivingWorkspace(actor)
+}
+
+/** Admin only: closes an open invoice with goods still outstanding; each outstanding line becomes a vendor issue. */
+export async function closeInvoiceShort(invoiceId: string, reason: string, actor: BmActor) {
+  await assertReceivingEnabled()
+  const { error } = await getAdminClient().rpc('close_bm_invoice_short', { p_actor: actor.id, p_invoice: invoiceId, p_reason: reason })
+  throwRpcError(error)
   return getReceivingWorkspace(actor)
 }

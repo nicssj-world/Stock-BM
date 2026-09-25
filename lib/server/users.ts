@@ -42,6 +42,9 @@ export async function listUsers(): Promise<AdminUserRow[]> {
   fail(profileError)
   fail(accessError)
   const accessMap = new Map(((accessData ?? []) as RecordRow[]).map((row) => [asString(row.user_id), row]))
+  const { data: signerData, error: signerError } = await admin.from('bm_user_signers').select('user_id,position_title')
+  fail(signerError)
+  const positions = new Map(((signerData ?? []) as RecordRow[]).map((row) => [asString(row.user_id), typeof row.position_title === 'string' ? row.position_title : null]))
   return ((profileData ?? []) as RecordRow[]).map((row) => {
     const access = accessMap.get(asString(row.id))
     return {
@@ -52,6 +55,7 @@ export async function listUsers(): Promise<AdminUserRow[]> {
       genomicActive: Boolean(row.is_active),
       stockRole: access ? asBmRole(access.role) : null,
       stockActive: Boolean(access?.is_active),
+      positionTitle: positions.get(asString(row.id)) ?? null,
       createdAt: asString(row.created_at),
     }
   })

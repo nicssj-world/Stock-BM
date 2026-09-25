@@ -12,7 +12,7 @@ function blankLine(lineNo: number): DraftLine {
   return { lineNo, catalogNoText: '', descriptionText: '', expectedQty: '1' }
 }
 
-export function InvoiceEditor({ data, onSaved, onError }: { data: ReceivingWorkspace; onSaved: (data: ReceivingWorkspace, text: string) => void; onError: (text: string) => void }) {
+export function InvoiceEditor({ data, onSaved, onError, canCloseShort = false }: { data: ReceivingWorkspace; onSaved: (data: ReceivingWorkspace, text: string) => void; onError: (text: string) => void; canCloseShort?: boolean }) {
   const activeVendors = data.vendors.filter((vendor) => vendor.isActive)
   const [vendorId, setVendorId] = useState(activeVendors[0]?.id ?? '')
   const [invoiceNo, setInvoiceNo] = useState('')
@@ -69,6 +69,18 @@ export function InvoiceEditor({ data, onSaved, onError }: { data: ReceivingWorks
     }
   }
 
+  // Closes an open invoice with goods still outstanding; every outstanding line becomes a vendor issue (Admin only).
+  async function closeShort(invoice: Invoice) {
+    const reason = window.prompt(`ปิด ${invoice.invoiceNo ?? 'ใบส่งของ'} แบบรับไม่ครบ · รายการค้างรับจะถูกบันทึกเป็นปัญหาผู้ขาย\nระบุเหตุผล:`)?.trim()
+    if (!reason) return
+    try {
+      const result = await api<{ receiving: ReceivingWorkspace }>(`/api/receiving/invoices/${invoice.id}/close`, { method: 'POST', body: JSON.stringify({ reason }) })
+      onSaved(result.receiving, 'ปิดใบส่งของแบบรับไม่ครบแล้ว')
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'ปิดใบส่งของไม่สำเร็จ')
+    }
+  }
+
   return <div className="space-y-4">
     <Card className="p-4">
       <form onSubmit={createInvoice} className="space-y-4">
@@ -84,11 +96,11 @@ export function InvoiceEditor({ data, onSaved, onError }: { data: ReceivingWorks
         <Button disabled={busy || !vendorId}><ClipboardList className="size-4" />สร้างใบส่งของ</Button>
       </form>
     </Card>
-    <Card className="overflow-hidden"><div className="flex items-center gap-2 border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3"><ClipboardList className="size-4 text-[#0b7f76]" /><h2 className="font-bold">ใบส่งของและ Expected vs Received</h2></div><div className="divide-y divide-[#edf2f2]">{data.invoices.map((invoice) => <InvoiceSummary key={invoice.id} invoice={invoice} data={data} onUpdateExpectedQty={updateExpectedQty} />)}{!data.invoices.length ? <p className="p-8 text-center text-sm text-[#81979c]">ยังไม่มีใบส่งของ</p> : null}</div></Card>
+    <Card className="overflow-hidden"><div className="flex items-center gap-2 border-b border-[#e1eaeb] bg-[#fbfdfd] px-4 py-3"><ClipboardList className="size-4 text-[#0b7f76]" /><h2 className="font-bold">ใบส่งของและ Expected vs Received</h2></div><div className="divide-y divide-[#edf2f2]">{data.invoices.map((invoice) => <InvoiceSummary key={invoice.id} invoice={invoice} data={data} onUpdateExpectedQty={updateExpectedQty} onCloseShort={canCloseShort ? closeShort : undefined} />)}{!data.invoices.length ? <p className="p-8 text-center text-sm text-[#81979c]">ยังไม่มีใบส่งของ</p> : null}</div></Card>
   </div>
 }
 
-function InvoiceSummary({ invoice, data, onUpdateExpectedQty }: { invoice: Invoice; data: ReceivingWorkspace; onUpdateExpectedQty: (invoice: Invoice, lineId: string, value: string) => void }) {
+function InvoiceSummary({ invoice, data, onUpdateExpectedQty, onCloseShort }: { invoice: Invoice; data: ReceivingWorkspace; onUpdateExpectedQty: (invoice: Invoice, lineId: string, value: string) => void; onCloseShort?: (invoice: Invoice) => void }) {
   const vendor = data.vendors.find((item) => item.id === invoice.vendorId)
-  return <div className="space-y-3 px-4 py-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-semibold text-[#315763]">{invoice.invoiceNo ?? 'ยังไม่มีเลขที่'} · {vendor?.name ?? 'ไม่พบ vendor'}</p><p className="text-xs text-[#81979c]">{invoice.invoiceDate ?? 'ไม่ระบุวันที่'} · {invoice.status} · {invoice.lines.length} lines</p></div><StatusBadge tone={invoice.status === 'closed' ? 'accepted' : invoice.status === 'cancelled' ? 'neutral' : 'warning'} label={invoice.status} /></div>{invoice.lines.map((line) => { const receivedQty = cumulativeReceived(data.receipts.filter((receipt) => receipt.status === 'confirmed').flatMap((receipt) => receipt.lines.filter((receiptLine) => receiptLine.invoiceLineId === line.id).map((receiptLine) => ({ receivedQty: receiptLine.receivedQty })))); const state = deliveryCompleteness(line.expectedQty, receivedQty); return <div key={line.id} className="grid gap-2 rounded-md border border-[#e1eaeb] bg-[#fbfdfd] p-3 sm:grid-cols-[1fr_130px_130px_auto] sm:items-center"><div><p className="text-sm font-semibold text-[#315763]">{line.catalogNoText ?? 'ไม่มี Catalog / REF'} · {line.descriptionText ?? 'ไม่มีรายละเอียด'}</p><p className="text-xs text-[#81979c]">สถานะ: {line.closureState} · received {receivedQty} / expected {line.expectedQty}</p></div><Input aria-label={`Expected qty ${line.lineNo}`} type="number" min="0.001" step="0.001" defaultValue={line.expectedQty} disabled={invoice.status === 'closed' || invoice.status === 'cancelled'} onBlur={(event) => { if (Number(event.currentTarget.value) !== line.expectedQty) onUpdateExpectedQty(invoice, line.id, event.currentTarget.value) }} /><span className="text-sm font-semibold text-[#58747d]">{state === 'complete' ? 'ครบแล้ว' : 'ยังเปิดอยู่'}</span><StatusBadge tone={state === 'complete' ? 'accepted' : 'warning'} label={state} /></div> })}</div>
+  return <div className="space-y-3 px-4 py-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-semibold text-[#315763]">{invoice.invoiceNo ?? 'ยังไม่มีเลขที่'} · {vendor?.name ?? 'ไม่พบ vendor'}</p><p className="text-xs text-[#81979c]">{invoice.invoiceDate ?? 'ไม่ระบุวันที่'} · {invoice.status} · {invoice.lines.length} lines</p></div><div className="flex flex-wrap items-center gap-2">{onCloseShort && invoice.status === 'open' ? <Button type="button" variant="secondary" onClick={() => onCloseShort(invoice)}>ปิดแบบรับไม่ครบ</Button> : null}{invoice.closedShortAt ? <StatusBadge tone="warning" label="ปิดแบบรับไม่ครบ" /> : null}<StatusBadge tone={invoice.status === 'closed' ? 'accepted' : invoice.status === 'cancelled' ? 'neutral' : 'warning'} label={invoice.status} /></div></div>{invoice.lines.map((line) => { const receivedQty = cumulativeReceived(data.receipts.filter((receipt) => receipt.status === 'confirmed').flatMap((receipt) => receipt.lines.filter((receiptLine) => receiptLine.invoiceLineId === line.id).map((receiptLine) => ({ receivedQty: receiptLine.receivedQty })))); const state = deliveryCompleteness(line.expectedQty, receivedQty); return <div key={line.id} className="grid gap-2 rounded-md border border-[#e1eaeb] bg-[#fbfdfd] p-3 sm:grid-cols-[1fr_130px_130px_auto] sm:items-center"><div><p className="text-sm font-semibold text-[#315763]">{line.catalogNoText ?? 'ไม่มี Catalog / REF'} · {line.descriptionText ?? 'ไม่มีรายละเอียด'}</p><p className="text-xs text-[#81979c]">สถานะ: {line.closureState} · received {receivedQty} / expected {line.expectedQty}</p></div><Input aria-label={`Expected qty ${line.lineNo}`} type="number" min="0.001" step="0.001" defaultValue={line.expectedQty} disabled={invoice.status === 'closed' || invoice.status === 'cancelled'} onBlur={(event) => { if (Number(event.currentTarget.value) !== line.expectedQty) onUpdateExpectedQty(invoice, line.id, event.currentTarget.value) }} /><span className="text-sm font-semibold text-[#58747d]">{state === 'complete' ? 'ครบแล้ว' : 'ยังเปิดอยู่'}</span><StatusBadge tone={state === 'complete' ? 'accepted' : 'warning'} label={state} /></div> })}</div>
 }

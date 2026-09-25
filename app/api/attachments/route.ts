@@ -1,4 +1,5 @@
 import { requireActor } from "@/lib/server/auth";
+import { assertVendorIssueAttachmentAllowed } from "@/lib/server/vendors";
 import {
   listAttachments,
   uploadAttachment,
@@ -85,6 +86,7 @@ export async function POST(request: Request) {
     if (!entityType || !kind)
       throw new HttpError(400, "entityType and kind are required");
     await assertEqaAttachmentAllowed(mod, entityType, entityId, kind);
+    if (mod === "stock" && entityType === "vendor-issue") await assertVendorIssueAttachmentAllowed(actor, entityId);
     if (mod === "equipment" && entityType === "equipment" && actor.role !== "Admin")
       throw new HttpError(403, "Admin permission required");
     if (mod === "equipment" && entityType === "equipment" && !["image/jpeg", "image/png", "image/webp"].includes(file.type))

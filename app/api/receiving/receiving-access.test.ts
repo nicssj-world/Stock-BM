@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest'
 const protectedRoutes = [
   'app/api/receiving/invoices/route.ts',
   'app/api/receiving/invoices/[id]/route.ts',
-  'app/api/receiving/invoices/[id]/close/route.ts',
   'app/api/receiving/invoices/[id]/lines/[lineId]/route.ts',
   'app/api/receiving/receipts/route.ts',
   'app/api/receiving/receipts/[id]/route.ts',
@@ -29,8 +28,20 @@ describe('receiving API access control', () => {
     expect(source).not.toContain("rpc('confirm_bm_receipt'")
   })
 
-  it('keeps invoice closure explicitly policy-gated', () => {
+  it('lets only an Admin close an invoice short, through the database function', () => {
     const source = readFileSync(join(process.cwd(), 'app/api/receiving/invoices/[id]/close/route.ts'), 'utf8')
-    expect(source).toContain("throw new HttpError(501, 'รอการอนุมัติ policy การปิดใบส่งของ')")
+    expect(source).toContain('requireStockAdmin')
+    expect(source).not.toContain('requireStockOperator')
+    expect(source).toContain('closeInvoiceShort(')
+    expect(source).not.toContain('501')
+    const server = readFileSync(join(process.cwd(), 'lib/server/receiving.ts'), 'utf8')
+    expect(server).toContain("rpc('close_bm_invoice_short'")
+    expect(server).toContain('await assertReceivingEnabled()')
+  })
+
+  it('lets only an Admin revise a completed assessment', () => {
+    const source = readFileSync(join(process.cwd(), 'app/api/receiving/assessments/[id]/route.ts'), 'utf8')
+    expect(source).toContain('requireStockAdmin')
+    expect(source).toContain('reviseReceiptAssessment(')
   })
 })

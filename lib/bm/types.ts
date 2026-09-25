@@ -183,6 +183,7 @@ export interface AdminUserRow {
   genomicActive: boolean
   stockRole: BmRole | null
   stockActive: boolean
+  positionTitle: string | null
   createdAt: string
 }
 

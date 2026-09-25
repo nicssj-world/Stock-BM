@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, BellRing, Biohazard, Boxes, ClipboardCheck, Dna, GitCompareArrows, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck, Stethoscope, Thermometer, Users } from 'lucide-react'
+import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, BellRing, Biohazard, Boxes, Building2,ClipboardCheck, Dna, GitCompareArrows, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck, Stethoscope, Thermometer, Users } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import { api } from '@/components/ui'
 
@@ -23,6 +23,7 @@ const stockSection: NavSection = {
     { href: '/movements', label: 'รับ-จ่าย / Movements', icon: MoveRight },
     { href: '/scan', label: 'สแกน / Scan', icon: QrCode },
     { href: '/reports', label: 'รายงาน / Reports & Audit', icon: BarChart3 },
+    { href: '/vendors', label: 'ผู้ขาย / Vendors', icon: Building2 },
   ],
 }
 

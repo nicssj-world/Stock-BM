@@ -1,7 +1,8 @@
 import { formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
 import type { StockWorkspace } from '@/lib/bm/types'
-import type { VendorPerformance } from '@/lib/vendors/types'
-import { vendorMetricLabel } from '@/lib/vendors/metric-labels'
+import type { Snapshot } from '@/lib/vendors/evaluation'
+import { criterionLabel } from '@/lib/vendors/evaluation'
+import { ISSUE_STATUS_LABELS, ISSUE_TYPE_LABELS, type VendorIssue } from '@/lib/vendors/issues'
 
 function escapeCsv(value: unknown) {
   const text = String(value ?? '')
@@ -58,35 +59,25 @@ export function buildMovementsCsv(workspace: StockWorkspace) {
   return csv(rows)
 }
 
-export function buildVendorPerformanceCsv(performance: VendorPerformance) {
-  const rows: unknown[][] = [['Vendor', 'Fiscal year', 'Metric', 'Numerator', 'Denominator', 'Percent', 'Applicable population', 'Provisional']]
-  for (const metric of Object.values(performance.metrics.metrics)) {
+export function buildVendorPerformanceCsv(performance: Omit<Snapshot, 'issues' | 'receipts' | 'assessments'>, issues: VendorIssue[]) {
+  const rows: unknown[][] = [['ผู้ขาย', 'ปีงบประมาณ (พ.ศ.)', 'เกณฑ์', 'ตัวตั้ง', 'ตัวหาร', 'ผล (%)']]
+  for (const criterion of performance.criteria) {
     rows.push([
-      `${performance.vendor.code} · ${performance.vendor.name}`,
+      `${performance.vendor.vendorCode} · ${performance.vendor.name}`,
       performance.fiscalYear,
-      vendorMetricLabel(metric.key),
-      metric.numerator,
-      metric.denominator ?? '',
-      metric.percent == null ? '' : metric.percent.toFixed(1),
-      metric.applicablePopulation,
-      metric.provisional ? 'yes' : 'no',
+      criterionLabel(criterion.criterionCode),
+      criterion.numerator,
+      criterion.applicable ? criterion.denominator : 'N/A',
+      criterion.percentage == null ? 'N/A' : criterion.percentage,
     ])
   }
   rows.push([])
-  const quantity = performance.metrics.quantityVsExpected
-  rows.push(['Quantity vs expected (informational)', quantity.linesWithExpected, quantity.reachedExpected, quantity.partiallyReceived, quantity.notYetReceived, quantity.label])
+  rows.push(['ช่วงข้อมูล', performance.coverage.startDate, performance.coverage.endDate, 'ตรวจรับแล้ว', performance.coverage.completed, 'ค้างประเมิน', performance.coverage.pending])
+  rows.push(['ตัวเลขนี้เป็นข้อมูลสด ไม่ใช่คะแนนอย่างเป็นทางการ'])
   rows.push([])
-  rows.push(['Metric', 'Source kind', 'Source id', 'Receipt id', 'Flagged'])
-  for (const metric of Object.values(performance.metrics.metrics)) {
-    for (const source of metric.sources) rows.push([vendorMetricLabel(metric.key), source.kind, source.id, source.receiptId ?? '', source.flagged ? 'yes' : 'no'])
-  }
-  rows.push([])
-  rows.push(['Delivery Lead Time', performance.metrics.deliveryLeadTime.sampleSize, performance.metrics.deliveryLeadTime.meanDays ?? '', performance.metrics.deliveryLeadTime.medianDays ?? '', performance.metrics.deliveryLeadTime.label])
-  rows.push([])
-  rows.push(['Issue ID', 'Issue type', 'Status', 'Opened at', 'Description', 'Resolution note'])
-  for (const issue of performance.issues) {
-    rows.push([issue.id, issue.issueType, issue.resolutionStatus, issue.openedAt, issue.description, issue.resolutionNote ?? ''])
+  rows.push(['รหัสปัญหา', 'ประเภท', 'สถานะ', 'เปิดเมื่อ', 'รายละเอียด', 'หมายเหตุการแก้ไข'])
+  for (const issue of issues) {
+    rows.push([issue.id, ISSUE_TYPE_LABELS[issue.issueType] ?? issue.issueType, ISSUE_STATUS_LABELS[issue.status] ?? issue.status, issue.openedAt, issue.description, issue.resolutionNote ?? ''])
   }
   return csv(rows)
 }
-

@@ -1,5 +1,7 @@
 # Receiving expected-quantity and closure policy holds
 
+> **Update 2026-09-25:** the holds below (P-06, P-07 stays, P-09, P-10, P-12, P-13, P-14, P-16) were closed by the owner decision to adopt LABCBH-Stock's vendor evaluation as the QP. See `2026-09-25-vendor-evaluation-labcbh-port.md`. The close route no longer returns 501; the text below is kept as history.
+
 The Stock1 receiving flow records invoice and invoice-line expectations, links
 each receipt to those records, and calculates cumulative received quantity. It
 does not silently turn an operational observation into a policy decision.

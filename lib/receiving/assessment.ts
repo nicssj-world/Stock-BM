@@ -8,6 +8,21 @@ export type ItemCorrectness = 'correct' | 'problem'
 export type ColdChainCondition = 'appropriate' | 'inappropriate'
 export type ReceiptAssessmentStatus = 'pending' | 'completed'
 
+// Reasons required when any answer is abnormal (LABCBH-Stock rules). The database enforces the same rules.
+export const ASSESSMENT_REASON_CODES = ['urgent_need', 'no_alternative', 'usable_condition', 'vendor_will_correct', 'documentation_pending', 'consume_before_expiry', 'approved_exception', 'other'] as const
+export type ReasonCode = (typeof ASSESSMENT_REASON_CODES)[number]
+export const REASON_LABELS: Record<ReasonCode, string> = {
+  urgent_need: 'จำเป็นต้องใช้เร่งด่วน',
+  no_alternative: 'ไม่มีสินค้าทดแทน',
+  usable_condition: 'ยังอยู่ในสภาพใช้งานได้',
+  vendor_will_correct: 'ผู้ขายจะดำเนินการแก้ไข',
+  documentation_pending: 'เอกสารอยู่ระหว่างติดตาม',
+  consume_before_expiry: 'วางแผนใช้ก่อนหมดอายุ',
+  approved_exception: 'ผู้มีอำนาจอนุมัติข้อยกเว้น',
+  other: 'เหตุผลอื่น',
+}
+export type AcceptanceDecision = 'accepted' | 'accepted_with_justification'
+
 export type ReceiptAssessmentAnswers = {
   productCondition: ProductCondition | null
   documentation: DocumentationState | null
@@ -16,6 +31,8 @@ export type ReceiptAssessmentAnswers = {
   coldChainCondition: ColdChainCondition | null
   hasComplaint: boolean | null
   note: string
+  reasonCodes: ReasonCode[]
+  otherReasonDetail: string
 }
 
 export type ReceiptAssessment = {
@@ -30,6 +47,9 @@ export type ReceiptAssessment = {
   coldChainCondition: ColdChainCondition | null
   hasComplaint: boolean | null
   note: string | null
+  reasonCodes: ReasonCode[]
+  otherReasonDetail: string | null
+  acceptanceDecision: AcceptanceDecision | null
   assessedBy: string | null
   assessedAt: string | null
   createdAt: string
@@ -44,6 +64,8 @@ export const EMPTY_ASSESSMENT_ANSWERS: ReceiptAssessmentAnswers = {
   coldChainCondition: null,
   hasComplaint: null,
   note: '',
+  reasonCodes: [],
+  otherReasonDetail: '',
 }
 
 export const ASSESSMENT_LABELS = {
@@ -54,6 +76,7 @@ export const ASSESSMENT_LABELS = {
   coldChainCondition: { title: 'สภาพ/อุณหภูมิ', options: { appropriate: 'เหมาะสม', inappropriate: 'ไม่เหมาะสม' } },
   hasComplaint: { title: 'มีปัญหา/ข้อร้องเรียนหรือไม่', options: { false: 'ไม่มี', true: 'มี' } },
   note: { title: 'หมายเหตุ' },
+  reasonCodes: { title: 'เหตุผลที่ยอมรับสินค้า' },
 } as const
 
 /** True when any answer is abnormal; the note then becomes mandatory. */
@@ -75,7 +98,11 @@ export function assessmentIssues(answers: ReceiptAssessmentAnswers): AssessmentI
   if (answers.coldChainApplicable === null) issues.push({ field: 'coldChainApplicable', message: 'กรุณาระบุ Cold chain applicable' })
   if (answers.coldChainApplicable === true && !answers.coldChainCondition) issues.push({ field: 'coldChainCondition', message: 'กรุณาระบุสภาพ/อุณหภูมิ' })
   if (answers.hasComplaint === null) issues.push({ field: 'hasComplaint', message: 'กรุณาระบุว่ามีปัญหา/ข้อร้องเรียนหรือไม่' })
-  if (hasAbnormalAnswer(answers) && !answers.note.trim()) issues.push({ field: 'note', message: 'มีรายการผิดปกติ — กรุณาระบุหมายเหตุ' })
+  if (hasAbnormalAnswer(answers)) {
+    if (answers.reasonCodes.length === 0) issues.push({ field: 'reasonCodes', message: 'มีรายการผิดปกติ — กรุณาเลือกเหตุผลที่ยอมรับสินค้า' })
+    if (answers.reasonCodes.includes('other') && !answers.otherReasonDetail.trim()) issues.push({ field: 'otherReasonDetail', message: 'กรุณาระบุรายละเอียดเหตุผลอื่น' })
+    if (!answers.note.trim()) issues.push({ field: 'note', message: 'มีรายการผิดปกติ — กรุณาระบุหมายเหตุ' })
+  }
   return issues
 }
 
@@ -85,6 +112,9 @@ export function normalizeAssessmentAnswers(answers: ReceiptAssessmentAnswers): R
     ...answers,
     coldChainCondition: answers.coldChainApplicable === true ? answers.coldChainCondition : null,
     note: answers.note.trim(),
+    // Reasons only exist while something is abnormal; the detail only while "other" is chosen.
+    reasonCodes: hasAbnormalAnswer(answers) ? [...new Set(answers.reasonCodes)] : [],
+    otherReasonDetail: hasAbnormalAnswer(answers) && answers.reasonCodes.includes('other') ? answers.otherReasonDetail.trim() : '',
   }
 }
 
