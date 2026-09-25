@@ -6,15 +6,11 @@ import { parseBarcode } from '@/lib/receiving/barcode'
 import { escapeBarcodeText, type BarcodeScanDiagnostics } from '@/lib/receiving/barcode-diagnostics'
 import { matchPackageBarcode, type PackageScanCandidate } from '@/lib/receiving/package-scan'
 import type { Invoice, Receipt, ReceiptLine, ReceivingWorkspace, Vendor } from '@/lib/receiving/types'
-import { buildVendorMetrics } from '@/lib/vendors/metrics'
-import type { VendorMetrics } from '@/lib/vendors/types'
-import { vendorFiscalYearFor, vendorFiscalYearLabel } from '@/lib/vendors/fiscal-year'
 import { barcodeFormatName } from '@/components/camera-scanner'
 import { Button, Card, Notice, PageHeader, StatusBadge, Tabs } from '@/components/ui'
 import type { PackageScanResolver } from '@/components/receiving/package-scan'
 import { ReceiptAssessmentDialog, type ReceiptAssessmentContext } from '@/components/receiving/receipt-assessment-dialog'
 import { ReceiveWizard, type ReceiveAdapter, type ReceiveSubmission } from '@/components/receiving/receive-wizard'
-import { VendorMetricsPanel } from '@/components/vendors/vendor-metrics-panel'
 
 // ---------------------------------------------------------------------------
 // Browser-only fixtures. Nothing here reaches Supabase, an API route, or the
@@ -25,9 +21,9 @@ const NOW = '2026-09-18T03:00:00.000Z'
 const ACTOR = 'preview-actor'
 
 const PREVIEW_VENDORS: Vendor[] = [
-  { id: 'preview-vendor-roche', code: 'V-ROCHE', name: 'Roche Diagnostics (Thailand) — fixture', taxId: '0105500000000', address: '— preview fixture address —', phone: '02-000-0000', email: 'orders@example.invalid', contactPerson: 'Fixture contact', isActive: true, note: 'Preview fixture only', createdBy: ACTOR, createdAt: NOW, updatedAt: NOW, itemCount: 1 },
-  { id: 'preview-vendor-b', code: 'V-FIXTURE-B', name: 'Fixture reagent supplier B', taxId: null, address: null, phone: '038-000-000', email: null, contactPerson: 'Fixture B', isActive: true, note: null, createdBy: ACTOR, createdAt: NOW, updatedAt: NOW, itemCount: 3 },
-  { id: 'preview-vendor-inactive', code: 'V-OLD', name: 'Inactive fixture vendor', taxId: null, address: null, phone: null, email: null, contactPerson: null, isActive: false, note: 'แสดงสถานะ inactive', createdBy: ACTOR, createdAt: NOW, updatedAt: NOW, itemCount: 0 },
+  { id: 'preview-vendor-roche', code: 'V-ROCHE', name: 'Roche Diagnostics (Thailand) — fixture', legalName: null, taxBranchCode: '00000', taxId: '0105500000000', address: '— preview fixture address —', phone: '02-000-0000', email: 'orders@example.invalid', contactPerson: 'Fixture contact', isActive: true, note: 'Preview fixture only', createdBy: ACTOR, createdAt: NOW, updatedAt: NOW, itemCount: 1 },
+  { id: 'preview-vendor-b', code: 'V-FIXTURE-B', name: 'Fixture reagent supplier B', legalName: null, taxBranchCode: '00000', taxId: null, address: null, phone: '038-000-000', email: null, contactPerson: 'Fixture B', isActive: true, note: null, createdBy: ACTOR, createdAt: NOW, updatedAt: NOW, itemCount: 3 },
+  { id: 'preview-vendor-inactive', code: 'V-OLD', name: 'Inactive fixture vendor', legalName: null, taxBranchCode: '00000', taxId: null, address: null, phone: null, email: null, contactPerson: null, isActive: false, note: 'แสดงสถานะ inactive', createdBy: ACTOR, createdAt: NOW, updatedAt: NOW, itemCount: 0 },
 ]
 
 const PREVIEW_ITEMS: ReceivingWorkspace['items'] = [
@@ -43,7 +39,7 @@ const PREVIEW_LOCATIONS: ReceivingWorkspace['locations'] = [
 ]
 
 const PREVIEW_INVOICE: Invoice = {
-  id: 'preview-invoice-1', vendorId: 'preview-vendor-roche', invoiceNo: 'INV-PREVIEW-001', invoiceDate: '2026-09-15', status: 'open', source: 'manual', note: null, createdBy: ACTOR, createdAt: NOW, updatedAt: NOW,
+  id: 'preview-invoice-1', vendorId: 'preview-vendor-roche', invoiceNo: 'INV-PREVIEW-001', invoiceDate: '2026-09-15', status: 'open', closedAt: null, closedShortAt: null, closedShortReason: null, source: 'manual', note: null, createdBy: ACTOR, createdAt: NOW, updatedAt: NOW,
   lines: [{ id: 'preview-invoice-line-1', invoiceId: 'preview-invoice-1', lineNo: 1, stockItemId: 'preview-item-tpuc3', catalogNoText: '08058679190', descriptionText: 'cobas TPUC3', expectedQty: 10, lotText: null, expiryText: null, matchMethod: 'manual', matchConfidence: null, closureState: 'open', shortReasonCode: null, shortReasonNote: null, sortOrder: 1, createdAt: NOW }],
 }
 
@@ -81,7 +77,7 @@ function receiptLine(receiptId: string, index: number, input: ReceiveSubmission[
   }
 }
 
-type PreviewTab = 'receive' | 'vendors' | 'performance' | 'evaluation'
+type PreviewTab = 'receive' | 'vendors'
 
 export function Stock1PreviewAcceptance() {
   const [tab, setTab] = useState<PreviewTab>('receive')
@@ -90,10 +86,7 @@ export function Stock1PreviewAcceptance() {
   const [evidenceLog, setEvidenceLog] = useState<Record<string, string>>({})
   const [dialog, setDialog] = useState<ReceiptAssessmentContext | null>(null)
   const [diagnostics, setDiagnostics] = useState<BarcodeScanDiagnostics | null>(null)
-  const [performanceVendorId, setPerformanceVendorId] = useState(PREVIEW_VENDORS[0].id)
-  const [snapshot, setSnapshot] = useState<{ vendorId: string; metrics: VendorMetrics; frozenAt: string } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const fiscalYear = vendorFiscalYearFor('2026-09-18')
 
   const workspace: ReceivingWorkspace = useMemo(() => ({
     vendors: PREVIEW_VENDORS,
@@ -118,7 +111,7 @@ export function Stock1PreviewAcceptance() {
       }
       setReceipts((current) => [...current, receipt])
       // Mirrors the database trigger: a confirmed receipt always has a Pending assessment.
-      setAssessments((current) => [...current, { id: `${receiptId}-assessment`, receiptId, vendorId: submission.vendorId, status: 'pending', productCondition: null, documentation: null, itemCorrectness: null, coldChainApplicable: null, coldChainCondition: null, hasComplaint: null, note: null, assessedBy: null, assessedAt: null, createdAt: NOW, updatedAt: NOW }])
+      setAssessments((current) => [...current, { id: `${receiptId}-assessment`, receiptId, vendorId: submission.vendorId, status: 'pending', reasonCodes: [], otherReasonDetail: null, acceptanceDecision: null, productCondition: null, documentation: null, itemCorrectness: null, coldChainApplicable: null, coldChainCondition: null, hasComplaint: null, note: null, assessedBy: null, assessedAt: null, createdAt: NOW, updatedAt: NOW }])
       if (submission.evidence) setEvidenceLog((current) => ({ ...current, [receiptId]: submission.evidence!.previewUrl }))
       setNotice(`SIMULATED CONFIRM: ${receipt.receiptNo} — ไม่มีการเรียก API หรือเขียน stock`)
       return { receiptId, receiptLabel: receipt.receiptNo ?? receiptId }
@@ -131,22 +124,6 @@ export function Stock1PreviewAcceptance() {
     setNotice('บันทึกการประเมินใน browser แล้ว — ตัวชี้วัด Vendor Performance อัปเดตจากข้อมูลนี้')
   }
 
-  const vendorMetrics = useMemo(() => {
-    const vendorReceipts = receipts.filter((receipt) => receipt.vendorId === performanceVendorId)
-    const invoiceLines = PREVIEW_INVOICE.vendorId === performanceVendorId ? PREVIEW_INVOICE.lines : []
-    return buildVendorMetrics({
-      fiscalYear,
-      completeDelivery: invoiceLines.map((line) => ({ id: line.id, closureState: line.closureState })),
-      shelfLife: vendorReceipts.flatMap((receipt) => receipt.lines.map((line) => ({ id: line.id, receiptId: receipt.id, compliance: line.torExpiryCompliance }))),
-      assessments: assessments.filter((item) => item.vendorId === performanceVendorId),
-      quantityLines: invoiceLines.map((line) => ({ id: line.id, expectedQty: line.expectedQty, receivedQty: receipts.flatMap((receipt) => receipt.lines).filter((candidate) => candidate.invoiceLineId === line.id).reduce((sum, candidate) => sum + candidate.receivedQty, 0) })),
-      issues: [],
-      deliveryDates: vendorReceipts.map((receipt) => ({ invoiceDate: receipt.invoiceId ? PREVIEW_INVOICE.invoiceDate : null, receivedDate: receipt.receivedDate })),
-      coldChainMappingApproved: false,
-    })
-  }, [assessments, fiscalYear, performanceVendorId, receipts])
-
-  const receiptLabel = (id: string) => receipts.find((receipt) => receipt.id === id)?.receiptNo ?? id
   const pending = assessments.filter((item) => item.status === 'pending')
 
   return <main className="mx-auto max-w-5xl space-y-5 px-4 py-6 sm:px-6">
@@ -154,7 +131,7 @@ export function Stock1PreviewAcceptance() {
     <Notice tone="warning">PREVIEW-ONLY · fixture ใน browser เท่านั้น · ไม่มี Supabase credentials · ไม่มีการเรียก API · ไม่มี stock mutation — การยืนยันเป็นการจำลอง</Notice>
     {notice ? <Notice tone="success">{notice}</Notice> : null}
 
-    <Tabs tabs={[{ key: 'receive' as const, label: 'รับเข้า' }, { key: 'vendors' as const, label: 'Vendor Registry' }, { key: 'performance' as const, label: 'Vendor Performance' }, { key: 'evaluation' as const, label: 'Annual Evaluation' }]} active={tab} onChange={setTab} />
+    <Tabs tabs={[{ key: 'receive' as const, label: 'รับเข้า' }, { key: 'vendors' as const, label: 'Vendor Registry' }]} active={tab} onChange={setTab} />
 
     {tab === 'receive' ? <div className="space-y-4">
       {pending.length ? <Card className="space-y-2 border-[#eed4a6] bg-[#fffaf0] p-4"><p className="text-sm font-bold text-[#8f5f1d]">การประเมินที่รอดำเนินการ (Pending) · {pending.length}</p>{pending.map((item) => { const receipt = receipts.find((candidate) => candidate.id === item.receiptId); return <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-sm"><span>{receipt?.receiptNo ?? item.receiptId}</span>{receipt ? <Button type="button" variant="secondary" onClick={() => setDialog(contextFor(receipt))}>ประเมิน</Button> : null}</div> })}</Card> : null}
@@ -176,17 +153,6 @@ export function Stock1PreviewAcceptance() {
     </div> : null}
 
     {tab === 'vendors' ? <Card className="overflow-x-auto p-0"><table className="w-full min-w-[720px] text-left text-xs"><thead className="bg-[#f1f6f6] text-[#58747d]"><tr><th className="p-2">Code</th><th className="p-2">ชื่อ</th><th className="p-2">Tax ID</th><th className="p-2">ติดต่อ</th><th className="p-2">โทร / Email</th><th className="p-2">สถานะ</th><th className="p-2">หมายเหตุ</th></tr></thead><tbody>{PREVIEW_VENDORS.map((vendor) => <tr key={vendor.id} className="border-t border-[#edf2f2]"><td className="mono p-2">{vendor.code}</td><td className="p-2 font-semibold text-[#173d50]">{vendor.name}<br /><span className="font-normal text-[#81979c]">{vendor.address ?? ''}</span></td><td className="mono p-2">{vendor.taxId ?? '-'}</td><td className="p-2">{vendor.contactPerson ?? '-'}</td><td className="p-2">{[vendor.phone, vendor.email].filter(Boolean).join(' · ') || '-'}</td><td className="p-2"><StatusBadge tone={vendor.isActive ? 'accepted' : 'neutral'} label={vendor.isActive ? 'active' : 'inactive'} /></td><td className="p-2">{vendor.note ?? '-'}</td></tr>)}</tbody></table><p className="p-3 text-xs text-[#81979c]">Production ใช้ Vendor Registry เดิม (bm_vendors) ที่ /admin — ข้อมูลในหน้านี้เป็น fixture</p></Card> : null}
-
-    {tab === 'performance' ? <div className="space-y-3">
-      <Card className="flex flex-wrap items-center justify-between gap-2 p-4"><div><p className="text-sm font-bold text-[#173d50]">Vendor Performance · ปีงบประมาณ {vendorFiscalYearLabel(fiscalYear)}</p><p className="text-xs text-[#81979c]">1 ต.ค. – 30 ก.ย. · คำนวณจากใบรับเข้าและการประเมินที่จำลองในหน้านี้ · ไม่มีคะแนน</p></div><select className="min-h-11 rounded-md border border-[#cfdee0] px-3 text-sm" value={performanceVendorId} onChange={(event) => setPerformanceVendorId(event.target.value)}>{PREVIEW_VENDORS.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.code}</option>)}</select></Card>
-      <VendorMetricsPanel metrics={vendorMetrics} receiptHref={null} receiptLabel={receiptLabel} />
-    </div> : null}
-
-    {tab === 'evaluation' ? <div className="space-y-3">
-      <Card className="space-y-2 p-4"><p className="text-sm font-bold text-[#173d50]">Annual Vendor Evaluation · {vendorFiscalYearLabel(fiscalYear)}</p><p className="text-xs text-[#81979c]">สร้าง snapshot ของ metrics (พร้อมที่มา) ตามระบบจริง — ไม่มีคะแนน น้ำหนัก เกณฑ์ผ่าน/ไม่ผ่าน หรือการจัดอันดับ</p><Button type="button" onClick={() => setSnapshot({ vendorId: performanceVendorId, metrics: vendorMetrics, frozenAt: new Date().toISOString() })}>Freeze snapshot ({PREVIEW_VENDORS.find((vendor) => vendor.id === performanceVendorId)?.code})</Button></Card>
-      <Notice tone="warning">ยังไม่ได้กำหนดสูตรคะแนน — รออนุมัติ P-13/P-14 · result = null</Notice>
-      {snapshot ? <><p className="text-xs text-[#81979c]">Snapshot frozen {snapshot.frozenAt} · ไม่เปลี่ยนตามการรับสินค้าภายหลัง</p><VendorMetricsPanel metrics={snapshot.metrics} receiptHref={null} receiptLabel={receiptLabel} /></> : <p className="text-sm text-[#81979c]">ยังไม่ได้ freeze snapshot</p>}
-    </div> : null}
 
     <Card className="border-[#e7d6b0] bg-[#fffaf0] p-4 text-sm text-[#76551c]"><p className="font-semibold">Safety boundary</p><p className="mt-1">Route นี้เปิดเฉพาะ Vercel Preview ที่ตั้ง <code>STOCK1_PREVIEW_ACCEPTANCE_MODE=true</code> และเป็น 404 ใน Production ไม่มีการสร้าง invoice, receipt, lot, transaction หรือ attachment จริง</p></Card>
 

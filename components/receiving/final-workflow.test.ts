@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 const read = (path: string) => readFileSync(join(process.cwd(), path), 'utf8')
 const wizard = read('components/receiving/receive-wizard.tsx')
 const dialog = read('components/receiving/receipt-assessment-dialog.tsx')
+const fields = read('components/receiving/assessment-fields.tsx')
 const container = read('components/receiving/receipt-draft.tsx')
 const server = read('lib/server/receiving.ts')
 const assessmentRoute = read('app/api/receiving/receipts/[id]/assessment/route.ts')
@@ -97,13 +98,13 @@ describe('final receiving workflow', () => {
 
 describe('Receipt Assessment popup', () => {
   it('asks exactly the approved questions and no quantity question', () => {
-    for (const field of ['productCondition', 'documentation', 'itemCorrectness', 'coldChainApplicable', 'coldChainCondition', 'hasComplaint']) expect(dialog).toContain(`L.${field}.title`)
-    expect(dialog).not.toMatch(/name="assessment-(qty|quantity)"|จำนวนที่ได้รับ\s*\*/)
+    for (const field of ['productCondition', 'documentation', 'itemCorrectness', 'coldChainApplicable', 'coldChainCondition', 'hasComplaint']) expect(fields).toContain(`L.${field}.title`)
+    expect(fields).not.toMatch(/name="assessment-(qty|quantity)"|จำนวนที่ได้รับ\s*\*/)
     expect(dialog).toContain('จำนวนจากใบรับเข้า (ไม่ต้องกรอกซ้ำ)')
   })
 
   it('shows the temperature question only when cold chain applies', () => {
-    expect(dialog).toContain('answers.coldChainApplicable === true ? <div')
+    expect(fields).toContain('answers.coldChainApplicable === true ? <div')
   })
 
   it('dismissing leaves the stock receipt intact and the assessment Pending', () => {
@@ -121,9 +122,16 @@ describe('Receipt Assessment popup', () => {
   it('completes through a guarded, operator-only endpoint that cannot touch stock', () => {
     expect(assessmentRoute).toContain('requireStockOperator')
     expect(assessmentRoute).toContain('export async function PUT')
-    const complete = server.slice(server.indexOf('export async function completeReceiptAssessment'))
-    expect(complete).toContain(".eq('status', 'pending')")
-    expect(complete).toContain("'confirmed'")
-    expect(complete).not.toMatch(/\.rpc\(|bm_stock_transactions|bm_stock_lots/)
+    const start = server.indexOf('export async function completeReceiptAssessment')
+    const complete = server.slice(start, server.indexOf('export async function', start + 10))
+    // The database function only completes a Pending assessment of a confirmed receipt, and never writes stock.
+    expect(complete).toContain("rpc('complete_bm_receipt_assessment'")
+    expect(complete).not.toMatch(/bm_stock_transactions|bm_stock_lots|receive_bm_stock/)
+    const sql = readFileSync(join(process.cwd(), 'supabase/migrations/202609250001_bm_vendor_evaluation_foundation.sql'), 'utf8')
+    const fn = sql.slice(sql.indexOf('function public.complete_bm_receipt_assessment('), sql.indexOf('function public.revise_bm_receipt_assessment('))
+    expect(fn).toContain("bm_require_role(p_actor, array['Admin','Staff'])")
+    expect(fn).toContain("v_receipt.status <> 'confirmed'")
+    expect(fn).toContain("v_a.status <> 'pending'")
+    expect(fn).not.toMatch(/bm_stock_transactions|bm_stock_lots|receive_bm_stock/)
   })
 })

@@ -6,32 +6,46 @@ const optionalText = (max: number) => z.string().trim().max(max).nullable().opti
 export const vendorCreateSchema = z.object({
   code: z.string().trim().min(1).max(80),
   name: z.string().trim().min(1).max(180),
-  taxId: nullableText(80),
+  legalName: nullableText(300),
+  taxId: z.string().trim().regex(/^[0-9]{13}$/, 'เลขประจำตัวผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก').nullable().optional().or(z.literal('')),
+  taxBranchCode: z.string().trim().regex(/^[0-9]{5}$/, 'รหัสสาขาต้องเป็นตัวเลข 5 หลัก').nullable().optional().or(z.literal('')),
   address: nullableText(500),
   phone: nullableText(80),
-  email: nullableText(180),
+  email: z.string().trim().max(180).refine((value) => !value || value.includes('@'), 'รูปแบบอีเมลไม่ถูกต้อง').nullable().optional(),
   contactPerson: nullableText(180),
   note: nullableText(1000),
 })
 
 export const vendorUpdateSchema = vendorCreateSchema.partial().extend({
   isActive: z.boolean().optional(),
+  // The updated_at the form was loaded with: the database rejects the save if someone else changed the vendor since.
+  expectedUpdatedAt: z.string().optional(),
+  deactivateNote: z.string().trim().max(1000).optional(),
 })
 
 export type VendorCreateInput = z.infer<typeof vendorCreateSchema>
 export type VendorUpdateInput = z.infer<typeof vendorUpdateSchema>
 
 export const vendorIssueCreateSchema = z.object({
-  issueType: z.enum(['complaint', 'documentation_discrepancy', 'packaging_damage', 'temperature_out_of_range', 'quantity_discrepancy', 'expiry_non_compliant', 'other']),
+  issueType: z.enum(['packaging_damage', 'documentation_discrepancy', 'temperature_out_of_range', 'complaint', 'quantity_discrepancy', 'expiry_non_compliant', 'item_discrepancy', 'other']),
   description: z.string().trim().min(1).max(4000),
   receiptId: z.string().uuid().nullable().optional(),
-  receiptLineId: z.string().uuid().nullable().optional(),
+  invoiceId: z.string().uuid().nullable().optional(),
 })
 
-export const vendorIssueUpdateSchema = z.object({
-  resolutionStatus: z.enum(['open', 'resolved', 'cancelled']),
-  resolutionNote: optionalText(4000),
-})
+// Resolving an open issue needs an action and a note; cancelling needs a reason (and a note when the reason is "other").
+export const vendorIssueUpdateSchema = z.discriminatedUnion('action', [
+  z.object({
+    action: z.literal('resolve'),
+    resolutionAction: z.enum(['vendor_replaced_goods', 'vendor_supplied_documents', 'vendor_clarified_accepted', 'credit_note_received', 'verified_no_impact', 'vendor_warned', 'other']),
+    note: z.string().trim().min(1, 'กรุณาระบุรายละเอียดการแก้ไข').max(2000),
+  }),
+  z.object({
+    action: z.literal('cancel'),
+    reason: z.enum(['duplicate', 'opened_in_error', 'other']),
+    note: z.string().trim().max(2000).nullable().optional(),
+  }),
+])
 
 export type VendorIssueCreateInput = z.infer<typeof vendorIssueCreateSchema>
 export type VendorIssueUpdateInput = z.infer<typeof vendorIssueUpdateSchema>
@@ -128,6 +142,8 @@ export const receiptAssessmentSchema = z.object({
   coldChainCondition: z.enum(['appropriate', 'inappropriate']).nullable().optional(),
   hasComplaint: z.boolean(),
   note: z.string().trim().max(4000).nullable().optional(),
+  reasonCodes: z.array(z.enum(['urgent_need', 'no_alternative', 'usable_condition', 'vendor_will_correct', 'documentation_pending', 'consume_before_expiry', 'approved_exception', 'other'])).max(8).default([]),
+  otherReasonDetail: z.string().trim().max(1000).nullable().optional(),
 }).strict()
 
 export type InvoiceCreateInput = z.infer<typeof invoiceCreateSchema>

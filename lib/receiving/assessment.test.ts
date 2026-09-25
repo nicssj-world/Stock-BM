@@ -11,6 +11,8 @@ const normal: ReceiptAssessmentAnswers = {
   coldChainCondition: null,
   hasComplaint: false,
   note: '',
+  reasonCodes: [],
+  otherReasonDetail: '',
 }
 
 describe('Receipt Assessment rules', () => {
@@ -39,11 +41,22 @@ describe('Receipt Assessment rules', () => {
     ['wrong item', { itemCorrectness: 'problem' as const }],
     ['cold chain inappropriate', { coldChainApplicable: true, coldChainCondition: 'inappropriate' as const }],
     ['complaint', { hasComplaint: true }],
-  ])('requires a note when %s', (_label, patch) => {
+  ])('requires reasons and a note when %s', (_label, patch) => {
     const answers = { ...normal, ...patch }
     expect(hasAbnormalAnswer(answers)).toBe(true)
-    expect(assessmentIssues(answers)).toEqual([expect.objectContaining({ field: 'note' })])
-    expect(assessmentIssues({ ...answers, note: 'กล่องบุบ 1 กล่อง' })).toEqual([])
+    expect(assessmentIssues(answers).map((issue) => issue.field)).toEqual(['reasonCodes', 'note'])
+    expect(assessmentIssues({ ...answers, note: 'กล่องบุบ 1 กล่อง' }).map((issue) => issue.field)).toEqual(['reasonCodes'])
+    expect(assessmentIssues({ ...answers, note: 'กล่องบุบ 1 กล่อง', reasonCodes: ['usable_condition'] })).toEqual([])
+  })
+
+  it('needs the detail when the reason is "other", and drops reasons once every answer is normal', () => {
+    const abnormal = { ...normal, productCondition: 'abnormal' as const, note: 'กล่องบุบ', reasonCodes: ['other' as const] }
+    expect(assessmentIssues(abnormal).map((issue) => issue.field)).toEqual(['otherReasonDetail'])
+    expect(assessmentIssues({ ...abnormal, otherReasonDetail: 'รอเอกสาร' })).toEqual([])
+    const corrected = normalizeAssessmentAnswers({ ...abnormal, productCondition: 'normal', otherReasonDetail: 'รอเอกสาร' })
+    expect(corrected.reasonCodes).toEqual([])
+    expect(corrected.otherReasonDetail).toBe('')
+    expect(normalizeAssessmentAnswers({ ...abnormal, otherReasonDetail: ' รอเอกสาร ', reasonCodes: ['other', 'other'] })).toMatchObject({ reasonCodes: ['other'], otherReasonDetail: 'รอเอกสาร' })
   })
 
   it('derives quantity completeness from receipt lines instead of asking', () => {

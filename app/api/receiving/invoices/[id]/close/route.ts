@@ -1,12 +1,15 @@
-import { requireStockOperator } from '@/lib/server/auth'
-import { assertReceivingEnabled } from '@/lib/server/receiving'
-import { HttpError } from '@/lib/server/errors'
-import { respond } from '@/lib/server/route'
+import { z } from 'zod'
+import { requireStockAdmin } from '@/lib/server/auth'
+import { closeInvoiceShort } from '@/lib/server/receiving'
+import { readJson, respond } from '@/lib/server/route'
 
-export async function POST(_request: Request, { params: _params }: { params: Promise<{ id: string }> }) {
+const closeSchema = z.object({ reason: z.string().trim().min(1, 'กรุณาระบุเหตุผลที่ปิดแบบรับไม่ครบ').max(1000) }).strict()
+
+// Closes an open invoice with goods still outstanding (LABCBH "closed short"). A full receipt closes the invoice by itself.
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   return respond(async () => {
-    await requireStockOperator()
-    await assertReceivingEnabled()
-    throw new HttpError(501, 'รอการอนุมัติ policy การปิดใบส่งของ')
+    const actor = await requireStockAdmin()
+    const { reason } = await readJson(request, closeSchema)
+    return { receiving: await closeInvoiceShort((await params).id, reason, actor) }
   })
 }

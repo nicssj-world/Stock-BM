@@ -10,7 +10,7 @@ import { ReceiptDraft } from '@/components/receiving/receipt-draft'
 
 type ReceivingTab = 'receive' | 'invoices' | 'history'
 
-export function ReceivingView({ initialData }: { initialData: ReceivingWorkspace }) {
+export function ReceivingView({ initialData, isAdmin = false }: { initialData: ReceivingWorkspace; isAdmin?: boolean }) {
   const [data, setData] = useState(initialData)
   const [tab, setTab] = useState<ReceivingTab>('receive')
   const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
@@ -41,7 +41,7 @@ export function ReceivingView({ initialData }: { initialData: ReceivingWorkspace
       </div>
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
       {tab === 'receive' ? <ReceiptDraft data={data} onSaved={onSaved} onError={onError} /> : null}
-      {tab === 'invoices' ? <InvoiceEditor data={data} onSaved={onSaved} onError={onError} /> : null}
+      {tab === 'invoices' ? <InvoiceEditor data={data} onSaved={onSaved} onError={onError} canCloseShort={isAdmin} /> : null}
       {tab === 'history' ? <HistoryList data={data} /> : null}
     </div>
   )

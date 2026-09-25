@@ -1,5 +1,6 @@
 -- 1E acceptance: one open invoice can be received in two confirmed receipts.
--- The invoice remains open and closure_state remains manual until P-09.
+-- The invoice stays open after the first receipt; once the second brings the line to its expected quantity the
+-- database completes the line and closes the invoice (P-09 decided: LABCBH rules, see the 2026-09-25 vendor-evaluation spec).
 
 update public.bm_receiving_policies
 set is_enabled = true,
@@ -109,11 +110,11 @@ begin
   from public.bm_receipt_lines
   where invoice_line_id = '74000000-0000-0000-0000-000000000001';
 
-  if v_invoice_status <> 'open' then
-    raise exception '1E: invoice status changed unexpectedly: %', v_invoice_status;
+  if v_invoice_status <> 'closed' then
+    raise exception '1E: a fully received invoice should close by itself, got %', v_invoice_status;
   end if;
-  if v_closure_state <> 'open' then
-    raise exception '1E: closure state changed without P-09 policy: %', v_closure_state;
+  if v_closure_state <> 'complete' then
+    raise exception '1E: a fully received line should be complete, got %', v_closure_state;
   end if;
   if v_total <> 10 or v_linked <> 2 then
     raise exception '1E: expected cumulative 10 across 2 linked receipts, got % across %', v_total, v_linked;
