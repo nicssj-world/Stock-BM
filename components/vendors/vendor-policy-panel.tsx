@@ -9,7 +9,7 @@ import { POLICY_STATUS_LABELS, VENDOR_EVALUATION_CRITERIA, VENDOR_EVALUATION_CRI
 
 const number = new Intl.NumberFormat('th-TH', { maximumFractionDigits: 2 })
 const percent = (value: number | null) => (value === null ? 'ยังไม่กำหนด' : `${number.format(value)}%`)
-const effectiveYears = (p: EvaluationPolicy) => `${p.effectiveFromFiscalYear} – ${p.effectiveToFiscalYear ?? 'ไม่กำหนดปีสิ้นสุด'}`
+const effectiveYears = (p: EvaluationPolicy) => p.effectiveToFiscalYear === null ? `${p.effectiveFromFiscalYear} เป็นต้นไป` : `${p.effectiveFromFiscalYear} – ${p.effectiveToFiscalYear}`
 
 // Layout and copy follow LABCBH-Stock VendorEvaluationPolicyPanel: a proposal is a form (Admin only), everything else is a record.
 export function VendorPolicyPanel({ policies, canManage }: { policies: EvaluationPolicy[]; canManage: boolean }) {

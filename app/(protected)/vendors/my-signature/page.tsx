@@ -11,7 +11,7 @@ export default async function MySignaturePage() {
   const actor = await requireFullPageActor()
   const signer = await getMySigner(actor)
   return <main className="mx-auto max-w-2xl space-y-6 px-4 py-6 sm:px-6">
-    <div><Link href="/admin" className="text-sm font-semibold text-[#0b7f76]">← Admin · Vendors</Link></div>
+    <div><Link href="/vendors" className="text-sm font-semibold text-[#0b7f76]">← ผู้ขายทั้งหมด</Link></div>
     <PageHeader eyebrow={actor.displayName} title="ตำแหน่งและลายเซ็นของฉัน" description="ใช้เมื่อคุณเป็นผู้ประเมิน ผู้ทบทวน หรือผู้อนุมัติของรายงานประเมินผู้ขาย" />
     <Card className="p-5"><SignatureSettings position={signer.position} signature={signer.signature} /></Card>
   </main>
