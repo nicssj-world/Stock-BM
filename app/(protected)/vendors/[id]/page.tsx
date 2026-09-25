@@ -54,7 +54,7 @@ export default async function VendorPage({ params, searchParams }: { params: Pro
   const isAdmin = actor.role === 'Admin'
 
   return <main className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6">
-    <div><Link href="/admin" className="text-sm font-semibold text-[#0b7f76]">← Admin · Vendors</Link></div>
+    <div><Link href="/vendors" className="text-sm font-semibold text-[#0b7f76]">← ผู้ขายทั้งหมด</Link></div>
     <PageHeader eyebrow={`Vendor · ${vendor.code}`} title={vendor.name} description={`${vendor.legalName && vendor.legalName !== vendor.name ? `${vendor.legalName} · ` : ''}${vendor.isActive ? 'ใช้งาน' : 'ปิดการใช้งาน'} · ผลตรวจรับ ปัญหา และรายงานประเมินประจำปี`}
       actions={<a className="inline-flex min-h-11 items-center gap-2 rounded-md border border-[#c9dadd] bg-white px-3.5 py-2 text-sm font-semibold text-[#244854] hover:bg-[#f7fbfb]" href={`/api/vendors/${id}/performance/export?fiscalYear=${fy}`}><Download className="size-4" aria-hidden />ส่งออก CSV</a>} />
 
