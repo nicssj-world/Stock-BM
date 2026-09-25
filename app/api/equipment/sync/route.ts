@@ -1,3 +1,4 @@
+import { respondEquipmentWrite } from '@/lib/server/equipment-archive'
 import { z } from "zod";
 import { requireActor } from "@/lib/server/auth";
 import {
@@ -19,7 +20,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  return respond(async () => {
+  return respondEquipmentWrite(async () => {
     const actor = await requireActor();
     const input = await readJson(request, syncSchema);
     const result = await syncEquipmentByLabCode(actor, input.labCode);

@@ -1,3 +1,4 @@
+import { respondEquipmentWrite } from '@/lib/server/equipment-archive'
 import { z } from "zod";
 import { requireActor } from "@/lib/server/auth";
 import {
@@ -92,7 +93,7 @@ export async function readEquipmentRecordForm(request: Request): Promise<{
 }
 
 export async function POST(request: Request) {
-  return respond(async () => {
+  return respondEquipmentWrite(async () => {
     if (!request.headers.get("content-type")?.includes("multipart/form-data"))
       throw new HttpError(415, "แบบฟอร์มบันทึกงานต้องส่งเป็น multipart พร้อมลายเซ็น");
     const parsed = await readEquipmentRecordForm(request);

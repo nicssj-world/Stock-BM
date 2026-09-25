@@ -1,3 +1,4 @@
+import { respondEquipmentWrite } from '@/lib/server/equipment-archive'
 import { z } from "zod";
 import { requireActor } from "@/lib/server/auth";
 import { createEquipmentTechnician } from "@/lib/server/equipment";
@@ -11,7 +12,7 @@ export const equipmentTechnicianSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  return respond(async () => ({
+  return respondEquipmentWrite(async () => ({
     workspace: await createEquipmentTechnician(
       await readJson(request, equipmentTechnicianSchema),
       await requireActor(),

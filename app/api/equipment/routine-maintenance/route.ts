@@ -1,3 +1,4 @@
+import { respondEquipmentWrite } from '@/lib/server/equipment-archive'
 import { z } from 'zod'
 import { requireActor } from '@/lib/server/auth'
 import {
@@ -70,7 +71,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  return respond(async () => {
+  return respondEquipmentWrite(async () => {
     const actor = await requireActor()
     const body = await readJson(request, schema)
     if (body.action === 'import-google-holidays') return importGoogleHolidays(body.equipmentId, actor)

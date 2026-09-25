@@ -1,3 +1,4 @@
+import { respondEquipmentWrite } from '@/lib/server/equipment-archive'
 import { z } from 'zod'
 import { requireActor } from '@/lib/server/auth'
 import { deleteFacsMaintenanceEntry, getFacsMaintenanceWorkspace, logFacsMaintenance, reviewFacsPeriod, setFacsHoliday, setFacsReviewer, unlockFacsPeriod } from '@/lib/server/facs-maintenance'
@@ -15,7 +16,7 @@ const schema = z.discriminatedUnion('action', [logSchema, reviewerSchema, holida
 
 export async function GET() { return respond(async () => ({ maintenance: await getFacsMaintenanceWorkspace(await requireActor()) })) }
 export async function POST(request: Request) {
-  return respond(async () => {
+  return respondEquipmentWrite(async () => {
     const actor = await requireActor(); const body = await readJson(request, schema)
     const maintenance = body.action === 'log' ? await logFacsMaintenance(body, actor)
       : body.action === 'set-reviewer' ? await setFacsReviewer(body.reviewerId, actor)

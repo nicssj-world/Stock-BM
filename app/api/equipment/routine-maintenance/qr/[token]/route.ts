@@ -1,3 +1,4 @@
+import { respondEquipmentWrite } from '@/lib/server/equipment-archive'
 import { z } from 'zod'
 import { requireActor } from '@/lib/server/auth'
 import { getRoutineWorkspaceByToken, logRoutineMaintenance, resolveRoutineEquipmentToken } from '@/lib/server/routine-maintenance'
@@ -23,7 +24,7 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
 }
 
 export async function POST(request: Request, context: { params: Promise<{ token: string }> }) {
-  return respond(async () => {
+  return respondEquipmentWrite(async () => {
     const actor = await requireActor()
     const { token } = await context.params
     const equipment = await resolveRoutineEquipmentToken(token)

@@ -212,7 +212,7 @@ export interface EquipmentWorkspace {
 }
 
 export interface PublicEquipmentContext {
-  equipment: Pick<Equipment, 'code' | 'name' | 'category' | 'manufacturer' | 'model' | 'serialNumber' | 'status'>
+  equipment: Pick<Equipment, 'code' | 'name' | 'category' | 'manufacturer' | 'model' | 'serialNumber' | 'status' | 'portalEquipmentId'>
   plans: Pick<EquipmentPlan, 'id' | 'activityType' | 'title' | 'nextDueOn' | 'dueState'>[]
   technicians: Pick<EquipmentTechnician, 'id' | 'technicianName' | 'company' | 'phone'>[]
 }

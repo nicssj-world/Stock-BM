@@ -8,6 +8,7 @@ import {
 import { HttpError } from "@/lib/server/errors";
 import { respond } from "@/lib/server/route";
 import { getAdminClient } from "@/lib/supabase/admin";
+import { assertEquipmentWriteAllowed } from "@/lib/server/equipment-archive";
 
 const MODULES: AttachmentModule[] = [
   "iqc",
@@ -71,6 +72,7 @@ export async function POST(request: Request) {
     const form = await request.formData();
     const file = form.get("file");
     const mod = asModule(String(form.get("module") ?? ""));
+    if (mod === "equipment") assertEquipmentWriteAllowed();
     if (mod === "equipment" && actor.role === "Assistant")
       throw new HttpError(403, "Equipment permission required");
     if (actor.role === "Assistant" && ["iqc", "eqa", "lotverif"].includes(mod))

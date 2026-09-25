@@ -1,3 +1,4 @@
+import { respondEquipmentWrite } from '@/lib/server/equipment-archive'
 import { z } from "zod";
 import { requireActor } from "@/lib/server/auth";
 import {
@@ -15,7 +16,7 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  return respond(async () => {
+  return respondEquipmentWrite(async () => {
     const input = await readJson(request, schema);
     return {
       workspace: await reviewEquipmentRecord(
@@ -31,7 +32,7 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  return respond(async () => ({
+  return respondEquipmentWrite(async () => ({
     workspace: await updatePendingEquipmentRecord(
       (await params).id,
       await readJson(request, equipmentRecordSchema),

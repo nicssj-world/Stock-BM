@@ -1,3 +1,4 @@
+import { respondEquipmentWrite } from '@/lib/server/equipment-archive'
 import { requireActor } from "@/lib/server/auth";
 import {
   deleteEquipmentTechnician,
@@ -10,7 +11,7 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  return respond(async () => ({
+  return respondEquipmentWrite(async () => ({
     workspace: await updateEquipmentTechnician(
       (await params).id,
       await readJson(request, equipmentTechnicianSchema),
@@ -23,7 +24,7 @@ export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  return respond(async () => ({
+  return respondEquipmentWrite(async () => ({
     workspace: await deleteEquipmentTechnician(
       (await params).id,
       await requireActor(),

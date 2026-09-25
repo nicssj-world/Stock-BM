@@ -233,7 +233,7 @@ function reviewerCode(actor: BmActor) {
 async function equipmentById(equipmentId: string) {
   const { data, error } = await getAdminClient()
     .from('bm_equipment')
-    .select('id,code,name,qr_token,status')
+    .select('id,code,name,qr_token,status,portal_equipment_id')
     .eq('id', equipmentId)
     .maybeSingle()
   fail(error)
@@ -245,7 +245,7 @@ export async function resolveRoutineEquipmentToken(token: string) {
   if (!token.trim()) return null
   const { data, error } = await getAdminClient()
     .from('bm_equipment')
-    .select('id,code,name,qr_token,status')
+    .select('id,code,name,qr_token,status,portal_equipment_id')
     .eq('qr_token', token)
     .maybeSingle()
   fail(error)
@@ -256,6 +256,7 @@ export async function resolveRoutineEquipmentToken(token: string) {
     code: string(row.code),
     name: string(row.name),
     qrToken: string(row.qr_token),
+    portalEquipmentId: nullable(row.portal_equipment_id),
   }
 }
 
