@@ -61,7 +61,7 @@ describe('equipment archive mode', () => {
   })
 
   it('prepares a disabled database lock for equipment, routine, sync, and attachment tables', () => {
-    const sql = readFileSync(join(process.cwd(), 'supabase/migrations/20260924100000_equipment_archive_read_only.sql'), 'utf8')
+    const sql = readFileSync(join(process.cwd(), 'supabase/migrations/20260925185316_equipment_archive_read_only.sql'), 'utf8')
     expect(sql).toContain('values (true, false)')
     expect(sql).toContain("'bm_equipment_routine_maintenance'")
     expect(sql).toContain("'bm_equipment_service_records'")
