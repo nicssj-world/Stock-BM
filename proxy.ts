@@ -32,6 +32,6 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/inventory/:path*', '/movements/:path*', '/issue/:path*', '/scan/:path*', '/reports/:path*', '/hpv/:path*', '/hiv-drt/:path*', '/hiv-alert/:path*', '/iqc/:path*', '/eqa/:path*', '/environment/:path*', '/equipment/:path*', '/lot-verification/:path*', '/morning-talk/:path*', '/admin/:path*', '/receiving/:path*', '/vendors/:path*', '/preview/stock1-acceptance'],
+  matcher: ['/dashboard/:path*', '/inventory/:path*', '/movements/:path*', '/issue/:path*', '/scan/:path*', '/reports/:path*', '/hpv/:path*', '/hiv-drt/:path*', '/hiv-alert/:path*', '/iqc/:path*', '/eqa/:path*', '/environment/:path*', '/equipment/:path*', '/lot-verification/:path*', '/morning-talk/:path*', '/monthly-tasks/:path*', '/admin/:path*', '/receiving/:path*', '/vendors/:path*', '/preview/stock1-acceptance'],
 }
 
