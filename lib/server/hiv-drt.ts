@@ -317,7 +317,7 @@ export async function checkoutHivDrtSample(input: { barcode: string; destination
 export async function receiveHivDrtResult(id: string, actor: BmActor) {
   assertHivDrtAccess(actor)
   const admin = getAdminClient()
-  const { data: sample, error: sampleError } = await admin.from('bm_hiv_drt_samples').select('id,barcode,status').eq('id', id).maybeSingle()
+  const { data: sample, error: sampleError } = await admin.from('bm_hiv_drt_samples').select('id,barcode,status,outlab_ln').eq('id', id).maybeSingle()
   fail(sampleError)
   const row = sample as RecordRow | null
   if (!row) throw new HttpError(404, 'ไม่พบ tube')
@@ -325,7 +325,7 @@ export async function receiveHivDrtResult(id: string, actor: BmActor) {
   const receivedAt = new Date().toISOString()
   const { error } = await admin
     .from('bm_hiv_drt_samples')
-    .update({ status: 'result_received', result_received_at: receivedAt, result_received_by: actor.id, updated_at: receivedAt })
+    .update({ status: 'result_received', outlab_ln: nullableString(row.outlab_ln), result_received_at: receivedAt, result_received_by: actor.id, updated_at: receivedAt })
     .eq('id', id)
   fail(error)
   await writeAudit(actor, 'hiv_drt.result.receive', 'hiv-drt-sample', id, { barcode: asString(row.barcode) })
