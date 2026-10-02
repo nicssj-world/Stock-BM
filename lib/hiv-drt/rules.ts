@@ -70,6 +70,15 @@ export function formatHivDrtPosition(position: number | null) {
   return `${String.fromCharCode(64 + row)}${column}`
 }
 
+export function normalizeHivDrtOutlabLn(value: string | null | undefined) {
+  const normalized = value?.trim()
+  return normalized && /^\d+$/.test(normalized) ? normalized : null
+}
+
+export function formatHivDrtOutlabLn(value: string | null | undefined) {
+  return normalizeHivDrtOutlabLn(value) ?? '-'
+}
+
 export function getHivDrtTatState(
   checkedOutAt: string | null,
   status: HivDrtSampleStatus,
