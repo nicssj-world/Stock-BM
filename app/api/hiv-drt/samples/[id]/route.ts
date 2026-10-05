@@ -5,7 +5,7 @@ import { readJson, respond } from '@/lib/server/route'
 
 const schema = z.object({
   position: z.number().int().min(1).max(96).optional(),
-  outlabLn: z.string().trim().max(180).regex(/^\d+$/, 'LN Outlab ต้องเป็นตัวเลข').nullable().optional(),
+  outlabLn: z.string().trim().max(180).nullable().optional(),
 }).refine((input) => (input.position !== undefined) !== (input.outlabLn !== undefined), 'Exactly one sample update is required')
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {

@@ -72,7 +72,7 @@ export function formatHivDrtPosition(position: number | null) {
 
 export function normalizeHivDrtOutlabLn(value: string | null | undefined) {
   const normalized = value?.trim()
-  return normalized && /^\d+$/.test(normalized) ? normalized : null
+  return normalized || null
 }
 
 export function formatHivDrtOutlabLn(value: string | null | undefined) {

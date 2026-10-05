@@ -238,7 +238,6 @@ export async function updateHivDrtOutlabLn(id: string, outlabLn: string | null, 
   if (!row) throw new HttpError(404, 'ไม่พบ tube')
   if (asString(row.status) !== 'checked_out') throw new HttpError(409, 'เพิ่ม LN Outlab ได้เฉพาะรายการที่กำลังรอผล')
   const normalizedLn = outlabLn?.trim() || null
-  if (normalizedLn && !/^\d+$/.test(normalizedLn)) throw new HttpError(400, 'LN Outlab ต้องเป็นตัวเลข')
   const updatedAt = new Date().toISOString()
   const { error } = await admin
     .from('bm_hiv_drt_samples')
