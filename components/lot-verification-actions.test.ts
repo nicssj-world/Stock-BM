@@ -33,10 +33,11 @@ describe('lot verification actions', () => {
     expect(view).toContain("if (vlQuantitative) return matches.find((stat) => stat.instrumentId === v.instrumentId && stat.source === 'baseline')")
   })
 
-  it('starts finalized verification cards collapsed but keeps their details accessible', () => {
-    expect(view).toContain("const [expanded, setExpanded] = useState(v.status !== 'released' && v.status !== 'rejected')")
+  it('opens the next follow-up card and keeps completed details accessible', () => {
+    expect(view).toContain("const initialExpanded = v.id === newVerificationId || (listFilter === 'follow-up' && v.id === firstFollowUpId)")
+    expect(view).toContain("const [expanded, setExpanded] = useState(initialExpanded)")
     expect(view).toContain('aria-expanded={expanded}')
-    expect(view).toContain('แสดงรายละเอียด')
+    expect(view).toContain("isFollowUpVerification(v) ? 'ทำต่อ' : 'ดูผล'")
   })
 
   it('gives the saved conclusion a prominent, semantic summary treatment', () => {
