@@ -8,7 +8,6 @@ import { api, Button, Card, Field, Input, Notice, Textarea } from '@/components/
 import { ManagedList } from '@/components/managed-list'
 
 type VendorForm = {
-  code: string
   name: string
   legalName: string
   taxId: string
@@ -21,7 +20,6 @@ type VendorForm = {
 }
 
 const emptyForm: VendorForm = {
-  code: '',
   name: '',
   legalName: '',
   taxId: '',
@@ -57,7 +55,6 @@ export function VendorAdmin({
   function edit(vendor: Vendor) {
     setEditingId(vendor.id)
     setForm({
-      code: vendor.code,
       name: vendor.name,
       legalName: vendor.legalName ?? '',
       taxId: vendor.taxId ?? '',
@@ -173,7 +170,7 @@ export function VendorAdmin({
             {editingVendor ? <Button type="button" variant="ghost" className="px-2 py-1 text-xs" onClick={reset}><X className="size-3.5" /> ยกเลิก</Button> : null}
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Vendor code"><Input required value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })} /></Field>
+            <Field label="Vendor code" hint={editingVendor ? 'รหัสนี้คงเดิมเมื่อแก้ไขข้อมูล' : 'ระบบสร้างรหัสรูปแบบ V0001 อัตโนมัติเมื่อบันทึก'}><Input readOnly value={editingVendor?.code ?? 'สร้างอัตโนมัติ'} /></Field>
             <Field label="ชื่อ vendor"><Input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></Field>
           </div>
           <Field label="ชื่อตามหนังสือรับรอง"><Input value={form.legalName} onChange={(event) => setForm({ ...form, legalName: event.target.value })} /></Field>

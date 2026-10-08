@@ -72,7 +72,6 @@ async function rpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
 function vendorPayload(input: VendorCreateInput | VendorUpdateInput) {
   const payload: Record<string, string | null> = {}
   const set = (key: string, value: string | null | undefined) => { if (value !== undefined) payload[key] = value === null ? '' : value }
-  set('code', input.code)
   set('name', input.name)
   set('legalName', input.legalName)
   set('taxId', input.taxId)

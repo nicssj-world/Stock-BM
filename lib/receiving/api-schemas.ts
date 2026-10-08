@@ -4,7 +4,6 @@ const nullableText = (max: number) => z.string().trim().max(max).nullable().opti
 const optionalText = (max: number) => z.string().trim().max(max).nullable().optional()
 
 export const vendorCreateSchema = z.object({
-  code: z.string().trim().min(1).max(80),
   name: z.string().trim().min(1).max(180),
   legalName: nullableText(300),
   taxId: z.string().trim().regex(/^[0-9]{13}$/, 'เลขประจำตัวผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก').nullable().optional().or(z.literal('')),
