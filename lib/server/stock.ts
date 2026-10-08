@@ -14,6 +14,7 @@ import type {
   StockLot,
   StockTransaction,
   StockTransactionLine,
+  StockVendorOption,
   StockWorkspace,
 } from '@/lib/bm/types'
 import { writeAudit } from '@/lib/server/audit'
@@ -68,6 +69,7 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
     { data: transactionData, error: transactionError },
     { data: balanceData, error: balanceError },
     { data: equipmentData, error: equipmentError },
+    { data: vendorData, error: vendorError },
     { data: itemEquipmentLinkData, error: itemEquipmentLinkError },
     { data: itemLocationLinkData, error: itemLocationLinkError },
     { data: itemVendorLinkData, error: itemVendorLinkError },
@@ -81,6 +83,7 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
       : Promise.resolve({ data: [], error: null }),
     admin.from('bm_stock_lot_location_balances').select('lot_id,location_id,on_hand'),
     admin.from('bm_equipment').select('id,code,name,status').order('code'),
+    admin.from('bm_vendors').select('id,code,name,is_active').order('code'),
     admin.from('bm_stock_item_equipment_links').select('stock_item_id,equipment_id'),
     admin.from('bm_stock_item_location_links').select('stock_item_id,location_id'),
     admin.from('bm_stock_item_vendors').select('stock_item_id,vendor_id'),
@@ -111,6 +114,13 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
     code: asString(row.code),
     name: asString(row.name),
     status: asString(row.status),
+  }))
+  // Vendor master is an optional addition to the stock workspace in older deployments.
+  const vendorOptions: StockVendorOption[] = (vendorError ? [] : ((vendorData ?? []) as RecordRow[])).map((row) => ({
+    id: asString(row.id),
+    code: asString(row.code),
+    name: asString(row.name),
+    isActive: Boolean(row.is_active),
   }))
   const equipmentIdsByItem = new Map<string, string[]>()
   for (const row of (itemEquipmentLinkData ?? []) as RecordRow[]) {
@@ -296,6 +306,7 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
     categories,
     locations,
     equipmentOptions,
+    vendorOptions,
     items,
     transactions,
     activeItemCount: activeItems.length,

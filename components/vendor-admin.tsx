@@ -127,6 +127,7 @@ export function VendorAdmin({
         <div className="p-4">
           <ManagedList
             noun="Vendor"
+            editLabel="แก้ไข"
             onToggle={toggle}
             onEdit={(id) => {
               const vendor = vendors.find((item) => item.id === id)

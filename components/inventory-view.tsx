@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { ArrowDownToLine, ArrowUpFromLine, FileDown, History, MoveRight, PackageCheck, PackageSearch, Pencil, Printer, RotateCcw, X } from 'lucide-react'
 import type { BmActor, StockItem, StockLot, StockTransaction, StockWorkspace } from '@/lib/bm/types'
 import { formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
-import { stockItemMatchesEquipment } from '@/lib/bm/stock-equipment-filter'
+import { stockItemMatchesVendor } from '@/lib/bm/stock-vendor-filter'
 import { printLotLabel } from '@/lib/bm/label-print'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select } from '@/components/ui'
 import { Pagination, usePagination } from '@/components/pagination'
@@ -22,7 +22,7 @@ export function InventoryView({ actor, initialData, defaultLocationId }: { actor
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('all')
   const [locationFilter, setLocationFilter] = useState(defaultLocationId && initialData.locations.some((location) => location.id === defaultLocationId) ? defaultLocationId : 'all')
-  const [equipmentFilter, setEquipmentFilter] = useState('all')
+  const [vendorFilter, setVendorFilter] = useState('all')
   const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
   const [actionLot, setActionLot] = useState<{ item: StockItem; lot: StockLot } | null>(null)
   const [editLot, setEditLot] = useState<{ item: StockItem; lot: StockLot } | null>(null)
@@ -34,9 +34,9 @@ export function InventoryView({ actor, initialData, defaultLocationId }: { actor
       const matches = !term || `${item.itemCode} ${item.name} ${item.categoryName}`.toLowerCase().includes(term)
       const statusOk = (status === 'all' && item.isActive) || (status === 'low' && item.isLowStock) || (status === 'expiring' && item.lots.some((lot) => lot.totalOnHand > 0 && lot.expiryState === 'expiring')) || (status === 'expired' && item.lots.some((lot) => lot.totalOnHand > 0 && lot.expiryState === 'expired'))
       const locationOk = locationFilter === 'all' || item.lots.some((lot) => lot.balances.some((balance) => balance.locationId === locationFilter && balance.onHand > 0))
-      return matches && statusOk && locationOk && stockItemMatchesEquipment(item, equipmentFilter)
+      return matches && statusOk && locationOk && stockItemMatchesVendor(item, vendorFilter)
     })
-  }, [data.items, equipmentFilter, locationFilter, q, status])
+  }, [data.items, locationFilter, q, status, vendorFilter])
   const itemPagination = usePagination(visibleItems.length, INVENTORY_PAGE_SIZE)
   const pagedItems = visibleItems.slice(itemPagination.start, itemPagination.end)
   const selectedItem = visibleItems.find((item) => item.id === selectedItemId) ?? visibleItems[0] ?? null
@@ -54,8 +54,8 @@ export function InventoryView({ actor, initialData, defaultLocationId }: { actor
   }
 
   function exportHref(report: 'balances' | 'movements') {
-    const equipmentQuery = equipmentFilter === 'all' ? '' : `&equipmentId=${encodeURIComponent(equipmentFilter)}`
-    return `/api/stock/export?report=${report}${equipmentQuery}`
+    const vendorQuery = vendorFilter === 'all' ? '' : `&vendorId=${encodeURIComponent(vendorFilter)}`
+    return `/api/stock/export?report=${report}${vendorQuery}`
   }
 
   async function reverse(transaction: StockTransaction) {
@@ -94,9 +94,9 @@ export function InventoryView({ actor, initialData, defaultLocationId }: { actor
             <option value="expiring">Expiring</option>
             <option value="expired">Expired</option>
           </Select>
-          <Select value={equipmentFilter} onChange={(event) => { setEquipmentFilter(event.target.value); itemPagination.setPage(1) }}>
-            <option value="all">ทุกเครื่องมือ</option>
-            {(data.equipmentOptions ?? []).map((equipment) => <option key={equipment.id} value={equipment.id}>{equipment.code} · {equipment.name}</option>)}
+          <Select value={vendorFilter} onChange={(event) => { setVendorFilter(event.target.value); itemPagination.setPage(1) }}>
+            <option value="all">ทุก Vendor</option>
+            {(data.vendorOptions ?? []).map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.code} · {vendor.name}{vendor.isActive ? '' : ' (inactive)'}</option>)}
           </Select>
           <Select value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}>
             <option value="all">All locations</option>

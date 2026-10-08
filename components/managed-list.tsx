@@ -19,6 +19,7 @@ export function ManagedList({
   onToggle,
   onEdit,
   onDelete,
+  editLabel,
   searchThreshold = 6,
   noun = 'รายการ',
 }: {
@@ -26,6 +27,7 @@ export function ManagedList({
   onToggle: (id: string, isActive: boolean) => Promise<boolean>
   onEdit?: (id: string) => void
   onDelete?: (id: string, label: string) => Promise<boolean>
+  editLabel?: string
   searchThreshold?: number
   noun?: string
 }) {
@@ -67,8 +69,8 @@ export function ManagedList({
                 {i.isActive ? 'ปิด' : 'เปิดใช้'}
               </Button>
               {onEdit ? (
-                <Button type="button" variant="ghost" className="min-h-7 px-2 py-1 text-xs" disabled={busy === i.id} onClick={() => onEdit(i.id)} aria-label={`แก้ไข ${i.label}`}>
-                  <Pencil className="size-3.5" />
+                <Button type="button" variant="ghost" className="min-h-7 gap-1 px-2 py-1 text-xs" disabled={busy === i.id} onClick={() => onEdit(i.id)} aria-label={`แก้ไข ${i.label}`}>
+                  <Pencil className="size-3.5" />{editLabel ? <span>{editLabel}</span> : null}
                 </Button>
               ) : null}
               {onDelete ? (

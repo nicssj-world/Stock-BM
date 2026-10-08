@@ -1,6 +1,6 @@
 import { requireStockOperator } from '@/lib/server/auth'
 import { buildBalancesCsv, buildMovementsCsv } from '@/lib/bm/csv'
-import { filterStockWorkspaceByEquipment } from '@/lib/bm/stock-equipment-filter'
+import { filterStockWorkspaceByVendor } from '@/lib/bm/stock-vendor-filter'
 import { getStockWorkspace } from '@/lib/server/stock'
 
 export async function GET(request: Request) {
@@ -8,8 +8,8 @@ export async function GET(request: Request) {
   const stock = await getStockWorkspace(actor)
   const searchParams = new URL(request.url).searchParams
   const report = searchParams.get('report')
-  const equipmentId = searchParams.get('equipmentId') ?? 'all'
-  const filteredStock = filterStockWorkspaceByEquipment(stock, equipmentId)
+  const vendorId = searchParams.get('vendorId') ?? 'all'
+  const filteredStock = filterStockWorkspaceByVendor(stock, vendorId)
   const body = report === 'movements' ? buildMovementsCsv(filteredStock) : buildBalancesCsv(filteredStock)
   const filename = report === 'movements' ? 'bm-stock-movements.csv' : 'bm-stock-balances.csv'
   return new Response(body, {

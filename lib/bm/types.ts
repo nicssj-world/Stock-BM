@@ -54,6 +54,13 @@ export interface StockEquipmentOption {
   status: string
 }
 
+export interface StockVendorOption {
+  id: string
+  code: string
+  name: string
+  isActive: boolean
+}
+
 export interface StockItem {
   id: string
   itemCode: string
@@ -117,6 +124,7 @@ export interface StockWorkspace {
   categories: StockCategory[]
   locations: StockLocation[]
   equipmentOptions?: StockEquipmentOption[]
+  vendorOptions?: StockVendorOption[]
   items: StockItem[]
   transactions: StockTransaction[]
   activeItemCount: number
