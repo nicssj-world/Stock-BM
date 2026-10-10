@@ -117,10 +117,8 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
   const [lines, setLines] = useState<ReceiveLineDraft[]>([])
   const [stage, setStage] = useState<'edit' | 'review'>('edit')
   const [lineError, setLineError] = useState<string | null>(null)
-  const [scanFeedback, setScanFeedback] = useState<{ text: string; key: number } | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const scanFeedbackSeed = useRef(0)
   const lineKeySeed = useRef(0)
   const receivedDate = todayBangkok()
 
@@ -141,7 +139,6 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
   function patchEditor(next: Partial<EditorState>) {
     setEditor((current) => ({ ...current, ...next }))
     setLineError(null)
-    setScanFeedback(null)
   }
 
   function chooseVendor(next: string) {
@@ -154,11 +151,6 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
   function chooseInvoiceLine(lineId: string) {
     const invoiceLine = selectedInvoice?.lines.find((line) => line.id === lineId)
     patchEditor({ invoiceLineId: lineId, ...(invoiceLine?.stockItemId ? { itemId: invoiceLine.stockItemId } : {}) })
-  }
-
-  function showScanFeedback(text: string) {
-    scanFeedbackSeed.current += 1
-    setScanFeedback({ text, key: scanFeedbackSeed.current })
   }
 
   function applyScan(result: PackageScanResponse) {
@@ -185,58 +177,10 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
     const resolvedItemId = scannedItemId && (!editor.itemId || editor.itemId === scannedItemId) ? scannedItemId : editor.itemId
     const resolvedItem = resolvedItemId ? data.items.find((item) => item.id === resolvedItemId) ?? null : null
 
-    // Scan → straight into a receiving line, no extra tap — but only when
-    // every value the line actually needs is already known and unambiguous.
-    // Anything short of that (no item resolved, item tracks a field the
-    // barcode didn't carry, invoice line still unresolved, or the lot fails
-    // shelf-life) falls back to prefilling the form for manual completion —
-    // the TOR/expiry-exception gate in particular is never bypassed here.
-    const eligibleForAutoAdd = Boolean(
-      resolvedItem
-      && !(editor.itemId && editor.itemId !== resolvedItemId)
-      && (!resolvedItem.trackLot || parsed.lot)
-      && (!resolvedItem.trackExpiry || parsed.expiry)
-      && editor.locationId
-      && !(selectedInvoice && !editor.invoiceLineId)
-      && torExpiryCompliance(resolvedItem.trackExpiry ? parsed.expiry : null, receivedDate) !== 'not_compliant',
-    )
-
-    if (eligibleForAutoAdd && resolvedItem) {
-      const lotNumber = resolvedItem.trackLot ? (parsed.lot ?? '').trim() : ''
-      const expiryDate = resolvedItem.trackExpiry ? parsed.expiry : null
-      const existingLineIndex = lines.findIndex((line) => line.itemId === resolvedItem.id && line.locationId === editor.locationId && (line.lotNumber || '') === lotNumber)
-      if (existingLineIndex !== -1) {
-        setLines((current) => current.map((line, index) => index === existingLineIndex ? { ...line, receivedQty: line.receivedQty + 1, scan } : line))
-        showScanFeedback(`เพิ่มจำนวน ${itemName(resolvedItem.id)} Lot ${lotNumber || '—'} เป็น ${lines[existingLineIndex].receivedQty + 1} ${resolvedItem.unit}`)
-      } else {
-        const invoiceLine = selectedInvoice?.lines.find((line) => line.id === editor.invoiceLineId) ?? null
-        lineKeySeed.current += 1
-        setLines((current) => [...current, {
-          key: `line-${lineKeySeed.current}`,
-          itemId: resolvedItem.id,
-          invoiceLineId: invoiceLine?.id ?? null,
-          expectedQty: invoiceLine?.expectedQty ?? null,
-          locationId: editor.locationId,
-          lotNumber,
-          expiryDate: expiryDate ?? '',
-          receivedQty: 1,
-          scan,
-          compliance: torExpiryCompliance(expiryDate, receivedDate),
-          remainingShelfLifeDays: remainingShelfLife(expiryDate, receivedDate),
-          receiptDecision: 'accepted',
-          acceptanceReasonCode: null,
-          acceptanceReasonNote: null,
-        }])
-        showScanFeedback(`เพิ่มรายการแล้ว: ${itemName(resolvedItem.id)} Lot ${lotNumber || '—'} · สแกนซ้ำเพื่อเพิ่มจำนวน`)
-      }
-      setLineError(null)
-      return
-    }
-
-    // Fallback: prefill what the scan found and let the user finish the rest
-    // (missing item, missing lot/expiry the item requires, a conflicting
-    // already-picked item, an unresolved invoice line, or a TOR failure that
-    // needs the exception UI below).
+    // A package scan identifies the item and prefills lot/expiry, but does
+    // not establish the quantity in stock units. The operator must enter
+    // the actual received quantity and explicitly add the receiving line.
+    // Keep the existing item/invoice mismatch and TOR checks in addLine().
     setScanFeedback(null)
     patchEditor({
       scan,
@@ -413,10 +357,7 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
     <Card className="space-y-4 p-4">
       {stepTitle(3, 'เพิ่มรายการรับ: Scan → Item/Lot/Expiry → จำนวน', lines.length > 0)}
       <PackageScan key={editor.itemId ?? 'no-item'} selectedItemId={editor.itemId} disabled={busy} onUse={applyScan} resolveScan={adapter.resolveScan} onScanDiagnostics={adapter.onScanDiagnostics} />
-      {/* aria-live announces the auto-add/increment result the instant a scan lands, with no extra tap needed to notice it. */}
-      <div aria-live="polite" role="status">
-        {scanFeedback ? <div key={scanFeedback.key} className="flex items-center gap-2 rounded-md border border-[#b8ded8] bg-[#f4fbf9] px-3 py-2.5 text-sm font-semibold text-[#0b5f58]"><ClipboardCheck className="size-4 shrink-0" />{scanFeedback.text}</div> : null}
-      </div>
+      <p className="text-xs text-[#58747d]">สแกนเพื่อเติม Item / Lot / Expiry จากนั้นระบุจำนวนที่ได้รับจริงและกดเพิ่มรายการนี้ (สแกนซ้ำไม่เพิ่มจำนวนอัตโนมัติ)</p>
       {editor.scan ? <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#58747d]"><span className="flex items-center gap-1"><ScanLine className="size-4" />ใช้ข้อมูลจาก barcode {editor.scan.standard?.toUpperCase()}{itemAutoSelectedFromScan ? ' · เลือก Item ให้อัตโนมัติจาก GTIN ที่ตรงกันแบบไม่กำกวม — ตรวจสอบก่อนเพิ่มรายการ' : ''}</span><button type="button" className="min-h-11 px-2 font-semibold text-[#0b7f76] underline" onClick={() => patchEditor({ scan: null })}>ล้างข้อมูล barcode</button></div> : null}
       <Field label="Item / Catalog-REF" hint={editor.itemId ? undefined : 'สแกนด้านบนเพื่อเลือกอัตโนมัติ หรือค้นหาด้วยตนเองที่นี่'}>
         <ItemPicker items={data.items} value={editor.itemId} onChange={(itemId) => patchEditor({ itemId })} disabled={busy} />
