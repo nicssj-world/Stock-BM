@@ -174,14 +174,10 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
     // and GTIN/AI 240 are still never written into Catalog/REF — only an
     // existing Item Master id.
     const scannedItemId = result.match.kind === 'exact_unique' ? result.itemId : null
-    const resolvedItemId = scannedItemId && (!editor.itemId || editor.itemId === scannedItemId) ? scannedItemId : editor.itemId
-    const resolvedItem = resolvedItemId ? data.items.find((item) => item.id === resolvedItemId) ?? null : null
-
     // A package scan identifies the item and prefills lot/expiry, but does
     // not establish the quantity in stock units. The operator must enter
     // the actual received quantity and explicitly add the receiving line.
     // Keep the existing item/invoice mismatch and TOR checks in addLine().
-    setScanFeedback(null)
     patchEditor({
       scan,
       ...(parsed.lot ? { lotNumber: parsed.lot } : {}),
