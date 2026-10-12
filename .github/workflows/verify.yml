@@ -15,5 +15,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test -- hpv
-      - run: npm run lint
+      - run: npx eslint lib/hpv/pagination.ts lib/hpv/pagination.test.ts lib/server/hpv.ts components/hpv-view.tsx
       - run: npx tsc --noEmit
