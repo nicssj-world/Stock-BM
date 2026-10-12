@@ -125,9 +125,9 @@ export function HpvView({ actor, initialData }: { actor: BmActor; initialData: H
     setNotice({ tone: 'success', text })
   }
 
-  const storedSamples = data.boxes.flatMap((box) => box.samples).filter((sample) => sample.status === 'stored').length
-  const checkedOutTotal = data.boxes.flatMap((box) => box.samples).filter((s) => s.status === 'checked_out').length
-  const dueBoxes = data.boxes.filter((box) => box.destroyDueAt && box.destroyDueAt.slice(0, 10) <= today).length
+  const storedSamples = data.boxes.filter((box) => box.status !== 'destroyed').flatMap((box) => box.samples).filter((sample) => sample.status === 'stored').length
+  const checkedOutTotal = data.boxes.flatMap((box) => box.samples).filter((s) => s.status === 'checked_out').length + data.externalSamples.filter((s) => s.status === 'checked_out').length
+  const dueBoxes = data.boxes.filter((box) => getHpvDestructionState(box.destroyDueAt, box.status, today, box.filledAt) === 'due_now').length
   const openBoxes = data.boxes.filter((box) => box.status === 'open').length
   const fullBoxes = data.boxes.filter((box) => box.status === 'full').length
   const destroyedBoxes = data.boxes.filter((box) => box.status === 'destroyed').length
@@ -1586,7 +1586,7 @@ function CheckoutTab({ actor, data, onWorkspace, onNotice }: {
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [dialogOpen, setDialogOpen] = useState(false)
   const effectiveDestination = destination === 'อื่นๆ' ? customDestination.trim() || 'อื่นๆ' : destination
-  const storedSamples = data.boxes.flatMap((box) => box.samples.map((sample) => ({ ...sample, box }))).filter((sample) => sample.status === 'stored')
+  const storedSamples = data.boxes.filter((box) => box.status !== 'destroyed').flatMap((box) => box.samples.map((sample) => ({ ...sample, box }))).filter((sample) => sample.status === 'stored')
   const deliveriesById = useMemo(() => new Map(data.deliveries.map((delivery) => [delivery.id, delivery])), [data.deliveries])
   const checkedOutSamples = useMemo<DeliverySample[]>(() => {
     const fromBoxes = data.boxes.flatMap((box) => box.samples.filter((s) => s.status === 'checked_out').map((sample) => ({ ...sample, box: box as HpvStorageBox | null })))
