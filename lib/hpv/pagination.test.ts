@@ -15,7 +15,7 @@ describe('HPV sample pagination', () => {
   })
 
   it('handles zero rows and an exact page boundary', async () => {
-    const fetchPage = vi.fn(async (_from: number, _to: number) => [] as { id: number }[])
+    const fetchPage = vi.fn(async () => [] as { id: number }[])
     expect(await collectHpvSamplePages(0, fetchPage)).toEqual([])
     expect(fetchPage).not.toHaveBeenCalled()
 
