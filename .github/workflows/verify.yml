@@ -17,3 +17,8 @@ jobs:
       - run: npm run test -- hpv
       - run: npx eslint lib/hpv/pagination.ts lib/hpv/pagination.test.ts lib/server/hpv.ts components/hpv-view.tsx
       - run: npx tsc --noEmit
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_BM_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_BM_SUPABASE_ANON_KEY: ci-placeholder
+          BM_SUPABASE_SERVICE_ROLE_KEY: ci-placeholder
