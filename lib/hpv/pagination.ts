@@ -2,7 +2,7 @@
  * Read every HPV sample without relying on Supabase's configured max_rows.
  * A short page or duplicated id is an error, never an empty storage box.
  */
-export async function collectHpvSamplePages<T extends { id: unknown }>(
+export async function collectHpvSamplePages<T extends Record<string, unknown>>(
   expectedCount: number,
   fetchPage: (from: number, to: number) => Promise<T[]>,
   pageSize = 500,
