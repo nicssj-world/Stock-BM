@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { Download } from 'lucide-react'
+import { VendorFollowupPanel } from '@/components/vendors/vendor-followup-panel'
 import { AnnualEvaluationPanel } from '@/components/vendors/annual-evaluation-panel'
 import { ReceiptAssessmentCard } from '@/components/vendors/receipt-assessment-card'
 import { VendorIssuePanel } from '@/components/vendors/vendor-issue-panel'
@@ -10,7 +11,7 @@ import { Button, Card, Notice, PageHeader } from '@/components/ui'
 import { formatThaiDateTime } from '@/lib/bm/thai-date'
 import { requireFullPageActor } from '@/lib/server/auth'
 import { HttpError } from '@/lib/server/errors'
-import { listAnnualRevisions } from '@/lib/server/vendor-evaluation'
+import { listAnnualRevisions, listVendorAnnualFollowups, listVendorFollowupOwners } from '@/lib/server/vendor-evaluation'
 import { getVendor, getVendorPerformanceSnapshot, listVendorInvoices, listVendorIssues, listVendorReceiptEvents } from '@/lib/server/vendors'
 import { isOfficial } from '@/lib/vendors/evaluation'
 import { bangkokToday, fiscalYearBE } from '@/lib/vendors/fiscal-year'
@@ -21,7 +22,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 const UUID = /^[0-9a-f-]{36}$/i
 
-export default async function VendorPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ fiscalYear?: string }> }) {
+export default async function VendorPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ fiscalYear?: string; receiptPage?: string }> }) {
   const actor = await requireFullPageActor()
   const { id } = await params
   if (!UUID.test(id)) notFound()
@@ -29,23 +30,31 @@ export default async function VendorPage({ params, searchParams }: { params: Pro
   const currentFy = fiscalYearBE(bangkokToday())
   const requested = Number.parseInt(query.fiscalYear ?? '', 10)
   const fy = requested >= 2500 && requested <= 3000 ? requested : currentFy
+  const requestedReceiptPage = Number.parseInt(query.receiptPage ?? '1',10)
+  const receiptPage = Number.isSafeInteger(requestedReceiptPage) && requestedReceiptPage > 0 ? Math.min(requestedReceiptPage,100000) : 1
+  const receiptPageSize = 20
   const trendYears = [fy - 4, fy - 3, fy - 2, fy - 1, fy]
   let data
   try {
-    const [vendor, snapshots, issues, events, revisions, invoices] = await Promise.all([
+    const [vendor, snapshots, issues, receiptBatch, revisions, invoices, followups, followupOwners] = await Promise.all([
       getVendor(id),
       Promise.all(trendYears.map((year) => getVendorPerformanceSnapshot(id, year, actor))),
       listVendorIssues(id),
-      listVendorReceiptEvents(id, 50),
+      listVendorReceiptEvents(id, receiptPage, receiptPageSize),
       listAnnualRevisions(id),
       listVendorInvoices(id),
+      listVendorAnnualFollowups(id),
+      actor.role === 'Admin' ? listVendorFollowupOwners() : Promise.resolve([]),
     ])
-    data = { vendor, snapshots, issues, events, revisions, invoices }
+    data = { vendor, snapshots, issues, receiptBatch, revisions, invoices, followups, followupOwners }
   } catch (error) {
     if (error instanceof HttpError && error.status === 404) notFound()
     throw error
   }
-  const { vendor, snapshots, issues, events, revisions, invoices } = data
+  const { vendor, snapshots, issues, receiptBatch, revisions, invoices, followups, followupOwners } = data
+  const { events, total:receiptTotal } = receiptBatch
+  const receiptPages = Math.max(1,Math.ceil(receiptTotal/receiptPageSize))
+  const receiptHref = (nextPage:number) => `/vendors/${id}?fiscalYear=${fy}&receiptPage=${nextPage}#receipt-assessments`
   const snapshot = snapshots[snapshots.length - 1]
   const officialFor = (year: number) => revisions.find((r) => r.fiscalYear === year && isOfficial(r))?.frozen ?? null
   const trend: TrendPoint[] = trendYears.map((year, i) => ({ fiscalYear: year, receipts: snapshots[i].activity.receipts, issues: snapshots[i].activity.openIssues + snapshots[i].activity.resolvedIssues, officialScore: officialFor(year)?.score ?? null }))
@@ -75,9 +84,20 @@ export default async function VendorPage({ params, searchParams }: { params: Pro
       {!isAdmin && <Notice tone="info">การสร้างและสิ้นสุดรายงานทำได้เฉพาะผู้ดูแลระบบ · ผู้ใช้อื่นดูและดาวน์โหลด PDF ของรายงานที่สิ้นสุดแล้วได้</Notice>}
       <AnnualEvaluationPanel revisions={revisions} vendorId={id} fiscalYear={fy} canManage={isAdmin} hasDraftForYear={draftForYear} /></Card>
 
-    <Card className="space-y-4 p-5"><h2 className="font-bold text-[#173d50]">ผลตรวจรับรายครั้ง</h2>
+    <Card className="space-y-3 p-5" id="annual-followups"><h2 className="font-bold text-[#173d50]">ติดตามผลประเมินผู้ขายที่ไม่ผ่าน</h2>
+      <VendorFollowupPanel followups={followups} owners={followupOwners} canManage={isAdmin} revisions={revisions} vendorId={id} />
+    </Card>
+
+    <Card className="space-y-4 p-5" id="receipt-assessments"><h2 className="font-bold text-[#173d50]">ผลตรวจรับรายครั้ง ({receiptTotal})</h2>
       {events.map((event) => <ReceiptAssessmentCard key={event.receiptId} event={event} canRevise={isAdmin} />)}
-      {!events.length && <p className="text-sm text-[#81979c]">ยังไม่มีการรับสินค้าจากผู้ขายนี้</p>}</Card>
+      {!events.length && <p className="text-sm text-[#81979c]">{receiptTotal ? 'ไม่พบรายการในหน้านี้ กรุณากลับไปหน้าก่อนหน้า' : 'ยังไม่มีการรับสินค้าจากผู้ขายนี้'}</p>}
+      {receiptTotal > receiptPageSize && <nav aria-label="แบ่งหน้าผลตรวจรับ" className="flex flex-wrap items-center justify-between gap-3 border-t border-[#e5eeee] pt-3 text-sm">
+        <span>หน้า {receiptPage} / {receiptPages} · แสดงครั้งละ {receiptPageSize} รายการ</span>
+        <div className="flex gap-2">
+          {receiptPage > 1 && <Link className="rounded-md border px-3 py-2 font-semibold text-[#0b7f76]" href={receiptHref(receiptPage-1)}>ก่อนหน้า</Link>}
+          {receiptPage < receiptPages && <Link className="rounded-md border px-3 py-2 font-semibold text-[#0b7f76]" href={receiptHref(receiptPage+1)}>ถัดไป</Link>}
+        </div>
+      </nav>}</Card>
 
     <Card className="space-y-3 p-5"><h2 className="font-bold text-[#173d50]">ปัญหาผู้ขาย</h2>
       <VendorIssuePanel issues={issues} vendorId={id} invoices={invoices} canOpen canAct={isAdmin} emptyText="ยังไม่มีบันทึกปัญหาของผู้ขายนี้" /></Card>

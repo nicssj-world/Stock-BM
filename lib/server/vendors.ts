@@ -190,11 +190,13 @@ export type VendorReceiptEvent = {
 }
 
 /** Confirmed receipts of a vendor with their event number and assessment, newest first. */
-export async function listVendorReceiptEvents(vendorId: string, limit = 50): Promise<VendorReceiptEvent[]> {
+export async function listVendorReceiptEvents(vendorId: string, page = 1, pageSize = 20): Promise<{events:VendorReceiptEvent[];total:number}> {
+  const offset = (Math.max(1,page)-1)*pageSize
   const admin = getAdminClient()
-  const { data, error } = await admin.from('bm_receipts')
-    .select('id,received_at,bm_invoices(invoice_no),bm_receipt_event_numbers(event_number),bm_receipt_assessments(*)')
-    .eq('vendor_id', vendorId).eq('status', 'confirmed').order('received_at', { ascending: false }).limit(limit)
+  const { data, count, error } = await admin.from('bm_receipts')
+    .select('id,received_at,bm_invoices(invoice_no),bm_receipt_event_numbers(event_number),bm_receipt_assessments(*)',{count:'exact'})
+    .eq('vendor_id', vendorId).eq('status', 'confirmed').order('received_at', { ascending: false })
+    .order('id', { ascending: false }).range(offset,offset+pageSize-1)
   fail(error)
   const one = <T,>(value: T | T[] | null | undefined): T | null => (Array.isArray(value) ? value[0] ?? null : value ?? null)
   const rows = (data ?? []) as RecordRow[]
@@ -210,7 +212,7 @@ export async function listVendorReceiptEvents(vendorId: string, limit = 50): Pro
       revisions.set(key, { count: current.count + 1, last: asString(revision.changed_at) })
     }
   }
-  return rows.map((row) => {
+  const events = rows.map((row) => {
     const assessmentRow = one(row.bm_receipt_assessments as RecordRow | RecordRow[] | null)
     const revision = assessmentRow ? revisions.get(asString(assessmentRow.id)) : undefined
     return {
@@ -223,6 +225,7 @@ export async function listVendorReceiptEvents(vendorId: string, limit = 50): Pro
       lastRevisionAt: revision?.last ?? null,
     }
   })
+  return {events,total:count ?? 0}
 }
 
 export type PerformanceSnapshot = Omit<Snapshot, 'issues' | 'receipts' | 'assessments'>
