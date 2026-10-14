@@ -1,5 +1,18 @@
 -- Forward-only completion of Vendor Evaluation V1.
 -- Approved policies and existing frozen reports are preserved.
+-- Preserve all finalization state, signer and immutable-report guards, but narrative text is optional.
+alter table public.bm_vendor_annual_evaluation_revisions
+  drop constraint bm_annual_revision_state_check;
+alter table public.bm_vendor_annual_evaluation_revisions
+  add constraint bm_annual_revision_state_check check (
+    (status = 'draft' and frozen_snapshot is null and report_fiscal_year is null and report_sequence is null and report_number is null and finalized_at is null and finalized_by is null
+      and evaluator_signature is null and reviewer_signature is null and approver_signature is null)
+    or (status = 'final' and frozen_snapshot is not null and report_fiscal_year is not null and report_sequence is not null and report_number is not null and finalized_at is not null and finalized_by is not null
+      and evaluator_id is not null and evaluator_name_snapshot is not null and evaluator_position_snapshot is not null and evaluator_signature like 'data:image/png;base64,%'
+      and reviewer_id is not null and reviewer_name_snapshot is not null and reviewer_position_snapshot is not null and reviewer_signature like 'data:image/png;base64,%'
+      and approver_id is not null and approver_name_snapshot is not null and approver_position_snapshot is not null and approver_signature like 'data:image/png;base64,%')
+  );
+
 create or replace function public.finalize_bm_vendor_annual_evaluation(p_actor uuid, p_revision uuid)
 returns text
 language plpgsql

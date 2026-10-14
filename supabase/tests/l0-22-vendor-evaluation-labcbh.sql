@@ -209,7 +209,13 @@ begin
     raise exception 'L0-22 revision 2 does not supersede revision 1 with its wording';
   end if;
   if (select evaluator_signature from public.bm_vendor_annual_evaluation_revisions where id = v_rev2) is not null then raise exception 'L0-22 a draft carries a signature'; end if;
+  -- Annual narrative fields are optional, while three signers and signatures remain compulsory.
+  perform public.save_bm_vendor_annual_evaluation_draft(v_admin, v_rev2, jsonb_build_object(
+    'summary', '', 'strengths', '', 'risksConcerns', '', 'recommendations', '',
+    'evaluatorId', v_staff, 'reviewerId', v_admin, 'approverId', v_admin2));
   if public.finalize_bm_vendor_annual_evaluation(v_admin, v_rev2) <> 'VE-' || v_fy || '-0002' then raise exception 'L0-22 report numbers are not sequential'; end if;
+  if (select frozen_snapshot #>> '{judgment,summary}' from public.bm_vendor_annual_evaluation_revisions where id = v_rev2) <> ''
+    then raise exception 'L0-22 optional narrative fields were not preserved as blanks'; end if;
 
   -- A vendor with no data has nothing to score.
   perform public.save_bm_vendor_annual_evaluation_draft(v_admin, public.create_bm_vendor_annual_evaluation_draft(v_admin, v_vendor2, v_fy),
