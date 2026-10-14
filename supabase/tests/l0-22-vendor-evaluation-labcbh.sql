@@ -183,7 +183,8 @@ begin
   perform pg_temp.expect_err(format('select public.finalize_bm_vendor_annual_evaluation(%L, %L)', v_admin, v_rev), 'BM_ANNUAL_SIGNATURE_MISSING');
   perform public.save_bm_user_signature(v_admin2, v_png);
   -- Evidence that changes after the draft was captured blocks finalizing until it is refreshed.
-  perform public.open_bm_vendor_issue(v_staff, v_vendor, 'other', 'raised after the draft');
+  -- Attach the late issue to a FY2569 receipt: manual issues without a receipt are classified by their actual opening FY (October is FY2570).
+  perform public.open_bm_vendor_issue(v_staff, v_vendor, 'other', 'raised after the draft', v_r1);
   perform pg_temp.expect_err(format('select public.finalize_bm_vendor_annual_evaluation(%L, %L)', v_staff, v_rev), 'BM_ACCESS_DENIED');
   perform pg_temp.expect_err(format('select public.finalize_bm_vendor_annual_evaluation(%L, %L)', v_admin, v_rev), 'BM_ANNUAL_EVIDENCE_STALE');
   perform public.refresh_bm_vendor_annual_evaluation_draft(v_admin, v_rev);
@@ -209,12 +210,18 @@ begin
     raise exception 'L0-22 revision 2 does not supersede revision 1 with its wording';
   end if;
   if (select evaluator_signature from public.bm_vendor_annual_evaluation_revisions where id = v_rev2) is not null then raise exception 'L0-22 a draft carries a signature'; end if;
+  -- Annual narrative fields are optional, while three signers and signatures remain compulsory.
+  perform public.save_bm_vendor_annual_evaluation_draft(v_admin, v_rev2, jsonb_build_object(
+    'summary', '', 'strengths', '', 'risksConcerns', '', 'recommendations', '',
+    'evaluatorId', v_staff, 'reviewerId', v_admin, 'approverId', v_admin2));
   if public.finalize_bm_vendor_annual_evaluation(v_admin, v_rev2) <> 'VE-' || v_fy || '-0002' then raise exception 'L0-22 report numbers are not sequential'; end if;
+  if (select frozen_snapshot #>> '{judgment,summary}' from public.bm_vendor_annual_evaluation_revisions where id = v_rev2) <> ''
+    then raise exception 'L0-22 optional narrative fields were not preserved as blanks'; end if;
 
   -- A vendor with no data has nothing to score.
   perform public.save_bm_vendor_annual_evaluation_draft(v_admin, public.create_bm_vendor_annual_evaluation_draft(v_admin, v_vendor2, v_fy),
     '{"summary":"a","strengths":"b","risksConcerns":"c","recommendations":"d","evaluatorId":"00000000-0000-0000-0000-000000000001","reviewerId":"00000000-0000-0000-0000-000000000001","approverId":"00000000-0000-0000-0000-000000000001"}'::jsonb);
-  perform pg_temp.expect_err(format('select public.finalize_bm_vendor_annual_evaluation(%L, (select r.id from public.bm_vendor_annual_evaluation_revisions r join public.bm_vendor_annual_evaluations e on e.id = r.evaluation_id where e.vendor_id = %L))', v_admin, v_vendor2), 'BM_ANNUAL_NO_APPLICABLE_CRITERIA');
+  perform pg_temp.expect_err(format('select public.finalize_bm_vendor_annual_evaluation(%L, (select r.id from public.bm_vendor_annual_evaluation_revisions r join public.bm_vendor_annual_evaluations e on e.id = r.evaluation_id where e.vendor_id = %L))', v_admin, v_vendor2), 'BM_ANNUAL_COVERAGE_LOW');
 
   -- The Stock1 scaffolding is gone, and the fiscal year turns over on 1 October.
   if to_regclass('public.bm_vendor_evaluations') is not null or to_regclass('public.bm_vendor_eval_policies') is not null then raise exception 'L0-22 retired evaluation tables still exist'; end if;

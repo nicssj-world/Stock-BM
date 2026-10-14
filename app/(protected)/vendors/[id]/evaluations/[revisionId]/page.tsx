@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { AnnualEvaluationEditor } from '@/components/vendors/annual-evaluation-editor'
-import { PageHeader } from '@/components/ui'
+import { Notice, PageHeader } from '@/components/ui'
 import { requireFullPageActor } from '@/lib/server/auth'
 import { HttpError } from '@/lib/server/errors'
 import { getAnnualRevision, listSigners } from '@/lib/server/vendor-evaluation'
@@ -27,6 +27,7 @@ export default async function AnnualEvaluationPage({ params }: { params: Promise
   return <main className="mx-auto max-w-4xl space-y-6 px-4 py-6 sm:px-6">
     <div><Link href={`/vendors/${id}`} className="text-sm font-semibold text-[#0b7f76]">← {vendor.name}</Link></div>
     <PageHeader eyebrow="Vendor annual evaluation" title={`รายงานประเมินผู้ขายประจำปี ${revision.fiscalYear}`} description={`${vendor.vendorCode} · ${vendor.name}`} />
+    {revision.frozen?.result === 'fail' && <Notice tone="warning">ผลประเมินไม่ผ่าน · ระบบสร้างงานติดตามแล้ว <Link href={`/vendors/${id}#annual-followups`} className="font-semibold underline">เปิดงานติดตามและบันทึกการแก้ไข</Link></Notice>}
     <AnnualEvaluationEditor revision={revision} signers={signers} canManage={canManage} />
   </main>
 }

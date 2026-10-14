@@ -1,0 +1,26 @@
+name: Real PostgreSQL vendor evaluation integration
+on:
+  pull_request:
+    paths:
+      - 'supabase/**'
+      - 'lib/vendors/**'
+      - 'components/vendors/**'
+      - 'app/api/vendors/**'
+      - '.github/workflows/db-integration.yml'
+  workflow_dispatch:
+jobs:
+  db:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Local database migrations and integration tests
+        run: npm run test:db

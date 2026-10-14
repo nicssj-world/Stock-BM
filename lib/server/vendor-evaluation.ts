@@ -189,3 +189,58 @@ export async function listUserPositions(): Promise<Map<string, string>> {
   if (error) throw new HttpError(400, error.message)
   return new Map(((data ?? []) as RecordRow[]).map((row) => [asString(row.user_id), asString(row.position_title)]))
 }
+
+
+export type VendorAnnualFollowup = {
+  id: string
+  revisionId: string
+  vendorId: string
+  fiscalYear: number
+  status: 'open' | 'in_progress' | 'closed'
+  responsibleUserId: string | null
+  dueDate: string | null
+  actionPlan: string | null
+  resolutionNote: string | null
+  updatedAt: string
+  createdAt: string
+  closedAt: string | null
+}
+export type VendorFollowupOwner = { id: string; name: string }
+
+export async function listVendorAnnualFollowups(vendorId: string): Promise<VendorAnnualFollowup[]> {
+  const { data, error } = await getAdminClient().from('bm_vendor_annual_followups')
+    .select('id,revision_id,vendor_id,fiscal_year,status,responsible_user_id,due_date,action_plan,resolution_note,updated_at,created_at,closed_at')
+    .eq('vendor_id',vendorId).order('created_at',{ascending:false}).limit(200)
+  if (error) throw new HttpError(400,error.message)
+  return ((data ?? []) as RecordRow[]).map((row) => ({
+    id: asString(row.id), revisionId: asString(row.revision_id), vendorId: asString(row.vendor_id),
+    fiscalYear: Number(row.fiscal_year), status: asString(row.status) as VendorAnnualFollowup['status'],
+    responsibleUserId: nullableString(row.responsible_user_id), dueDate: nullableString(row.due_date),
+    actionPlan: nullableString(row.action_plan), resolutionNote: nullableString(row.resolution_note),
+    updatedAt: asString(row.updated_at), createdAt: asString(row.created_at), closedAt: nullableString(row.closed_at),
+  }))
+}
+
+export async function listVendorFollowupOwners(): Promise<VendorFollowupOwner[]> {
+  const admin = getAdminClient()
+  const { data: access, error: accessError } = await admin.from('bm_user_access')
+    .select('user_id').eq('is_active',true).in('role',['Admin','Staff']).limit(500)
+  if (accessError) throw new HttpError(400,accessError.message)
+  const ids = ((access ?? []) as RecordRow[]).map((r) => asString(r.user_id)).filter(Boolean)
+  if (!ids.length) return []
+  const { data: users, error: userError } = await admin.from('nipt_users').select('id,display_name')
+    .in('id',ids).eq('is_active',true)
+  if (userError) throw new HttpError(400,userError.message)
+  return ((users ?? []) as RecordRow[]).map((row) => ({id:asString(row.id),name:asString(row.display_name)}))
+    .sort((a,b) => a.name.localeCompare(b.name,'th'))
+}
+
+export async function updateVendorAnnualFollowup(vendorId: string, followupId: string,
+  input: {status: VendorAnnualFollowup['status']; responsibleUserId: string|null; dueDate: string|null; actionPlan: string; resolutionNote: string; expectedUpdatedAt: string},
+  actor: BmActor) {
+  await rpc('update_bm_vendor_annual_followup',{
+    p_actor:actor.id,p_vendor:vendorId,p_followup:followupId,p_status:input.status,
+    p_owner:input.responsibleUserId,p_due:input.dueDate,p_plan:input.actionPlan,p_resolution:input.resolutionNote,
+    p_expected_updated_at:input.expectedUpdatedAt,
+  })
+}
