@@ -23,8 +23,11 @@ function printTail(output, limit = 18) {
 }
 
 function runNpx(args, { allowFailure = false } = {}) {
-  const command = process.platform === 'win32' ? process.env.ComSpec ?? 'cmd.exe' : npxCommand
-  const commandArgs = process.platform === 'win32'
+  // CI installs the Supabase CLI through setup-cli, not node_modules.
+  // Run that binary directly while keeping the existing no-install npx path locally.
+  const useSetupCli = process.env.CI === 'true' && args[0] === 'supabase'
+  const command = useSetupCli ? 'supabase' : process.platform === 'win32' ? process.env.ComSpec ?? 'cmd.exe' : npxCommand
+  const commandArgs = useSetupCli ? args.slice(1) : process.platform === 'win32'
     ? ['/d', '/s', '/c', [npxCommand, '--no-install', ...args].join(' ')]
     : ['--no-install', ...args]
   const result = spawnSync(command, commandArgs, {

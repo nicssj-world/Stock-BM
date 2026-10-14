@@ -126,8 +126,10 @@ create or replace function public.bm_create_vendor_annual_fail_followup()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare v_vendor uuid; v_fy integer;
 begin
-  if new.status = 'final' and (tg_op = 'INSERT' or old.status is distinct from 'final')
-     and new.frozen_snapshot ->> 'result' = 'fail' then
+  -- Updates of "final" reports are prevented by the immutable revision guard.
+  -- The trigger fires only on INSERT or UPDATE OF status, so one failed
+  -- transition produces at most one row (enforced by UNIQUE revision_id).
+  if new.status = 'final' and new.frozen_snapshot ->> 'result' = 'fail' then
     select vendor_id, fiscal_year into v_vendor, v_fy
       from public.bm_vendor_annual_evaluations where id = new.evaluation_id;
     insert into public.bm_vendor_annual_followups (revision_id,vendor_id,fiscal_year)

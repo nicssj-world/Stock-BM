@@ -84,11 +84,13 @@ export default async function VendorPage({ params, searchParams }: { params: Pro
       {!isAdmin && <Notice tone="info">การสร้างและสิ้นสุดรายงานทำได้เฉพาะผู้ดูแลระบบ · ผู้ใช้อื่นดูและดาวน์โหลด PDF ของรายงานที่สิ้นสุดแล้วได้</Notice>}
       <AnnualEvaluationPanel revisions={revisions} vendorId={id} fiscalYear={fy} canManage={isAdmin} hasDraftForYear={draftForYear} /></Card>
 
-    <Card className="space-y-3 p-5" id="annual-followups"><h2 className="font-bold text-[#173d50]">ติดตามผลประเมินผู้ขายที่ไม่ผ่าน</h2>
+    <div id="annual-followups" />
+    <Card className="space-y-3 p-5"><h2 className="font-bold text-[#173d50]">ติดตามผลประเมินผู้ขายที่ไม่ผ่าน</h2>
       <VendorFollowupPanel followups={followups} owners={followupOwners} canManage={isAdmin} revisions={revisions} vendorId={id} />
     </Card>
 
-    <Card className="space-y-4 p-5" id="receipt-assessments"><h2 className="font-bold text-[#173d50]">ผลตรวจรับรายครั้ง ({receiptTotal})</h2>
+    <div id="receipt-assessments" />
+    <Card className="space-y-4 p-5"><h2 className="font-bold text-[#173d50]">ผลตรวจรับรายครั้ง ({receiptTotal})</h2>
       {events.map((event) => <ReceiptAssessmentCard key={event.receiptId} event={event} canRevise={isAdmin} />)}
       {!events.length && <p className="text-sm text-[#81979c]">{receiptTotal ? 'ไม่พบรายการในหน้านี้ กรุณากลับไปหน้าก่อนหน้า' : 'ยังไม่มีการรับสินค้าจากผู้ขายนี้'}</p>}
       {receiptTotal > receiptPageSize && <nav aria-label="แบ่งหน้าผลตรวจรับ" className="flex flex-wrap items-center justify-between gap-3 border-t border-[#e5eeee] pt-3 text-sm">
