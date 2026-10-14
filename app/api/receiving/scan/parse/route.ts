@@ -1,5 +1,6 @@
 import { requireStockOperator } from '@/lib/server/auth'
 import { parseBarcode } from '@/lib/receiving/barcode'
+import { normalizeCatalog } from '@/lib/receiving/item-search'
 import { matchPackageBarcode, type PackageScanCandidate } from '@/lib/receiving/package-scan'
 import { assertReceivingEnabled } from '@/lib/server/receiving'
 import { HttpError } from '@/lib/server/errors'
@@ -26,9 +27,10 @@ export async function POST(request: Request) {
     const input = await readJson(request, schema)
     const parsed = parseBarcode(input.raw, input.symbologyId ?? null)
     const candidates: PackageScanCandidate[] = []
+    let source: 'gtin' | 'ai240_catalog' = 'gtin'
+    const admin = getAdminClient()
 
     if (parsed.gtin) {
-      const admin = getAdminClient()
       const { data: barcodeRows, error: barcodeError } = await admin
         .from('bm_stock_item_barcodes')
         .select('stock_item_id,pack_description')
@@ -59,7 +61,31 @@ export async function POST(request: Request) {
       }
     }
 
-    const resolution = matchPackageBarcode(parsed, candidates, input.stockItemId ?? null)
+    // AI 240 is NOT universally a REF. Treat it as an exact Item Master catalog
+    // fallback only when no approved GTIN mapping exists. Duplicate REF values
+    // remain ambiguous and require a deliberate manual choice.
+    if (!candidates.length && parsed.additionalProductId) {
+      const catalog = normalizeCatalog(parsed.additionalProductId)
+      if (catalog) {
+        const { data: catalogRows, error: catalogError } = await admin
+          .from('bm_stock_items')
+          .select('id,item_code,name,unit,is_active')
+          .eq('catalog_no_normalized', catalog)
+          .eq('is_active', true)
+        if (catalogError) throw new HttpError(500, catalogError.message)
+        for (const row of (catalogRows ?? []) as RecordRow[]) {
+          candidates.push({
+            itemId: asString(row.id),
+            itemCode: asString(row.item_code),
+            name: asString(row.name),
+            unit: asString(row.unit),
+          })
+        }
+        if (candidates.length) source = 'ai240_catalog'
+      }
+    }
+
+    const resolution = matchPackageBarcode(parsed, candidates, input.stockItemId ?? null, source)
     return {
       parsed: { ...resolution.parsed, itemId: resolution.itemId },
       match: resolution.match,
