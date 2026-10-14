@@ -32,6 +32,7 @@ export function ItemPicker<T extends ItemSearchRow>({ items, value, onChange, di
       <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-[#81979c]" aria-hidden="true" />
       <Input type="search" value={query} onChange={(event) => setQuery(event.target.value)} disabled={disabled} className="pl-9" placeholder="ค้นหา Catalog/REF, รหัส, ชื่อสินค้า" autoComplete="off" inputMode="search" />
     </label>
+    {results.length ? <p className="text-xs font-semibold text-[#58747d]" role="status">พบ {results.length} รายการ — แตะที่ชื่อสินค้าเพื่อเลือกก่อนเพิ่มรายการ</p> : null}
     <ul className="max-h-72 divide-y divide-[#edf2f2] overflow-y-auto rounded-md border border-[#dce8e9] bg-white" role="listbox" aria-label="ผลการค้นหา Item">
       {results.map((item) => <li key={item.id}>
         <button type="button" role="option" aria-selected={false} disabled={disabled} onClick={() => onChange(item.id)} className="flex min-h-12 w-full flex-col items-start px-3 py-2 text-left hover:bg-[#f4fbf9] focus:bg-[#f4fbf9] focus:outline-none">

@@ -214,7 +214,9 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
     // unmatched GTINs are excluded before onUse ever fires (see PackageScan),
     // and GTIN/AI 240 are still never written into Catalog/REF — only an
     // existing Item Master id.
-    const scannedItemId = result.itemId
+    // Accept the canonical response.itemId; tolerate an older API response
+    // where the same resolved ID was present only under parsed.itemId.
+    const scannedItemId = result.itemId ?? result.parsed.itemId ?? null
     // A package scan identifies the item and prefills lot/expiry, but does
     // not establish the quantity in stock units. The operator must enter
     // the actual received quantity and explicitly add the receiving line.
@@ -230,7 +232,7 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
 
   function addLine() {
     const qty = Number(editor.receivedQty)
-    if (!editor.itemId || !selectedItem) return setLineError('กรุณาเลือก Item / Catalog-REF จาก Item Master')
+    if (!editor.itemId || !selectedItem) return setLineError('กรุณาเลือก Item / Catalog-REF จาก Item Master — แตะสินค้าที่พบในผลค้นหาเพื่อยืนยันการเลือก')
     if (!editor.locationId) return setLineError('กรุณาเลือก location')
     if (selectedItem.trackLot && !editor.lotNumber.trim()) return setLineError('กรุณาระบุ Lot')
     if (selectedItem.trackExpiry && !editor.expiryDate) return setLineError('กรุณาระบุวันหมดอายุ')
@@ -405,7 +407,7 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
       {stepTitle(3, 'เพิ่มรายการรับ: Scan → Item/Lot/Expiry → จำนวน', lines.length > 0)}
       <PackageScan key={scanResetKey} selectedItemId={editor.itemId} disabled={busy} onUse={applyScan} resolveScan={adapter.resolveScan} onScanDiagnostics={adapter.onScanDiagnostics} />
       <p className="text-xs text-[#58747d]">สแกนเพื่อเติม Item / Lot / Expiry จากนั้นระบุจำนวนที่ได้รับจริงและกดเพิ่มรายการนี้ (สแกนซ้ำไม่เพิ่มจำนวนอัตโนมัติ)</p>
-      {editor.scan ? <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#58747d]"><span className="flex items-center gap-1"><ScanLine className="size-4" />ใช้ข้อมูลจาก barcode {editor.scan.standard?.toUpperCase()}{itemAutoSelectedFromScan ? ' · เลือก Item ให้อัตโนมัติจาก GTIN ที่ตรงกันแบบไม่กำกวม — ตรวจสอบก่อนเพิ่มรายการ' : ''}</span><button type="button" className="min-h-11 px-2 font-semibold text-[#0b7f76] underline" onClick={() => patchEditor({ scan: null })}>ล้างข้อมูล barcode</button></div> : null}
+      {editor.scan ? <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#58747d]"><span className="flex items-center gap-1"><ScanLine className="size-4" />ใช้ข้อมูลจาก barcode {editor.scan.standard?.toUpperCase()}{itemAutoSelectedFromScan ? ' · เลือก Item ให้อัตโนมัติจาก GTIN หรือ REF ที่ตรงกับ Item Master — ตรวจสอบก่อนเพิ่มรายการ' : ''}</span><button type="button" className="min-h-11 px-2 font-semibold text-[#0b7f76] underline" onClick={() => patchEditor({ scan: null })}>ล้างข้อมูล barcode</button></div> : null}
       <Button type="button" variant="secondary" disabled={busy} onClick={() => setLineDialogOpen(true)}><PackagePlus className="size-4" />เพิ่มรายการด้วยตนเอง / กรอกจำนวน</Button>
       {editor.scan ? <p className="text-xs text-[#58747d]">ข้อมูลสแกนถูกเก็บไว้ในแบบร่าง กดกรอกจำนวนเพื่อดำเนินการต่อ</p> : null}
       {lineDialogOpen ? <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#0d2430]/60 sm:items-center sm:p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setLineDialogOpen(false) }}>

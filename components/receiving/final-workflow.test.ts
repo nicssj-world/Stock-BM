@@ -34,7 +34,8 @@ describe('final receiving workflow', () => {
   it('opens a quantity dialog after scans and preserves the draft until explicit add', () => {
     const scanFn = wizard.slice(wizard.indexOf('function applyScan'), wizard.indexOf('function addLine'))
     expect(scanFn).toContain('setLineDialogOpen(true)')
-    expect(scanFn).toContain('const scannedItemId = result.itemId')
+    expect(scanFn).toContain('const scannedItemId = result.itemId ?? result.parsed.itemId ?? null')
+    expect(scanFn).toContain('...(scannedItemId && !editor.itemId ? { itemId: scannedItemId } : {})')
     expect(wizard).toContain('role="dialog"')
     expect(wizard).toContain('aria-modal="true"')
     expect(wizard).toContain('setLineDialogOpen(false)')
