@@ -105,11 +105,12 @@ export function PackageScan({
 
   const parsed = result?.parsed
   const matchTone = result?.match.kind === 'exact_unique' ? 'accepted' : result?.match.kind === 'exact_ambiguous' ? 'investigate' : 'neutral'
+  const matchedByCatalog = result?.match.source === 'ai240_catalog'
   const matchLabel = result?.match.kind === 'exact_unique'
-    ? 'GTIN ตรงกับ Item เดียว'
+    ? (matchedByCatalog ? 'AI 240 ตรง REF ใน Item Master — ตรวจสอบสินค้า' : 'GTIN ตรงกับ Item เดียว')
     : result?.match.kind === 'exact_ambiguous'
-      ? (result.conflicts.length ? 'GTIN ตรงหลาย Item — ต้องเลือกเอง' : 'GTIN ตรงกับ Item ที่เลือก')
-      : 'ไม่พบ GTIN ใน Item Master — เลือก Item เอง'
+      ? (result.conflicts.length ? (matchedByCatalog ? 'REF ตรงหลาย Item — เลือกเอง' : 'GTIN ตรงหลาย Item — เลือกเอง') : 'Item ตรงกับรายการที่เลือก')
+      : 'ยังไม่พบ Item — เลือกเองในหน้าต่างรับเข้า'
 
   return <div className="space-y-3 rounded-md border border-[#cfe1e2] bg-white p-3">
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -132,7 +133,7 @@ export function PackageScan({
         <p>Expiry: <span className="mono font-semibold text-[#173d50]">{parsed.expiry ?? 'ไม่มีใน barcode — กรอกเอง'}</span></p>
       </div>
       {applied ? <p className="flex items-center gap-1 text-xs font-semibold text-[#2f7d44]"><CheckCircle2 className="size-4" />เติมข้อมูลจาก barcode แล้ว — ตรวจสอบก่อนยืนยัน</p> : null}
-      {result.match.kind === 'exact_ambiguous' && result.conflicts.length ? <fieldset className="space-y-1 text-xs text-[#8f5f1d]"><legend className="font-semibold">GTIN นี้ผูกกับหลาย Item — เลือก Item ที่ตรงกับ package</legend>{result.match.candidates.map((candidate) => <label key={candidate.itemId} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-[#eed4a6] bg-white px-2"><input type="radio" name="package-scan-item" checked={candidateChoice === candidate.itemId} onChange={() => setCandidateChoice(candidate.itemId)} />{candidate.itemCode} · {candidate.name}</label>)}<Button type="button" disabled={disabled || busy || !candidateChoice} onClick={useCandidate}><CheckCircle2 className="size-4" />ใช้ Item นี้</Button></fieldset> : null}
+      {result.match.kind === 'exact_ambiguous' && result.conflicts.length ? <fieldset className="space-y-1 text-xs text-[#8f5f1d]"><legend className="font-semibold">{matchedByCatalog ? 'REF นี้ตรงกับหลาย Item — เลือกสินค้าที่ถูกต้อง' : 'GTIN นี้ผูกกับหลาย Item — เลือก Item ที่ตรงกับ package'}</legend>{result.match.candidates.map((candidate) => <label key={candidate.itemId} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-[#eed4a6] bg-white px-2"><input type="radio" name="package-scan-item" checked={candidateChoice === candidate.itemId} onChange={() => setCandidateChoice(candidate.itemId)} />{candidate.itemCode} · {candidate.name}</label>)}<Button type="button" disabled={disabled || busy || !candidateChoice} onClick={useCandidate}><CheckCircle2 className="size-4" />ใช้ Item นี้</Button></fieldset> : null}
       {result.conflicts.some((conflict) => conflict.code === 'barcode_item_mismatch') ? <Notice tone="danger">{result.conflicts.map((conflict) => conflict.message).join(' ')} — ไม่ได้เติมข้อมูล ตรวจสอบ Item หรือสแกนใหม่</Notice> : null}
       <details className="text-xs text-[#58747d]">
         <summary className="cursor-pointer py-1 font-semibold">ข้อมูล barcode เพิ่มเติม</summary>
@@ -144,7 +145,7 @@ export function PackageScan({
           <div><dt className="inline">Serial (AI 21): </dt><dd className="mono inline">{parsed.serial ?? '—'}</dd></div>
           <div><dt className="inline">Standard / Symbology: </dt><dd className="mono inline">{parsed.standard ?? '—'} · {parsed.symbologyId ?? '—'}</dd></div>
         </dl>
-        <p className="mt-1 text-[11px] text-[#81979c]">GTIN และ AI 240 เก็บเป็นหลักฐานเท่านั้น ไม่ใช้แทน Catalog/REF</p>
+        <p className="mt-1 text-[11px] text-[#81979c]">GTIN และ AI 240 เก็บเป็นหลักฐาน โดย AI 240 อาจใช้ค้นหา REF ที่มีอยู่จริงใน Item Master แต่ไม่เขียนทับ REF</p>
         {parsed.catalogCandidate ? <p className="mt-1 text-[11px] text-[#8f5f1d]">หมายเหตุผู้ผลิต: {parsed.catalogCandidate.reason}</p> : null}
       </details>
     </div> : null}

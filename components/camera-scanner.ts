@@ -80,11 +80,13 @@ export function useCameraScanner({
   onError,
   stopOnScan = false,
   dedupeMs = 1500,
+  scanMode = 'package',
 }: {
   onScan: (code: string, details?: CameraScanResult) => void
   onError: (message: string) => void
   stopOnScan?: boolean
   dedupeMs?: number
+  scanMode?: 'package' | 'document'
 }) {
   const [cameraOn, setCameraOn] = useState(false)
   const [starting, setStarting] = useState(false)
@@ -154,7 +156,13 @@ export function useCameraScanner({
         import('@zxing/library'),
       ])
       const hints = new Map()
-      hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+      hints.set(DecodeHintType.TRY_HARDER, true)
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, scanMode === 'document' ? [
+        BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.CODE_93,
+        BarcodeFormat.CODABAR, BarcodeFormat.ITF, BarcodeFormat.EAN_13,
+        BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E,
+        BarcodeFormat.PDF_417, BarcodeFormat.QR_CODE,
+      ] : [
         BarcodeFormat.AZTEC,
         BarcodeFormat.CODABAR,
         BarcodeFormat.CODE_39,
@@ -202,7 +210,7 @@ export function useCameraScanner({
       controlsRef.current?.stop()
       controlsRef.current = null
     }
-  }, [cameraOn, dedupeMs, stop, stopOnScan])
+  }, [cameraOn, dedupeMs, scanMode, stop, stopOnScan])
 
   useEffect(() => stop, [stop])
 

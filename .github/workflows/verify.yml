@@ -1,4 +1,4 @@
-name: HPV regression, lint and typecheck
+name: Receiving and HPV regression, lint and typecheck
 on:
   push:
     branches: [main, 'fix/**']
@@ -15,7 +15,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test -- hpv
+      - run: npx vitest run components/receiving/final-workflow.test.ts components/camera-scanner.test.ts app/api/receiving/scan/parse/route.test.ts lib/receiving/package-scan.test.ts
       - run: npx eslint lib/hpv/pagination.ts lib/hpv/pagination.test.ts lib/server/hpv.ts components/hpv-view.tsx
+      - run: npx eslint components/receiving/receive-wizard.tsx components/receiving/package-scan.tsx components/receiving/scan-text-field.tsx components/receiving/item-picker.tsx components/camera-scanner.ts app/api/receiving/scan/parse/route.ts lib/receiving/package-scan.ts
       - run: npx tsc --noEmit
       - run: npm run build
         env:

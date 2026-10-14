@@ -15,6 +15,7 @@ export type PackageScanConflict = {
 }
 
 export type PackageScanMatch = {
+  source: 'gtin' | 'ai240_catalog' | null
   kind: 'exact_unique' | 'exact_ambiguous' | 'none'
   itemId: string | null
   candidates: PackageScanCandidate[]
@@ -27,22 +28,22 @@ export type PackageScanResolution = {
   conflicts: PackageScanConflict[]
 }
 
-export function matchPackageBarcode(parsed: ParsedBarcode, candidates: PackageScanCandidate[], selectedItemId: string | null): PackageScanResolution {
+export function matchPackageBarcode(parsed: ParsedBarcode, candidates: PackageScanCandidate[], selectedItemId: string | null, source: 'gtin' | 'ai240_catalog' = 'gtin'): PackageScanResolution {
   const uniqueCandidates = [...new Map(candidates.map((candidate) => [candidate.itemId, candidate])).values()]
-  if (!parsed.gtin || uniqueCandidates.length === 0) {
-    return { parsed, itemId: null, match: { kind: 'none', itemId: null, candidates: [] }, conflicts: [] }
+  if ((!parsed.gtin && source === 'gtin') || uniqueCandidates.length === 0) {
+    return { parsed, itemId: null, match: { kind: 'none', source: null, itemId: null, candidates: [] }, conflicts: [] }
   }
 
   if (uniqueCandidates.length > 1) {
     // The user already chose one of the exact candidates from Item Master:
     // the barcode is consistent with that choice, nothing is guessed.
     if (selectedItemId && uniqueCandidates.some((candidate) => candidate.itemId === selectedItemId)) {
-      return { parsed, itemId: selectedItemId, match: { kind: 'exact_ambiguous', itemId: selectedItemId, candidates: uniqueCandidates }, conflicts: [] }
+      return { parsed, itemId: selectedItemId, match: { kind: 'exact_ambiguous', source, itemId: selectedItemId, candidates: uniqueCandidates }, conflicts: [] }
     }
     return {
       parsed,
       itemId: null,
-      match: { kind: 'exact_ambiguous', itemId: null, candidates: uniqueCandidates },
+      match: { kind: 'exact_ambiguous', source, itemId: null, candidates: uniqueCandidates },
       conflicts: [{ code: 'ambiguous_gtin', message: 'GTIN ตรงกับหลายรายการ ต้องเลือก Item เองก่อนใช้ข้อมูล', target: 'stockItemId' }],
     }
   }
@@ -52,7 +53,7 @@ export function matchPackageBarcode(parsed: ParsedBarcode, candidates: PackageSc
     return {
       parsed,
       itemId: null,
-      match: { kind: 'exact_unique', itemId: null, candidates: uniqueCandidates },
+      match: { kind: 'exact_unique', source, itemId: null, candidates: uniqueCandidates },
       conflicts: [{ code: 'barcode_item_mismatch', message: 'GTIN ของ package ไม่ตรงกับ Item ที่เลือกไว้', target: 'stockItemId' }],
     }
   }
@@ -60,7 +61,7 @@ export function matchPackageBarcode(parsed: ParsedBarcode, candidates: PackageSc
   return {
     parsed,
     itemId: candidate.itemId,
-    match: { kind: 'exact_unique', itemId: candidate.itemId, candidates: uniqueCandidates },
+    match: { kind: 'exact_unique', source, itemId: candidate.itemId, candidates: uniqueCandidates },
     conflicts: [],
   }
 }

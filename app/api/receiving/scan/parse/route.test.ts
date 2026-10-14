@@ -13,6 +13,13 @@ describe('package scan parse route', () => {
     expect(source).toContain('matchPackageBarcode(')
   })
 
+  it('falls back to a confirmed Item Master catalog value from AI 240 without creating a new REF', () => {
+    expect(source).toContain("from('bm_stock_items')")
+    expect(source).toContain(".eq('catalog_no_normalized', catalog)")
+    expect(source).toContain("source = 'ai240_catalog'")
+    expect(source).toContain('!candidates.length && parsed.additionalProductId')
+  })
+
   it('has no stock mutation or ledger call', () => {
     expect(source).not.toMatch(/\.insert\(|\.update\(|\.delete\(|\.rpc\(/)
     expect(source).not.toMatch(/receive_bm_stock|issue_bm_stock|adjust_bm_stock/)
