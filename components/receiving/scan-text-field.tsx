@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Camera, X } from 'lucide-react'
 import { useCameraScanner } from '@/components/camera-scanner'
-import { Button, Field, Input, Notice } from '@/components/ui'
+import { Button, Input, Notice } from '@/components/ui'
 
 /**
  * A text field that can also be filled by scanning a barcode/QR with the
@@ -47,7 +47,8 @@ export function ScanTextField({
     scanMode,
   })
 
-  return <Field label={label} hint={hint}>
+  return <div className="block">
+    <p className="mb-1 text-xs font-semibold text-[#58747d]">{label}</p>
     <div className="flex gap-2">
       <Input value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} placeholder={placeholder} />
       <Button
@@ -60,6 +61,7 @@ export function ScanTextField({
         {cameraOn ? <X className="size-4" /> : <Camera className="size-4" />}
       </Button>
     </div>
+    {hint ? <p className="mt-1 text-[11px] text-[#8ba0a5]">{hint}</p> : null}
     {cameraOn ? <div className="relative mt-2 overflow-hidden rounded-md border border-[#d6e2e3] bg-black">
       <video ref={videoRef} className="aspect-video w-full object-cover" muted playsInline />
       <div className="pointer-events-none absolute inset-0 grid place-items-center">
@@ -68,5 +70,5 @@ export function ScanTextField({
     </div> : null}
     {cameraOn ? <p className="mt-1 text-xs text-[#58747d]">วางบาร์โค้ดแนวนอนให้เต็มกรอบ เลื่อนกล้องเข้าออกเพื่อปรับโฟกัส</p> : null}
     {error ? <Notice tone="danger">{error} — สามารถพิมพ์เลขจากบาร์โค้ดแทนได้</Notice> : null}
-  </Field>
+  </div>
 }

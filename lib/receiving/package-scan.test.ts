@@ -49,6 +49,17 @@ describe('matchPackageBarcode', () => {
     expect(result.conflicts[0]?.code).toBe('barcode_item_mismatch')
   })
 
+  it('uses an exact existing REF candidate from AI 240 only when provided by the resolver', () => {
+    const parsed = { ...parseBarcode(fixtureData['gs1-128'].raw, fixtureData['gs1-128'].symbologyId), additionalProductId: '09040803190' }
+    const resolution = matchPackageBarcode(parsed, candidates.slice(0, 1), null, 'ai240_catalog')
+    expect(resolution.match.source).toBe('ai240_catalog')
+    expect(resolution.itemId).toBe('item-1')
+    expect(resolution.parsed.catalog).toBeNull()
+    const ambiguous = matchPackageBarcode(parsed, candidates, null, 'ai240_catalog')
+    expect(ambiguous.itemId).toBeNull()
+    expect(ambiguous.conflicts[0]?.code).toBe('ambiguous_gtin')
+  })
+
   it('keeps a no-GTIN payload usable as a manual raw scan without selecting an item', () => {
     const parsed = parseBarcode(fixtureData['hibc-secondary'].raw)
     const result = matchPackageBarcode(parsed, candidates, null)
