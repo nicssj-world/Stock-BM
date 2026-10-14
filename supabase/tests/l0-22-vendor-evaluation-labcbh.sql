@@ -183,7 +183,8 @@ begin
   perform pg_temp.expect_err(format('select public.finalize_bm_vendor_annual_evaluation(%L, %L)', v_admin, v_rev), 'BM_ANNUAL_SIGNATURE_MISSING');
   perform public.save_bm_user_signature(v_admin2, v_png);
   -- Evidence that changes after the draft was captured blocks finalizing until it is refreshed.
-  perform public.open_bm_vendor_issue(v_staff, v_vendor, 'other', 'raised after the draft');
+  -- Attach the late issue to a FY2569 receipt: manual issues without a receipt are classified by their actual opening FY (October is FY2570).
+  perform public.open_bm_vendor_issue(v_staff, v_vendor, 'other', 'raised after the draft', v_r1);
   perform pg_temp.expect_err(format('select public.finalize_bm_vendor_annual_evaluation(%L, %L)', v_staff, v_rev), 'BM_ACCESS_DENIED');
   perform pg_temp.expect_err(format('select public.finalize_bm_vendor_annual_evaluation(%L, %L)', v_admin, v_rev), 'BM_ANNUAL_EVIDENCE_STALE');
   perform public.refresh_bm_vendor_annual_evaluation_draft(v_admin, v_rev);
