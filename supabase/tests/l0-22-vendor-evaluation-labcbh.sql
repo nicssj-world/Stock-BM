@@ -214,7 +214,7 @@ begin
   -- A vendor with no data has nothing to score.
   perform public.save_bm_vendor_annual_evaluation_draft(v_admin, public.create_bm_vendor_annual_evaluation_draft(v_admin, v_vendor2, v_fy),
     '{"summary":"a","strengths":"b","risksConcerns":"c","recommendations":"d","evaluatorId":"00000000-0000-0000-0000-000000000001","reviewerId":"00000000-0000-0000-0000-000000000001","approverId":"00000000-0000-0000-0000-000000000001"}'::jsonb);
-  perform pg_temp.expect_err(format('select public.finalize_bm_vendor_annual_evaluation(%L, (select r.id from public.bm_vendor_annual_evaluation_revisions r join public.bm_vendor_annual_evaluations e on e.id = r.evaluation_id where e.vendor_id = %L))', v_admin, v_vendor2), 'BM_ANNUAL_NO_APPLICABLE_CRITERIA');
+  perform pg_temp.expect_err(format('select public.finalize_bm_vendor_annual_evaluation(%L, (select r.id from public.bm_vendor_annual_evaluation_revisions r join public.bm_vendor_annual_evaluations e on e.id = r.evaluation_id where e.vendor_id = %L))', v_admin, v_vendor2), 'BM_ANNUAL_COVERAGE_LOW');
 
   -- The Stock1 scaffolding is gone, and the fiscal year turns over on 1 October.
   if to_regclass('public.bm_vendor_evaluations') is not null or to_regclass('public.bm_vendor_eval_policies') is not null then raise exception 'L0-22 retired evaluation tables still exist'; end if;

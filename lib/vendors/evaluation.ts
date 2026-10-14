@@ -157,7 +157,6 @@ export function draftInputError(input: Pick<DraftInput, 'summary' | 'strengths' 
 export function finalizeReadiness(r: { summary: string | null; strengths: string | null; risksConcerns: string | null; recommendations: string | null; evaluatorId: string | null; reviewerId: string | null; approverId: string | null }, policyApproved: boolean): string[] {
   const problems: string[] = []
   if (!policyApproved) problems.push('นโยบายที่ใช้ยังเป็นข้อเสนอ ยังไม่ได้อนุมัติ')
-  if (!r.summary || !r.strengths || !r.risksConcerns || !r.recommendations) problems.push('กรอกสรุป จุดแข็ง ความเสี่ยง และข้อเสนอแนะให้ครบทั้ง 4 ช่อง')
   if (!r.evaluatorId || !r.reviewerId || !r.approverId) problems.push('เลือกผู้ประเมิน ผู้ทบทวน และผู้อนุมัติให้ครบ')
   return problems
 }
