@@ -437,7 +437,7 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
             <Button type="button" disabled={busy} onClick={addLine}><PackagePlus className="size-4" />เพิ่มรายการนี้</Button>
           </div>
         </div>
-      </div>}
+      </div> : null}
     </Card>
 
     <Card className="space-y-3 p-4">
