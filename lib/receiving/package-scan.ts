@@ -65,3 +65,15 @@ export function matchPackageBarcode(parsed: ParsedBarcode, candidates: PackageSc
     conflicts: [],
   }
 }
+
+/**
+ * The receiving API must return the resolved Item ID at the top level.
+ * Keeping a copy in parsed.itemId supports existing scanner consumers, but
+ * the popup reads response.itemId. Omitting it silently drops a valid REF match.
+ */
+export function packageScanResponse(resolution: PackageScanResolution) {
+  return {
+    ...resolution,
+    parsed: { ...resolution.parsed, itemId: resolution.itemId },
+  }
+}

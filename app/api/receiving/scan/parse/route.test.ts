@@ -11,6 +11,7 @@ describe('package scan parse route', () => {
     expect(source).toContain('parseBarcode(')
     expect(source).toContain("from('bm_stock_item_barcodes')")
     expect(source).toContain('matchPackageBarcode(')
+    expect(source).toContain('return packageScanResponse(resolution)')
   })
 
   it('falls back to a confirmed Item Master catalog value from AI 240 without creating a new REF', () => {

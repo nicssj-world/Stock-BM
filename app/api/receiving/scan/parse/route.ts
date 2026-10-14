@@ -1,7 +1,7 @@
 import { requireStockOperator } from '@/lib/server/auth'
 import { parseBarcode } from '@/lib/receiving/barcode'
 import { normalizeCatalog } from '@/lib/receiving/item-search'
-import { matchPackageBarcode, type PackageScanCandidate } from '@/lib/receiving/package-scan'
+import { matchPackageBarcode, packageScanResponse, type PackageScanCandidate } from '@/lib/receiving/package-scan'
 import { assertReceivingEnabled } from '@/lib/server/receiving'
 import { HttpError } from '@/lib/server/errors'
 import { getAdminClient } from '@/lib/supabase/admin'
@@ -86,10 +86,6 @@ export async function POST(request: Request) {
     }
 
     const resolution = matchPackageBarcode(parsed, candidates, input.stockItemId ?? null, source)
-    return {
-      parsed: { ...resolution.parsed, itemId: resolution.itemId },
-      match: resolution.match,
-      conflicts: resolution.conflicts,
-    }
+    return packageScanResponse(resolution)
   })
 }
