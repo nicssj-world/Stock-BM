@@ -6,6 +6,7 @@ create table if not exists public.bm_portal_equipment_refs (
   lab_code text not null unique,
   name text not null,
   model text,
+  serial_number text,
   status text not null default 'active'
     check (status in ('active','maintenance','out_of_service','decommissioned')),
   portal_url text,
@@ -37,8 +38,8 @@ grant select, insert, update, delete on public.bm_portal_equipment_links to serv
 
 -- Migrate associations by identity. Preserve all source rows for history.
 insert into public.bm_portal_equipment_refs
-  (portal_equipment_id, lab_code, name, model, status)
-select portal_equipment_id, code, name, model, status
+  (portal_equipment_id, lab_code, name, model, serial_number, status)
+select portal_equipment_id, code, name, model, serial_number, status
 from public.bm_equipment
 where portal_equipment_id is not null
 on conflict (portal_equipment_id) do nothing;
