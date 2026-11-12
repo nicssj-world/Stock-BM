@@ -20,6 +20,7 @@ import type {
 import { writeAudit } from '@/lib/server/audit'
 import { HttpError } from '@/lib/server/errors'
 import { getAdminClient } from '@/lib/supabase/admin'
+import { replacePortalEquipmentLinks } from '@/lib/server/portal-equipment-references'
 
 type RecordRow = Record<string, unknown>
 
@@ -82,9 +83,9 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
       ? admin.from('bm_stock_transactions').select('*').order('created_at', { ascending: false }).limit(500)
       : Promise.resolve({ data: [], error: null }),
     admin.from('bm_stock_lot_location_balances').select('lot_id,location_id,on_hand'),
-    admin.from('bm_equipment').select('id,code,name,status').order('code'),
+    admin.from('bm_portal_equipment_refs').select('portal_equipment_id,lab_code,name,status').order('lab_code'),
     admin.from('bm_vendors').select('id,code,name,is_active').order('code'),
-    admin.from('bm_stock_item_equipment_links').select('stock_item_id,equipment_id'),
+    admin.from('bm_portal_equipment_links').select('entity_id,portal_equipment_id').eq('module', 'stock'),
     admin.from('bm_stock_item_location_links').select('stock_item_id,location_id'),
     admin.from('bm_stock_item_vendors').select('stock_item_id,vendor_id'),
   ])
@@ -110,8 +111,8 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
   const transactionRows = (transactionData ?? []) as RecordRow[]
   const balanceRows = (balanceData ?? []) as RecordRow[]
   const equipmentOptions: StockEquipmentOption[] = ((equipmentData ?? []) as RecordRow[]).map((row) => ({
-    id: asString(row.id),
-    code: asString(row.code),
+    id: asString(row.portal_equipment_id),
+    code: asString(row.lab_code),
     name: asString(row.name),
     status: asString(row.status),
   }))
@@ -124,8 +125,8 @@ export async function getStockWorkspace(actor: BmActor, options: { includeTransa
   }))
   const equipmentIdsByItem = new Map<string, string[]>()
   for (const row of (itemEquipmentLinkData ?? []) as RecordRow[]) {
-    const itemId = asString(row.stock_item_id)
-    const equipmentId = asString(row.equipment_id)
+    const itemId = asString(row.entity_id)
+    const equipmentId = asString(row.portal_equipment_id)
     if (!itemId || !equipmentId) continue
     equipmentIdsByItem.set(itemId, [...(equipmentIdsByItem.get(itemId) ?? []), equipmentId])
   }
@@ -333,24 +334,8 @@ function assertTracking(trackLot: boolean, trackExpiry: boolean) {
 
 async function replaceItemEquipmentLinks(itemId: string, equipmentIds: string[] | undefined, actor: BmActor) {
   if (equipmentIds === undefined) return
-  const uniqueEquipmentIds = [...new Set(equipmentIds.filter(Boolean))]
-  const admin = getAdminClient()
-  if (uniqueEquipmentIds.length) {
-    const { data, error } = await admin.from('bm_equipment').select('id').in('id', uniqueEquipmentIds)
-    fail(error)
-    const foundIds = new Set(((data ?? []) as RecordRow[]).map((row) => asString(row.id)))
-    if (foundIds.size !== uniqueEquipmentIds.length) throw new HttpError(400, 'One or more selected equipment records were not found')
-  }
-  const { error: deleteError } = await admin.from('bm_stock_item_equipment_links').delete().eq('stock_item_id', itemId)
-  fail(deleteError)
-  if (uniqueEquipmentIds.length) {
-    const { error: insertError } = await admin.from('bm_stock_item_equipment_links').insert(uniqueEquipmentIds.map((equipmentId) => ({
-      stock_item_id: itemId,
-      equipment_id: equipmentId,
-      created_by: actor.id,
-    })))
-    fail(insertError)
-  }
+  // Stock mappings are now separate from the archived equipment registry.
+  await replacePortalEquipmentLinks(actor, 'stock', itemId, equipmentIds)
 }
 
 async function replaceItemLocationLinks(itemId: string, locationIds: string[] | undefined, actor: BmActor) {
