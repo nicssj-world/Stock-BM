@@ -276,6 +276,7 @@ function CreateForm({ data, onDone, onCancel }: { data: LotVerifWorkspace; onDon
               </Select>
             </Field>
           </div>
+          <p className="mt-2 text-xs text-[#58747d]">เครื่องมือ Lot Verification ใช้การเชื่อมเดียวกับ IQC · <Link href="/iqc?setup=equipment" className="font-bold text-[#0b7f76] underline">จัดการเครื่องมือ Portal ใน IQC</Link></p>
         </section>
 
         <section className="rounded-lg border border-[#e3ebec] p-3 sm:p-4" aria-labelledby="lotverif-create-method">
