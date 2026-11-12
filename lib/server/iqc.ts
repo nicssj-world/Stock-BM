@@ -42,10 +42,12 @@ import { normalizeTestSets, parseTestSets } from '@/lib/iqc/test-sets'
 import { sigmaRating, sixSigma, teaPercent } from '@/lib/iqc/sixsigma'
 import { combinedRelative, divisorFor, expandedRelative, pooledRsd, relativeStandardUncertainty, standardUncertainty } from '@/lib/iqc/uncertainty'
 import type { BmActor } from '@/lib/bm/types'
+import { canUsePortalEquipmentStatus, normalizePortalEquipmentStatus } from '@/lib/equipment/portal-reference-status'
 import { bangkokDateKey, todayBangkok } from '@/lib/bm/rules'
 import { writeAudit } from '@/lib/server/audit'
 import { deleteEntityAttachments } from '@/lib/server/attachments'
 import { HttpError } from '@/lib/server/errors'
+import { refreshPortalEquipmentReference } from '@/lib/server/portal-equipment-references'
 import { getAdminClient } from '@/lib/supabase/admin'
 
 type RecordRow = Record<string, unknown>
@@ -116,17 +118,22 @@ async function assertLinkedIqcInstrument(instrumentId: string) {
   const admin = getAdminClient()
   const [{ data: instrument, error: instrumentError }, { data: link, error: linkError }] = await Promise.all([
     admin.from('iqc_instruments').select('id,is_active').eq('id', normalizedId).maybeSingle(),
-    admin.from('bm_equipment_module_links').select('equipment_id').eq('module', 'iqc').eq('entity_type', 'instrument').eq('entity_id', normalizedId).maybeSingle(),
+    admin.from('bm_portal_equipment_links').select('portal_equipment_id')
+      .eq('module', 'iqc').eq('entity_id', normalizedId).maybeSingle(),
   ])
   fail(instrumentError)
   fail(linkError)
   if (!instrument || !Boolean((instrument as RecordRow).is_active)) throw new HttpError(400, 'เครื่องมือ IQC นี้ไม่พร้อมใช้งาน')
-  const equipmentId = nullableString((link as RecordRow | null)?.equipment_id)
-  if (!equipmentId) throw new HttpError(400, 'เครื่องมือ IQC นี้ยังไม่ได้เชื่อมกับ Equipment — ให้เชื่อมจากหน้า Equipment ก่อน')
-  const { data: equipment, error: equipmentError } = await admin.from('bm_equipment').select('id,status').eq('id', equipmentId).maybeSingle()
+  const equipmentId = nullableString((link as RecordRow | null)?.portal_equipment_id)
+  if (!equipmentId) throw new HttpError(400, 'เครื่องมือ IQC ยังไม่ได้เชื่อมกับ Portal · เปิดการตั้งค่า IQC เพื่อเชื่อมเครื่องมือ')
+  await refreshPortalEquipmentReference(equipmentId)
+  const { data: equipment, error: equipmentError } = await admin.from('bm_portal_equipment_refs')
+    .select('portal_equipment_id,status').eq('portal_equipment_id', equipmentId).maybeSingle()
   fail(equipmentError)
-  if (!equipment) throw new HttpError(400, 'ไม่พบ Equipment ที่เชื่อมกับเครื่องมือ IQC')
-  if (asString((equipment as RecordRow).status) === 'decommissioned') throw new HttpError(400, 'Equipment นี้เลิกใช้งานแล้ว จึงไม่สามารถใช้บันทึก IQC ได้')
+  if (!equipment) throw new HttpError(400, 'ไม่พบเครื่องมืออ้างอิงจาก Portal')
+  if (!canUsePortalEquipmentStatus(normalizePortalEquipmentStatus((equipment as RecordRow).status))) {
+    throw new HttpError(400, 'เครื่องมือ Portal ต้องมีสถานะ Active จึงบันทึก IQC ได้')
+  }
   return equipmentId
 }
 
@@ -359,7 +366,7 @@ function buildSetupHealth(input: {
       description: 'ใช้ Equipment เป็นแหล่งข้อมูลหลักของเครื่องมือ IQC',
       state: input.instruments.length ? 'complete' : 'blocked',
       count: input.instruments.length,
-      nextAction: input.instruments.length ? 'ตรวจสอบเครื่องมือที่เชื่อมแล้ว' : 'เชื่อมเครื่องมือจาก Equipment',
+      nextAction: input.instruments.length ? 'ตรวจสอบเครื่องมือที่เชื่อมแล้ว' : 'เชื่อมเครื่องมือจาก Portal',
     },
     {
       key: 'analyte',
@@ -473,10 +480,10 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     admin.from('eqa_results').select('iqc_analyte_id,assigned_value,submitted_value,eqa_rounds(status,submission_date)').not('iqc_analyte_id', 'is', null),
     admin.from('nipt_users').select('id,display_name').order('display_name'),
     admin.from('bm_audit_logs').select('entity_id,actor_id,detail,created_at').eq('action', 'iqc.lot.lockAndClose').order('created_at', { ascending: false }),
-    admin.from('bm_equipment_module_links').select('equipment_id,entity_id').eq('module', 'iqc').eq('entity_type', 'instrument'),
-    admin.from('bm_equipment').select('id,code,name,model,status'),
+    admin.from('bm_portal_equipment_links').select('portal_equipment_id,entity_id').eq('module', 'iqc'),
+    admin.from('bm_portal_equipment_refs').select('portal_equipment_id,lab_code,name,model,status'),
     admin.from('bm_stock_lots').select('id,item_id,lot_number,expiry_date,bm_stock_items!inner(item_code,name,is_active,bm_stock_categories!inner(name))').eq('bm_stock_items.is_active', true).eq('bm_stock_items.bm_stock_categories.name', 'Reagent').order('created_at', { ascending: false }),
-    admin.from('bm_stock_item_equipment_links').select('stock_item_id,equipment_id'),
+    admin.from('bm_portal_equipment_links').select('entity_id,portal_equipment_id').eq('module', 'stock'),
   ])
   fail(analyteError)
   fail(instrumentError)
@@ -502,14 +509,14 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
 
   const analytes = ((analyteData ?? []) as RecordRow[]).map(mapAnalyte)
   const allInstruments = ((instrumentData ?? []) as RecordRow[]).map(mapInstrument)
-  const equipmentById = new Map(((equipmentData ?? []) as RecordRow[]).map((row) => [asString(row.id), row]))
-  const equipmentIdByInstrument = new Map(((equipmentLinkData ?? []) as RecordRow[]).map((row) => [asString(row.entity_id), asString(row.equipment_id)]))
+  const equipmentById = new Map(((equipmentData ?? []) as RecordRow[]).map((row) => [asString(row.portal_equipment_id), row]))
+  const equipmentIdByInstrument = new Map(((equipmentLinkData ?? []) as RecordRow[]).map((row) => [asString(row.entity_id), asString(row.portal_equipment_id)]))
   for (const instrument of allInstruments) {
     const equipmentId = equipmentIdByInstrument.get(instrument.id)
     const equipment = equipmentId ? equipmentById.get(equipmentId) : undefined
     if (!equipmentId || !equipment) continue
     instrument.equipmentId = equipmentId
-    instrument.equipmentCode = asString(equipment.code)
+    instrument.equipmentCode = asString(equipment.lab_code)
     instrument.equipmentName = asString(equipment.name)
     instrument.equipmentStatus = asString(equipment.status) as IqcInstrument['equipmentStatus']
     // Equipment is the single source of truth for the label shown in IQC.
@@ -522,12 +529,14 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   // Keep the linked-record slice explicit: Equipment is the selector source,
   // while inactive/decommissioned records are removed from routine setup.
   const instruments = allInstruments.filter((instrument) => Boolean(instrument.equipmentId))
-  const activeLinkedInstruments = instruments.filter((instrument) => instrument.isActive && instrument.equipmentStatus !== 'decommissioned')
+  const activeLinkedInstruments = instruments.filter((instrument) => instrument.isActive
+    && instrument.equipmentStatus != null
+    && canUsePortalEquipmentStatus(instrument.equipmentStatus))
   const controlMaterials = ((materialData ?? []) as RecordRow[]).map(mapMaterial)
   const equipmentIdsByStockItem = new Map<string, string[]>()
   for (const row of (stockItemEquipmentLinkData ?? []) as RecordRow[]) {
-    const stockItemId = asString(row.stock_item_id)
-    const equipmentId = asString(row.equipment_id)
+    const stockItemId = asString(row.entity_id)
+    const equipmentId = asString(row.portal_equipment_id)
     if (stockItemId && equipmentId) equipmentIdsByStockItem.set(stockItemId, [...(equipmentIdsByStockItem.get(stockItemId) ?? []), equipmentId])
   }
   const stockLots: IqcStockLotOption[] = ((stockLotData ?? []) as RecordRow[]).map((row) => {
@@ -980,6 +989,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   return {
     analytes,
     instruments: activeLinkedInstruments,
+    instrumentCandidates: allInstruments,
     controlMaterials,
     controlLots,
     stockLots,

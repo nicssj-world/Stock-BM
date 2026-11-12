@@ -8,7 +8,7 @@ describe('scan-to-fill text field', () => {
   it('uses the shared camera scanner and stops after a single scan', () => {
     expect(source).toContain('useCameraScanner')
     expect(source).toContain('stopOnScan: true')
-    expect(source).toContain('onChange(code)')
+    expect(source).toContain('onChange(value)')
   })
 
   it('supports typing as well as scanning, and never parses the value as GS1/HIBC package data', () => {

@@ -2064,8 +2064,8 @@ function ManageTab({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (t: string
       <SettingsDisclosure title="Analyte / ชุดทดสอบ"><AnalyteForm onSubmit={(b) => post('/api/iqc/analytes', b, 'เพิ่ม analyte แล้ว')} onUpdate={(id, b) => post(`/api/iqc/analytes/${id}`, b, 'แก้ไข analyte แล้ว', 'PATCH')} onToggle={(id, a) => post(`/api/iqc/analytes/${id}`, { isActive: a }, a ? 'เปิดใช้ analyte แล้ว' : 'ปิด analyte แล้ว', 'PATCH')} onDelete={(id) => remove(`/api/iqc/analytes/${id}`, 'ลบ analyte แล้ว')} analytes={data.analytes} /></SettingsDisclosure>
       <SettingsDisclosure title="เครื่องมือ IQC"><Card className="space-y-2 p-4">
         <h2 className="font-bold text-[#173d50]">เครื่องมือ IQC</h2>
-        <p className="text-sm text-[#58747d]">เลือกเครื่องจากทะเบียน Equipment เท่านั้น เพื่อใช้ข้อมูลเครื่องและสถานะเดียวกันทั้งระบบ</p>
-        <Link className="inline-flex text-sm font-bold text-[#0b7f76] underline" href="/equipment?view=registry">ไปที่ทะเบียน Equipment เพื่อเปิดใช้กับ IQC</Link>
+        <p className="text-sm text-[#58747d]">เชื่อมเครื่องมือ IQC กับทะเบียนกลางใน Lab Management Portal</p>
+        <Link className="inline-flex text-sm font-bold text-[#0b7f76] underline" href="/iqc?setup=equipment">จัดการการเชื่อมเครื่องมือ Portal ใน IQC</Link>
         <div className="divide-y divide-[#eef3f3] rounded-md border border-[#e3ebec] text-xs">
           {data.instruments.map((instrument) => {
             const tests = data.controlPlans.filter((plan) => plan.isActive && plan.instrumentId === instrument.id)

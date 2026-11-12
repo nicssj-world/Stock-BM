@@ -4,11 +4,13 @@ import { describe, expect, it } from 'vitest'
 
 const reportPage = readFileSync(join(process.cwd(), 'app/(protected)/reports/stock-summary/page.tsx'), 'utf8')
 const legacyEndpoint = readFileSync(join(process.cwd(), 'app/api/reports/stock-summary.pdf/route.ts'), 'utf8')
+const printButton = readFileSync(join(process.cwd(), 'components/print-button.tsx'), 'utf8')
 
 describe('stock compliance report', () => {
   it('uses a print-ready HTML report with Thai font support and actionable risk details', () => {
-    expect(reportPage).toContain('Print / Save PDF')
-    expect(reportPage).toContain('window.print()')
+    expect(reportPage).toContain('<PrintButton id="print-stock-report" />')
+    expect(printButton).toContain('Print / Save PDF')
+    expect(printButton).toContain('window.print()')
     expect(reportPage).toContain('"Noto Sans Thai"')
     expect(reportPage).toContain('Lot / วันหมดอายุ')
     expect(reportPage).toContain('รายการเคลื่อนไหวล่าสุด')

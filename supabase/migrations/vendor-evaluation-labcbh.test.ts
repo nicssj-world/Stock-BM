@@ -73,8 +73,9 @@ describe('LABCBH vendor evaluation migrations', () => {
 
   it('never edits the migration history that is already applied', () => {
     const names = readdirSync(dir).filter((name) => name.endsWith('.sql')).sort()
-    const mine = names.filter((name) => name.startsWith('20260925'))
+    const mine = names.filter((name) => name.startsWith('20260925000'))
     expect(mine).toEqual(['202609250001_bm_vendor_evaluation_foundation.sql', '202609250002_bm_vendor_evaluation_policy.sql', '202609250003_bm_vendor_annual_evaluation.sql'])
-    expect(names.at(-1)).toBe(mine.at(-1))
+    const portalReferencesIndex = names.indexOf('202611120001_portal_equipment_references.sql')
+    expect(portalReferencesIndex).toBeGreaterThan(names.indexOf(mine.at(-1)!))
   })
 })

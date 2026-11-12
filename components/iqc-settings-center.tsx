@@ -27,6 +27,7 @@ import { parseTestSets } from '@/lib/iqc/test-sets'
 import { formatDate } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, Select, StatusBadge, type StatusTone, Textarea } from '@/components/ui'
 import { ManagedList } from '@/components/managed-list'
+import { PortalEquipmentLinker } from '@/components/portal-equipment-linker'
 
 type SetupKey = 'equipment' | 'analyte' | 'lot' | 'spec' | 'baseline' | 'plan' | 'advanced'
 type ReviewFilter = 'all' | 'included' | 'excluded' | 'void'
@@ -207,7 +208,7 @@ export function IqcSettingsCenter({ data, actor, initialSetup, initialInstrument
       </div>
 
       <div id="iqc-setup-panel" role="region" aria-live="polite">
-        {taskKey === 'equipment' ? <EquipmentTask data={data} /> : null}
+        {taskKey === 'equipment' ? <EquipmentTask data={data} actor={actor} /> : null}
         {taskKey === 'analyte' ? <AnalyteTask data={data} onOk={onOk} onErr={onErr} /> : null}
         {taskKey === 'lot' ? <ControlLotTask data={data} onOk={onOk} onErr={onErr} /> : null}
         {taskKey === 'spec' ? <AssignedSpecTask data={data} onOk={onOk} onErr={onErr} /> : null}
@@ -411,20 +412,64 @@ function AnalyteTask({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (text: s
   )
 }
 
-function EquipmentTask({ data }: { data: IqcWorkspace }) {
-  return (
-    <Card className="space-y-4 p-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div><h3 className="font-bold text-[#173d50]">เชื่อมเครื่องมือ</h3><p className="mt-1 text-sm text-[#6e878e]">IQC ใช้เครื่องมือจาก Equipment โดยตรง จึงไม่สร้าง instrument ซ้ำจากหน้านี้</p></div>
-        <Link href="/equipment" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-[#c9dadd] bg-white px-3.5 py-2 text-sm font-semibold text-[#244854] hover:bg-[#f7fbfb]">เปิด Equipment <ArrowRight className="size-4" aria-hidden="true" /></Link>
+function EquipmentTask({ data, actor }: { data: IqcWorkspace; actor: BmActor }) {
+  const [form, setForm] = useState({ code: '', name: '', model: '' })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  async function createInstrument(event: React.FormEvent) {
+    event.preventDefault()
+    setBusy(true); setError('')
+    try {
+      await api('/api/iqc/instruments', { method: 'POST', body: JSON.stringify(form) })
+      window.location.reload()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'เพิ่ม Instrument ไม่สำเร็จ') }
+    finally { setBusy(false) }
+  }
+  async function setInstrumentActive(instrumentId: string, isActive: boolean) {
+    setBusy(true); setError('')
+    try {
+      await api(`/api/iqc/instruments/${instrumentId}`, {
+        method: 'PATCH', body: JSON.stringify({ isActive }),
+      })
+      window.location.reload()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'เปลี่ยนสถานะ Instrument ไม่สำเร็จ') }
+    finally { setBusy(false) }
+  }
+  const candidates = data.instrumentCandidates ?? data.instruments
+  return <Card className="space-y-4 p-5">
+    <div><h3 className="font-bold text-[#173d50]">เชื่อมเครื่องมือจาก Lab Management Portal</h3>
+      <p className="mt-1 text-sm text-[#6e878e]">ทะเบียนเครื่องมืออยู่ใน Portal · IQC จัดเก็บเฉพาะ Instrument ที่ใช้กับการตรวจและความสัมพันธ์กับเครื่องมือจริง</p></div>
+    {candidates.map((instrument) => <div key={instrument.id} className="space-y-2 rounded-md border border-[#dbe8e9] bg-white p-3">
+      <div className="flex flex-wrap justify-between gap-2"><div><p className="font-semibold text-[#173d50]">{instrument.code} · {instrument.name}</p>
+        <p className="text-xs text-[#6e878e]">{instrument.equipmentCode ? `Portal: ${instrument.equipmentCode}` : 'ยังไม่เชื่อมกับ Portal'}</p></div>
+        <StatusBadge tone={instrument.equipmentStatus === 'active' ? 'accepted' : 'warning'} label={instrument.equipmentStatus ?? 'ยังไม่เชื่อม'} />
       </div>
-      {data.instruments.length ? (
-        <div className="overflow-x-auto rounded-md border border-[#e1ebec]">
-          <table className="w-full min-w-[640px] text-left text-sm"><thead className="bg-[#f7fbfb] text-xs text-[#789097]"><tr><th className="px-3 py-2">เครื่องมือ</th><th className="px-3 py-2">Equipment</th><th className="px-3 py-2">สถานะ</th></tr></thead><tbody className="divide-y divide-[#edf2f2]">{data.instruments.map((instrument) => <tr key={instrument.id}><td className="px-3 py-3"><span className="mono font-semibold text-[#173d50]">{instrument.code}</span><span className="ml-2 text-[#58747d]">{instrument.name}</span></td><td className="px-3 py-3 text-[#58747d]">{instrument.equipmentName ?? 'ยังไม่เชื่อม'}</td><td className="px-3 py-3"><StatusBadge tone={instrument.equipmentStatus === 'active' ? 'accepted' : 'warning'} label={instrument.equipmentStatus ?? 'ไม่ทราบสถานะ'} /></td></tr>)}</tbody></table>
+      {actor.role === 'Admin' ? <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-[#58747d]">สถานะใน IQC: {instrument.isActive ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}</span>
+          <Button type="button" variant="secondary" className="text-xs" disabled={busy}
+            onClick={() => setInstrumentActive(instrument.id, !instrument.isActive)}>
+            {instrument.isActive ? 'ปิดใช้ IQC Instrument' : 'เปิดใช้ IQC Instrument'}
+          </Button>
         </div>
-      ) : <Notice tone="warning">ยังไม่มีเครื่องมือ IQC ที่เชื่อมกับ Equipment ให้เปิด Equipment แล้วเชื่อม Cobas 8800 ก่อน</Notice>}
-    </Card>
-  )
+        <PortalEquipmentLinker module="iqc" entityId={instrument.id}
+          initialIds={instrument.equipmentId ? [instrument.equipmentId] : []} onSaved={() => window.location.reload()} />
+      </div> : null}
+    </div>)}
+    {!candidates.length ? <Notice tone="warning">ยังไม่มี Instrument สำหรับ IQC</Notice> : null}
+    {error ? <Notice tone="danger">{error}</Notice> : null}
+    {actor.role === 'Admin' ? <form onSubmit={createInstrument} className="space-y-2 rounded-md border border-[#d8e6e7] p-3">
+      <h4 className="text-sm font-bold">เพิ่ม Instrument สำหรับการตั้งค่า IQC</h4>
+      <p className="text-xs text-[#58747d]">สร้างเฉพาะ Instrument สำหรับงาน IQC แล้วเลือกเครื่องมือจาก Portal · ไม่ใช่การเพิ่มทะเบียนเครื่องมือใหม่</p>
+      <div className="grid gap-2 md:grid-cols-3">
+        <Field label="รหัส Instrument"><Input required value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })} /></Field>
+        <Field label="ชื่อ Instrument"><Input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></Field>
+        <Field label="Model"><Input value={form.model} onChange={(event) => setForm({ ...form, model: event.target.value })} /></Field>
+      </div>
+      <Button disabled={busy}>เพิ่ม Instrument</Button>
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+    </form> : null}
+  </Card>
 }
 
 function ControlLotTask({ data, onOk, onErr }: { data: IqcWorkspace; onOk: (text: string, data: IqcWorkspace) => void; onErr: (text: string) => void }) {

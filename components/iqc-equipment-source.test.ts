@@ -6,11 +6,13 @@ const iqcView = readFileSync(join(process.cwd(), 'components/iqc-view.tsx'), 'ut
 const equipmentView = readFileSync(join(process.cwd(), 'components/equipment-view.tsx'), 'utf8')
 const equipmentService = readFileSync(join(process.cwd(), 'lib/server/equipment.ts'), 'utf8')
 const iqcService = readFileSync(join(process.cwd(), 'lib/server/iqc.ts'), 'utf8')
+const iqcSettings = readFileSync(join(process.cwd(), 'components/iqc-settings-center.tsx'), 'utf8')
 
 describe('IQC equipment source', () => {
   it('removes duplicate Instrument setup from the IQC settings workflow', () => {
     expect(iqcView).not.toContain('<InstrumentForm onSubmit=')
-    expect(iqcView).toContain('ไปที่ทะเบียน Equipment เพื่อเปิดใช้กับ IQC')
+    expect(iqcView).toContain('<IqcSettingsCenter')
+    expect(iqcSettings).toContain('PortalEquipmentLinker')
   })
 
   it('enables IQC directly from a registered equipment record', () => {
@@ -46,7 +48,9 @@ describe('IQC equipment source', () => {
   })
 
   it('keeps the workflow navigation above tab-specific summary cards', () => {
-    expect(iqcView).toContain('<div className="flex w-full" role="tablist"')
-    expect(iqcView.indexOf('<Tabs tabs={tabs} active={tab} onChange={setTab} />')).toBeLessThan(iqcView.indexOf("{tab !== 'enter' ? <div className=\"grid gap-3"))
+    const tabsIndex = iqcView.indexOf('<Tabs tabs={tabs} active={tab} onChange={setTab} />')
+    const summaryIndex = iqcView.indexOf("{tab !== 'enter' ? <div className=\"grid gap-3")
+    expect(tabsIndex).toBeGreaterThanOrEqual(0)
+    expect(summaryIndex).toBeGreaterThan(tabsIndex)
   })
 })
