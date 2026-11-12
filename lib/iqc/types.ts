@@ -440,6 +440,7 @@ export interface IqcUncertaintyBudget {
 export interface IqcWorkspace {
   analytes: IqcAnalyte[]
   instruments: IqcInstrument[]
+  instrumentCandidates?: IqcInstrument[] // includes unlinked IQC instrument records for Portal association
   controlMaterials: IqcControlMaterial[]
   controlLots: IqcControlLot[]
   stockLots: IqcStockLotOption[]
