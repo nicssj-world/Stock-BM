@@ -123,7 +123,7 @@ try {
   // Supabase start applies migrations eagerly. Temporarily disable that step so
   // the shared-project stand-ins can be loaded before the first repository SQL.
   fs.writeFileSync(configPath, setMigrationsEnabled(originalConfig, false))
-  runNpx(['supabase', 'start', '--exclude', 'analytics'])
+  runNpx(['supabase', 'start', '--exclude', 'logflare', '--exclude', 'vector'])
   started = true
   configureLocalApiClient()
 
