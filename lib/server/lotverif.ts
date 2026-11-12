@@ -210,15 +210,15 @@ async function loadLotOptions(
     materialIds.length ? admin.from('iqc_control_materials').select('id,name,level').in('id', materialIds) : Promise.resolve({ data: [] }),
   ])
   const { data: stockItemEquipmentData, error: stockItemEquipmentError } = itemIds.length
-    ? await admin.from('bm_stock_item_equipment_links').select('stock_item_id,equipment_id').in('stock_item_id', itemIds)
+    ? await admin.from('bm_portal_equipment_links').select('entity_id,portal_equipment_id').eq('module', 'stock').in('entity_id', itemIds)
     : { data: [], error: null }
   fail(stockItemEquipmentError)
   const items = new Map(((itemRows ?? []) as RecordRow[]).map((row) => [asString(row.id), row]))
   const materials = new Map(((materialRows ?? []) as RecordRow[]).map((row) => [asString(row.id), row]))
   const instrumentIdsByStockItem = new Map<string, string[]>()
   for (const row of (stockItemEquipmentData ?? []) as RecordRow[]) {
-    const stockItemId = asString(row.stock_item_id)
-    const instrumentIds = instrumentIdsByEquipment.get(asString(row.equipment_id)) ?? []
+    const stockItemId = asString(row.entity_id)
+    const instrumentIds = instrumentIdsByEquipment.get(asString(row.portal_equipment_id)) ?? []
     if (stockItemId && instrumentIds.length) instrumentIdsByStockItem.set(stockItemId, [...(instrumentIdsByStockItem.get(stockItemId) ?? []), ...instrumentIds])
   }
   const controlLotFilter = new Map<string, { instrumentIds: Set<string>; analyteIds: Set<string> }>()
@@ -281,8 +281,8 @@ export async function getLotVerifWorkspace(actor: BmActor): Promise<LotVerifWork
     admin.from('iqc_control_specs').select('control_lot_id,analyte_id,assigned_mean,assigned_sd,lab_mean,lab_sd,lab_locked_at,active_limit'),
     admin.from('iqc_baselines').select('control_lot_id,analyte_id,instrument_id,mean,sd,state').eq('state', 'approved'),
     admin.from('iqc_instruments').select('id,code,name,model,is_active').eq('is_active', true).order('code'),
-    admin.from('bm_equipment_module_links').select('equipment_id,entity_id').eq('module', 'iqc').eq('entity_type', 'instrument'),
-    admin.from('bm_equipment').select('id,code,name,model,status'),
+    admin.from('bm_portal_equipment_links').select('portal_equipment_id,entity_id').eq('module', 'iqc'),
+    admin.from('bm_portal_equipment_refs').select('portal_equipment_id,lab_code,name,model,status'),
     admin.from('iqc_control_plans').select('analyte_id,instrument_id,is_active').eq('is_active', true),
     loadLotLabels(),
   ])
@@ -302,13 +302,13 @@ export async function getLotVerifWorkspace(actor: BmActor): Promise<LotVerifWork
   const parallelRows = (parallelData ?? []) as RecordRow[]
   const analyteRows = (analyteData ?? []) as RecordRow[]
   const instrumentRows = (instrumentData ?? []) as RecordRow[]
-  const equipmentById = new Map(((equipmentData ?? []) as RecordRow[]).map((row) => [asString(row.id), row]))
+  const equipmentById = new Map(((equipmentData ?? []) as RecordRow[]).map((row) => [asString(row.portal_equipment_id), row]))
   const activeInstrumentIds = new Set(instrumentRows.map((row) => asString(row.id)).filter(Boolean))
   const equipmentIdByInstrument = new Map<string, string>()
   const instrumentIdsByEquipment = new Map<string, string[]>()
   for (const row of (instrumentEquipmentLinkData ?? []) as RecordRow[]) {
     const instrumentId = asString(row.entity_id)
-    const equipmentId = asString(row.equipment_id)
+    const equipmentId = asString(row.portal_equipment_id)
     if (!activeInstrumentIds.has(instrumentId) || !instrumentId || !equipmentId) continue
     equipmentIdByInstrument.set(instrumentId, equipmentId)
     instrumentIdsByEquipment.set(equipmentId, [...(instrumentIdsByEquipment.get(equipmentId) ?? []), instrumentId])
@@ -318,7 +318,7 @@ export async function getLotVerifWorkspace(actor: BmActor): Promise<LotVerifWork
     const usableEquipment = equipment && asString(equipment.status) !== 'decommissioned' ? equipment : undefined
     return {
       id: asString(row.id),
-      code: usableEquipment ? asString(usableEquipment.code) : asString(row.code),
+      code: usableEquipment ? asString(usableEquipment.lab_code) : asString(row.code),
       name: usableEquipment ? asString(usableEquipment.name) : asString(row.name),
       model: usableEquipment ? nullableString(usableEquipment.model) : nullableString(row.model),
       equipmentId: usableEquipment ? equipmentIdByInstrument.get(asString(row.id)) ?? null : null,
@@ -327,10 +327,10 @@ export async function getLotVerifWorkspace(actor: BmActor): Promise<LotVerifWork
   const instruments = instrumentRecords.filter((instrument) => Boolean(instrument.equipmentId))
   const linkedInstrumentIds = new Set(instruments.map((instrument) => instrument.id))
   const unlinkedEquipment: LotVerifUnlinkedEquipment[] = ((equipmentData ?? []) as RecordRow[])
-    .filter((row) => asString(row.status) !== 'decommissioned' && ![...equipmentIdByInstrument.values()].includes(asString(row.id)))
+    .filter((row) => asString(row.status) !== 'decommissioned' && ![...equipmentIdByInstrument.values()].includes(asString(row.portal_equipment_id)))
     .map((row) => ({
-      id: asString(row.id),
-      code: asString(row.code),
+      id: asString(row.portal_equipment_id),
+      code: asString(row.lab_code),
       name: asString(row.name),
       model: nullableString(row.model),
     }))
@@ -513,15 +513,15 @@ async function loadInstrumentScope(instrumentId: string): Promise<InstrumentScop
   const [{ data: instrumentData, error: instrumentError }, { data: planData, error: planError }, { data: linkData, error: linkError }] = await Promise.all([
     admin.from('iqc_instruments').select('id,is_active').eq('id', instrumentId).maybeSingle(),
     admin.from('iqc_control_plans').select('analyte_id').eq('instrument_id', instrumentId).eq('is_active', true),
-    admin.from('bm_equipment_module_links').select('equipment_id').eq('module', 'iqc').eq('entity_type', 'instrument').eq('entity_id', instrumentId).maybeSingle(),
+    admin.from('bm_portal_equipment_links').select('portal_equipment_id').eq('module', 'iqc').eq('entity_id', instrumentId).maybeSingle(),
   ])
   fail(instrumentError)
   fail(planError)
   fail(linkError)
   if (!instrumentData || !Boolean((instrumentData as RecordRow).is_active)) throw new HttpError(400, 'ไม่พบเครื่องมือที่ใช้งานอยู่')
-  const equipmentId = nullableString((linkData as RecordRow | null)?.equipment_id)
+  const equipmentId = nullableString((linkData as RecordRow | null)?.portal_equipment_id)
   if (!equipmentId) throw new HttpError(400, 'เครื่องมือนี้ยังไม่ได้เชื่อมกับ Equipment')
-  const { data: equipmentData, error: equipmentError } = await admin.from('bm_equipment').select('id,status').eq('id', equipmentId).maybeSingle()
+  const { data: equipmentData, error: equipmentError } = await admin.from('bm_portal_equipment_refs').select('portal_equipment_id,status').eq('portal_equipment_id', equipmentId).maybeSingle()
   fail(equipmentError)
   if (!equipmentData) throw new HttpError(400, 'ไม่พบ Equipment ที่เชื่อมกับเครื่องมือ')
   if (asString((equipmentData as RecordRow).status) === 'decommissioned') throw new HttpError(400, 'Equipment นี้เลิกใช้งานแล้ว')
@@ -554,12 +554,13 @@ async function assertInstrumentScopedLots(input: {
     if (lotRows.length !== uniqueLotIds.length) throw new HttpError(400, 'ไม่พบ Reagent lot ที่เลือก')
     const itemIds = [...new Set(lotRows.map((row) => asString(row.item_id)).filter(Boolean))]
     const { data: linkData, error: linkError } = await admin
-      .from('bm_stock_item_equipment_links')
-      .select('stock_item_id')
-      .eq('equipment_id', scope.equipmentId)
-      .in('stock_item_id', itemIds)
+      .from('bm_portal_equipment_links')
+      .select('entity_id')
+      .eq('module', 'stock')
+      .eq('portal_equipment_id', scope.equipmentId)
+      .in('entity_id', itemIds)
     fail(linkError)
-    const allowedItemIds = new Set(((linkData ?? []) as RecordRow[]).map((row) => asString(row.stock_item_id)))
+    const allowedItemIds = new Set(((linkData ?? []) as RecordRow[]).map((row) => asString(row.entity_id)))
     if (lotRows.some((row) => !allowedItemIds.has(asString(row.item_id)))) throw new HttpError(409, 'Reagent lot ที่เลือกไม่ตรงกับเครื่องมือ')
     return
   }
