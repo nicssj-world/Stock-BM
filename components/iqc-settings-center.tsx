@@ -425,6 +425,16 @@ function EquipmentTask({ data, actor }: { data: IqcWorkspace; actor: BmActor }) 
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'เพิ่ม Instrument ไม่สำเร็จ') }
     finally { setBusy(false) }
   }
+  async function setInstrumentActive(instrumentId: string, isActive: boolean) {
+    setBusy(true); setError('')
+    try {
+      await api(`/api/iqc/instruments/${instrumentId}`, {
+        method: 'PATCH', body: JSON.stringify({ isActive }),
+      })
+      window.location.reload()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'เปลี่ยนสถานะ Instrument ไม่สำเร็จ') }
+    finally { setBusy(false) }
+  }
   const candidates = data.instrumentCandidates ?? data.instruments
   return <Card className="space-y-4 p-5">
     <div><h3 className="font-bold text-[#173d50]">เชื่อมเครื่องมือจาก Lab Management Portal</h3>
@@ -434,10 +444,20 @@ function EquipmentTask({ data, actor }: { data: IqcWorkspace; actor: BmActor }) 
         <p className="text-xs text-[#6e878e]">{instrument.equipmentCode ? `Portal: ${instrument.equipmentCode}` : 'ยังไม่เชื่อมกับ Portal'}</p></div>
         <StatusBadge tone={instrument.equipmentStatus === 'active' ? 'accepted' : 'warning'} label={instrument.equipmentStatus ?? 'ยังไม่เชื่อม'} />
       </div>
-      {actor.role === 'Admin' ? <PortalEquipmentLinker module="iqc" entityId={instrument.id}
-        initialIds={instrument.equipmentId ? [instrument.equipmentId] : []} onSaved={() => window.location.reload()} /> : null}
+      {actor.role === 'Admin' ? <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-[#58747d]">สถานะใน IQC: {instrument.isActive ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}</span>
+          <Button type="button" variant="secondary" className="text-xs" disabled={busy}
+            onClick={() => setInstrumentActive(instrument.id, !instrument.isActive)}>
+            {instrument.isActive ? 'ปิดใช้ IQC Instrument' : 'เปิดใช้ IQC Instrument'}
+          </Button>
+        </div>
+        <PortalEquipmentLinker module="iqc" entityId={instrument.id}
+          initialIds={instrument.equipmentId ? [instrument.equipmentId] : []} onSaved={() => window.location.reload()} />
+      </div> : null}
     </div>)}
     {!candidates.length ? <Notice tone="warning">ยังไม่มี Instrument สำหรับ IQC</Notice> : null}
+    {error ? <Notice tone="danger">{error}</Notice> : null}
     {actor.role === 'Admin' ? <form onSubmit={createInstrument} className="space-y-2 rounded-md border border-[#d8e6e7] p-3">
       <h4 className="text-sm font-bold">เพิ่ม Instrument สำหรับการตั้งค่า IQC</h4>
       <p className="text-xs text-[#58747d]">สร้างเฉพาะ Instrument สำหรับงาน IQC แล้วเลือกเครื่องมือจาก Portal · ไม่ใช่การเพิ่มทะเบียนเครื่องมือใหม่</p>
