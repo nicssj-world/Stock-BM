@@ -5,17 +5,9 @@ import { HttpError } from '@/lib/server/errors'
 import { getAdminClient } from '@/lib/supabase/admin'
 import { fetchPortalEquipmentByLabCode } from '@/lib/server/equipment-sync'
 
+import type { PortalEquipmentModule, PortalEquipmentReference } from '@/lib/equipment/portal-reference-types'
+
 type Row = Record<string, unknown>
-export type PortalEquipmentReference = {
-  id: string
-  code: string
-  name: string
-  model: string | null
-  serialNumber: string | null
-  status: 'active' | 'maintenance' | 'out_of_service' | 'decommissioned'
-  portalUrl: string | null
-}
-export type PortalEquipmentModule = 'iqc' | 'eqa' | 'stock'
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value : ''
