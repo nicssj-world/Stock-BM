@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { ExternalLink, KeyRound, MapPin, PackagePlus, Pencil, Plus, Tags, Trash2, UserCog, X } from 'lucide-react'
-import type { AdminUserRow, BmActor, StockCategory, StockItem, StockLocation, StockWorkspace } from '@/lib/bm/types'
+import type { AdminUserRow, BmActor, StockCategory, StockItem, StockLocation, StockWorkspace, StockEquipmentOption } from '@/lib/bm/types'
 import type { SupplierCandidate, Vendor } from '@/lib/receiving/types'
 import { api, Button, Card, Field, Input, Loading, Notice, PageHeader, Select } from '@/components/ui'
 import { Pagination, usePagination } from '@/components/pagination'
@@ -75,6 +75,9 @@ function ItemsAdmin({ data, vendors, onSaved, onError }: { data: StockWorkspace;
   const [form, setForm] = useState(emptyForm)
   const [editingItemId, setEditingItemId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [portalLabCode, setPortalLabCode] = useState('')
+  const [importedEquipment, setImportedEquipment] = useState<StockEquipmentOption[]>([])
+  const equipmentOptions = [...(data.equipmentOptions ?? []), ...importedEquipment.filter((item) => !(data.equipmentOptions ?? []).some((existing) => existing.id === item.id))]
   const editingItem = data.items.find((item) => item.id === editingItemId) ?? null
   const categoryOptions = data.categories.filter((category) => category.isActive || category.id === form.categoryId)
   const vendorOptions = vendors.filter((vendor) => vendor.isActive || form.vendorIds.includes(vendor.id))
@@ -113,6 +116,19 @@ function ItemsAdmin({ data, vendors, onSaved, onError }: { data: StockWorkspace;
       hpvSelfCollected: item.hpvSelfCollected,
       hpvClinicianCollected: item.hpvClinicianCollected,
     })
+  }
+
+  async function addPortalEquipment() {
+    if (!portalLabCode.trim()) return
+    setBusy(true)
+    try {
+      const result = await api<{ equipment: { id: string; code: string; name: string; status: string } }>('/api/portal-equipment', { method: 'POST', body: JSON.stringify({ labCode: portalLabCode }) })
+      const equipment = result.equipment
+      setImportedEquipment((items) => [...items.filter((item) => item.id !== equipment.id), equipment])
+      setForm((current) => ({ ...current, equipmentIds: [...new Set([...current.equipmentIds, equipment.id])] }))
+      setPortalLabCode('')
+    } catch (error) { onError(error instanceof Error ? error.message : 'ค้นหา Portal ไม่สำเร็จ') }
+    finally { setBusy(false) }
   }
 
   async function save(event: React.FormEvent) {
@@ -202,22 +218,26 @@ function ItemsAdmin({ data, vendors, onSaved, onError }: { data: StockWorkspace;
         <Field label="Manufacturer barcode"><Input value={form.manufacturerBarcode} onChange={(event) => setForm({ ...form, manufacturerBarcode: event.target.value })} /></Field>
         <div className="rounded-md border border-[#d8e6e6] bg-[#f8fbfc] p-3">
           <p className="text-xs font-bold text-[#315763]">เครื่องมือที่ใช้กับน้ำยา / Equipment</p>
-          <p className="mt-1 text-[11px] text-[#81979c]">เลือกได้หลายเครื่องมือ และกดชื่อเพื่อเปิดทะเบียนเครื่องมือ</p>
+          <p className="mt-1 text-[11px] text-[#81979c]">เลือกได้หลายเครื่องมือจาก Portal · ระบบจะเก็บเฉพาะการเชื่อมโยง</p>
           <div className="mt-2 space-y-2">
-            {(data.equipmentOptions ?? []).map((equipment) => <label key={equipment.id} className="flex items-start gap-2 text-xs text-[#58747d]">
+            {equipmentOptions.map((equipment) => <label key={equipment.id} className="flex items-start gap-2 text-xs text-[#58747d]">
               <input
                 type="checkbox"
                 checked={form.equipmentIds.includes(equipment.id)}
                 onChange={(event) => setForm({ ...form, equipmentIds: event.target.checked ? [...form.equipmentIds, equipment.id] : form.equipmentIds.filter((id) => id !== equipment.id) })}
               />
               <span className="min-w-0">
-                <a className="inline-flex items-center gap-1 font-semibold text-[#0b7f76] hover:underline" href={`/equipment?view=registry&equipment=${equipment.id}`} target="_blank" rel="noreferrer">
+                <a className="inline-flex items-center gap-1 font-semibold text-[#0b7f76] hover:underline" href={`https://lab-management-cbh.vercel.app/staff/equipment?equipment=${equipment.id}`} target="_blank" rel="noreferrer">
                   {equipment.code} · {equipment.name} <ExternalLink className="size-3" />
                 </a>
                 <span className="ml-1 text-[10px] text-[#91a3a7]">({equipment.status})</span>
               </span>
             </label>)}
-            {!(data.equipmentOptions ?? []).length ? <p className="text-xs text-[#81979c]">ยังไม่มีเครื่องมือในทะเบียน</p> : null}
+            {!equipmentOptions.length ? <p className="text-xs text-[#81979c]">ยังไม่มีเครื่องมือในทะเบียน</p> : null}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Input className="min-w-40 flex-1" placeholder="รหัส LAB-BM จาก Portal" value={portalLabCode} onChange={(event) => setPortalLabCode(event.target.value)} />
+            <Button type="button" variant="secondary" disabled={busy || !portalLabCode.trim()} onClick={addPortalEquipment}>ค้น/เพิ่มจาก Portal</Button>
           </div>
         </div>
         <div className="rounded-md border border-[#d8e6e6] bg-[#f8fbfc] p-3">
