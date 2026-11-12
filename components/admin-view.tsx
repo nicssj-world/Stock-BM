@@ -223,6 +223,7 @@ function ItemsAdmin({ data, vendors, onSaved, onError }: { data: StockWorkspace;
             {equipmentOptions.map((equipment) => <label key={equipment.id} className="flex items-start gap-2 text-xs text-[#58747d]">
               <input
                 type="checkbox"
+                disabled={equipment.status === 'decommissioned' && !form.equipmentIds.includes(equipment.id)}
                 checked={form.equipmentIds.includes(equipment.id)}
                 onChange={(event) => setForm({ ...form, equipmentIds: event.target.checked ? [...form.equipmentIds, equipment.id] : form.equipmentIds.filter((id) => id !== equipment.id) })}
               />
