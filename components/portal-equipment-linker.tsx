@@ -68,10 +68,10 @@ export function PortalEquipmentLinker({
         <div className="max-h-56 space-y-1 overflow-auto rounded-md border bg-white p-2">
           {visible.map((item) => <label key={item.id} className="flex cursor-pointer items-start gap-2 rounded p-2 text-xs hover:bg-[#f1f7f7]">
             <input type={module === 'iqc' ? 'radio' : 'checkbox'} className="mt-0.5 size-4" name={module === 'iqc' ? `portal-eq-${entityId}` : undefined}
-              disabled={item.status === 'decommissioned'}
+              disabled={item.status === 'decommissioned' && !selected.includes(item.id)}
               checked={selected.includes(item.id)}
               onChange={(event) => setSelected(module === 'iqc' ? [item.id] : event.target.checked ? [...selected, item.id] : selected.filter((id) => id !== item.id))} />
-            <span className="min-w-0 flex-1"><strong>{item.code}</strong> · {item.name}{item.model ? ` · ${item.model}` : ''}{item.serialNumber ? ` · S/N ${item.serialNumber}` : ''}<span className="ml-1 text-[#6c838a]">({item.status})</span></span>
+            <span className="min-w-0 flex-1"><strong>{item.code}</strong> · {item.name}{item.model ? ` · ${item.model}` : ''}{item.serialNumber ? ` · S/N ${item.serialNumber}` : ''}<span className="ml-1 text-[#6c838a]">({item.status})</span>{item.portalUrl ? <a href={item.portalUrl} target="_blank" rel="noreferrer" className="ml-2 font-semibold text-[#0b7f76] underline" onClick={(event) => event.stopPropagation()}>เปิดใน Portal</a> : null}</span>
           </label>)}
           {!visible.length ? <p className="p-2 text-xs text-[#789097]">ไม่พบเครื่องมือ · ค้นจาก Portal ด้วยรหัส LAB ด้านล่าง</p> : null}
         </div>
