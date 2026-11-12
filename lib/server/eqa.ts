@@ -129,8 +129,8 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
     admin.from('eqa_results').select('*').order('created_at'),
     admin.from('eqa_corrective_actions').select('*').order('created_at', { ascending: false }).limit(500),
     admin.from('iqc_analytes').select('id,code,name,group_label,scale,unit').eq('is_active', true).order('code'),
-    admin.from('bm_equipment_module_links').select('equipment_id,entity_id').eq('module', 'eqa').eq('entity_type', 'scheme'),
-    admin.from('bm_equipment').select('id,code,name,status'),
+    admin.from('bm_portal_equipment_links').select('portal_equipment_id,entity_id').eq('module', 'eqa'),
+    admin.from('bm_portal_equipment_refs').select('portal_equipment_id,lab_code,name,status'),
     admin.from('nipt_users').select('id,display_name,is_active').order('display_name'),
     admin.from('eqa_approver_assignments').select('*'),
     admin.from('eqa_document_states').select('*'),
@@ -145,11 +145,11 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
 
   const providers: EqaProvider[] = (providerData as RecordRow[]).map((row) => ({ id: asString(row.id), name: asString(row.name), isActive: Boolean(row.is_active) }))
   const providerMap = new Map(providers.map((provider) => [provider.id, provider]))
-  const equipmentById = new Map((equipmentData as RecordRow[]).map((row) => [asString(row.id), row]))
+  const equipmentById = new Map((equipmentData as RecordRow[]).map((row) => [asString(row.portal_equipment_id), row]))
   const equipmentIdsByScheme = new Map<string, string[]>()
   for (const link of equipmentLinkData as RecordRow[]) {
     const schemeId = asString(link.entity_id)
-    equipmentIdsByScheme.set(schemeId, [...(equipmentIdsByScheme.get(schemeId) ?? []), asString(link.equipment_id)])
+    equipmentIdsByScheme.set(schemeId, [...(equipmentIdsByScheme.get(schemeId) ?? []), asString(link.portal_equipment_id)])
   }
   const schemes: EqaScheme[] = (schemeData as RecordRow[]).map((row) => ({
     id: asString(row.id), providerId: asString(row.provider_id), providerName: providerMap.get(asString(row.provider_id))?.name ?? '-',
@@ -157,7 +157,7 @@ export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
     roundsPerYear: nullableNumber(row.rounds_per_year), isActive: Boolean(row.is_active),
     equipment: (equipmentIdsByScheme.get(asString(row.id)) ?? []).flatMap((equipmentId) => {
       const equipment = equipmentById.get(equipmentId)
-      return equipment ? [{ id: equipmentId, code: asString(equipment.code), name: asString(equipment.name), status: asString(equipment.status) as EqaScheme['equipment'][number]['status'] }] : []
+      return equipment ? [{ id: equipmentId, code: asString(equipment.lab_code), name: asString(equipment.name), status: asString(equipment.status) as EqaScheme['equipment'][number]['status'] }] : []
     }),
   }))
   const schemeMap = new Map(schemes.map((scheme) => [scheme.id, scheme]))
