@@ -56,7 +56,7 @@ export function PortalEquipmentLinker({
       setMessage({ tone: 'danger', text: error instanceof Error ? error.message : 'บันทึกการเชื่อมโยงไม่สำเร็จ' })
     } finally { setBusy(false) }
   }
-  const visible = refs.filter((row) => `${row.code} ${row.name} ${row.model ?? ''}`.toLowerCase().includes(term.toLowerCase().trim()))
+  const visible = refs.filter((row) => `${row.code} ${row.name} ${row.model ?? ''} ${row.serialNumber ?? ''}`.toLowerCase().includes(term.toLowerCase().trim()))
   return (
     <div className="rounded-md border border-[#d8e6e7] bg-[#f9fcfc] p-3">
       <Button type="button" variant="secondary" className="text-xs" onClick={() => setExpanded(!expanded)}>
@@ -64,14 +64,14 @@ export function PortalEquipmentLinker({
       </Button>
       {expanded ? <div className="mt-3 space-y-3">
         <p className="text-xs text-[#58747d]">ทะเบียนเครื่องมืออยู่ที่ Portal · ที่นี่บันทึกเฉพาะการเชื่อมโยงกับโมดูลนี้</p>
-        <Input value={term} onChange={(event) => setTerm(event.target.value)} placeholder="ค้นหารหัส LAB / ชื่อเครื่องมือ / รุ่น" />
+        <Input value={term} onChange={(event) => setTerm(event.target.value)} placeholder="ค้นหารหัส LAB / ชื่อเครื่องมือ / รุ่น / Serial Number" />
         <div className="max-h-56 space-y-1 overflow-auto rounded-md border bg-white p-2">
           {visible.map((item) => <label key={item.id} className="flex cursor-pointer items-start gap-2 rounded p-2 text-xs hover:bg-[#f1f7f7]">
             <input type={module === 'iqc' ? 'radio' : 'checkbox'} className="mt-0.5 size-4" name={module === 'iqc' ? `portal-eq-${entityId}` : undefined}
               disabled={item.status === 'decommissioned'}
               checked={selected.includes(item.id)}
               onChange={(event) => setSelected(module === 'iqc' ? [item.id] : event.target.checked ? [...selected, item.id] : selected.filter((id) => id !== item.id))} />
-            <span className="min-w-0 flex-1"><strong>{item.code}</strong> · {item.name}{item.model ? ` · ${item.model}` : ''}<span className="ml-1 text-[#6c838a]">({item.status})</span></span>
+            <span className="min-w-0 flex-1"><strong>{item.code}</strong> · {item.name}{item.model ? ` · ${item.model}` : ''}{item.serialNumber ? ` · S/N ${item.serialNumber}` : ''}<span className="ml-1 text-[#6c838a]">({item.status})</span></span>
           </label>)}
           {!visible.length ? <p className="p-2 text-xs text-[#789097]">ไม่พบเครื่องมือ · ค้นจาก Portal ด้วยรหัส LAB ด้านล่าง</p> : null}
         </div>
