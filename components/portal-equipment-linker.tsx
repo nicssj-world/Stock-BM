@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { api, Button, Input, Notice } from '@/components/ui'
-import type { PortalEquipmentModule, PortalEquipmentReference } from '@/lib/server/portal-equipment-references'
+import type { PortalEquipmentModule, PortalEquipmentReference } from '@/lib/equipment/portal-reference-types'
 
 export function PortalEquipmentLinker({
   module, entityId, initialIds = [], onSaved,
