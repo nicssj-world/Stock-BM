@@ -96,4 +96,29 @@ $;
 revoke all on function public.replace_bm_portal_equipment_links(text,uuid,uuid[],uuid) from public,anon,authenticated;
 grant execute on function public.replace_bm_portal_equipment_links(text,uuid,uuid[],uuid) to service_role;
 
+-- The historical VL baseline approval RPC also checks an archived equipment
+-- link. Patch only that existence guard, preserving every other calculation,
+-- signature and version of the function currently installed.
+do $portal_iqc_baseline_guard$
+declare
+  v_original text;
+  v_updated text;
+begin
+  select pg_get_functiondef(p.oid) into v_original
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public' and p.proname = 'apply_iqc_vl_baseline' and p.prokind = 'f'
+  limit 1;
+  if v_original is not null then
+    v_updated := regexp_replace(v_original,
+      'from public[.]bm_equipment_module_links link[[:space:]]+join public[.]bm_equipment equipment on equipment[.]id = link[.]equipment_id[[:space:]]+where link[.]module = ''iqc''[[:space:]]+and link[.]entity_type = ''instrument''[[:space:]]+and link[.]entity_id = p_instrument_id[[:space:]]+and equipment[.]status <> ''decommissioned''',
+      'from public.bm_portal_equipment_links link join public.bm_portal_equipment_refs equipment on equipment.portal_equipment_id = link.portal_equipment_id where link.module = ''iqc'' and link.entity_id = p_instrument_id and equipment.status <> ''decommissioned''',
+      'i');
+    if v_updated = v_original then
+      raise exception 'VL baseline guard changed; migration requires manual review';
+    end if;
+    execute v_updated;
+  end if;
+end;
+$portal_iqc_baseline_guard$;
+
 notify pgrst, 'reload schema';
