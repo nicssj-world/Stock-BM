@@ -3,13 +3,14 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const sql = readFileSync(join(process.cwd(), 'supabase/migrations/202608210001_stock_lot_correction.sql'), 'utf8')
+const compactSql = sql.replace(/\s+/g, ' ').toLowerCase()
 
 describe('stock lot correction migration', () => {
   it('updates the stable lot source with admin-only validation', () => {
     expect(sql).toContain('create or replace function public.update_bm_stock_lot')
     expect(sql).toContain("if v_role <> 'Admin' then raise exception 'Admin permission required for lot correction'")
-    expect(sql).toContain('where id = p_lot\n  for update')
-    expect(sql).toContain('set lot_number = v_lot_number,\n      expiry_date = p_expiry_date')
+    expect(compactSql).toContain('where id = p_lot for update')
+    expect(compactSql).toContain('set lot_number = v_lot_number, expiry_date = p_expiry_date')
   })
 
   it('preserves the ledger and records before/after audit data', () => {

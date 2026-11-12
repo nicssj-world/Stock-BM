@@ -42,10 +42,12 @@ import { normalizeTestSets, parseTestSets } from '@/lib/iqc/test-sets'
 import { sigmaRating, sixSigma, teaPercent } from '@/lib/iqc/sixsigma'
 import { combinedRelative, divisorFor, expandedRelative, pooledRsd, relativeStandardUncertainty, standardUncertainty } from '@/lib/iqc/uncertainty'
 import type { BmActor } from '@/lib/bm/types'
+import { canUsePortalEquipmentStatus, normalizePortalEquipmentStatus } from '@/lib/equipment/portal-reference-status'
 import { bangkokDateKey, todayBangkok } from '@/lib/bm/rules'
 import { writeAudit } from '@/lib/server/audit'
 import { deleteEntityAttachments } from '@/lib/server/attachments'
 import { HttpError } from '@/lib/server/errors'
+import { refreshPortalEquipmentReference } from '@/lib/server/portal-equipment-references'
 import { getAdminClient } from '@/lib/supabase/admin'
 
 type RecordRow = Record<string, unknown>
@@ -124,11 +126,14 @@ async function assertLinkedIqcInstrument(instrumentId: string) {
   if (!instrument || !Boolean((instrument as RecordRow).is_active)) throw new HttpError(400, 'เครื่องมือ IQC นี้ไม่พร้อมใช้งาน')
   const equipmentId = nullableString((link as RecordRow | null)?.portal_equipment_id)
   if (!equipmentId) throw new HttpError(400, 'เครื่องมือ IQC ยังไม่ได้เชื่อมกับ Portal · เปิดการตั้งค่า IQC เพื่อเชื่อมเครื่องมือ')
+  await refreshPortalEquipmentReference(equipmentId)
   const { data: equipment, error: equipmentError } = await admin.from('bm_portal_equipment_refs')
     .select('portal_equipment_id,status').eq('portal_equipment_id', equipmentId).maybeSingle()
   fail(equipmentError)
   if (!equipment) throw new HttpError(400, 'ไม่พบเครื่องมืออ้างอิงจาก Portal')
-  if (asString((equipment as RecordRow).status) === 'decommissioned') throw new HttpError(400, 'เครื่องมือนี้เลิกใช้งานแล้ว จึงบันทึก IQC ไม่ได้')
+  if (!canUsePortalEquipmentStatus(normalizePortalEquipmentStatus((equipment as RecordRow).status))) {
+    throw new HttpError(400, 'เครื่องมือ Portal ต้องมีสถานะ Active จึงบันทึก IQC ได้')
+  }
   return equipmentId
 }
 
@@ -524,7 +529,9 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   // Keep the linked-record slice explicit: Equipment is the selector source,
   // while inactive/decommissioned records are removed from routine setup.
   const instruments = allInstruments.filter((instrument) => Boolean(instrument.equipmentId))
-  const activeLinkedInstruments = instruments.filter((instrument) => instrument.isActive && instrument.equipmentStatus !== 'decommissioned')
+  const activeLinkedInstruments = instruments.filter((instrument) => instrument.isActive
+    && instrument.equipmentStatus != null
+    && canUsePortalEquipmentStatus(instrument.equipmentStatus))
   const controlMaterials = ((materialData ?? []) as RecordRow[]).map(mapMaterial)
   const equipmentIdsByStockItem = new Map<string, string[]>()
   for (const row of (stockItemEquipmentLinkData ?? []) as RecordRow[]) {

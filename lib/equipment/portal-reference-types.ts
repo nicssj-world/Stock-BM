@@ -6,6 +6,7 @@ export type PortalEquipmentModule = 'iqc' | 'eqa' | 'stock'
 
 export type PortalEquipmentStatus =
   | 'active'
+  | 'inactive'
   | 'maintenance'
   | 'out_of_service'
   | 'decommissioned'

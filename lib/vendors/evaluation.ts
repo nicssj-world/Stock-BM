@@ -156,6 +156,7 @@ export function draftInputError(input: Pick<DraftInput, 'summary' | 'strengths' 
 
 export function finalizeReadiness(r: { summary: string | null; strengths: string | null; risksConcerns: string | null; recommendations: string | null; evaluatorId: string | null; reviewerId: string | null; approverId: string | null }, policyApproved: boolean): string[] {
   const problems: string[] = []
+  if ([r.summary, r.strengths, r.risksConcerns, r.recommendations].some((value) => !value?.trim())) problems.push('Assessment narrative is incomplete')
   if (!policyApproved) problems.push('นโยบายที่ใช้ยังเป็นข้อเสนอ ยังไม่ได้อนุมัติ')
   if (!r.evaluatorId || !r.reviewerId || !r.approverId) problems.push('เลือกผู้ประเมิน ผู้ทบทวน และผู้อนุมัติให้ครบ')
   return problems

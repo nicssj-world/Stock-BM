@@ -98,7 +98,8 @@ export function LotVerificationView({ actor, initialData }: { actor: BmActor; in
     const createdCard = document.getElementById(`lotverif-card-${newVerificationId}`)
     if (!createdCard) return
     createdCard.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    setNewVerificationId(null)
+    const frame = window.requestAnimationFrame(() => setNewVerificationId(null))
+    return () => window.cancelAnimationFrame(frame)
   }, [data.verifications, newVerificationId])
 
   return (

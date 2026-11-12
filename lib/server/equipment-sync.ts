@@ -103,6 +103,8 @@ async function fetchPortalPage(page: number, labCode?: string) {
   }
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) throw new HttpError(502, 'Token เชื่อมต่อ Portal ไม่ถูกต้อง')
+    if (response.status === 404) throw new HttpError(404, 'ไม่พบรหัส LAB นี้ใน Portal หรืออยู่นอกขอบเขต Stock-BM')
+    if (response.status === 409) throw new HttpError(409, 'รหัส LAB นี้ซ้ำใน Portal · กรุณาแก้ข้อมูลต้นทางก่อนเชื่อม')
     throw new HttpError(502, `Portal ตอบกลับด้วยสถานะ ${response.status}`)
   }
   const parsed = portalPageSchema.safeParse(await response.json().catch(() => null))

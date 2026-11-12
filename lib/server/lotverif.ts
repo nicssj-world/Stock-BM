@@ -18,8 +18,10 @@ import type {
 import { calculateParallelComparison, difference, percentDiff, withinCriteria, type ParallelControlInput } from '@/lib/lotverif/compare'
 import type { AnalyteScale } from '@/lib/iqc/westgard'
 import type { BmActor } from '@/lib/bm/types'
+import { canUsePortalEquipmentStatus, normalizePortalEquipmentStatus } from '@/lib/equipment/portal-reference-status'
 import { writeAudit } from '@/lib/server/audit'
 import { HttpError } from '@/lib/server/errors'
+import { refreshPortalEquipmentReference } from '@/lib/server/portal-equipment-references'
 import { getAdminClient } from '@/lib/supabase/admin'
 
 type RecordRow = Record<string, unknown>
@@ -315,7 +317,7 @@ export async function getLotVerifWorkspace(actor: BmActor): Promise<LotVerifWork
   }
   const instrumentRecords: LotVerifInstrument[] = instrumentRows.map((row) => {
     const equipment = equipmentById.get(equipmentIdByInstrument.get(asString(row.id)) ?? '')
-    const usableEquipment = equipment && asString(equipment.status) !== 'decommissioned' ? equipment : undefined
+    const usableEquipment = equipment && canUsePortalEquipmentStatus(normalizePortalEquipmentStatus(equipment.status)) ? equipment : undefined
     return {
       id: asString(row.id),
       code: usableEquipment ? asString(usableEquipment.lab_code) : asString(row.code),
@@ -327,7 +329,8 @@ export async function getLotVerifWorkspace(actor: BmActor): Promise<LotVerifWork
   const instruments = instrumentRecords.filter((instrument) => Boolean(instrument.equipmentId))
   const linkedInstrumentIds = new Set(instruments.map((instrument) => instrument.id))
   const unlinkedEquipment: LotVerifUnlinkedEquipment[] = ((equipmentData ?? []) as RecordRow[])
-    .filter((row) => asString(row.status) !== 'decommissioned' && ![...equipmentIdByInstrument.values()].includes(asString(row.portal_equipment_id)))
+    .filter((row) => canUsePortalEquipmentStatus(normalizePortalEquipmentStatus(row.status))
+      && ![...equipmentIdByInstrument.values()].includes(asString(row.portal_equipment_id)))
     .map((row) => ({
       id: asString(row.portal_equipment_id),
       code: asString(row.lab_code),
@@ -521,10 +524,13 @@ async function loadInstrumentScope(instrumentId: string): Promise<InstrumentScop
   if (!instrumentData || !Boolean((instrumentData as RecordRow).is_active)) throw new HttpError(400, 'ไม่พบเครื่องมือที่ใช้งานอยู่')
   const equipmentId = nullableString((linkData as RecordRow | null)?.portal_equipment_id)
   if (!equipmentId) throw new HttpError(400, 'เครื่องมือนี้ยังไม่ได้เชื่อมกับ Equipment')
+  await refreshPortalEquipmentReference(equipmentId)
   const { data: equipmentData, error: equipmentError } = await admin.from('bm_portal_equipment_refs').select('portal_equipment_id,status').eq('portal_equipment_id', equipmentId).maybeSingle()
   fail(equipmentError)
   if (!equipmentData) throw new HttpError(400, 'ไม่พบ Equipment ที่เชื่อมกับเครื่องมือ')
-  if (asString((equipmentData as RecordRow).status) === 'decommissioned') throw new HttpError(400, 'Equipment นี้เลิกใช้งานแล้ว')
+  if (!canUsePortalEquipmentStatus(normalizePortalEquipmentStatus((equipmentData as RecordRow).status))) {
+    throw new HttpError(400, 'เครื่องมือ Portal ต้องมีสถานะ Active จึงสร้าง Lot Verification ได้')
+  }
   return {
     instrumentId,
     equipmentId,

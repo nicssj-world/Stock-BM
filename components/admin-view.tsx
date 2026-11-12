@@ -8,6 +8,7 @@ import { api, Button, Card, Field, Input, Loading, Notice, PageHeader, Select } 
 import { Pagination, usePagination } from '@/components/pagination'
 import { VendorAdmin } from '@/components/vendor-admin'
 import { PositionCell } from '@/components/vendors/position-cell'
+import { canLinkPortalEquipmentStatus, normalizePortalEquipmentStatus } from '@/lib/equipment/portal-reference-status'
 
 type Tab = 'items' | 'categories' | 'locations' | 'vendors' | 'users'
 
@@ -223,7 +224,7 @@ function ItemsAdmin({ data, vendors, onSaved, onError }: { data: StockWorkspace;
             {equipmentOptions.map((equipment) => <label key={equipment.id} className="flex items-start gap-2 text-xs text-[#58747d]">
               <input
                 type="checkbox"
-                disabled={equipment.status === 'decommissioned' && !form.equipmentIds.includes(equipment.id)}
+                disabled={!canLinkPortalEquipmentStatus(normalizePortalEquipmentStatus(equipment.status)) && !form.equipmentIds.includes(equipment.id)}
                 checked={form.equipmentIds.includes(equipment.id)}
                 onChange={(event) => setForm({ ...form, equipmentIds: event.target.checked ? [...form.equipmentIds, equipment.id] : form.equipmentIds.filter((id) => id !== equipment.id) })}
               />
@@ -474,23 +475,25 @@ function UsersAdmin({ actorId, users, refreshUsers, onError, onSuccess }: { acto
   useEffect(() => {
     const ephisId = form.ephisId.trim()
     if (!ephisId) {
-      setLookupState({ busy: false, text: '', tone: 'muted' })
-      return
+      const timer = window.setTimeout(() => setLookupState({ busy: false, text: '', tone: 'muted' }), 0)
+      return () => window.clearTimeout(timer)
     }
     if (!/^\d+$/.test(ephisId)) {
-      setLookupState({ busy: false, text: 'E-Phis must be numeric', tone: 'warning' })
-      return
+      const timer = window.setTimeout(() => setLookupState({ busy: false, text: 'E-Phis must be numeric', tone: 'warning' }), 0)
+      return () => window.clearTimeout(timer)
     }
 
     const listedUser = users?.find((user) => user.ephisId === ephisId)
     if (listedUser) {
-      setLookupState({ busy: false, text: `Found: ${listedUser.displayName}`, tone: 'success' })
-      if (!displayNameEdited) {
-        setForm((current) => current.ephisId.trim() === ephisId
-          ? { ...current, displayName: listedUser.displayName, genomicRole: listedUser.genomicRole }
-          : current)
-      }
-      return
+      const timer = window.setTimeout(() => {
+        setLookupState({ busy: false, text: `Found: ${listedUser.displayName}`, tone: 'success' })
+        if (!displayNameEdited) {
+          setForm((current) => current.ephisId.trim() === ephisId
+            ? { ...current, displayName: listedUser.displayName, genomicRole: listedUser.genomicRole }
+            : current)
+        }
+      }, 0)
+      return () => window.clearTimeout(timer)
     }
 
     let active = true

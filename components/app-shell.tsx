@@ -32,11 +32,12 @@ const receivingItem: NavItem = { href: '/receiving', label: 'รับเข้�
 const hpvManagementItem: NavItem = { href: '/hpv', label: 'HPV Genotype', icon: Dna }
 const hivDrtManagementItem: NavItem = { href: '/hiv-drt', label: 'HIV DRT', icon: Biohazard }
 const hivLabAlertManagementItem: NavItem = { href: '/hiv-alert', label: 'HIV LAB Alert', icon: BellRing }
+const equipmentManagementItem: NavItem = { href: '/equipment', label: 'Equipment', icon: Settings }
 const monthlyTasksItem: NavItem = { href: '/monthly-tasks', label: 'งานประจำเดือน / Monthly Tasks', icon: CalendarCheck }
 
 const managementSection: NavSection = {
   title: 'Management',
-  items: [hpvManagementItem, hivLabAlertManagementItem, hivDrtManagementItem],
+  items: [hpvManagementItem, hivLabAlertManagementItem, hivDrtManagementItem, equipmentManagementItem],
 }
 
 const assistantManagementSection: NavSection = {
