@@ -137,7 +137,7 @@ function normalizeLabCode(value: string) {
   return code
 }
 
-async function fetchPortalEquipmentByLabCode(value: string) {
+export async function fetchPortalEquipmentByLabCode(value: string) {
   const labCode = normalizeLabCode(value)
   const page = await fetchPortalPage(1, labCode)
   if (!page.items.length || page.count === 0) {
