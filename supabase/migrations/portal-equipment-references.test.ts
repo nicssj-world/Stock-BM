@@ -20,7 +20,7 @@ describe('Portal equipment references for archived Stock-BM equipment', () => {
     expect(sql).toContain('revoke all on public.bm_portal_equipment_refs from public, anon, authenticated')
     expect(sql).toContain('create or replace function public.replace_bm_portal_equipment_links')
     expect(sql).toContain('security invoker')
-    expect(sql).toContain("p_module in ('iqc','eqa','stock')")
+    expect(sql).toContain("p_module not in ('iqc','eqa','stock')")
     expect(sql).toContain('bm_portal_iqc_one_equipment')
     expect(sql).toContain('VL baseline guard changed')
   })
