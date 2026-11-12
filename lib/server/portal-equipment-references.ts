@@ -11,6 +11,7 @@ export type PortalEquipmentReference = {
   code: string
   name: string
   model: string | null
+  serialNumber: string | null
   status: 'active' | 'maintenance' | 'out_of_service' | 'decommissioned'
   portalUrl: string | null
 }
@@ -31,13 +32,14 @@ export function toPortalEquipmentReference(row: Row): PortalEquipmentReference {
     code: text(row.lab_code),
     name: text(row.name),
     model: row.model == null ? null : text(row.model),
+    serialNumber: row.serial_number == null ? null : text(row.serial_number),
     status: normalizeStatus(row.status),
     portalUrl: row.portal_url == null ? null : text(row.portal_url),
   }
 }
 export async function getPortalEquipmentReferences(): Promise<PortalEquipmentReference[]> {
   const { data, error } = await getAdminClient().from('bm_portal_equipment_refs')
-    .select('portal_equipment_id,lab_code,name,model,status,portal_url').order('lab_code')
+    .select('portal_equipment_id,lab_code,name,model,serial_number,status,portal_url').order('lab_code')
   if (error) throw new HttpError(500, error.message)
   return ((data ?? []) as Row[]).map(toPortalEquipmentReference)
 }
@@ -76,6 +78,7 @@ export async function lookupAndCachePortalEquipment(actor: BmActor, labCode: str
     lab_code: code,
     name,
     model: portal.model || null,
+    serial_number: portal.serial_number || null,
     status: normalizeStatus(portal.portal_status),
     portal_url: portal.portal_url || null,
     synced_at: new Date().toISOString(),
