@@ -59,4 +59,41 @@ join public.bm_equipment equipment on equipment.id = link.equipment_id
 where equipment.portal_equipment_id is not null
 on conflict do nothing;
 
+
+-- Transactional replacement. Validates the module, owning entity and every
+-- Portal reference before changing any associations.
+create or replace function public.replace_bm_portal_equipment_links(
+  p_module text, p_entity_id uuid, p_equipment_ids uuid[], p_actor uuid
+) returns void language plpgsql security invoker set search_path = public as $
+declare v_count integer;
+begin
+  if p_module not in ('iqc','eqa','stock') or p_entity_id is null then
+    raise exception 'Invalid equipment module or entity';
+  end if;
+  if p_module = 'iqc' and coalesce(array_length(p_equipment_ids,1),0) > 1 then
+    raise exception 'One IQC instrument can link only one equipment';
+  end if;
+  if p_module = 'iqc' then
+    perform 1 from public.iqc_instruments where id = p_entity_id;
+  elsif p_module = 'eqa' then
+    perform 1 from public.eqa_schemes where id = p_entity_id;
+  else
+    perform 1 from public.bm_stock_items where id = p_entity_id;
+  end if;
+  if not found then raise exception 'Target module entity does not exist'; end if;
+  select count(*) into v_count
+  from (select distinct x from unnest(coalesce(p_equipment_ids,'{}'::uuid[])) as x) ids
+  left join public.bm_portal_equipment_refs refs on refs.portal_equipment_id = ids.x
+  where ids.x is null or refs.portal_equipment_id is null or refs.status = 'decommissioned';
+  if v_count > 0 then raise exception 'Portal equipment is unknown or decommissioned'; end if;
+  delete from public.bm_portal_equipment_links
+  where module = p_module and entity_id = p_entity_id;
+  insert into public.bm_portal_equipment_links(module,entity_id,portal_equipment_id,created_by)
+  select p_module,p_entity_id,x,p_actor
+  from (select distinct x from unnest(coalesce(p_equipment_ids,'{}'::uuid[])) as x) ids;
+end;
+$;
+revoke all on function public.replace_bm_portal_equipment_links(text,uuid,uuid[],uuid) from public,anon,authenticated;
+grant execute on function public.replace_bm_portal_equipment_links(text,uuid,uuid[],uuid) to service_role;
+
 notify pgrst, 'reload schema';
