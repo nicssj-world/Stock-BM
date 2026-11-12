@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { AlertTriangle, CheckCircle2, ChevronDown, GitCompareArrows, Pencil, Plus, Search, Settings2, Trash2, X } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { LotVerification, LotVerifParallelRow, LotVerifStatus, LotVerifWorkspace } from '@/lib/lotverif/types'
