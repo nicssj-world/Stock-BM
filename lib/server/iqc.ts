@@ -982,6 +982,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   return {
     analytes,
     instruments: activeLinkedInstruments,
+    instrumentCandidates: allInstruments,
     controlMaterials,
     controlLots,
     stockLots,
