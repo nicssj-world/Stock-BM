@@ -6,6 +6,7 @@ import { AlertTriangle, CalendarClock, Calculator, ChevronDown, ClipboardList, E
 import type { BmActor } from '@/lib/bm/types'
 import { LAB_LOCK_MIN_POINTS, type IqcCorrectiveAction, type IqcUncertaintyBudget, type IqcWorkspace } from '@/lib/iqc/types'
 import { findCorrectiveActionForPoint, runsWithoutCorrectiveActions } from '@/lib/iqc/corrective-actions'
+import { filterIqcChartsByInstrumentVisibility, type IqcChartInstrumentVisibility } from '@/lib/iqc/chart-instrument-visibility'
 import { hasTestSet, parseTestSets } from '@/lib/iqc/test-sets'
 import { formatDate, formatDateTime } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
@@ -220,6 +221,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
   const [busy, setBusy] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<ChartStatusFilter>('all')
   const [lotVisibility, setLotVisibility] = useState<LotVisibility>('active')
+  const [instrumentVisibility, setInstrumentVisibility] = useState<IqcChartInstrumentVisibility>('active')
   const [query, setQuery] = useState('')
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null)
@@ -297,8 +299,10 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
       })
       .map((lot) => lot.id),
   )
-  const visibleLotCharts = data.charts.filter((chart) => lotsById.get(chart.controlLotId)?.isActive === (lotVisibility === 'active'))
-  const chartLotIds = new Set(data.charts.map((chart) => chart.controlLotId))
+  const activeInstrumentIds = new Set(data.instruments.map((instrument) => instrument.id))
+  const instrumentVisibleCharts = filterIqcChartsByInstrumentVisibility(data.charts, activeInstrumentIds, instrumentVisibility)
+  const visibleLotCharts = instrumentVisibleCharts.filter((chart) => lotsById.get(chart.controlLotId)?.isActive === (lotVisibility === 'active'))
+  const chartLotIds = new Set(instrumentVisibleCharts.map((chart) => chart.controlLotId))
   const activeLotsWithoutCharts = data.controlLots.filter((lot) => lot.isActive && !chartLotIds.has(lot.id))
   const attentionKeys = new Set(visibleLotCharts.filter((chart) => chart.status !== 'accepted' || expiringLotIds.has(chart.controlLotId)).map((chart) => chart.key))
   const rejectedCount = visibleLotCharts.filter((chart) => chart.status === 'rejected').length
@@ -320,9 +324,9 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
       if (statusFilter === 'unlocked' && (chart.policyProfile === 'vl-standard-v1' || chart.labLockedAt)) return false
       if (statusFilter === 'expiring' && !expiringLotIds.has(chart.controlLotId)) return false
       if (!q) return true
-      return [chart.controlMaterialName, chart.level, chart.lotNumber, chart.analyteCode, chart.analyteName, chart.groupLabel].filter(Boolean).join(' ').toLowerCase().includes(q)
+      return [chart.instrumentName, chart.controlMaterialName, chart.level, chart.lotNumber, chart.analyteCode, chart.analyteName, chart.groupLabel].filter(Boolean).join(' ').toLowerCase().includes(q)
     })
-    .sort((a, b) => chartStatusRank(a.status) - chartStatusRank(b.status) || a.controlMaterialName.localeCompare(b.controlMaterialName) || a.lotNumber.localeCompare(b.lotNumber) || a.analyteCode.localeCompare(b.analyteCode))
+    .sort((a, b) => chartStatusRank(a.status) - chartStatusRank(b.status) || a.controlMaterialName.localeCompare(b.controlMaterialName) || a.lotNumber.localeCompare(b.lotNumber) || a.analyteCode.localeCompare(b.analyteCode) || (a.instrumentName ?? '').localeCompare(b.instrumentName ?? ''))
   const selectedChart = filteredCharts.find((chart) => chart.key === selectedKey) ?? null
   const selectedPoint = selectedChart?.points.find((point) => point.resultId === selectedPointId) ?? null
   const selectedRun = selectedPoint ? (data.runs.find((run) => run.id === selectedPoint.runId) ?? null) : null
@@ -443,7 +447,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
       </Card>
 
       <Card className="p-3">
-        <div className="grid gap-3 lg:grid-cols-[1fr_190px_220px]">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr_190px_220px_220px]">
           <label className="relative block">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-[#789097]" />
             <Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder="Search control, lot, analyte" />
@@ -459,6 +463,19 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
           >
             <option value="active">Active chart lots (มีผลแล้ว)</option>
             <option value="closed">Closed lots / History (chart history)</option>
+          </Select>
+          <Select
+            value={instrumentVisibility}
+            onChange={(event) => {
+              setInstrumentVisibility(event.target.value as IqcChartInstrumentVisibility)
+              setSelectedKey(null)
+              setSelectedPointId(null)
+            }}
+            aria-label="กรองกราฟตามเครื่องมือ"
+          >
+            <option value="active">เฉพาะเครื่องที่ใช้งาน</option>
+            <option value="inactive">เครื่องที่ปิดใช้ / ประวัติ</option>
+            <option value="all">ทุกเครื่อง</option>
           </Select>
           <Select
             value={statusFilter}
@@ -481,7 +498,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
         </div>
       </Card>
 
-      {lotVisibility === 'active' && activeLotsWithoutCharts.length ? <div className="rounded-lg border border-[#eed4a6] bg-[#fff9ed] px-3 py-2.5 text-xs text-[#795d2d]">
+      {lotVisibility === 'active' && instrumentVisibility === 'active' && activeLotsWithoutCharts.length ? <div className="rounded-lg border border-[#eed4a6] bg-[#fff9ed] px-3 py-2.5 text-xs text-[#795d2d]">
         <span className="font-bold text-[#8b5a08]">Active Control lot ที่ยังไม่มีผล/กราฟ:</span>{' '}
         {activeLotsWithoutCharts.map((lot) => `${lot.controlMaterialName} · Lot ${lot.lotNumber}`).join(', ')}
         <span className="ml-1">(จะแสดงในรายการกราฟหลังบันทึกผล)</span>
@@ -570,6 +587,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
                               เกณฑ์ที่ใช้: {activeLimitLabel} · n {chart.n} · mean {fmtCompact(chart.mean)} · SD {fmtCompact(chart.sd)}
                               {latest ? ` · latest ${fmtCompact(latest.value)} (${formatDateTime(latest.runDatetime)})` : ''}
                             </p>
+                            <p className="mt-1 text-[11px] font-semibold text-[#315763]">เครื่อง: {chart.instrumentName ?? 'ไม่ระบุเครื่องมือ (ประวัติเดิม)'}</p>
                             <p className="mt-1 text-[11px] text-[#58747d]">
                               Assigned: {fmtCompact(chart.assignedMean)} / SD {fmtCompact(chart.assignedSd)} · LAB: {fmtCompact(chart.labMean ?? chart.runningLabMean)} / SD {fmtCompact(chart.labSd ?? chart.runningLabSd)}{chart.labLockedAt ? ` (locked n ${chart.labN ?? chart.runningLabN})` : chart.runningLabMean != null ? ` (คำนวณสด n ${chart.runningLabN} · รอ Lock & ปิด Lot)` : ` (ยังไม่ครบ ${LAB_LOCK_MIN_POINTS} จุด · n ${chart.runningLabN})`}
                             </p>
@@ -594,7 +612,13 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
               )
             })
           ) : (
-            <Card className="p-8 text-center text-sm text-[#8198a0]">{lotVisibility === 'active' ? 'No active IQC charts match this filter.' : 'No closed IQC charts match this filter.'}</Card>
+            <Card className="p-8 text-center text-sm text-[#8198a0]">{lotVisibility === 'active'
+              ? instrumentVisibility === 'active'
+                ? 'ไม่มีกราฟของเครื่องที่ใช้งานตรงกับตัวกรอง · เลือก “เครื่องที่ปิดใช้ / ประวัติ” เพื่อดูกราฟเดิม'
+                : instrumentVisibility === 'inactive'
+                  ? 'ไม่พบกราฟของเครื่องที่ปิดใช้ในล็อตที่เลือก'
+                  : 'No active IQC charts match this filter.'
+              : 'No closed IQC charts match this filter.'}</Card>
           )}
         </div>
 
