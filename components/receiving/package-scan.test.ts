@@ -16,7 +16,8 @@ describe('package scan capture panel', () => {
     expect(source).toContain('response.conflicts.length === 0')
     expect(source).toContain('onUse(response)')
     expect(source).toContain('resolveScanPayload(')
-    expect(source).toContain('ไม่ใช้แทน Catalog/REF')
+    // AI 240 may look up an existing REF in Item Master but never overwrites it.
+    expect(source).toContain('แต่ไม่เขียนทับ REF')
   })
 
   it('contains no stock mutation shortcut', () => {

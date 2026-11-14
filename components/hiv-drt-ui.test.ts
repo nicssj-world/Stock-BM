@@ -67,7 +67,8 @@ describe('HIV DRT interface', () => {
     expect(source).toContain('!min-h-8 !shrink-0 !whitespace-nowrap')
     expect(source).toContain('outlabLnDraft.trim() || null')
     expect(source).toContain('<th className="px-4 py-3">LN Outlab</th>')
-    expect(source).toContain('{sample.outlabLn ?? \'-\'}')
+    // Display goes through the shared formatter (shows '-' when empty).
+    expect(source).toContain('{formatHivDrtOutlabLn(sample.outlabLn)}')
     expect(source).toContain("method: 'PATCH'")
   })
 

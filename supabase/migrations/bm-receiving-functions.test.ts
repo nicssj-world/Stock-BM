@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const sql = readFileSync(join(process.cwd(), 'supabase/migrations/202609180006_bm_receiving_functions.sql'), 'utf8')
+// Normalize line endings: Windows checkouts (core.autocrlf) turn LF into CRLF.
+const sql = readFileSync(join(process.cwd(), 'supabase/migrations/202609180006_bm_receiving_functions.sql'), 'utf8').replace(/\r\n/g, '\n')
 
 describe('receiving function migration', () => {
   it('mirrors the global six-calendar-month TOR rule with a strict greater-than boundary', () => {
