@@ -978,10 +978,10 @@ function RunResultCard({ run, lots, onStartCorrectiveAction, onViewCharts, onNex
           <Button type="button" variant={needsAction ? 'secondary' : 'primary'} onClick={onNextRun}>บันทึก run ถัดไป</Button>
         </div>
       </div>
-      <div className="overflow-x-auto border-t border-[#e5eeee]">
-        <table className="w-full min-w-[640px] text-left text-sm">
+      <div className="relative overflow-x-auto border-t border-[#e5eeee]">
+        <table className="w-full text-left text-sm">
           <thead className="bg-[#f7fbfb] text-xs text-[#789097]">
-            <tr><th scope="col" className="px-4 py-2">Analyte</th><th scope="col" className="px-4 py-2">Control lot</th><th scope="col" className="px-4 py-2 text-right">ค่า</th><th scope="col" className="px-4 py-2 text-right">z</th><th scope="col" className="px-4 py-2">ผล</th><th scope="col" className="px-4 py-2"><span className="sr-only">การดำเนินการ</span></th></tr>
+            <tr><th scope="col" className="px-3 py-2 sm:px-4">Analyte</th><th scope="col" className="hidden px-4 py-2 sm:table-cell">Control lot</th><th scope="col" className="px-3 py-2 text-right sm:px-4">ค่า</th><th scope="col" className="hidden px-4 py-2 text-right sm:table-cell">z</th><th scope="col" className="px-3 py-2 sm:px-4">ผล</th><th scope="col" className="px-3 py-2 sm:px-4"><span className="sr-only">การดำเนินการ</span></th></tr>
           </thead>
           <tbody className="divide-y divide-[#edf2f2]">
             {results.map((result) => {
@@ -989,10 +989,10 @@ function RunResultCard({ run, lots, onStartCorrectiveAction, onViewCharts, onNex
               const flagged = result.status === 'rejected' || result.status === 'investigate'
               return (
                 <tr key={result.resultId ?? `${result.controlLotId}:${result.analyteId}`} className={result.status === 'rejected' ? 'bg-[#fff7f8]' : ''}>
-                  <th scope="row" className="mono px-4 py-2 font-semibold text-[#173d50]">{result.analyteCode}</th>
-                  <td className="px-4 py-2 text-xs text-[#58747d]">{lot ? `${lot.level ? `${lot.level} · ` : ''}${lot.lotNumber}` : '—'}</td>
-                  <td className="mono px-4 py-2 text-right tabular-nums">{result.numericValue != null ? fmtCompact(result.numericValue) : result.qualitativeValue ?? '—'}</td>
-                  <td className="mono px-4 py-2 text-right tabular-nums">{result.z != null ? result.z.toFixed(2) : '—'}</td>
+                  <th scope="row" className="mono px-3 py-2 font-semibold text-[#173d50] sm:px-4">{result.analyteCode}</th>
+                  <td className="hidden px-4 py-2 text-xs text-[#58747d] sm:table-cell">{lot ? `${lot.level ? `${lot.level} · ` : ''}${lot.lotNumber}` : '—'}</td>
+                  <td className="mono px-3 py-2 text-right tabular-nums sm:px-4">{result.numericValue != null ? fmtCompact(result.numericValue) : result.qualitativeValue ?? '—'}</td>
+                  <td className="mono hidden px-4 py-2 text-right tabular-nums sm:table-cell">{result.z != null ? result.z.toFixed(2) : '—'}</td>
                   <td className="px-4 py-2">
                     <span className="flex flex-wrap items-center gap-1.5">
                       <StatusBadge tone={result.status} label={chartStatusLabel(result.status)} />
@@ -1000,7 +1000,7 @@ function RunResultCard({ run, lots, onStartCorrectiveAction, onViewCharts, onNex
                     </span>
                   </td>
                   <td className="px-4 py-1.5 text-right">
-                    {flagged ? <Button type="button" variant="danger" className="text-xs" onClick={() => onStartCorrectiveAction({ runId: run.id, resultId: result.resultId ?? null, analyteId: result.analyteId, controlLotId: result.controlLotId })}><Wrench className="size-3.5" aria-hidden="true" />เปิด CAPA</Button> : null}
+                    {flagged ? <Button type="button" variant="danger" className="text-xs whitespace-nowrap" onClick={() => onStartCorrectiveAction({ runId: run.id, resultId: result.resultId ?? null, analyteId: result.analyteId, controlLotId: result.controlLotId })}><Wrench className="size-3.5" aria-hidden="true" />เปิด CAPA</Button> : null}
                   </td>
                 </tr>
               )
@@ -1436,7 +1436,7 @@ function EnterTab({ data, onOk, onErr, onViewCharts, onStartCorrectiveAction }: 
                 <option value="">เลือก Control lot สำหรับ Panel…</option>
                 {panelControlLots.map((lot) => <option key={lot.id} value={lot.id}>{lot.controlMaterialName}{lot.level ? ` · ${lot.level}` : ''} · Lot {lot.lotNumber}</option>)}
               </Select> : null}
-              <Button type="button" variant="ghost" className="h-9" onClick={addRow} disabled={!instrumentId}>
+              <Button type="button" variant="ghost" className="h-9 whitespace-nowrap" onClick={addRow} disabled={!instrumentId}>
                 + เพิ่มรายการ
               </Button>
             </div>

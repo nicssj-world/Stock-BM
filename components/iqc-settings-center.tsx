@@ -89,7 +89,7 @@ function TaskCard({ task, step, selected, notNeeded, onSelect, panelId }: { task
       onClick={onSelect}
       aria-pressed={selected}
       aria-controls={panelId}
-      className={`flex min-h-28 flex-col rounded-lg border p-4 text-left transition duration-200 focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${selected ? 'border-[#0b7f76] bg-[#f1faf9] shadow-sm' : 'border-[#d9e5e6] bg-white hover:border-[#9ec4c4]'}`}
+      className={`flex min-h-28 w-full flex-col rounded-lg border p-4 text-left transition duration-200 focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${selected ? 'border-[#0b7f76] bg-[#f1faf9] shadow-sm' : 'border-[#d9e5e6] bg-white hover:border-[#9ec4c4]'}`}
     >
       <div className="flex items-start justify-between gap-3">
         <span className="flex items-center gap-2">
@@ -258,9 +258,9 @@ export function IqcSettingsCenter({ data, actor, initialSetup, initialInstrument
         ))}
       </ol>
       {advancedTask ? (
-        <div className="flex justify-end">
-          <button type="button" onClick={() => selectTask('advanced')} aria-pressed={taskKey === 'advanced'} className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-3 text-sm font-semibold text-[#315763] hover:bg-[#eef6f5] focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none">
-            <Database className="size-4 text-[#0b7f76]" aria-hidden="true" /> เกณฑ์เพิ่มเติม: TEa, Six Sigma, Uncertainty <span className="font-normal text-[#789097]">(ไม่บังคับ)</span>
+        <div className="flex sm:justify-end">
+          <button type="button" onClick={() => selectTask('advanced')} aria-pressed={taskKey === 'advanced'} className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-3 text-left text-sm font-semibold text-[#315763] hover:bg-[#eef6f5] focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none">
+            <Database className="size-4 shrink-0 text-[#0b7f76]" aria-hidden="true" /><span>เกณฑ์เพิ่มเติม: TEa, Six Sigma, Uncertainty <span className="font-normal whitespace-nowrap text-[#789097]">(ไม่บังคับ)</span></span>
           </button>
         </div>
       ) : null}
@@ -697,7 +697,7 @@ function ControlLotTask({ data, onOk, onErr, onCreated }: { data: IqcWorkspace; 
         </div>
         {visibleControlLots.length ? (
           <>
-            <div className="overflow-x-auto rounded-md border border-[#e1ebec]">
+            <div className="relative overflow-x-auto rounded-md border border-[#e1ebec]">
               <table className="w-full min-w-[820px] text-left text-xs">
                 <thead className="bg-[#f7fbfb] text-[#789097]">
                   <tr><th className="px-3 py-2">Material</th><th className="px-3 py-2">ระดับ</th><th className="px-3 py-2">Control lot</th><th className="px-3 py-2">Expiry</th><th className="px-3 py-2">Stock</th><th className="px-3 py-2">สถานะ</th><th className="px-3 py-2"><span className="sr-only">จัดการ</span></th></tr>
@@ -866,9 +866,9 @@ function AssignedSpecTask({ data, initialLotId, onOk, onErr }: { data: IqcWorksp
           </Select>
         </Field>
         <div className="overflow-x-auto rounded-md border border-[#e1ebec]">
-          <table className="w-full min-w-[640px] text-left text-sm">
+          <table className="w-full text-left text-sm">
             <thead className="bg-[#f7fbfb] text-xs text-[#789097]">
-              <tr><th scope="col" className="px-3 py-2">Analyte</th><th scope="col" className="px-3 py-2">Assigned mean</th><th scope="col" className="px-3 py-2">Assigned SD</th><th scope="col" className="px-3 py-2">สถานะ</th></tr>
+              <tr><th scope="col" className="px-3 py-2">Analyte</th><th scope="col" className="w-px px-2 py-2 whitespace-nowrap sm:px-3">Assigned mean</th><th scope="col" className="w-px px-2 py-2 whitespace-nowrap sm:px-3">Assigned SD</th><th scope="col" className="hidden px-3 py-2 sm:table-cell">สถานะ</th></tr>
             </thead>
             <tbody className="divide-y divide-[#edf2f2]">
               {rows.map(({ analyte, value, dirty, isChange }) => {
@@ -877,18 +877,19 @@ function AssignedSpecTask({ data, initialLotId, onOk, onErr }: { data: IqcWorksp
                 const errorId = `spec-error-${analyte.id}`
                 return (
                   <tr key={analyte.id} className={error ? 'bg-[#fff7f8]' : dirty ? 'bg-[#fffbf2]' : ''}>
-                    <th scope="row" className="px-3 py-2 align-top font-normal">
+                    <th scope="row" className="px-2 py-2 align-top font-normal sm:px-3">
                       <span className="mono block font-semibold text-[#173d50]">{analyte.code}</span>
                       <span className="text-xs text-[#789097]">{analyte.unit ?? analyte.name}</span>
+                      <span className="mt-1 block sm:hidden"><StatusBadge tone={dirty ? 'warning' : complete ? 'accepted' : 'not_evaluated'} label={dirty ? (isChange ? 'แก้ไข · ยังไม่บันทึก' : 'ใหม่ · ยังไม่บันทึก') : complete ? 'บันทึกแล้ว' : 'ยังไม่กรอก'} /></span>
                     </th>
-                    <td className="px-3 py-2 align-top">
-                      <Input id={`spec-mean-${analyte.id}`} className="mono w-36 tabular-nums" type="number" step="any" inputMode="decimal" aria-label={`Assigned mean ${analyte.code}`} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} value={value.mean} onChange={(event) => update(analyte.id, 'mean', event.target.value)} />
+                    <td className="px-2 py-2 align-top sm:px-3">
+                      <div className="w-[5.5rem] sm:w-40"><Input id={`spec-mean-${analyte.id}`} className="mono tabular-nums" type="number" step="any" inputMode="decimal" aria-label={`Assigned mean ${analyte.code}`} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} value={value.mean} onChange={(event) => update(analyte.id, 'mean', event.target.value)} /></div>
                     </td>
-                    <td className="px-3 py-2 align-top">
-                      <Input className="mono w-36 tabular-nums" type="number" step="any" min="0" inputMode="decimal" aria-label={`Assigned SD ${analyte.code}`} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} value={value.sd} onChange={(event) => update(analyte.id, 'sd', event.target.value)} />
+                    <td className="px-2 py-2 align-top sm:px-3">
+                      <div className="w-[5.5rem] sm:w-40"><Input className="mono tabular-nums" type="number" step="any" min="0" inputMode="decimal" aria-label={`Assigned SD ${analyte.code}`} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} value={value.sd} onChange={(event) => update(analyte.id, 'sd', event.target.value)} /></div>
                       {error ? <p id={errorId} className="mt-1 text-xs font-semibold text-[#a83541]">{error}</p> : null}
                     </td>
-                    <td className="px-3 py-2 align-top">
+                    <td className="hidden px-3 py-2 align-top sm:table-cell">
                       <StatusBadge tone={dirty ? 'warning' : complete ? 'accepted' : 'not_evaluated'} label={dirty ? (isChange ? 'แก้ไข · ยังไม่บันทึก' : 'ใหม่ · ยังไม่บันทึก') : complete ? 'บันทึกแล้ว' : 'ยังไม่กรอก'} />
                     </td>
                   </tr>
@@ -972,7 +973,7 @@ function BaselineTask({ data, actor, instrumentId, lotId, analyteId, vlAnalytes,
             <h4 className="font-bold text-[#173d50]">Lot × ระดับ ของเครื่องนี้</h4>
             <span className="text-xs text-[#58747d]">{readyCount ? <><strong className="mono text-[#8f5f1d]">{readyCount}</strong> แถวพร้อมทบทวน · </> : null}<span className="mono">{matrixRows.length}</span> แถว</span>
           </div>
-          <div className="overflow-x-auto">
+          <div className="relative overflow-x-auto">
             <table className="w-full min-w-[860px] text-left text-xs">
               <thead className="bg-[#f7fbfb] text-[#789097]"><tr><th scope="col" className="px-4 py-3">Assay / ระดับ</th><th scope="col" className="px-4 py-3">Control lot</th><th scope="col" className="px-4 py-3">CoA</th><th scope="col" className="px-4 py-3">ผล QC</th><th scope="col" className="px-4 py-3">สถานะ baseline</th><th scope="col" className="px-4 py-3"><span className="sr-only">ทบทวน</span></th></tr></thead>
               <tbody className="divide-y divide-[#edf2f2] text-[#3f5c64]">
