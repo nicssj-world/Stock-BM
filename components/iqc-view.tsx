@@ -7,6 +7,7 @@ import type { BmActor } from '@/lib/bm/types'
 import { LAB_LOCK_MIN_POINTS, type IqcCorrectiveAction, type IqcUncertaintyBudget, type IqcWorkspace } from '@/lib/iqc/types'
 import { findCorrectiveActionForPoint, runsWithoutCorrectiveActions } from '@/lib/iqc/corrective-actions'
 import { hasTestSet, parseTestSets } from '@/lib/iqc/test-sets'
+import { findNewRun, pickDefaultInstrumentId, readRememberedInstrumentId, rememberInstrumentId, worstRunStatus } from '@/lib/iqc/entry-defaults'
 import { formatDate, formatDateTime } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
 import { StructuredCorrectiveTab, type IqcCorrectiveContext } from '@/components/iqc-corrective-tab'
@@ -156,7 +157,7 @@ export function IqcView({ actor, initialData, initialTab = 'enter', initialSetup
         </Card>
       ) : null}
 
-      {tab !== 'enter' ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {tab !== 'enter' && tab !== 'charts' ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Charts" value={scoped.summary.chartCount} />
         <StatCard label="In-control" value={scoped.summary.inControl} tone="accepted" />
         <StatCard label="Warning" value={scoped.summary.warning} tone="warning" />
@@ -178,7 +179,7 @@ export function IqcView({ actor, initialData, initialTab = 'enter', initialSetup
       ) : null}
 
       {tab === 'charts' ? <ChartsOverviewTab data={scoped} isAdmin={canManageIqc} onOk={ok} onErr={err} onOpenCorrectiveAction={openCorrectiveAction} onStartCorrectiveAction={openCorrectiveDraft} /> : null}
-      {tab === 'enter' ? <EnterTab data={scoped} onOk={ok} onErr={err} onDone={() => setTab('charts')} /> : null}
+      {tab === 'enter' ? <EnterTab data={scoped} onOk={ok} onErr={err} onViewCharts={() => setTab('charts')} onStartCorrectiveAction={openCorrectiveDraft} /> : null}
       {tab === 'sixsigma' ? <SixSigmaTab data={scoped} /> : null}
       {tab === 'uncertainty' ? <UncertaintyTab data={scoped} isAdmin={canManageIqc} onOk={ok} onErr={err} /> : null}
       {tab === 'corrective' ? <StructuredCorrectiveTab key={`iqc-corrective-${correctiveContext?.runId ?? focusedCorrectiveActionId ?? 'manual'}-${correctiveContext?.resultId ?? ''}`} data={data} actor={actor} onOk={ok} onErr={err} focusId={focusedCorrectiveActionId} initialContext={correctiveContext} /> : null}
@@ -218,7 +219,11 @@ function fmtCompact(value: number | null) {
 
 function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction, onStartCorrectiveAction }: { data: IqcWorkspace; isAdmin: boolean; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void; onOpenCorrectiveAction: (id: string) => void; onStartCorrectiveAction: (context: IqcCorrectiveContext) => void }) {
   const [busy, setBusy] = useState<string | null>(null)
-  const [statusFilter, setStatusFilter] = useState<ChartStatusFilter>('all')
+  // Open on what needs attention; fall back to everything when all is in control.
+  const [statusFilter, setStatusFilter] = useState<ChartStatusFilter>(() => {
+    const activeLotIds = new Set(data.controlLots.filter((lot) => lot.isActive).map((lot) => lot.id))
+    return data.charts.some((chart) => activeLotIds.has(chart.controlLotId) && chart.status !== 'accepted') ? 'attention' : 'all'
+  })
   const [lotVisibility, setLotVisibility] = useState<LotVisibility>('active')
   const [query, setQuery] = useState('')
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
@@ -914,10 +919,81 @@ function findLatestUsedControlLotId(runs: IqcWorkspace['runs'], candidateLotIds:
   return null
 }
 
-function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void; onDone: () => void }) {
+const RUN_STATUS_COPY: Record<IqcWorkspace['runs'][number]['results'][number]['status'], { title: string; detail: string }> = {
+  accepted: { title: 'ผ่านทุกรายการ', detail: 'ใช้ผลตรวจผู้ป่วยของ run นี้ได้' },
+  warning: { title: 'มีแจ้งเตือน', detail: 'ผลยังใช้ได้ แต่ควรติดตามแนวโน้มของรายการที่แจ้งเตือน' },
+  investigate: { title: 'ต้องตรวจสอบ', detail: 'เปิด CAPA เพื่อบันทึกการตรวจสอบก่อนรายงานผล' },
+  rejected: { title: 'Rejected', detail: 'หยุดรายงานผลของรายการที่ reject และเปิด CAPA' },
+  not_evaluated: { title: 'ยังไม่ประเมิน', detail: 'ยังไม่มีเกณฑ์ (Mean/SD หรือ baseline) สำหรับบางรายการ' },
+}
+
+function RunResultCard({ run, lots, onStartCorrectiveAction, onViewCharts, onNextRun }: {
+  run: IqcWorkspace['runs'][number]
+  lots: IqcWorkspace['controlLots']
+  onStartCorrectiveAction: (context: IqcCorrectiveContext) => void
+  onViewCharts: () => void
+  onNextRun: () => void
+}) {
+  const results = run.results.filter((result) => !result.isVoided)
+  const overall = worstRunStatus(run)
+  const copy = RUN_STATUS_COPY[overall]
+  const lotsById = new Map(lots.map((lot) => [lot.id, lot]))
+  const needsAction = overall === 'rejected' || overall === 'investigate'
+  return (
+    <Card className={`overflow-hidden p-0 ${overall === 'rejected' ? 'border-[#efc7cc]' : overall === 'investigate' || overall === 'warning' ? 'border-[#eed4a6]' : 'border-[#b9ded8]'}`}>
+      <div id="iqc-run-result" tabIndex={-1} role="status" aria-live="polite" className="flex flex-col gap-3 px-4 py-3 focus:outline-none sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <StatusBadge tone={overall} label={copy.title} />
+          <div>
+            <p className="font-bold text-[#173d50]">ผล run นี้{run.runNo ? ` · Run ${run.runNo}` : ''}{run.instrumentName ? ` · ${run.instrumentName}` : ''}</p>
+            <p className="text-xs text-[#58747d]">{formatDateTime(run.runDatetime)} · {copy.detail}</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="ghost" onClick={onViewCharts}><LineChart className="size-4" aria-hidden="true" />ดูกราฟ</Button>
+          <Button type="button" variant={needsAction ? 'secondary' : 'primary'} onClick={onNextRun}>บันทึก run ถัดไป</Button>
+        </div>
+      </div>
+      <div className="overflow-x-auto border-t border-[#e5eeee]">
+        <table className="w-full min-w-[640px] text-left text-sm">
+          <thead className="bg-[#f7fbfb] text-xs text-[#789097]">
+            <tr><th scope="col" className="px-4 py-2">Analyte</th><th scope="col" className="px-4 py-2">Control lot</th><th scope="col" className="px-4 py-2 text-right">ค่า</th><th scope="col" className="px-4 py-2 text-right">z</th><th scope="col" className="px-4 py-2">ผล</th><th scope="col" className="px-4 py-2"><span className="sr-only">การดำเนินการ</span></th></tr>
+          </thead>
+          <tbody className="divide-y divide-[#edf2f2]">
+            {results.map((result) => {
+              const lot = lotsById.get(result.controlLotId)
+              const flagged = result.status === 'rejected' || result.status === 'investigate'
+              return (
+                <tr key={result.resultId ?? `${result.controlLotId}:${result.analyteId}`} className={result.status === 'rejected' ? 'bg-[#fff7f8]' : ''}>
+                  <th scope="row" className="mono px-4 py-2 font-semibold text-[#173d50]">{result.analyteCode}</th>
+                  <td className="px-4 py-2 text-xs text-[#58747d]">{lot ? `${lot.level ? `${lot.level} · ` : ''}${lot.lotNumber}` : '—'}</td>
+                  <td className="mono px-4 py-2 text-right tabular-nums">{result.numericValue != null ? fmtCompact(result.numericValue) : result.qualitativeValue ?? '—'}</td>
+                  <td className="mono px-4 py-2 text-right tabular-nums">{result.z != null ? result.z.toFixed(2) : '—'}</td>
+                  <td className="px-4 py-2">
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <StatusBadge tone={result.status} label={chartStatusLabel(result.status)} />
+                      {result.violatedRules.length ? <span className="mono text-xs font-semibold text-[#8f5f1d]">{result.violatedRules.join(', ')}</span> : null}
+                    </span>
+                  </td>
+                  <td className="px-4 py-1.5 text-right">
+                    {flagged ? <Button type="button" variant="danger" className="text-xs" onClick={() => onStartCorrectiveAction({ runId: run.id, resultId: result.resultId ?? null, analyteId: result.analyteId, controlLotId: result.controlLotId })}><Wrench className="size-3.5" aria-hidden="true" />เปิด CAPA</Button> : null}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  )
+}
+
+function EnterTab({ data, onOk, onErr, onViewCharts, onStartCorrectiveAction }: { data: IqcWorkspace; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void; onViewCharts: () => void; onStartCorrectiveAction: (context: IqcCorrectiveContext) => void }) {
   const activeAnalytes = useMemo(() => data.analytes.filter((a) => a.isActive), [data.analytes])
   const activeLots = useMemo(() => data.controlLots.filter((l) => l.isActive), [data.controlLots])
   const [instrumentId, setInstrumentId] = useState('')
+  const [savedRun, setSavedRun] = useState<IqcWorkspace['runs'][number] | null>(null)
+  const instrumentDefaulted = useRef(false)
   const [runDatetime, setRunDatetime] = useState('')
   const [note, setNote] = useState('')
   const [consumables, setConsumables] = useState<ConsumableRow[]>([])
@@ -967,12 +1043,17 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
     ? testSetControlLotId
     : isCd4TestSet && panelControlLots.length === 1 ? panelControlLots[0].id : ''
   const selectedPanelControlLot = panelControlLots.find((lot) => lot.id === effectiveTestSetControlLotId)
-  const testSetOptions = useMemo(
-    () => [...testSetAnalyteIds.entries()]
-      .filter(([, analyteIds]) => !instrumentId || !plannedAnalyteIds.size || [...analyteIds].some((id) => plannedAnalyteIds.has(id)))
-      .map(([name, analyteIds]) => ({ name, count: analyteIds.size })),
-    [instrumentId, plannedAnalyteIds, testSetAnalyteIds],
+  const plannedAnalyteIdsFor = useCallback(
+    (forInstrumentId: string) => new Set(data.controlPlans.filter((plan) => plan.isActive && plan.instrumentId === forInstrumentId).map((plan) => plan.analyteId)),
+    [data.controlPlans],
   )
+  const testSetOptionsFor = useCallback((forInstrumentId: string) => {
+    const planned = plannedAnalyteIdsFor(forInstrumentId)
+    return [...testSetAnalyteIds.entries()]
+      .filter(([, analyteIds]) => !forInstrumentId || !planned.size || [...analyteIds].some((id) => planned.has(id)))
+      .map(([name, analyteIds]) => ({ name, count: analyteIds.size }))
+  }, [plannedAnalyteIdsFor, testSetAnalyteIds])
+  const testSetOptions = useMemo(() => testSetOptionsFor(instrumentId), [instrumentId, testSetOptionsFor])
   const availableAnalytes = useMemo(
     () => activeAnalytes.filter((analyte) =>
       (!instrumentId || !plannedAnalyteIds.size || plannedAnalyteIds.has(analyte.id))
@@ -1053,13 +1134,14 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
     }))
     setRows(added)
   }
-  function startTestSet(selectedSet: string, selectedControlLotId?: string) {
+  function startTestSet(selectedSet: string, selectedControlLotId?: string, forInstrumentId = instrumentId) {
+    const planned = plannedAnalyteIdsFor(forInstrumentId)
     const selectedSetIds = testSetAnalyteIds.get(selectedSet) ?? new Set<string>()
-    const selectedAnalytes = activeAnalytes.filter((analyte) => selectedSetIds.has(analyte.id) && (!instrumentId || !plannedAnalyteIds.size || plannedAnalyteIds.has(analyte.id)))
+    const selectedAnalytes = activeAnalytes.filter((analyte) => selectedSetIds.has(analyte.id) && (!forInstrumentId || !planned.size || planned.has(analyte.id)))
     const panelLots = findPanelControlLots(selectedSet, activeLots)
     const isCd4Panel = selectedAnalytes.length > 0 && selectedAnalytes.every((analyte) => isCd4AnalyteCode(analyte.code))
     const latestUsedLotId = isCd4Panel
-      ? findLatestUsedControlLotId(data.runs, panelLots.map((lot) => lot.id), selectedSetIds, instrumentId)
+      ? findLatestUsedControlLotId(data.runs, panelLots.map((lot) => lot.id), selectedSetIds, forInstrumentId)
       : null
     const selectedCd4Lot = isCd4Panel
       ? selectedControlLotId !== undefined
@@ -1097,14 +1179,56 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
       : unmapped.length ? `ยังไม่พบ Control lot ที่มี Level ตรงกับ: ${unmapped.join(', ')}` : '')
   }
 
-  function defaultCd4PanelLotId(selectedSet: string) {
+  function defaultCd4PanelLotId(selectedSet: string, forInstrumentId = instrumentId) {
+    const planned = plannedAnalyteIdsFor(forInstrumentId)
     const selectedSetIds = testSetAnalyteIds.get(selectedSet) ?? new Set<string>()
-    const selectedAnalytes = activeAnalytes.filter((analyte) => selectedSetIds.has(analyte.id) && (!instrumentId || !plannedAnalyteIds.size || plannedAnalyteIds.has(analyte.id)))
+    const selectedAnalytes = activeAnalytes.filter((analyte) => selectedSetIds.has(analyte.id) && (!forInstrumentId || !planned.size || planned.has(analyte.id)))
     if (!selectedAnalytes.length || !selectedAnalytes.every((analyte) => isCd4AnalyteCode(analyte.code))) return ''
     const panelLotsForSet = findPanelControlLots(selectedSet, activeLots)
-    const latestUsedLotId = findLatestUsedControlLotId(data.runs, panelLotsForSet.map((lot) => lot.id), selectedSetIds, instrumentId)
+    const latestUsedLotId = findLatestUsedControlLotId(data.runs, panelLotsForSet.map((lot) => lot.id), selectedSetIds, forInstrumentId)
     return panelLotsForSet.find((lot) => lot.id === latestUsedLotId)?.id ?? (panelLotsForSet.length === 1 ? panelLotsForSet[0].id : '')
   }
+
+  function chooseTestSet(selectedSet: string, forInstrumentId = instrumentId) {
+    setTestSet(selectedSet)
+    setFillLot('')
+    if (selectedSet) {
+      const defaultLotId = defaultCd4PanelLotId(selectedSet, forInstrumentId)
+      setTestSetControlLotId(defaultLotId)
+      startTestSet(selectedSet, defaultLotId, forInstrumentId)
+    } else {
+      setTestSetControlLotId('')
+      setRows([])
+      setLotMappingWarning('')
+    }
+  }
+
+  // Selecting an instrument resets the run, then picks its test set when the
+  // Control plan gives that instrument exactly one.
+  function chooseInstrument(nextInstrumentId: string, { confirmDiscard = true } = {}) {
+    if (confirmDiscard && rows.some((row) => row.value.trim()) && !window.confirm('เปลี่ยนเครื่องจะล้างค่าที่กรอกไว้ ต้องการเปลี่ยนหรือไม่')) return
+    setInstrumentId(nextInstrumentId)
+    setFillLot('')
+    setTestSetControlLotId('')
+    setConsumables([])
+    setRows([])
+    setLotMappingWarning('')
+    const options = nextInstrumentId ? testSetOptionsFor(nextInstrumentId) : []
+    if (options.length === 1) chooseTestSet(options[0].name, nextInstrumentId)
+    else setTestSet('')
+  }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (instrumentDefaulted.current) return
+      instrumentDefaulted.current = true
+      const defaultId = pickDefaultInstrumentId(data.instruments, readRememberedInstrumentId())
+      if (defaultId) chooseInstrument(defaultId, { confirmDiscard: false })
+    }, 0)
+    return () => window.clearTimeout(timer)
+    // Runs once on mount: later changes are the user's own choice.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -1125,6 +1249,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
         }
       })
     if (!values.length) return onErr('กรอกค่าผลอย่างน้อย 1 รายการ')
+    const previousRunIds = new Set(data.runs.map((run) => run.id))
     setBusy(true)
     try {
       const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/runs', {
@@ -1145,8 +1270,13 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
         }),
       })
       onOk('บันทึก run แล้ว', result.iqc)
+      rememberInstrumentId(instrumentId)
+      setSavedRun(findNewRun(previousRunIds, result.iqc.runs, instrumentId))
+      // Keep instrument, test set and rows so the next run is only new values.
+      setRows((current) => current.map((row) => ({ ...row, value: '' })))
+      setNote('')
       setRunDatetime(nowForDatetimeLocalInput())
-      onDone()
+      window.setTimeout(() => document.getElementById('iqc-run-result')?.focus(), 0)
     } catch (e) {
       onErr(e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ')
     } finally {
@@ -1164,15 +1294,15 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="font-bold text-[#173d50]">บันทึก IQC ประจำวัน</h2>
-            <p className="mt-1 text-sm text-[#58747d]">เลือก Control lot เพียงครั้งเดียว ระบบจะเตรียมรายการตรวจทั้งหมดของล็อตนั้นให้กรอก</p>
+            <p className="mt-1 text-sm text-[#58747d]">เลือกเครื่องและ Test set ระบบจะเตรียมรายการตรวจและ Control lot ให้ กรอกค่าแล้วเห็นผล Westgard ทันที</p>
           </div>
-          <div className="flex items-center gap-2 text-xs font-semibold text-[#0b7f76]">
-            <span className="rounded-full bg-white px-2.5 py-1">1 เลือกลอต</span>
-            <span>→</span>
-            <span className="rounded-full bg-white px-2.5 py-1">2 กรอกผล</span>
-            <span>→</span>
-            <span className="rounded-full bg-white px-2.5 py-1">3 ตรวจสอบผล</span>
-          </div>
+          <ol className="flex items-center gap-2 text-xs font-semibold text-[#0b7f76]" aria-label="ขั้นตอน">
+            <li className={`rounded-full px-2.5 py-1 ${instrumentId && testSet ? 'bg-[#dff1ee]' : 'bg-white'}`}>1 เครื่อง / Test set</li>
+            <li aria-hidden="true">→</li>
+            <li className="rounded-full bg-white px-2.5 py-1">2 กรอกผล</li>
+            <li aria-hidden="true">→</li>
+            <li className={`rounded-full px-2.5 py-1 ${savedRun ? 'bg-[#dff1ee]' : 'bg-white'}`}>3 ดูผล</li>
+          </ol>
         </div>
       </Card>
       <div className="flex justify-end">
@@ -1181,6 +1311,18 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
         </Button>
       </div>
       {showImport ? <ImportPanel data={data} onOk={onOk} onErr={onErr} /> : null}
+      {savedRun ? (
+        <RunResultCard
+          run={savedRun}
+          lots={data.controlLots}
+          onStartCorrectiveAction={onStartCorrectiveAction}
+          onViewCharts={onViewCharts}
+          onNextRun={() => {
+            setSavedRun(null)
+            window.setTimeout(() => document.querySelector<HTMLInputElement>('#iqc-entry-rows input:not([disabled])')?.focus(), 0)
+          }}
+        />
+      ) : null}
       <form onSubmit={submit} className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
         <Card className="space-y-3 p-4">
           <h2 className="font-bold text-[#173d50]">Run context</h2>
@@ -1188,15 +1330,8 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
             <Input type="datetime-local" value={runDatetime} onChange={(e) => setRunDatetime(e.target.value)} required />
           </Field>
           <Field label="เครื่อง / Instrument">
-            <Select value={instrumentId} required onChange={(e) => {
-              setInstrumentId(e.target.value)
-              setFillLot('')
-              setTestSet('')
-              setTestSetControlLotId('')
-              setConsumables([])
-              setRows([])
-            }}>
-              <option value="">— ไม่ระบุ —</option>
+            <Select value={instrumentId} required onChange={(e) => chooseInstrument(e.target.value)}>
+              <option value="">เลือกเครื่อง…</option>
               {data.instruments
                 .filter((i) => i.isActive)
                 .map((i) => (
@@ -1265,20 +1400,8 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
           <div className="flex flex-wrap items-end justify-between gap-2">
             <h2 className="font-bold text-[#173d50]">2. กรอกผลตรวจ</h2>
             <div className="flex items-end gap-1.5">
-              <Select className="h-9 w-48" value={testSet} disabled={!instrumentId} onChange={(e) => {
-                const selectedSet = e.target.value
-                setTestSet(selectedSet)
-                setFillLot('')
-                if (selectedSet) {
-                  const defaultLotId = defaultCd4PanelLotId(selectedSet)
-                  setTestSetControlLotId(defaultLotId)
-                  startTestSet(selectedSet, defaultLotId)
-                } else {
-                  setTestSetControlLotId('')
-                  setRows([])
-                }
-              }}>
-                <option value="">ทุก test / ไม่เลือกชุด</option>
+              <Select className="h-9 w-56" value={testSet} disabled={!instrumentId} aria-label="Test set" onChange={(e) => chooseTestSet(e.target.value)}>
+                <option value="">{instrumentId ? 'เลือก Test set…' : 'เลือกเครื่องก่อน'}</option>
                 {testSetOptions.map((option) => <option key={option.name} value={option.name}>{option.name} ({option.count} รายการ)</option>)}
               </Select>
               {testSet && isCd4TestSet ? <Select className="h-9 w-64" value={effectiveTestSetControlLotId} disabled={!instrumentId} aria-label={selectedPanelControlLot ? `Control lot ${selectedPanelControlLot.lotNumber}` : 'Control lot for panel'} onChange={(e) => {
@@ -1289,27 +1412,34 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
                 <option value="">เลือก Control lot สำหรับ Panel…</option>
                 {panelControlLots.map((lot) => <option key={lot.id} value={lot.id}>{lot.controlMaterialName}{lot.level ? ` · ${lot.level}` : ''} · Lot {lot.lotNumber}</option>)}
               </Select> : null}
-              {!testSet ? <Select className="h-9 w-56" value={fillLot} disabled={!instrumentId} onChange={(e) => {
-                const controlLotId = e.target.value
-                setFillLot(controlLotId)
-                startLot(controlLotId)
-              }}>
-                <option value="">1. เลือก Control lot…</option>
-                {activeLots.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.controlMaterialName}
-                    {l.level ? ` ${l.level}` : ''} · {l.lotNumber}
-                  </option>
-                ))}
-              </Select> : null}
-              <Button type="button" variant="ghost" className="h-9" onClick={addRow}>
+              <Button type="button" variant="ghost" className="h-9" onClick={addRow} disabled={!instrumentId}>
                 + เพิ่มรายการ
               </Button>
             </div>
           </div>
+          {instrumentId && !testSet ? (
+            <details className="rounded-md border border-dashed border-[#cfdee0] bg-[#fbfdfd] px-3 py-1" open={!testSetOptions.length || Boolean(fillLot)}>
+              <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold text-[#315763] focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none">เลือก Control lot เอง (analyte ที่ไม่อยู่ใน Test set)</summary>
+              <div className="pb-3">
+                <Select className="h-9 w-full sm:w-72" value={fillLot} aria-label="Control lot" onChange={(e) => {
+                  const controlLotId = e.target.value
+                  setFillLot(controlLotId)
+                  startLot(controlLotId)
+                }}>
+                  <option value="">เลือก Control lot…</option>
+                  {activeLots.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.controlMaterialName}
+                      {l.level ? ` ${l.level}` : ''} · {l.lotNumber}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            </details>
+          ) : null}
           {testSet ? <p className={`text-xs ${lotMappingWarning ? 'text-[#c02a37]' : 'text-[#176d65]'}`}>{lotMappingWarning || 'ระบบจับคู่ Control lot ตาม Level ของแต่ละ analyte ให้อัตโนมัติ'}</p> : null}
           {hasLogScaleResult ? <p className="rounded-md border border-[#b9ded8] bg-[#f1faf8] px-3 py-2 text-xs text-[#176d65]">สำหรับ Viral load ให้กรอกค่า <strong>Copies/mL หรือ IU/mL</strong> ตาม unit ของ analyte — ระบบคำนวณ log10 เพื่อใช้พล็อตกราฟและประเมิน Westgard ให้อัตโนมัติ</p> : null}
-          <div className="space-y-2">
+          <div id="iqc-entry-rows" className="space-y-2">
             {rows.map((row, i) => {
               const analyte = analyteById.get(row.analyteId)
               const isBelowLodNormal = /(?:HIV|HBV|HCV)-VL\s*\(Normal\)$/i.test(analyte?.code ?? '')
@@ -1343,7 +1473,7 @@ function EnterTab({ data, onOk, onErr, onDone }: { data: IqcWorkspace; onOk: (t:
                 </div>
               )
             })}
-            {!rows.length ? <p className="rounded-md border border-dashed border-[#cfdee0] px-3 py-6 text-center text-sm text-[#9aafb4]">เริ่มจากเลือก Control lot ด้านบน ระบบจะเติมรายการตรวจให้โดยอัตโนมัติ</p> : null}
+            {!rows.length ? <p className="rounded-md border border-dashed border-[#cfdee0] px-3 py-6 text-center text-sm text-[#9aafb4]">{instrumentId ? 'เลือก Test set ด้านบน ระบบจะเติมรายการตรวจและ Control lot ให้อัตโนมัติ' : 'เลือกเครื่องก่อน'}</p> : null}
           </div>
           <div className="flex justify-end">
             <Button disabled={busy || !instrumentId || !rows.length}>{busy ? 'กำลังบันทึก…' : 'บันทึก run'}</Button>

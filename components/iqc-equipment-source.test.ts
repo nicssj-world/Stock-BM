@@ -34,7 +34,9 @@ describe('IQC equipment source', () => {
 
   it('can fill a named test set as one group of IQC analytes', () => {
     expect(iqcView).toContain('const testSetAnalyteIds = useMemo(')
-    expect(iqcView).toContain('ทุก test / ไม่เลือกชุด')
+    // Test set is the primary path; picking a Control lot by hand stays available.
+    expect(iqcView).toContain("'เลือก Test set…'")
+    expect(iqcView).toContain('เลือก Control lot เอง')
     expect(iqcView).toContain('startLot(fillLot, selectedSet)')
   })
 
@@ -46,7 +48,8 @@ describe('IQC equipment source', () => {
   })
 
   it('keeps the workflow navigation above tab-specific summary cards', () => {
-    expect(iqcView).toContain('<div className="flex w-full" role="tablist"')
-    expect(iqcView.indexOf('<Tabs tabs={tabs} active={tab} onChange={setTab} />')).toBeLessThan(iqcView.indexOf("{tab !== 'enter' ? <div className=\"grid gap-3"))
+    // The tab bar is the shared Tabs component (role="tablist" lives in ui.tsx).
+    expect(iqcView).toContain("import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'")
+    expect(iqcView.indexOf('<Tabs tabs={tabs} active={tab} onChange={setTab} />')).toBeLessThan(iqcView.indexOf("{tab !== 'enter' && tab !== 'charts' ? <div className=\"grid gap-3"))
   })
 })
