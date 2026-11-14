@@ -65,6 +65,8 @@ export interface IqcStockLotOption {
   lotNumber: string
   expiryDate: string | null
   equipmentIds: string[]
+  /** bm_stock_items.id of this stock lot (matches a control material's stock item). */
+  itemId?: string | null
 }
 
 export interface IqcSpec {
@@ -189,6 +191,8 @@ export interface IqcSetupTask {
   count: number
   nextAction: string
   dependencies: { label: string; done: boolean }[]
+  /** Optional review work: shown as a link, never counted as missing setup. */
+  optional?: boolean
 }
 
 export interface IqcSetupHealth {

@@ -39,6 +39,8 @@ import { LAB_LOCK_MIN_POINTS } from '@/lib/iqc/types'
 import { calculateBaselineStats, evaluateVlScope, expectedNormalResult, type BaselineValue, type EvaluationAnalyte, type EvaluationBaseline } from '@/lib/iqc/baseline'
 import { cv, evaluateLatest, evaluateLatestByPolicy, mean, sd, toStat, WESTGARD_RULES, type QcStatus, type WestgardPolicyProfile, type WestgardRule } from '@/lib/iqc/westgard'
 import { normalizeTestSets, parseTestSets } from '@/lib/iqc/test-sets'
+import { isVlControlLot, planSpecBatch, type SpecBatchItem } from '@/lib/iqc/spec-batch'
+import { summarizeSetupHealth } from '@/lib/iqc/setup-health'
 import { sigmaRating, sixSigma, teaPercent } from '@/lib/iqc/sixsigma'
 import { combinedRelative, divisorFor, expandedRelative, pooledRsd, relativeStandardUncertainty, standardUncertainty } from '@/lib/iqc/uncertainty'
 import type { BmActor } from '@/lib/bm/types'
@@ -343,7 +345,7 @@ function buildSetupHealth(input: {
     .filter((scope) => !approvedBaselineScopes.has(scope))).size
   const activePlanCount = input.controlPlans.filter((plan) => plan.isActive).length
   const cd4QuantitativeAnalytes = input.analytes.filter((analyte) => analyte.isActive && analyte.dataType === 'quantitative' && !isVlAnalyte(analyte))
-  const requiredAssignedSpecKeys = new Set(activeLots.flatMap((lot) => cd4QuantitativeAnalytes.map((analyte) => `${lot.id}:${analyte.id}`)))
+  const requiredAssignedSpecKeys = new Set(activeLots.filter((lot) => !isVlControlLot(lot)).flatMap((lot) => cd4QuantitativeAnalytes.map((analyte) => `${lot.id}:${analyte.id}`)))
   const configuredAssignedSpecKeys = new Set(input.specs
     .filter((spec) => requiredAssignedSpecKeys.has(`${spec.controlLotId}:${spec.analyteId}`) && spec.assignedMean != null && spec.assignedSd != null && spec.assignedSd > 0)
     .map((spec) => `${spec.controlLotId}:${spec.analyteId}`))
@@ -422,12 +424,7 @@ function buildSetupHealth(input: {
       nextAction: teaCount || uncertaintyCount ? 'ตรวจสอบค่าที่คำนวณแล้ว' : 'ตั้งค่า TEa หรือเปิดรายการที่ต้อง review',
     },
   ]
-  return {
-    tasks,
-    readyCount: tasks.filter((task) => task.state === 'complete').length,
-    attentionCount: tasks.filter((task) => task.state === 'attention').length,
-    blockedCount: tasks.filter((task) => task.state === 'blocked').length,
-  }
+  return summarizeSetupHealth(tasks)
 }
 
 export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
@@ -532,7 +529,7 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
   }
   const stockLots: IqcStockLotOption[] = ((stockLotData ?? []) as RecordRow[]).map((row) => {
     const item = row.bm_stock_items as RecordRow | null
-    return { id: asString(row.id), itemCode: asString(item?.item_code), itemName: asString(item?.name), lotNumber: asString(row.lot_number), expiryDate: nullableString(row.expiry_date), equipmentIds: equipmentIdsByStockItem.get(asString(row.item_id)) ?? [] }
+    return { id: asString(row.id), itemCode: asString(item?.item_code), itemName: asString(item?.name), lotNumber: asString(row.lot_number), expiryDate: nullableString(row.expiry_date), equipmentIds: equipmentIdsByStockItem.get(asString(row.item_id)) ?? [], itemId: nullableString(row.item_id) }
   })
   const materialMap = new Map(controlMaterials.map((m) => [m.id, m]))
   const lotRows = (lotData ?? []) as RecordRow[]
@@ -1491,15 +1488,83 @@ export async function deleteControlLot(id: string, actor: BmActor) {
   return getIqcWorkspace(actor)
 }
 
-export async function upsertSpec(input: {
+type SpecWriteInput = {
   controlLotId: string
   analyteId: string
   assignedMean?: number | null
   assignedSd?: number | null
   expectedQualitative?: string | null
   changeReason?: string | null
+}
+
+export async function upsertSpec(input: SpecWriteInput, actor: BmActor) {
+  assertAdmin(actor)
+  await writeSpec(input, actor)
+  return getIqcWorkspace(actor)
+}
+
+// Saves the manufacturer Mean/SD of many CD4 analytes for one control lot.
+// Every row goes through writeSpec, so the revision trigger, chart
+// recalculation and per-row audit are identical to the single-row form.
+export async function upsertSpecsBatch(input: {
+  controlLotId: string
+  changeReason?: string | null
+  items: SpecBatchItem[]
 }, actor: BmActor) {
   assertAdmin(actor)
+  const admin = getAdminClient()
+  const analyteIds = [...new Set(input.items.map((item) => item.analyteId))]
+  const [{ data: lotRow, error: lotError }, { data: analyteRows, error: analyteError }, { data: specRows, error: specError }] = await Promise.all([
+    admin.from('iqc_control_lots').select('id').eq('id', input.controlLotId).maybeSingle(),
+    analyteIds.length ? admin.from('iqc_analytes').select('id,code,data_type,is_active').in('id', analyteIds) : Promise.resolve({ data: [], error: null }),
+    admin.from('iqc_control_specs').select('control_lot_id,analyte_id,assigned_mean,assigned_sd,expected_qualitative').eq('control_lot_id', input.controlLotId),
+  ])
+  fail(lotError)
+  fail(analyteError)
+  fail(specError)
+  if (!lotRow) throw new HttpError(404, 'ไม่พบ Control lot')
+  const existing = ((specRows ?? []) as RecordRow[]).map((row) => ({
+    controlLotId: asString(row.control_lot_id),
+    analyteId: asString(row.analyte_id),
+    assignedMean: nullableNumber(row.assigned_mean),
+    assignedSd: nullableNumber(row.assigned_sd),
+    expectedQualitative: nullableString(row.expected_qualitative),
+  }))
+  const plan = planSpecBatch({
+    controlLotId: input.controlLotId,
+    items: input.items,
+    existing,
+    analytes: ((analyteRows ?? []) as RecordRow[]).map((row) => ({
+      id: asString(row.id),
+      code: asString(row.code),
+      dataType: asString(row.data_type) === 'qualitative' ? 'qualitative' as const : 'quantitative' as const,
+      isActive: row.is_active !== false,
+    })),
+    changeReason: input.changeReason,
+  })
+  if (!plan.ok) throw new HttpError(400, plan.error)
+  let saved = 0
+  try {
+    for (const row of plan.rows) {
+      const current = existing.find((spec) => spec.analyteId === row.analyteId)
+      await writeSpec({
+        controlLotId: input.controlLotId,
+        analyteId: row.analyteId,
+        assignedMean: row.assignedMean,
+        assignedSd: row.assignedSd,
+        expectedQualitative: current?.expectedQualitative ?? null,
+        changeReason: input.changeReason,
+      }, actor)
+      saved += 1
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'บันทึก Mean/SD ไม่สำเร็จ'
+    throw new HttpError(error instanceof HttpError ? error.status : 500, saved ? `บันทึกแล้ว ${saved} จาก ${plan.rows.length} รายการ แล้วหยุดเพราะ: ${message}` : message)
+  }
+  return getIqcWorkspace(actor)
+}
+
+async function writeSpec(input: SpecWriteInput, actor: BmActor) {
   const admin = getAdminClient()
   const { data: existing, error: existingError } = await admin
     .from('iqc_control_specs')
@@ -1543,7 +1608,6 @@ export async function upsertSpec(input: {
   // await recalculateChartStatuses(input.controlLotId, input.analyteId)
   if (specChanged) await recalculateChartStatuses(input.controlLotId, input.analyteId, actor)
   await writeAudit(actor, 'iqc.spec.upsert', 'iqc-control-spec', input.controlLotId, { ...input, recalculated: specChanged })
-  return getIqcWorkspace(actor)
 }
 
 export async function createTeaSpec(input: {
