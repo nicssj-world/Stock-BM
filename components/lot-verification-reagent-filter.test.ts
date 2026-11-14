@@ -7,8 +7,7 @@ const service = readFileSync(join(process.cwd(), 'lib/server/lotverif.ts'), 'utf
 
 describe('Lot-to-Lot reagent selection', () => {
   it('explains that the Reagent lot picker excludes other stock categories', () => {
-    expect(view).toContain("'เลือก Reagent lot ใหม่จาก Stock'")
-    expect(view).toContain('Reagent lot (น้ำยาใน Stock)')
+    expect(view).toContain("hint={subjectKind === 'reagent-lot' ? 'เลือก Reagent lot ใหม่จาก Stock'" )
   })
 
   it('filters options and rejects non-Reagent lots at the server boundary', () => {

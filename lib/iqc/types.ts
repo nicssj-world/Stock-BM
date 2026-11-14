@@ -1,5 +1,6 @@
 import type { AnalyteScale, QcStatus, WestgardPolicyProfile, WestgardRule } from '@/lib/iqc/westgard'
 import type { CorrectiveCorrectionOutcome, CorrectiveErrorType, CorrectiveReviewFindings } from '@/lib/corrective-actions'
+import type { PortalEquipmentStatus } from '@/lib/equipment/portal-reference-types'
 
 export type { AnalyteScale, QcStatus, WestgardPolicyProfile } from '@/lib/iqc/westgard'
 export type IqcPolicyProfile = 'cd4-legacy' | 'vl-standard-v1'
@@ -32,7 +33,7 @@ export interface IqcInstrument {
   equipmentId: string | null
   equipmentCode: string | null
   equipmentName: string | null
-  equipmentStatus: 'active' | 'maintenance' | 'out_of_service' | 'decommissioned' | null
+  equipmentStatus: PortalEquipmentStatus | null
 }
 
 export interface IqcControlMaterial {
@@ -444,6 +445,7 @@ export interface IqcUncertaintyBudget {
 export interface IqcWorkspace {
   analytes: IqcAnalyte[]
   instruments: IqcInstrument[]
+  instrumentCandidates?: IqcInstrument[] // includes unlinked IQC instrument records for Portal association
   controlMaterials: IqcControlMaterial[]
   controlLots: IqcControlLot[]
   stockLots: IqcStockLotOption[]

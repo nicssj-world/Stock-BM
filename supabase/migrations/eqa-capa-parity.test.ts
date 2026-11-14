@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const sql = readFileSync(join(process.cwd(), 'supabase/migrations/202607270001_eqa_capa_parity_and_round_sequence.sql'), 'utf8')
+const compactSql = sql.replace(/\s+/g, ' ').toLowerCase()
 
 describe('EQA CAPA parity + round sequence migration', () => {
   it('adds IQC-parity ownership and effectiveness columns to eqa_corrective_actions', () => {
@@ -21,7 +22,7 @@ describe('EQA CAPA parity + round sequence migration', () => {
 
   it('adds a partial index for open corrective actions with a due date', () => {
     expect(sql).toContain('create index if not exists eqa_corrective_actions_due_open')
-    expect(sql).toContain("on public.eqa_corrective_actions(due_date)\n  where status <> 'closed'")
+    expect(compactSql).toContain("on public.eqa_corrective_actions(due_date) where status <> 'closed'")
   })
 
   it('adds a nullable sequence number and partial unique index for generated rounds', () => {

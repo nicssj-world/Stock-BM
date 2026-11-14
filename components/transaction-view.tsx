@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -145,6 +145,7 @@ export function TransactionView({
   const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
   const [historyLoaded, setHistoryLoaded] = useState(Boolean(initialHistoryLoaded))
   const [historyLoading, setHistoryLoading] = useState(false)
+  const historyLoadStarted = useRef(Boolean(initialHistoryLoaded))
   const activeItems = data.items.filter((item) => item.isActive)
   const activeLocations = data.locations.filter((location) => location.isActive)
   const visibleTabs = ALL_TABS.filter((tab) => !tab.adminOnly || actor?.role === 'Admin')
@@ -171,25 +172,37 @@ export function TransactionView({
 
   useEffect(() => {
     if (useLastMode) return
-    setMode(initialMode)
-    setNotice(null)
+    const timer = window.setTimeout(() => {
+      setMode(initialMode)
+      setNotice(null)
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [initialMode, useLastMode])
 
   useEffect(() => {
-    if (mode !== 'history' || historyLoaded || historyLoading) return
-    setHistoryLoading(true)
-    api<{ transactions: StockTransaction[] }>('/api/stock/history')
-      .then((result) => {
-        setData((current) => ({ ...current, transactions: result.transactions }))
-        setHistoryLoaded(true)
-      })
-      .catch((error) => {
-        setNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'โหลด history ไม่สำเร็จ' })
-      })
-      .finally(() => {
-        setHistoryLoading(false)
-      })
-  }, [historyLoaded, historyLoading, mode])
+    if (mode !== 'history' || historyLoaded || historyLoadStarted.current) return
+    let started = false
+    const timer = window.setTimeout(() => {
+      started = true
+      historyLoadStarted.current = true
+      setHistoryLoading(true)
+      api<{ transactions: StockTransaction[] }>('/api/stock/history')
+        .then((result) => {
+          setData((current) => ({ ...current, transactions: result.transactions }))
+          setHistoryLoaded(true)
+        })
+        .catch((error) => {
+          historyLoadStarted.current = false
+          setNotice({ tone: 'danger', text: error instanceof Error ? error.message : 'โหลด history ไม่สำเร็จ' })
+        })
+        .finally(() => {
+          setHistoryLoading(false)
+        })
+    }, 0)
+    return () => {
+      if (!started) window.clearTimeout(timer)
+    }
+  }, [historyLoaded, mode])
 
   const workflow = mode === 'receive' ? (
     <ReceiveForm items={activeItems} locations={activeLocations} defaultItemId={defaultItemId} defaultLocationId={defaultLocationId} onSaved={(stock) => { setData(stock); setNotice({ tone: 'success', text: 'บันทึกรับเข้าแล้ว / Receive saved' }) }} onError={(text) => setNotice({ tone: 'danger', text })} />

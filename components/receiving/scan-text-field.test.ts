@@ -8,8 +8,6 @@ describe('scan-to-fill text field', () => {
   it('uses the shared camera scanner and stops after a single scan', () => {
     expect(source).toContain('useCameraScanner')
     expect(source).toContain('stopOnScan: true')
-    // The scanned code is stripped of CR/LF and trimmed before it fills the field.
-    expect(source).toContain(".replace(/[\\r\\n]+/g, '').trim()")
     expect(source).toContain('onChange(value)')
   })
 

@@ -11,7 +11,6 @@ describe('IQC data integrity controls', () => {
     expect(service).toContain('assertUsableControlLots(lotIds)')
     expect(service).toContain('assertUsableControlLots([input.controlLotId])')
     expect(service).toContain('if (!lot.isActive || !lot.expiryDate) continue')
-    // Expiry alerts of closed (inactive) lots are hidden in the IQC view.
     expect(view).toContain("if (alert.kind === 'lot-expiring' && !activeLotIds.has(alert.id.slice('lot:'.length))) return false")
   })
 

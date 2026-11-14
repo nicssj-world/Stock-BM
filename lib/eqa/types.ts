@@ -1,4 +1,5 @@
 import type { CorrectiveCorrectionOutcome, CorrectiveErrorType, CorrectiveReviewFindings } from '@/lib/corrective-actions'
+import type { PortalEquipmentStatus } from '@/lib/equipment/portal-reference-types'
 
 export type EqaRoundStatus = 'scheduled' | 'received' | 'submitted' | 'evaluated' | 'closed'
 export type EqaOutcome = 'acceptable' | 'warning' | 'unacceptable' | 'not-evaluated'
@@ -19,7 +20,7 @@ export interface EqaEquipment {
   id: string
   code: string
   name: string
-  status: 'active' | 'maintenance' | 'out_of_service' | 'decommissioned'
+  status: PortalEquipmentStatus
 }
 
 export interface EqaScheme {

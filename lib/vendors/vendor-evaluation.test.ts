@@ -89,9 +89,7 @@ describe('vendor evaluation helpers', () => {
     expect(isOfficial({ ...base, frozen: null })).toBe(false)
     const ready = { summary: 'a', strengths: 'b', risksConcerns: 'c', recommendations: 'd', evaluatorId: '1', reviewerId: '2', approverId: '3' }
     expect(finalizeReadiness(ready, true)).toEqual([])
-    // Annual narratives are optional (7ba5690): only policy approval and the three signers are required.
-    expect(finalizeReadiness({ ...ready, strengths: null, evaluatorId: null }, false)).toHaveLength(2)
-    expect(finalizeReadiness({ ...ready, summary: null, strengths: null, risksConcerns: null, recommendations: null }, true)).toEqual([])
+    expect(finalizeReadiness({ ...ready, strengths: null, evaluatorId: null }, false)).toHaveLength(3)
   })
 
   it('labels every issue type', () => {

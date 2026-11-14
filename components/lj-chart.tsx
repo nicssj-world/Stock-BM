@@ -166,6 +166,7 @@ export function LjChart({
             {chart.unit ? ` · ${chart.unit}` : ''}
             {scaleHint}
           </p>
+          <p className="mt-0.5 text-xs font-semibold text-[#315763]">เครื่อง: {chart.instrumentName ?? 'ไม่ระบุเครื่องมือ (ประวัติเดิม)'}</p>
           {chart.currentConsumables.length ? (
             <div className="mt-1 flex flex-wrap gap-1">
               {chart.currentConsumables.map((c) => (

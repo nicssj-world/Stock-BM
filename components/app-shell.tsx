@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, BellRing, Biohazard, Boxes, Building2, CalendarCheck, ClipboardCheck, Dna, GitCompareArrows, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck, Stethoscope, Thermometer, Users } from 'lucide-react'
+import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, BellRing, Biohazard, Boxes, Building2, CalendarCheck, ClipboardCheck, Dna, GitCompareArrows, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck, Thermometer, Users } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import { api } from '@/components/ui'
 
@@ -32,11 +32,12 @@ const receivingItem: NavItem = { href: '/receiving', label: 'รับเข้�
 const hpvManagementItem: NavItem = { href: '/hpv', label: 'HPV Genotype', icon: Dna }
 const hivDrtManagementItem: NavItem = { href: '/hiv-drt', label: 'HIV DRT', icon: Biohazard }
 const hivLabAlertManagementItem: NavItem = { href: '/hiv-alert', label: 'HIV LAB Alert', icon: BellRing }
+const equipmentManagementItem: NavItem = { href: '/equipment', label: 'Equipment', icon: Settings }
 const monthlyTasksItem: NavItem = { href: '/monthly-tasks', label: 'งานประจำเดือน / Monthly Tasks', icon: CalendarCheck }
 
 const managementSection: NavSection = {
   title: 'Management',
-  items: [hpvManagementItem, hivLabAlertManagementItem, hivDrtManagementItem],
+  items: [hpvManagementItem, hivLabAlertManagementItem, hivDrtManagementItem, equipmentManagementItem],
 }
 
 const assistantManagementSection: NavSection = {
@@ -57,7 +58,6 @@ const monitoringSection: NavSection = {
   items: [
     monthlyTasksItem,
     { href: '/morning-talk', label: 'Morning Talk', icon: Users },
-    { href: '/equipment', label: 'เครื่องมือ / Equipment', icon: Stethoscope },
     { href: '/environment', label: 'อุณหภูมิ / Temperature', icon: Thermometer },
     { href: '/lot-verification', label: 'Lot verification', icon: GitCompareArrows },
   ],

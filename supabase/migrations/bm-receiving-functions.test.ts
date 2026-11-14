@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-// Normalize line endings: Windows checkouts (core.autocrlf) turn LF into CRLF.
-const sql = readFileSync(join(process.cwd(), 'supabase/migrations/202609180006_bm_receiving_functions.sql'), 'utf8').replace(/\r\n/g, '\n')
+const sql = readFileSync(join(process.cwd(), 'supabase/migrations/202609180006_bm_receiving_functions.sql'), 'utf8')
+const compactSql = sql.replace(/\s+/g, ' ').toLowerCase()
 
 describe('receiving function migration', () => {
   it('mirrors the global six-calendar-month TOR rule with a strict greater-than boundary', () => {
@@ -17,10 +17,10 @@ describe('receiving function migration', () => {
   })
 
   it('uses deterministic pre-locking and the required concurrency-safe lot resolution', () => {
-    expect(sql).toContain('perform 1\n  from public.bm_stock_lots\n  where id in (select stock_lot_id from public.bm_receipt_lines')
-    expect(sql).toContain('order by id\n  for update')
+    expect(compactSql).toContain('perform 1 from public.bm_stock_lots where id in (select stock_lot_id from public.bm_receipt_lines')
+    expect(compactSql).toContain('order by id for update')
     expect(sql).toContain('on conflict (item_id, lot_number) do nothing')
-    expect(sql).toContain('where item_id = v_item.id and lot_number = v_lot_number\n    for update')
+    expect(compactSql).toContain('where item_id = v_item.id and lot_number = v_lot_number for update')
     expect(sql).toContain("raise exception 'Existing lot expiry date does not match'")
   })
 

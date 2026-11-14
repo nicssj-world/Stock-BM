@@ -49,7 +49,7 @@ describe('HIV LAB Alert interface', () => {
   it('links every new record to HIV DRT and keeps the Alert out of Assistant navigation', () => {
     expect(view).toContain('/hiv-drt?view=storage&sample=')
     expect(shell).toContain("href: '/hiv-alert'")
-    expect(shell).toContain('items: [hpvManagementItem, hivLabAlertManagementItem, hivDrtManagementItem]')
+    expect(shell).toContain('items: [hpvManagementItem, hivLabAlertManagementItem, hivDrtManagementItem, equipmentManagementItem]')
     expect(shell).toContain("items: [hpvManagementItem, { href: '/morning-talk'")
     expect(proxy).toContain("'/hiv-alert/:path*'")
   })
