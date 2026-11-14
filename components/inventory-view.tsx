@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ArrowDownToLine, ArrowUpFromLine, FileDown, History, MoveRight, PackageCheck, PackageSearch, Pencil, Printer, RotateCcw, X } from 'lucide-react'
 import type { BmActor, StockItem, StockLot, StockTransaction, StockWorkspace } from '@/lib/bm/types'
 import { formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
@@ -273,13 +273,20 @@ function LotActionSheet({ actor, item, lot, locations, onEdit, onClose }: { acto
   const firstLocation = locations.find((location) => location.id === firstLocationId)
   const issueHref = `/movements?mode=issue&lotId=${lot.id}${firstLocationId ? `&locationId=${firstLocationId}` : ''}`
   const moveHref = `/movements?mode=move&lotId=${lot.id}${firstLocationId ? `&locationId=${firstLocationId}` : ''}`
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [onClose])
   return (
-    <div className="fixed inset-0 z-50 flex items-end bg-[#08242b]/35 p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] xl:hidden" onClick={onClose}>
-      <div className="w-full rounded-lg border border-[#d6e2e3] bg-white shadow-[0_-18px_40px_rgba(20,64,72,0.18)]" onClick={(event) => event.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#08242b]/35 p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:items-center sm:pb-3" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-labelledby="stock-lot-actions-title" className="max-h-[90dvh] w-full overflow-y-auto rounded-lg border border-[#d6e2e3] bg-white shadow-[0_-18px_40px_rgba(20,64,72,0.18)] sm:max-w-md sm:rounded-xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 border-b border-[#e0e9ea] px-4 py-3">
           <div className="min-w-0">
             <p className="mono text-xs font-bold text-[#0b7f76]">{item.itemCode}</p>
-            <h2 className="mt-0.5 truncate font-bold text-[#173d50]">{lot.lotNumber}</h2>
+            <h2 id="stock-lot-actions-title" className="mt-0.5 truncate font-bold text-[#173d50]">Actions · {lot.lotNumber}</h2>
             <p className="mt-0.5 text-xs text-[#789097]">EXP {formatDate(lot.expiryDate)} · {formatQuantity(lot.totalOnHand)} {item.unit}</p>
           </div>
           <button type="button" onClick={onClose} className="flex size-9 shrink-0 items-center justify-center rounded-md text-[#789097] hover:bg-[#eef5f4]"><X className="size-5" /></button>

@@ -79,7 +79,7 @@ export function AnnualEvaluationEditor({ revision, signers, canManage }: { revis
       </div>
     </Card>
 
-    <Card className="space-y-4 p-5"><h2 className="font-bold text-[#173d50]">ผลการประเมินและข้อเสนอแนะ</h2>
+    <Card className="space-y-4 p-5"><h2 className="font-bold text-[#173d50]">ผลการประเมินและข้อเสนอแนะ (ไม่บังคับ)</h2>
       {editable ? <div className="space-y-4">
         {([['summary', 'สรุปผลการประเมิน'], ['strengths', 'จุดแข็ง'], ['risksConcerns', 'ความเสี่ยง / ข้อกังวล'], ['recommendations', 'ข้อเสนอแนะ']] as const).map(([key, label]) => <div key={key} className="space-y-1"><Field label={label}><Textarea rows={4} maxLength={4000} value={draft[key]} onChange={(e) => set(key)(e.target.value)} aria-describedby={`ae-count-${key}`} /></Field><small id={`ae-count-${key}`} className="block text-right text-[#81979c]">{draft[key].length}/4000</small></div>)}
       </div> : <dl className="space-y-3 text-sm">{([['สรุปผลการประเมิน', revision.summary], ['จุดแข็ง', revision.strengths], ['ความเสี่ยง / ข้อกังวล', revision.risksConcerns], ['ข้อเสนอแนะ', revision.recommendations]] as const).map(([label, value]) => <div key={label}><dt className="text-xs text-[#81979c]">{label}</dt><dd className="whitespace-pre-wrap break-words">{value || '—'}</dd></div>)}</dl>}

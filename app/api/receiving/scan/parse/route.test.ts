@@ -11,6 +11,14 @@ describe('package scan parse route', () => {
     expect(source).toContain('parseBarcode(')
     expect(source).toContain("from('bm_stock_item_barcodes')")
     expect(source).toContain('matchPackageBarcode(')
+    expect(source).toContain('return packageScanResponse(resolution)')
+  })
+
+  it('falls back to a confirmed Item Master catalog value from AI 240 without creating a new REF', () => {
+    expect(source).toContain("from('bm_stock_items')")
+    expect(source).toContain(".eq('catalog_no_normalized', catalog)")
+    expect(source).toContain("source = 'ai240_catalog'")
+    expect(source).toContain('!candidates.length && parsed.additionalProductId')
   })
 
   it('has no stock mutation or ledger call', () => {

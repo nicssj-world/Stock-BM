@@ -1,0 +1,27 @@
+name: Receiving and HPV regression, lint and typecheck
+on:
+  push:
+    branches: [main, 'fix/**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run test -- hpv
+      - run: npx vitest run components/receiving/final-workflow.test.ts components/camera-scanner.test.ts app/api/receiving/scan/parse/route.test.ts lib/receiving/package-scan.test.ts
+      - run: npx eslint lib/hpv/pagination.ts lib/hpv/pagination.test.ts lib/server/hpv.ts components/hpv-view.tsx
+      - run: npx eslint components/receiving/receive-wizard.tsx components/receiving/package-scan.tsx components/receiving/scan-text-field.tsx components/receiving/item-picker.tsx components/camera-scanner.ts app/api/receiving/scan/parse/route.ts lib/receiving/package-scan.ts
+      - run: npx vitest run components/vendors/vendor-evaluation-completion.test.ts supabase/migrations/vendor-evaluation-completion.test.ts
+      - run: npx tsc --noEmit
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_BM_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_BM_SUPABASE_ANON_KEY: ci-placeholder
+          BM_SUPABASE_SERVICE_ROLE_KEY: ci-placeholder

@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { addTwoMonths, getHpvDestructionState, nextHpvBoxPosition, summarizeHpvSites } from '@/lib/hpv/rules'
+import { collectHpvSamplePages } from '@/lib/hpv/pagination'
 import type { BmActor } from '@/lib/bm/types'
 import type {
   HpvDashboard,
@@ -224,6 +225,25 @@ function boxFromRow(row: RecordRow, samples: HpvSample[]): HpvStorageBox {
   }
 }
 
+async function fetchCompleteHpvSamples(admin: ReturnType<typeof getAdminClient>): Promise<RecordRow[]> {
+  const { count, error: countError } = await admin
+    .from('bm_hpv_samples')
+    .select('id', { count: 'exact', head: true })
+  fail(countError)
+  if (count === null) throw new HttpError(503, 'Unable to verify HPV sample count')
+
+  return collectHpvSamplePages(count, async (from, to) => {
+    const { data, error } = await admin
+      .from('bm_hpv_samples')
+      .select('*')
+      .order('stored_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to)
+    fail(error)
+    return (data ?? []) as RecordRow[]
+  })
+}
+
 export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
   const admin = getAdminClient()
   const [
@@ -234,7 +254,7 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
     { data: kitReturnLineData, error: kitReturnLineError },
     { data: receiptData, error: receiptError },
     { data: boxData, error: boxError },
-    { data: sampleData, error: sampleError },
+    sampleData,
     { data: deliveryData, error: deliveryError },
     stock,
   ] = await Promise.all([
@@ -249,7 +269,7 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
     admin.from('bm_hpv_kit_return_lines').select('*'),
     admin.from('bm_hpv_site_receipts').select('*, bm_hpv_sites(name)').order('created_at', { ascending: false }).limit(200),
     admin.from('bm_hpv_storage_boxes').select('*').order('created_at', { ascending: false }).limit(100),
-    admin.from('bm_hpv_samples').select('*').order('stored_at', { ascending: false }).limit(2500),
+    fetchCompleteHpvSamples(admin),
     admin.from('bm_hpv_sample_deliveries').select('*').order('delivered_at', { ascending: false }).limit(200),
     getStockWorkspace(actor),
   ])
@@ -260,7 +280,6 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
   if (kitReturnLineError && !kitReturnLineError.message.includes('bm_hpv_kit_return_lines')) fail(kitReturnLineError)
   fail(receiptError)
   fail(boxError)
-  fail(sampleError)
   if (deliveryError && !deliveryError.message.includes('bm_hpv_sample_deliveries')) fail(deliveryError)
 
   const siteRows = (siteData ?? []) as RecordRow[]
@@ -269,7 +288,7 @@ export async function getHpvWorkspace(actor: BmActor): Promise<HpvWorkspace> {
   const kitReturnRows = kitReturnError ? [] : (kitReturnData ?? []) as RecordRow[]
   const kitReturnLineRows = kitReturnLineError ? [] : (kitReturnLineData ?? []) as RecordRow[]
   const receiptRows = (receiptData ?? []) as RecordRow[]
-  const sampleRows = (sampleData ?? []) as RecordRow[]
+  const sampleRows = sampleData
   const boxRows = (boxData ?? []) as RecordRow[]
   const deliveryRows = deliveryError ? [] : (deliveryData ?? []) as RecordRow[]
   const distributionTransactionIds = [...new Set(distributionRows.map((row) => asString(row.stock_transaction_id)).filter(Boolean))]
@@ -887,6 +906,9 @@ export async function undoHpvSampleCheckout(id: string, actor: BmActor) {
 
   const boxId = nullableString(row.box_id)
   if (boxId) {
+    const { data: box, error: boxError } = await admin.from('bm_hpv_storage_boxes').select('status').eq('id', boxId).maybeSingle()
+    fail(boxError)
+    if (!box || box.status === 'destroyed') throw new HttpError(409, 'ไม่สามารถคืน sample เข้ากล่องที่ทำลายแล้ว')
     // Sample came from a storage box — undoing checkout puts it back to stored in its original position.
     const { error } = await admin
       .from('bm_hpv_samples')
@@ -927,13 +949,24 @@ export async function destroyHpvStorageBox(id: string, actor: BmActor) {
 export async function getHpvDashboardData(): Promise<HpvDashboard> {
   const admin = getAdminClient()
   const today = todayBangkok()
-  const [{ count: storedCount }, { data: boxData, error: boxError }] = await Promise.all([
-    admin.from('bm_hpv_samples').select('*', { count: 'exact', head: true }).eq('status', 'stored'),
-    admin.from('bm_hpv_storage_boxes').select('destroy_due_at,filled_at,status').not('destroy_due_at', 'is', null).neq('status', 'destroyed'),
-  ])
+  const { data: boxData, error: boxError } = await admin
+    .from('bm_hpv_storage_boxes')
+    .select('id,destroy_due_at,filled_at,status')
   fail(boxError)
-  const states = (boxData ?? []).map((box) => getHpvDestructionState(nullableString((box as RecordRow).destroy_due_at), asString((box as RecordRow).status) as HpvBoxStatus, today, nullableString((box as RecordRow).filled_at)))
-  return { storedSamples: storedCount ?? 0, boxesDueSoon: states.filter((state) => state === 'due_soon').length, boxesDueDestruction: states.filter((state) => state === 'due_now').length }
+  const boxes = (boxData ?? []) as RecordRow[]
+  const activeBoxIds = boxes.filter((box) => box.status !== 'destroyed').map((box) => asString(box.id))
+  const { count: storedCount, error: storedError } = activeBoxIds.length
+    ? await admin.from('bm_hpv_samples').select('id', { count: 'exact', head: true }).eq('status', 'stored').in('box_id', activeBoxIds)
+    : { count: 0, error: null }
+  fail(storedError)
+  const states = boxes.map((box) => getHpvDestructionState(
+    nullableString(box.destroy_due_at), asString(box.status) as HpvBoxStatus, today, nullableString(box.filled_at),
+  ))
+  return {
+    storedSamples: storedCount ?? 0,
+    boxesDueSoon: states.filter((state) => state === 'due_soon').length,
+    boxesDueDestruction: states.filter((state) => state === 'due_now').length,
+  }
 }
 
 export async function reopenHpvStorageBox(id: string, actor: BmActor) {
@@ -957,7 +990,7 @@ export async function checkoutHpvSample(input: { barcode: string; destination?: 
   const note = clean(input.note)
   const checkedOutAt = new Date().toISOString()
 
-  const { data: sample, error: sampleError } = await admin.from('bm_hpv_samples').select('id,status').eq('barcode', barcode).maybeSingle()
+  const { data: sample, error: sampleError } = await admin.from('bm_hpv_samples').select('id,status,box_id').eq('barcode', barcode).maybeSingle()
   fail(sampleError)
   const sampleRow = sample as RecordRow | null
 
@@ -990,6 +1023,12 @@ export async function checkoutHpvSample(input: { barcode: string; destination?: 
   }
 
   if (asString(sampleRow.status) !== 'stored') throw new HttpError(409, 'Only stored HPV samples can be checked out')
+  const sourceBoxId = nullableString(sampleRow.box_id)
+  if (sourceBoxId) {
+    const { data: box, error: boxError } = await admin.from('bm_hpv_storage_boxes').select('status').eq('id', sourceBoxId).maybeSingle()
+    fail(boxError)
+    if (!box || box.status === 'destroyed') throw new HttpError(409, 'ตัวอย่างอยู่ในกล่องที่ทำลายแล้ว ไม่สามารถ Checkout ได้')
+  }
 
   const { error } = await admin
     .from('bm_hpv_samples')

@@ -20,6 +20,13 @@ describe('shared camera scanner metadata plumbing', () => {
     expect(source).toContain('BarcodeFormat.RSS_EXPANDED')
   })
 
+  it('offers a 1D invoice/document barcode mode', () => {
+    expect(source).toContain("scanMode = 'package'")
+    expect(source).toContain("scanMode === 'document'")
+    expect(source).toContain('DecodeHintType.TRY_HARDER')
+    expect(source).toContain('BarcodeFormat.ITF')
+  })
+
   it('derives the symbology identifier from the detected barcode format instead of a text prefix ZXing never emits', () => {
     // getText() never carries an embedded "]d2"-style AIM prefix and
     // @zxing/library's ResultMetadataType has no SYMBOLOGY_IDENTIFIER entry,
