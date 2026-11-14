@@ -12,6 +12,7 @@ import type { EqaReadinessIssue, EqaReadinessTarget } from '@/lib/eqa/rules'
 import { formatDateTime } from '@/lib/bm/rules'
 import { api, Button, Field, Input, Select, StatusBadge, type StatusTone } from '@/components/ui'
 import { SignaturePad, type SignaturePadHandle } from '@/components/signature-pad'
+import { MySignatureField, useMySignature, type MySignatureHandle } from '@/components/my-signature-field'
 
 export type Tab = 'plans' | 'rounds' | 'corrective' | 'reports' | 'manage'
 export const TAB_KEYS: Tab[] = ['plans', 'rounds', 'corrective', 'reports', 'manage']
@@ -48,8 +49,19 @@ export function ApprovalPanel({ actor, data, type, entityId, state, approvals, r
   const [busyRole, setBusyRole] = useState<EqaApprovalRole | null>(null)
   const [signingRole, setSigningRole] = useState<EqaApprovalRole | null>(null)
   const [signerName, setSignerName] = useState('')
+  const [signAs, setSignAs] = useState<'self' | 'other'>('other')
   const pad = useRef<SignaturePadHandle | null>(null)
   const onPadReady = useCallback((handle: SignaturePadHandle) => { pad.current = handle }, [])
+  const mine = useMySignature()
+  const mySignature = useRef<MySignatureHandle | null>(null)
+  const onMySignatureReady = useCallback((handle: MySignatureHandle) => { mySignature.current = handle }, [])
+
+  /** true: this role is the signed-in user's own · false: someone else's · null: unassigned (anyone may sign). */
+  function isOwnRole(role: EqaApprovalRole): boolean | null {
+    if (role === 'analyst') return analystId ? analystId === actor.id : null
+    const assignment = data.approverAssignments.find((item) => item.approvalRole === role)
+    return assignment ? assignment.userId === actor.id : null
+  }
 
   async function revoke(role: EqaApprovalRole) {
     setBusyRole(role)
@@ -68,32 +80,63 @@ export function ApprovalPanel({ actor, data, type, entityId, state, approvals, r
   function startSigning(role: EqaApprovalRole, defaultName: string) {
     setSigningRole(role)
     setSignerName(defaultName)
+    // The user's own role signs as themselves. An unassigned role defaults to a
+    // signer without an account (drawn on this device), but can be switched.
+    setSignAs(isOwnRole(role) === true ? 'self' : 'other')
     pad.current = null
+    mySignature.current = null
   }
 
   function cancelSigning() {
     setSigningRole(null)
     setSignerName('')
     pad.current = null
+    mySignature.current = null
   }
 
-  async function sign(role: EqaApprovalRole) {
-    if (!signerName.trim()) return onErr('กรุณากรอกชื่อ-นามสกุลผู้ลงนาม')
-    if (pad.current?.isEmpty() !== false) return onErr('กรุณาวาดลายเซ็นก่อนลงนาม')
-    const signature = await pad.current?.toFile()
-    if (!signature) return onErr('อ่านลายเซ็นไม่สำเร็จ กรุณาเซ็นใหม่อีกครั้ง')
+  // One tap for the user's own role when a signature is already saved.
+  async function signWithSaved(role: EqaApprovalRole) {
     const form = new FormData()
     form.set('approvalRole', role)
-    form.set('signerName', signerName.trim())
-    form.set('signature', signature)
+    form.set('useSavedSignature', '1')
+    await submitSignature(role, form, false)
+  }
+
+  async function submitSignature(role: EqaApprovalRole, form: FormData, remember: boolean, drawn: File | null = null) {
     setBusyRole(role)
     try {
       const response = await fetch(`/api/eqa/documents/${type}/${entityId}/approvals`, { method: 'POST', body: form })
       const payload = await response.json().catch(() => ({})) as { eqa?: EqaWorkspace; error?: string }
       if (!response.ok || !payload.eqa) throw new Error(payload.error ?? 'ลงนามไม่สำเร็จ')
+      const remembered = remember && drawn ? await mySignature.current?.rememberIfRequested(drawn) : false
       cancelSigning()
-      onOk(`ลงนาม${roleName(role)}แล้ว`, payload.eqa)
+      onOk(`ลงนาม${roleName(role)}แล้ว${remembered ? ' · เก็บลายเซ็นไว้ใช้ครั้งต่อไปแล้ว' : ''}`, payload.eqa)
     } catch (error) { onErr(error instanceof Error ? error.message : 'ลงนามไม่สำเร็จ') } finally { setBusyRole(null) }
+  }
+
+  async function sign(role: EqaApprovalRole) {
+    const form = new FormData()
+    form.set('approvalRole', role)
+    let drawn: File | null = null
+    if (signAs === 'self') {
+      const handle = mySignature.current
+      if (!handle?.isReady()) return onErr('กรุณาวาดลายเซ็นก่อนลงนาม')
+      if (handle.usesSaved()) form.set('useSavedSignature', '1')
+      else {
+        drawn = await handle.drawnFile()
+        if (!drawn) return onErr('อ่านลายเซ็นไม่สำเร็จ กรุณาเซ็นใหม่อีกครั้ง')
+        form.set('signerName', actor.displayName)
+        form.set('signature', drawn)
+      }
+    } else {
+      if (!signerName.trim()) return onErr('กรุณากรอกชื่อ-นามสกุลผู้ลงนาม')
+      if (pad.current?.isEmpty() !== false) return onErr('กรุณาวาดลายเซ็นก่อนลงนาม')
+      drawn = (await pad.current?.toFile()) ?? null
+      if (!drawn) return onErr('อ่านลายเซ็นไม่สำเร็จ กรุณาเซ็นใหม่อีกครั้ง')
+      form.set('signerName', signerName.trim())
+      form.set('signature', drawn)
+    }
+    await submitSignature(role, form, signAs === 'self', drawn)
   }
 
   const signedCount = roles.filter((role) => approvals.find((item) => item.approvalRole === role)?.signatureAttachmentId).length
@@ -138,9 +181,28 @@ export function ApprovalPanel({ actor, data, type, entityId, state, approvals, r
               <p className="mt-0.5 text-[10px] text-[#9aafb4]">บันทึกโดยบัญชี {approval!.approvedByName}</p>
               {approval && (approval.approvedById === actor.id || actor.role === 'Admin') ? <Button variant="ghost" className="mt-2 min-h-9 px-2 py-1 text-xs" disabled={busyRole === role} onClick={() => revoke(role)}>ถอนลายเซ็น</Button> : null}
             </> : <>
-              {legacyApproval ? <p className="mt-3 rounded-md border border-[#eed4a6] bg-[#fffaf0] px-2 py-1.5 text-[11px] leading-4 text-[#8b5c0b]">มีการยืนยันเดิมโดย {approval!.approvedByName} แต่ยังไม่มีภาพลายเซ็น</p> : <p className="mt-3 min-h-8 text-[#789097]">{assigneeName ? `รอ ${assigneeName} ลงนาม` : 'ยังไม่มีผู้ลงนามในระบบ · ใช้เครื่องนี้กรอกชื่อและเซ็นได้'}</p>}
-              {canAct && signingRole !== role ? <Button className="mt-2 min-h-10 w-full px-3 py-2 text-xs" disabled={Boolean(readiness.length) || busyRole !== null} onClick={() => startSigning(role, assigneeName || approval?.signerName || '')}><PenLine className="size-4" />ลงนามตอนนี้</Button> : null}
-              {canAct && signingRole === role ? <div className="mt-3 space-y-2 border-t border-[#e6eeee] pt-3"><Field label="ชื่อ-นามสกุลผู้ลงนาม" hint={assigneeName ? 'ชื่อนี้ผูกกับผู้รับผิดชอบในระบบ' : 'ผู้ลงนามไม่มีบัญชีในระบบ กรอกชื่อจริงที่อยู่หน้าเครื่อง'}><Input value={signerName} readOnly={Boolean(assigneeName && actor.role !== 'Admin')} autoFocus onChange={(event) => setSignerName(event.target.value)} /></Field><SignaturePad label={`ลายเซ็น${roleName(role)}`} onReady={onPadReady} /><div className="flex flex-wrap gap-2"><Button type="button" className="min-h-10 px-3 text-xs" disabled={busyRole === role} onClick={() => sign(role)}>{busyRole === role ? <LoaderCircle className="size-4 animate-spin" /> : <PenLine className="size-4" />}บันทึกลายเซ็น</Button><Button type="button" variant="secondary" className="min-h-10 px-3 text-xs" disabled={busyRole === role} onClick={cancelSigning}><X className="size-4" />ยกเลิก</Button></div></div> : null}
+              {legacyApproval ? <p className="mt-3 rounded-md border border-[#eed4a6] bg-[#fffaf0] px-2 py-1.5 text-[11px] leading-4 text-[#8b5c0b]">มีการยืนยันเดิมโดย {approval!.approvedByName} แต่ยังไม่มีภาพลายเซ็น</p> : <p className="mt-3 min-h-8 text-[#789097]">{isOwnRole(role) === true ? 'รอคุณลงนาม' : assigneeName ? `รอ ${assigneeName} ลงนาม` : 'ยังไม่มีผู้ลงนามในระบบ · ใช้เครื่องนี้กรอกชื่อและเซ็นได้'}</p>}
+              {canAct && signingRole !== role && isOwnRole(role) === true && mine.signature ? <>
+                <Button className="mt-2 min-h-10 w-full px-3 py-2 text-xs" disabled={Boolean(readiness.length) || busyRole !== null} onClick={() => signWithSaved(role)}>{busyRole === role ? <LoaderCircle className="size-4 animate-spin" /> : <PenLine className="size-4" />}ลงนามด้วยลายเซ็นของฉัน</Button>
+                <button type="button" className="mt-1 min-h-9 w-full rounded-md text-[11px] font-semibold text-[#58747d] hover:text-[#173d50] focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none disabled:opacity-50" disabled={Boolean(readiness.length) || busyRole !== null} onClick={() => startSigning(role, assigneeName || approval?.signerName || '')}>ดูลายเซ็นหรือวาดใหม่ก่อนลงนาม</button>
+              </> : canAct && signingRole !== role ? <Button className="mt-2 min-h-10 w-full px-3 py-2 text-xs" disabled={Boolean(readiness.length) || busyRole !== null} onClick={() => startSigning(role, assigneeName || approval?.signerName || '')}><PenLine className="size-4" />ลงนามตอนนี้</Button> : null}
+              {canAct && signingRole === role ? <div className="mt-3 space-y-2 border-t border-[#e6eeee] pt-3">
+                {isOwnRole(role) === null ? (
+                  <div className="grid grid-cols-2 gap-1 rounded-md bg-[#eef5f4] p-1" role="radiogroup" aria-label="ผู้ลงนาม">
+                    {([['self', 'ฉันเป็นผู้ลงนาม'], ['other', 'ผู้ลงนามคนอื่น']] as const).map(([value, text]) => (
+                      <button key={value} type="button" role="radio" aria-checked={signAs === value} onClick={() => setSignAs(value)} className={`min-h-9 rounded px-2 text-[11px] font-bold focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${signAs === value ? 'bg-white text-[#0b7f76] shadow-sm' : 'text-[#58747d]'}`}>{text}</button>
+                    ))}
+                  </div>
+                ) : null}
+                {signAs === 'self' ? <>
+                  <p className="text-[11px] text-[#58747d]">ลงนามในชื่อ <strong className="text-[#173d50]">{assigneeName || actor.displayName}</strong></p>
+                  <MySignatureField label={`ลายเซ็น${roleName(role)}`} onReady={onMySignatureReady} />
+                </> : <>
+                  <Field label="ชื่อ-นามสกุลผู้ลงนาม" hint={assigneeName ? 'ชื่อนี้ผูกกับผู้รับผิดชอบในระบบ · ให้ผู้ลงนามวาดลายเซ็นเอง' : 'ผู้ลงนามไม่มีบัญชีในระบบ กรอกชื่อจริงที่อยู่หน้าเครื่อง'}><Input value={signerName} readOnly={Boolean(assigneeName && actor.role !== 'Admin')} autoFocus onChange={(event) => setSignerName(event.target.value)} /></Field>
+                  <SignaturePad label={`ลายเซ็น${roleName(role)}`} onReady={onPadReady} />
+                </>}
+                <div className="flex flex-wrap gap-2"><Button type="button" className="min-h-10 px-3 text-xs" disabled={busyRole === role} onClick={() => sign(role)}>{busyRole === role ? <LoaderCircle className="size-4 animate-spin" /> : <PenLine className="size-4" />}ลงนาม</Button><Button type="button" variant="secondary" className="min-h-10 px-3 text-xs" disabled={busyRole === role} onClick={cancelSigning}><X className="size-4" />ยกเลิก</Button></div>
+              </div> : null}
             </>}
           </div>
         })}

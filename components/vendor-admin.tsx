@@ -142,7 +142,7 @@ export function VendorAdmin({
         </div>
         {vendors.length ? <div className="border-t border-[#e5eeee] p-4">
           <h3 className="text-sm font-bold text-[#315763]">ผลงานผู้ขาย / รายงานประเมินประจำปี</h3>
-          <p className="mt-1 text-xs text-[#81979c]">ผลตรวจรับ ปัญหา และรายงานประเมิน 8 เกณฑ์ตามปีงบประมาณ (1 ต.ค. – 30 ก.ย.) · <Link href="/vendors/evaluation-policy" className="font-semibold text-[#0b7f76] underline">นโยบายประเมินผู้ขาย</Link> · <Link href="/vendors/my-signature" className="font-semibold text-[#0b7f76] underline">ตำแหน่งและลายเซ็นของฉัน</Link></p>
+          <p className="mt-1 text-xs text-[#81979c]">ผลตรวจรับ ปัญหา และรายงานประเมิน 8 เกณฑ์ตามปีงบประมาณ (1 ต.ค. – 30 ก.ย.) · <Link href="/vendors/evaluation-policy" className="font-semibold text-[#0b7f76] underline">นโยบายประเมินผู้ขาย</Link> · <Link href="/my-signature" className="font-semibold text-[#0b7f76] underline">ตำแหน่งและลายเซ็นของฉัน</Link></p>
           <ul className="mt-2 flex flex-wrap gap-2">{vendors.map((vendor) => <li key={vendor.id}><Link href={`/vendors/${vendor.id}`} className="inline-flex min-h-11 items-center rounded-md border border-[#c9dadd] bg-white px-3 text-xs font-semibold text-[#0b7f76] hover:bg-[#f4fbf9]">{vendor.code}{vendor.isActive ? '' : ' (inactive)'}</Link></li>)}</ul>
         </div> : null}
         <div className="border-t border-[#e5eeee] bg-[#fbfdfd] p-4">

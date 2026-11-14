@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, BellRing, Biohazard, Boxes, Building2, CalendarCheck, ClipboardCheck, Dna, GitCompareArrows, LineChart, LogOut, MoveRight, QrCode, Settings, ShieldCheck, Thermometer, Users } from 'lucide-react'
+import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, BellRing, Biohazard, Boxes, Building2, CalendarCheck, ClipboardCheck, Dna, GitCompareArrows, LineChart, LogOut, MoveRight, PenLine, QrCode, Settings, ShieldCheck, Thermometer, Users } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import { api } from '@/components/ui'
 
@@ -98,6 +98,16 @@ export function AppShell({ actor, receivingEnabled, children }: { actor: BmActor
             <p className="mt-1 hidden text-xs text-[#a8c8ce] lg:block">Quality Management System</p>
           </div>
           <div className="flex shrink-0 items-center gap-2 lg:hidden">
+            {actor.role !== 'Assistant' ? (
+              <Link
+                href="/my-signature"
+                aria-label="ลายเซ็นของฉัน"
+                title="ลายเซ็นของฉัน"
+                className="inline-flex size-9 items-center justify-center rounded-md border border-white/15 bg-white/10 text-[#cce7eb] transition hover:bg-white/15 hover:text-white focus-visible:ring-2 focus-visible:ring-[#7ee3d8] focus-visible:outline-none"
+              >
+                <PenLine className="size-4" />
+              </Link>
+            ) : null}
             <button
               type="button"
               onClick={logout}
@@ -135,6 +145,11 @@ export function AppShell({ actor, receivingEnabled, children }: { actor: BmActor
             <p className="font-bold text-white">{actor.displayName}</p>
             <p className="mt-1 text-[11px] text-[#a8c8ce]">{actor.role} · E-Phis {actor.ephisId}</p>
             <p className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold text-[#7ee3d8]"><ShieldCheck className="size-3" /> Linked Genomic-CBH</p>
+            {actor.role !== 'Assistant' ? (
+              <Link href="/my-signature" aria-current={pathname === '/my-signature' ? 'page' : undefined} className="mt-3 flex items-center gap-2 rounded-md border border-white/10 px-2.5 py-2 text-xs font-semibold text-[#cce7eb] transition hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[#7ee3d8] focus-visible:outline-none">
+                <PenLine className="size-3.5" /> ลายเซ็นของฉัน
+              </Link>
+            ) : null}
           </div>
           <button onClick={logout} className="mt-3 flex w-full items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-[#b9d6dc] hover:bg-white/8 hover:text-white">
             <LogOut className="size-4" /> ออกจากระบบ / Logout

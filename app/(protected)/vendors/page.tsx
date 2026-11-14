@@ -24,7 +24,7 @@ export default async function VendorsPage() {
     <PageHeader eyebrow="Vendors" title="ผู้ขาย / ประเมินผู้ขาย" description={`ผลตรวจรับ ปัญหา และรายงานประเมินประจำปีงบประมาณ ${fy} (1 ต.ค. – 30 ก.ย.) เลือกผู้ขายเพื่อดูรายละเอียด`}
       actions={<div className="flex flex-wrap gap-2 text-sm font-semibold text-[#0b7f76]">
         <Link href="/vendors/evaluation-policy" className="underline">นโยบายประเมินผู้ขาย</Link>
-        <Link href="/vendors/my-signature" className="underline">ตำแหน่งและลายเซ็นของฉัน</Link>
+        <Link href="/my-signature" className="underline">ตำแหน่งและลายเซ็นของฉัน</Link>
         {actor.role === 'Admin' ? <Link href="/admin" className="underline">จัดการข้อมูลผู้ขาย</Link> : null}
       </div>} />
     <Card className="overflow-x-auto">

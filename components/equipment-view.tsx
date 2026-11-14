@@ -53,6 +53,7 @@ import type {
 import { AttachmentList } from "@/components/attachments";
 import { RoutineMaintenance } from "@/components/routine-maintenance";
 import { SignaturePad, type SignaturePadHandle } from "@/components/signature-pad";
+import { MySignatureField, type MySignatureHandle } from "@/components/my-signature-field";
 import {
   api,
   Button,
@@ -1546,6 +1547,13 @@ function WorkHistory({
   const [selectedTechnicianId, setSelectedTechnicianId] = useState("");
   const technicianSignatureRef = useRef<SignaturePadHandle | null>(null);
   const receiverSignatureRef = useRef<SignaturePadHandle | null>(null);
+  // The signed-in user is usually the one who received the work: use their own
+  // name and saved signature instead of drawing it again.
+  const [receiverIsMe, setReceiverIsMe] = useState(actor.role !== "Assistant");
+  const mySignatureRef = useRef<MySignatureHandle | null>(null);
+  const onMySignatureReady = useCallback((handle: MySignatureHandle) => {
+    mySignatureRef.current = handle;
+  }, []);
   const [formError, setFormError] = useState<string | null>(null);
   const [reasonDialog, setReasonDialog] = useState<{
     record: EquipmentServiceRecord;
@@ -1628,13 +1636,16 @@ function WorkHistory({
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setFormError(null);
-    if (!form.receiverName.trim()) {
+    if (!receiverIsMe && !form.receiverName.trim()) {
       setFormError("กรุณาระบุชื่อผู้รับงาน");
       return;
     }
     const technicianSignature = await technicianSignatureRef.current?.toFile();
-    const receiverSignature = await receiverSignatureRef.current?.toFile();
-    if (!technicianSignature || !receiverSignature) {
+    const receiverUsesSaved = receiverIsMe && Boolean(mySignatureRef.current?.usesSaved());
+    const receiverSignature = receiverIsMe
+      ? await mySignatureRef.current?.drawnFile()
+      : await receiverSignatureRef.current?.toFile();
+    if (!technicianSignature || (!receiverUsesSaved && !receiverSignature)) {
       setFormError("กรุณาลงลายเซ็นช่างและผู้รับงานให้ครบ");
       return;
     }
@@ -1656,13 +1667,17 @@ function WorkHistory({
     for (const [key, value] of Object.entries(payload))
       body.append(key, value == null ? "" : String(value));
     body.append("technicianSignature", technicianSignature);
-    body.append("receiverSignature", receiverSignature);
+    if (receiverIsMe) body.append("receiverIsMe", "1");
+    if (receiverUsesSaved) body.append("receiverUseSavedSignature", "1");
+    else if (receiverSignature) body.append("receiverSignature", receiverSignature);
     const ok = await mutate(
       "/api/equipment/records",
       { method: "POST", body },
       "บันทึกประวัติงานแล้ว",
     );
     if (ok) {
+      if (receiverIsMe && !receiverUsesSaved && receiverSignature)
+        await mySignatureRef.current?.rememberIfRequested(receiverSignature);
       setForm(emptyRecord);
       setSelectedTechnicianId("");
       setFormError(null);
@@ -2102,12 +2117,24 @@ function WorkHistory({
             </Field>
             <Field label="ผู้รับงาน *">
               <Input
-                required
-                value={form.receiverName}
+                required={!receiverIsMe}
+                readOnly={receiverIsMe}
+                value={receiverIsMe ? actor.displayName : form.receiverName}
                 onChange={(e) =>
                   setForm({ ...form, receiverName: e.target.value })
                 }
               />
+              {actor.role !== "Assistant" ? (
+                <label className="mt-1 inline-flex min-h-11 cursor-pointer items-center gap-2 text-xs text-[#3f5c64]">
+                  <input
+                    type="checkbox"
+                    checked={receiverIsMe}
+                    onChange={(e) => setReceiverIsMe(e.target.checked)}
+                    className="size-4 accent-[#0b7f76]"
+                  />
+                  ฉันเป็นผู้รับงาน (ใช้ชื่อและลายเซ็นของฉัน)
+                </label>
+              ) : null}
             </Field>
           </div>
           <Field label="เบอร์ติดต่อช่าง">
@@ -2176,10 +2203,17 @@ function WorkHistory({
               label="ลายเซ็นช่าง *"
               onReady={onTechnicianSignatureReady}
             />
-            <SignaturePad
-              label="ลายเซ็นผู้รับงาน *"
-              onReady={onReceiverSignatureReady}
-            />
+            {receiverIsMe ? (
+              <MySignatureField
+                label="ลายเซ็นผู้รับงาน *"
+                onReady={onMySignatureReady}
+              />
+            ) : (
+              <SignaturePad
+                label="ลายเซ็นผู้รับงาน *"
+                onReady={onReceiverSignatureReady}
+              />
+            )}
           </div>
           {formError ? (
             <p className="rounded-md border border-[#efc7cc] bg-[#fff5f6] px-3 py-2 text-xs text-[#a83541]" role="alert">

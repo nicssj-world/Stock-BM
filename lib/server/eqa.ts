@@ -32,6 +32,7 @@ import { writeAudit } from '@/lib/server/audit'
 import { HttpError } from '@/lib/server/errors'
 import { deleteEntityAttachments, deleteStoredAttachment, uploadAttachment } from '@/lib/server/attachments'
 import { getAdminClient } from '@/lib/supabase/admin'
+import { getSavedSignatureFile } from '@/lib/server/user-signature'
 
 type RecordRow = Record<string, unknown>
 
@@ -801,21 +802,25 @@ function documentApprovals(workspace: EqaWorkspace, type: EqaDocumentType, entit
   return workspace.annualSummaries.find((summary) => summary.planItem.id === entityId)?.approvals ?? []
 }
 
-export async function approveEqaDocument(type: EqaDocumentType, entityId: string, role: EqaApprovalRole, actor: BmActor, input: { signerName: string; signature: File }) {
+export async function approveEqaDocument(type: EqaDocumentType, entityId: string, role: EqaApprovalRole, actor: BmActor, input: { signerName: string; signature?: File | null; useSavedSignature?: boolean }) {
   assertOperator(actor)
   if (!REQUIRED_APPROVALS[type].includes(role)) throw new HttpError(400, 'บทบาทนี้ไม่อยู่ในแบบฟอร์มฉบับนี้')
-  if (!(input.signature instanceof File) || input.signature.type !== 'image/png' || input.signature.size === 0) throw new HttpError(400, 'ลายเซ็นต้องเป็นไฟล์ PNG ที่ไม่ว่าง')
-  if (input.signature.size > 2 * 1024 * 1024) throw new HttpError(400, 'ไฟล์ลายเซ็นใหญ่เกิน 2 MB')
+  if (!input.useSavedSignature) {
+    if (!(input.signature instanceof File) || input.signature.type !== 'image/png' || input.signature.size === 0) throw new HttpError(400, 'ลายเซ็นต้องเป็นไฟล์ PNG ที่ไม่ว่าง')
+    if (input.signature.size > 2 * 1024 * 1024) throw new HttpError(400, 'ไฟล์ลายเซ็นใหญ่เกิน 2 MB')
+  }
 
   const workspace = await getEqaWorkspace(actor)
   const readiness = documentReadiness(workspace, type, entityId)
   if (readiness.length) throw new HttpError(409, readiness.join(' | '))
 
   let assignedSignerName: string | null = null
+  let assignedSignerId: string | null = null
   if (role === 'analyst') {
     const round = workspace.rounds.find((item) => item.id === entityId)
     if (!round || (actor.role !== 'Admin' && round.analystId !== actor.id)) throw new HttpError(403, 'เฉพาะผู้ตรวจวิเคราะห์ที่ระบุในรอบหรือ Admin เท่านั้นที่ลงนามได้')
     assignedSignerName = round.analystName
+    assignedSignerId = round.analystId
   } else {
     const assignment = workspace.approverAssignments.find((item) => item.approvalRole === role)
     // The quality manager, section head, and department head may be external
@@ -824,9 +829,16 @@ export async function approveEqaDocument(type: EqaDocumentType, entityId: string
     // device.
     if (assignment && actor.role !== 'Admin' && assignment.userId !== actor.id) throw new HttpError(403, 'คุณไม่ได้รับมอบหมายบทบาทลงนามนี้')
     assignedSignerName = assignment?.userName ?? null
+    assignedSignerId = assignment?.userId ?? null
   }
+  // A saved signature signs only for its owner: the role must be assigned to
+  // the signed-in user (or unassigned, signing in their own name). Signing for
+  // someone else, including an Admin signing another person's role, must be drawn.
+  if (input.useSavedSignature && assignedSignerId && assignedSignerId !== actor.id) throw new HttpError(403, 'ใช้ลายเซ็นที่บันทึกไว้ได้เฉพาะเมื่อคุณเป็นผู้ลงนามเอง · กรุณาให้ผู้ลงนามวาดลายเซ็น')
   const typedSignerName = input.signerName.trim()
-  const signerName = actor.role !== 'Admin' && assignedSignerName ? assignedSignerName : typedSignerName || assignedSignerName
+  const signerName = input.useSavedSignature
+    ? assignedSignerName ?? actor.displayName
+    : actor.role !== 'Admin' && assignedSignerName ? assignedSignerName : typedSignerName || assignedSignerName
   if (!signerName) throw new HttpError(400, 'กรุณากรอกชื่อ-นามสกุลผู้ลงนาม')
   if (signerName.length > 200) throw new HttpError(400, 'ชื่อผู้ลงนามยาวเกิน 200 ตัวอักษร')
 
@@ -835,7 +847,10 @@ export async function approveEqaDocument(type: EqaDocumentType, entityId: string
   if (existing?.signatureAttachmentId) throw new HttpError(409, 'บทบาทนี้ลงนามแล้ว กรุณาถอนลายเซ็นเดิมก่อนลงนามใหม่')
 
   const admin = getAdminClient()
-  const signature = await uploadAttachment({ module: 'eqa', entityType: 'eqa-document', entityId, kind: `signature:${type}:${state.revision}:${role}`, file: input.signature }, actor)
+  // The saved signature is copied into this document's own attachment, so a
+  // later change to the saved signature never alters what was signed here.
+  const signatureFile = input.useSavedSignature ? await getSavedSignatureFile(actor) : input.signature!
+  const signature = await uploadAttachment({ module: 'eqa', entityType: 'eqa-document', entityId, kind: `signature:${type}:${state.revision}:${role}`, file: signatureFile }, actor)
   try {
     fail((await admin.from('eqa_document_states').upsert({ document_type: type, entity_id: entityId, revision: state.revision, status: 'draft', updated_at: new Date().toISOString() }, { onConflict: 'document_type,entity_id' })).error)
     fail((await admin.from('eqa_document_approvals').upsert({ document_type: type, entity_id: entityId, revision: state.revision, approval_role: role, approved_by: actor.id, approved_at: new Date().toISOString(), signer_name: signerName, signature_attachment_id: signature.id }, { onConflict: 'document_type,entity_id,revision,approval_role' })).error)
@@ -854,7 +869,7 @@ export async function approveEqaDocument(type: EqaDocumentType, entityId: string
     if (role === 'analyst') await advanceRoundStatus(admin, entityId, 'submitted')
     else if (role === 'technical-manager' && complete) await advanceRoundStatus(admin, entityId, 'closed')
   }
-  await writeAudit(actor, 'eqa.document.sign', `eqa-${type}`, entityId, { role, revision: state.revision, signerName, complete, signatureAttachmentId: signature.id })
+  await writeAudit(actor, 'eqa.document.sign', `eqa-${type}`, entityId, { role, revision: state.revision, signerName, complete, signatureAttachmentId: signature.id, signatureSource: input.useSavedSignature ? 'saved' : 'drawn' })
   return getEqaWorkspace(actor)
 }
 

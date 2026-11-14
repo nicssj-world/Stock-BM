@@ -6,6 +6,8 @@ import {
   type InternalEquipmentSignatures,
 } from "@/lib/server/equipment";
 import { HttpError } from "@/lib/server/errors";
+import { getSavedSignatureFile } from "@/lib/server/user-signature";
+import type { BmActor } from "@/lib/bm/types";
 import { respond } from "@/lib/server/route";
 
 export const equipmentRecordSchema = z
@@ -67,7 +69,7 @@ const NULLABLE_FORM_FIELDS = [
   "nextRecommendedOn",
 ] as const;
 
-export async function readEquipmentRecordForm(request: Request): Promise<{
+export async function readEquipmentRecordForm(request: Request, actor: BmActor): Promise<{
   input: z.infer<typeof equipmentRecordSchema>;
   signatures: InternalEquipmentSignatures;
 }> {
@@ -79,8 +81,15 @@ export async function readEquipmentRecordForm(request: Request): Promise<{
   for (const key of NULLABLE_FORM_FIELDS) {
     if (values[key] === "") values[key] = null;
   }
+  // "receiverIsMe": the signed-in user received the work, so their own name and
+  // saved signature (read on the server, never uploaded) are used.
+  const receiverIsMe = values.receiverIsMe === "1";
+  const receiverUsesSaved = receiverIsMe && values.receiverUseSavedSignature === "1";
+  delete values.receiverIsMe;
+  delete values.receiverUseSavedSignature;
+  if (receiverIsMe) values.receiverName = actor.displayName;
   const technicianSignature = form.get("technicianSignature");
-  const receiverSignature = form.get("receiverSignature");
+  const receiverSignature = receiverUsesSaved ? await getSavedSignatureFile(actor) : form.get("receiverSignature");
   if (!(technicianSignature instanceof File) || !(receiverSignature instanceof File))
     throw new HttpError(400, "กรุณาลงลายเซ็นช่างและผู้รับงานให้ครบ");
   const input = equipmentRecordSchema.parse(values);
@@ -96,11 +105,12 @@ export async function POST(request: Request) {
   return respondEquipmentWrite(async () => {
     if (!request.headers.get("content-type")?.includes("multipart/form-data"))
       throw new HttpError(415, "แบบฟอร์มบันทึกงานต้องส่งเป็น multipart พร้อมลายเซ็น");
-    const parsed = await readEquipmentRecordForm(request);
+    const actor = await requireActor();
+    const parsed = await readEquipmentRecordForm(request, actor);
     return {
       workspace: await createInternalEquipmentRecord(
         parsed.input,
-        await requireActor(),
+        actor,
         parsed.signatures,
       ),
     };
