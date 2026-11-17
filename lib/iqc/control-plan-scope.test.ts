@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getIqcControlPlanScope } from '@/lib/iqc/control-plan-scope'
+import { getIqcControlPlanScope, groupPlannedTestSets } from '@/lib/iqc/control-plan-scope'
 import type { IqcAnalyte, IqcControlPlan } from '@/lib/iqc/types'
 
 const analytes = [
@@ -43,5 +43,22 @@ describe('IQC control plan scope', () => {
     expect(scope.testSets).toEqual(allTestSets)
     expect(scope.plannedTestSets).toEqual([])
     expect(scope.hasPlans).toBe(false)
+  })
+})
+
+describe('groupPlannedTestSets', () => {
+  it('groups active plans by instrument and test set, counting an analyte under each set it belongs to', () => {
+    const groups = groupPlannedTestSets(analytes, plans)
+    expect(groups.map((group) => [group.instrumentName, group.testSet, group.analyteCodes])).toEqual([
+      ['Cobas B', 'HIV-VL', ['HBV-VL (HPC)']],
+      ['Flow A', 'CD4 Low Panel', ['%CD3', '%CD4']],
+      ['Flow A', 'COE Panel', ['%CD3', '%CD4']],
+    ])
+  })
+
+  it('filters by instrument and ignores inactive plans', () => {
+    const inactive = plans.map((plan) => (plan.id === 'plan-cd4' ? { ...plan, isActive: false } : plan))
+    expect(groupPlannedTestSets(analytes, inactive, 'instrument-a').map((group) => group.analyteCodes)).toEqual([['%CD3'], ['%CD3']])
+    expect(groupPlannedTestSets(analytes, inactive, 'instrument-new')).toEqual([])
   })
 })

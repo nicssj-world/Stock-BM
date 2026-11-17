@@ -39,6 +39,7 @@ import { LAB_LOCK_MIN_POINTS } from '@/lib/iqc/types'
 import { calculateBaselineStats, evaluateVlScope, expectedNormalResult, type BaselineValue, type EvaluationAnalyte, type EvaluationBaseline } from '@/lib/iqc/baseline'
 import { cv, evaluateLatest, evaluateLatestByPolicy, mean, sd, toStat, WESTGARD_RULES, type QcStatus, type WestgardPolicyProfile, type WestgardRule } from '@/lib/iqc/westgard'
 import { normalizeTestSets, parseTestSets } from '@/lib/iqc/test-sets'
+import { groupPlannedTestSets } from '@/lib/iqc/control-plan-scope'
 import { isVlControlLot, planSpecBatch, type SpecBatchItem } from '@/lib/iqc/spec-batch'
 import { summarizeSetupHealth } from '@/lib/iqc/setup-health'
 import { sigmaRating, sixSigma, teaPercent } from '@/lib/iqc/sixsigma'
@@ -350,7 +351,7 @@ function buildSetupHealth(input: {
   const expectedReviewScopes = baselineLots.flatMap((lot) => input.instruments.flatMap((instrument) => vlAnalytes.map((analyte) => `${lot.id}:${analyte.id}:${instrument.id}`)))
   const baselineReviewCount = new Set([...expectedReviewScopes, ...chartReviewScopes, ...observedReviewScopes]
     .filter((scope) => !approvedBaselineScopes.has(scope))).size
-  const activePlanCount = input.controlPlans.filter((plan) => plan.isActive).length
+  const activePlanCount = groupPlannedTestSets(input.analytes, input.controlPlans).length
   const cd4QuantitativeAnalytes = input.analytes.filter((analyte) => analyte.isActive && analyte.dataType === 'quantitative' && !isVlAnalyte(analyte))
   const requiredAssignedSpecKeys = new Set(activeLots.filter((lot) => !isVlControlLot(lot)).flatMap((lot) => cd4QuantitativeAnalytes.map((analyte) => `${lot.id}:${analyte.id}`)))
   const configuredAssignedSpecKeys = new Set(input.specs

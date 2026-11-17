@@ -29,7 +29,8 @@ describe('IQC equipment source', () => {
   })
 
   it('shows the configured tests for a selected instrument and filters its entry options', () => {
-    expect(iqcView).toContain('Test ที่กำหนดสำหรับเครื่องนี้:')
+    expect(iqcView).toContain('Test set ที่กำหนดสำหรับเครื่องนี้:')
+    expect(iqcView).toContain('plannedTestSetGroups.map(')
     expect(iqcView).toContain('const availableAnalytes = useMemo(')
     expect(iqcView).toContain('Test: {tests.length ? tests.map((plan) => plan.analyteCode).join(\', \') : \'ยังไม่ได้กำหนด\'}')
   })

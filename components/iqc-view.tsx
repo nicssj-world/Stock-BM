@@ -8,6 +8,7 @@ import { LAB_LOCK_MIN_POINTS, type IqcCorrectiveAction, type IqcUncertaintyBudge
 import { findCorrectiveActionForPoint, runsWithoutCorrectiveActions } from '@/lib/iqc/corrective-actions'
 import { filterIqcChartsByInstrumentVisibility, type IqcChartInstrumentVisibility } from '@/lib/iqc/chart-instrument-visibility'
 import { hasTestSet, parseTestSets } from '@/lib/iqc/test-sets'
+import { groupPlannedTestSets } from '@/lib/iqc/control-plan-scope'
 import { findNewRun, pickDefaultInstrumentId, readRememberedInstrumentId, rememberInstrumentId, worstRunStatus } from '@/lib/iqc/entry-defaults'
 import { formatDate, formatDateTime } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
@@ -1044,6 +1045,7 @@ function EnterTab({ data, onOk, onErr, onViewCharts, onStartCorrectiveAction }: 
     [data.controlPlans, instrumentId],
   )
   const plannedAnalyteIds = useMemo(() => new Set(selectedControlPlans.map((plan) => plan.analyteId)), [selectedControlPlans])
+  const plannedTestSetGroups = useMemo(() => groupPlannedTestSets(data.analytes, data.controlPlans, instrumentId), [data.analytes, data.controlPlans, instrumentId])
   const testSetAnalyteIds = useMemo(() => {
     const groups = new Map<string, Set<string>>()
     for (const analyte of activeAnalytes) {
@@ -1368,7 +1370,7 @@ function EnterTab({ data, onOk, onErr, onViewCharts, onStartCorrectiveAction }: 
           </Field>
           {instrumentId ? <div className={`rounded-lg border px-3 py-2 text-xs ${selectedControlPlans.length ? 'border-[#b9ded8] bg-[#f1faf8] text-[#176d65]' : 'border-[#eed4a6] bg-[#fff9ed] text-[#8b5a08]'}`}>
             {selectedControlPlans.length
-              ? <>Test ที่กำหนดสำหรับเครื่องนี้: <span className="font-bold">{selectedControlPlans.map((plan) => plan.analyteCode).join(', ')}</span></>
+              ? <>Test set ที่กำหนดสำหรับเครื่องนี้: {plannedTestSetGroups.map((group, index) => <span key={group.testSet}>{index ? ' · ' : ''}<span className="font-bold">{group.testSet}</span> ({group.analyteCodes.length})</span>)}</>
               : <>ยังไม่ได้กำหนด test สำหรับเครื่องนี้ — <Link className="font-semibold underline" href="/iqc?setup=plan">ไปกำหนดการรัน</Link></>}
           </div> : null}
           {selectedInstrument?.equipmentId ? (

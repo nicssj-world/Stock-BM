@@ -22,7 +22,7 @@ import {
 import type { BmActor } from '@/lib/bm/types'
 import type { IqcBaselineReview, IqcBaselineReviewInput, IqcWorkspace, QcStatus } from '@/lib/iqc/types'
 import { getIqcBaselineAnalytesForLot, getIqcBaselineScope } from '@/lib/iqc/baseline-scope'
-import { getIqcControlPlanScope } from '@/lib/iqc/control-plan-scope'
+import { getIqcControlPlanScope, groupPlannedTestSets } from '@/lib/iqc/control-plan-scope'
 import { parseTestSets } from '@/lib/iqc/test-sets'
 import { nextIncompleteSetupTask, summarizeSetupHealth } from '@/lib/iqc/setup-health'
 import { isAssignedSpecAnalyte, isVlControlLot } from '@/lib/iqc/spec-batch'
@@ -122,13 +122,14 @@ function defaultSetupHealth(data: IqcWorkspace) {
     .filter((spec) => requiredAssignedSpecKeys.has(`${spec.controlLotId}:${spec.analyteId}`) && spec.assignedMean != null && spec.assignedSd != null && spec.assignedSd > 0)
     .map((spec) => `${spec.controlLotId}:${spec.analyteId}`))
   const missingAssignedSpecCount = [...requiredAssignedSpecKeys].filter((key) => !configuredAssignedSpecKeys.has(key)).length
+  const plannedSetCount = groupPlannedTestSets(data.analytes, data.controlPlans).length
   const tasks = [
       { key: 'equipment' as const, label: 'เชื่อมเครื่องมือ', description: 'ใช้ Equipment เป็นแหล่งข้อมูลหลักของเครื่องมือ IQC', state: data.instruments.length ? 'complete' as const : 'blocked' as const, count: data.instruments.length, nextAction: 'ตรวจสอบเครื่องมือ', dependencies: [] },
       { key: 'analyte' as const, label: 'เพิ่ม analyte / ชุดทดสอบ', description: 'เพิ่ม assay และจัดกลุ่ม test set ก่อนกำหนดการรัน', state: data.analytes.some((analyte) => analyte.isActive) ? 'complete' as const : 'attention' as const, count: data.analytes.filter((analyte) => analyte.isActive).length, nextAction: data.analytes.some((analyte) => analyte.isActive) ? 'ตรวจสอบ analyte ที่ใช้งานอยู่' : 'เพิ่ม analyte', dependencies: [] },
       { key: 'lot' as const, label: 'เพิ่ม Control lot', description: 'ผูก Material, lot และ stock ในงานเดียว', state: data.instruments.length > 0 && data.controlLots.length > 0 ? 'complete' as const : 'blocked' as const, count: data.controlLots.length, nextAction: 'เพิ่ม lot', dependencies: [{ label: 'มีเครื่องมือที่เชื่อมจาก Equipment', done: data.instruments.length > 0 }] },
       { key: 'spec' as const, label: 'กำหนด Mean/SD จากผู้ผลิต', description: 'กรอก Assigned mean และ SD ของ Control สำหรับ CD4 ก่อนบันทึกผล', state: !cd4QuantitativeAnalytes.length ? 'complete' as const : !activeLots.length ? 'blocked' as const : missingAssignedSpecCount ? 'attention' as const : 'complete' as const, count: missingAssignedSpecCount || configuredAssignedSpecKeys.size, nextAction: missingAssignedSpecCount ? `กรอก Mean/SD อีก ${missingAssignedSpecCount} รายการ` : 'ตรวจสอบ Mean/SD ที่บันทึกแล้ว', dependencies: [{ label: 'มี CD4 quantitative analyte', done: cd4QuantitativeAnalytes.length > 0 }, { label: 'มี Control lot', done: activeLots.length > 0 }] },
       { key: 'baseline' as const, label: 'ตั้งค่าค่าอ้างอิงและ QC baseline', description: 'ทบทวนผลจริงก่อนใช้เป็นเกณฑ์ตัดสิน VL', state: 'attention' as const, count: data.charts.length, nextAction: 'ทบทวน baseline', dependencies: [{ label: 'มีเครื่องมือที่เชื่อมจาก Equipment', done: data.instruments.length > 0 }, { label: 'มี Control lot', done: data.controlLots.length > 0 }] },
-      { key: 'plan' as const, label: 'กำหนดการรัน', description: 'กำหนดว่าเครื่องนี้ต้องรัน control อะไรและใช้ policy ใด', state: data.controlPlans.length ? 'complete' as const : 'attention' as const, count: data.controlPlans.length, nextAction: 'กำหนดการรัน', dependencies: [{ label: 'มีเครื่องมือที่เชื่อมจาก Equipment', done: data.instruments.length > 0 }] },
+      { key: 'plan' as const, label: 'กำหนดการรัน', description: 'กำหนดว่าเครื่องนี้ต้องรัน control อะไรและใช้ policy ใด', state: plannedSetCount ? 'complete' as const : 'attention' as const, count: plannedSetCount, nextAction: 'กำหนดการรัน', dependencies: [{ label: 'มีเครื่องมือที่เชื่อมจาก Equipment', done: data.instruments.length > 0 }] },
       { key: 'advanced' as const, label: 'เกณฑ์เพิ่มเติม', description: 'TEa, Six Sigma และ Uncertainty สำหรับการทบทวนเชิงลึก', state: 'attention' as const, count: data.teaSpecs.length + data.uncertaintyBudgets.length, nextAction: 'เปิด advanced', dependencies: [{ label: 'มี VL analyte ในระบบ', done: data.analytes.some((analyte) => /-VL\b/i.test(analyte.code)) }] },
   ]
   return {

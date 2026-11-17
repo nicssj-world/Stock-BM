@@ -5,6 +5,29 @@ function collectTestSets(analytes: IqcAnalyte[]) {
   return [...new Set(analytes.flatMap((analyte) => parseTestSets(analyte.groupLabel)))].sort()
 }
 
+export const NO_TEST_SET_LABEL = 'ไม่ระบุ test set'
+
+/**
+ * Active plans grouped by (instrument, test set). An analyte in several test sets
+ * appears under each; an analyte with none falls under NO_TEST_SET_LABEL.
+ */
+export function groupPlannedTestSets(analytes: IqcAnalyte[], controlPlans: IqcControlPlan[], instrumentId?: string) {
+  const analyteById = new Map(analytes.map((analyte) => [analyte.id, analyte]))
+  const groups = new Map<string, { instrumentId: string; instrumentName: string; testSet: string; analyteCodes: string[] }>()
+  for (const plan of controlPlans) {
+    if (!plan.isActive || (instrumentId && plan.instrumentId !== instrumentId)) continue
+    const analyte = analyteById.get(plan.analyteId)
+    const sets = parseTestSets(analyte?.groupLabel)
+    for (const testSet of sets.length ? sets : [NO_TEST_SET_LABEL]) {
+      const key = `${plan.instrumentId}:${testSet}`
+      const group = groups.get(key) ?? { instrumentId: plan.instrumentId, instrumentName: plan.instrumentName, testSet, analyteCodes: [] }
+      group.analyteCodes.push(plan.analyteCode)
+      groups.set(key, group)
+    }
+  }
+  return [...groups.values()].sort((a, b) => a.instrumentName.localeCompare(b.instrumentName) || a.testSet.localeCompare(b.testSet))
+}
+
 /**
  * Scope for the control-plan setup screen. An instrument can run many test sets;
  * analytes / test sets it already has an active plan for are left out of
