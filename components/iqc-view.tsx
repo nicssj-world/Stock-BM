@@ -1369,7 +1369,7 @@ function EnterTab({ data, onOk, onErr, onViewCharts, onStartCorrectiveAction }: 
           {instrumentId ? <div className={`rounded-lg border px-3 py-2 text-xs ${selectedControlPlans.length ? 'border-[#b9ded8] bg-[#f1faf8] text-[#176d65]' : 'border-[#eed4a6] bg-[#fff9ed] text-[#8b5a08]'}`}>
             {selectedControlPlans.length
               ? <>Test ที่กำหนดสำหรับเครื่องนี้: <span className="font-bold">{selectedControlPlans.map((plan) => plan.analyteCode).join(', ')}</span></>
-              : 'ยังไม่ได้กำหนด test สำหรับเครื่องนี้ — ไปที่ ตั้งค่าล็อตและเกณฑ์ > Control plan'}
+              : <>ยังไม่ได้กำหนด test สำหรับเครื่องนี้ — <Link className="font-semibold underline" href="/iqc?setup=plan">ไปกำหนดการรัน</Link></>}
           </div> : null}
           {selectedInstrument?.equipmentId ? (
             <div className={`rounded-lg border px-3 py-2 text-xs ${selectedInstrument.equipmentStatus === 'maintenance' || selectedInstrument.equipmentStatus === 'out_of_service' ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-[#dbe8e8] bg-[#f4f9f8] text-[#41656d]'}`}>

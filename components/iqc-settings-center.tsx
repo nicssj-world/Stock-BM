@@ -1100,14 +1100,37 @@ function ControlPlanTask({ data, onOk, onErr, onSaved }: { data: IqcWorkspace; o
   const [rules, setRules] = useState<string[]>(ALL_RULES)
   const [busy, setBusy] = useState(false)
   const scope = useMemo(() => getIqcControlPlanScope(data.analytes, data.controlPlans, instrumentId), [data.analytes, data.controlPlans, instrumentId])
-  const activeTestSet = testSet && scope.testSets.includes(testSet) ? testSet : ''
-  const selectedAnalytes = scope.analytes.filter((analyte) => !activeTestSet || parseTestSets(analyte.groupLabel).includes(activeTestSet))
+  const [editingSet, setEditingSet] = useState<string | null>(null)
+  const plannedRows = useMemo(() => scope.plannedTestSets.map((set) => {
+    const analytes = scope.plannedAnalytes.filter((analyte) => parseTestSets(analyte.groupLabel).includes(set))
+    const ids = new Set(analytes.map((analyte) => analyte.id))
+    const plan = data.controlPlans.find((item) => item.isActive && item.instrumentId === instrumentId && ids.has(item.analyteId))
+    return { set, analytes, plan }
+  }), [scope.plannedTestSets, scope.plannedAnalytes, data.controlPlans, instrumentId])
+  const editingRow = editingSet ? plannedRows.find((row) => row.set === editingSet) ?? null : null
+  // '' means "ทุก test set" on purpose. A stale choice (e.g. a set just saved and now hidden) falls back to the
+  // first remaining set instead of silently widening to every unplanned analyte.
+  const activeTestSet = testSet === '' ? '' : scope.testSets.includes(testSet) ? testSet : scope.testSets[0] ?? ''
+  const selectedAnalytes = editingRow ? editingRow.analytes : scope.analytes.filter((analyte) => !activeTestSet || parseTestSets(analyte.groupLabel).includes(activeTestSet))
   const requiredLevels = [...new Set(selectedAnalytes.map((analyte) => analyte.code.match(/\((HPC|LPC|Normal)\)/i)?.[1]).filter((level): level is string => Boolean(level)))]
 
   function changeInstrument(nextInstrumentId: string) {
     const nextScope = getIqcControlPlanScope(data.analytes, data.controlPlans, nextInstrumentId)
+    setEditingSet(null)
     setInstrumentId(nextInstrumentId)
     setTestSet(nextInstrumentId ? nextScope.testSets[0] ?? '' : '')
+  }
+
+  function startEdit(row: (typeof plannedRows)[number]) {
+    setEditingSet(row.set)
+    setFrequency(row.plan?.frequency === 'per-run' ? 'per-run' : 'daily')
+    setRules(row.plan?.westgardRules?.length ? [...row.plan.westgardRules] : ALL_RULES)
+  }
+
+  function cancelEdit() {
+    setEditingSet(null)
+    setFrequency('daily')
+    setRules(ALL_RULES)
   }
 
   function toggleRule(rule: string) { setRules((current) => current.includes(rule) ? current.filter((item) => item !== rule) : [...current, rule]) }
@@ -1119,9 +1142,28 @@ function ControlPlanTask({ data, onOk, onErr, onSaved }: { data: IqcWorkspace; o
     setBusy(true)
     try {
       const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/control-plans', { method: 'POST', body: JSON.stringify({ analyteIds: selectedAnalytes.map((analyte) => analyte.id), instrumentId, requiredLevels, frequency, westgardRules: rules, isActive: true }) })
-      onOk('บันทึกกำหนดการรันและ policy ตามชนิด analyte แล้ว', result.iqc)
-      onSaved(result.iqc)
+      if (editingRow) {
+        onOk(`แก้ไขกำหนดการรัน ${editingRow.set} แล้ว`, result.iqc)
+        cancelEdit()
+      } else {
+        onOk('บันทึกกำหนดการรันและ policy ตามชนิด analyte แล้ว', result.iqc)
+        const remaining = getIqcControlPlanScope(result.iqc.analytes, result.iqc.controlPlans, instrumentId).testSets
+        // Stay here while this instrument still has test sets left to add; move on only when it is fully set up.
+        if (remaining.length) setTestSet(remaining[0])
+        else onSaved(result.iqc)
+      }
     } catch (error) { onErr(error instanceof Error ? error.message : 'บันทึกกำหนดการรันไม่สำเร็จ') } finally { setBusy(false) }
+  }
+
+  async function removeSet(row: (typeof plannedRows)[number]) {
+    if (!row.plan) return
+    if (!window.confirm(`เอา ${row.set} (${row.analytes.length} analyte) ออกจากเครื่องนี้หรือไม่ — ผลที่บันทึกไว้แล้วไม่ถูกลบ`)) return
+    setBusy(true)
+    try {
+      const result = await api<{ iqc: IqcWorkspace }>('/api/iqc/control-plans', { method: 'POST', body: JSON.stringify({ analyteIds: row.analytes.map((analyte) => analyte.id), instrumentId, requiredLevels: row.plan.requiredLevels, frequency: row.plan.frequency, westgardRules: row.plan.westgardRules, isActive: false }) })
+      if (editingSet === row.set) cancelEdit()
+      onOk(`เอา ${row.set} ออกจากเครื่องนี้แล้ว`, result.iqc)
+    } catch (error) { onErr(error instanceof Error ? error.message : 'เอาแผนออกไม่สำเร็จ') } finally { setBusy(false) }
   }
 
   return (
@@ -1132,14 +1174,34 @@ function ControlPlanTask({ data, onOk, onErr, onSaved }: { data: IqcWorkspace; o
       </div>
       <div className="grid gap-3 md:grid-cols-3">
         <Field label="เครื่องมือ"><Select value={instrumentId} onChange={(event) => changeInstrument(event.target.value)}><option value="">เลือกเครื่องมือ</option>{data.instruments.filter((instrument) => instrument.isActive).map((instrument) => <option key={instrument.id} value={instrument.id}>{instrument.code} · {instrument.name}</option>)}</Select></Field>
-        <Field label="Test set"><Select value={activeTestSet} onChange={(event) => setTestSet(event.target.value)}><option value="">ทุก test set</option>{scope.testSets.map((set) => <option key={set} value={set}>{set}</option>)}</Select></Field>
+        <Field label="Test set">{editingRow
+          ? <Select value={editingRow.set} disabled onChange={() => undefined}><option value={editingRow.set}>{editingRow.set} (กำลังแก้ไข)</option></Select>
+          : <Select value={activeTestSet} onChange={(event) => setTestSet(event.target.value)}><option value="">ทุก test set</option>{scope.testSets.map((set) => <option key={set} value={set}>{set}</option>)}</Select>}</Field>
         <Field label="ความถี่"><Select value={frequency} onChange={(event) => setFrequency(event.target.value as 'daily' | 'per-run')}><option value="daily">ทุกวัน</option><option value="per-run">ทุก run</option></Select></Field>
       </div>
       <div className="rounded-md border border-[#c8e2df] bg-[#f5fbfa] p-4">
-        <p className="text-sm text-[#176b68]">จะกำหนด <strong className="mono">{selectedAnalytes.length}</strong> analyte{requiredLevels.length ? <> · ระดับ <strong>{requiredLevels.join(', ')}</strong></> : null}</p>
+        {editingRow ? <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-[#8f5f1d]">กำลังแก้ไขแผนเดิมของ {editingRow.set}</p><button type="button" onClick={cancelEdit} className="min-h-11 rounded-md px-3 py-2 text-sm font-semibold text-[#0b7f76] hover:bg-white focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none">ยกเลิกการแก้ไข</button></div> : null}
+        <p className="text-sm text-[#176b68]">{editingRow ? 'จะอัปเดต' : 'จะกำหนด'} <strong className="mono">{selectedAnalytes.length}</strong> analyte{requiredLevels.length ? <> · ระดับ <strong>{requiredLevels.join(', ')}</strong></> : null}</p>
         <div className="mt-2 flex flex-wrap gap-1.5">{selectedAnalytes.map((analyte) => <span key={analyte.id} className="mono rounded-full border border-[#d9e5e6] bg-white px-2.5 py-1 text-xs font-semibold text-[#3f5c64]">{analyte.code}</span>)}</div>
-        {!scope.hasPlans && instrumentId ? <p className="mt-2 text-xs text-[#8f5f1d]">เครื่องนี้ยังไม่มีกำหนดการรัน จึงแสดง test set ที่ใช้งานทั้งหมด</p> : null}
+        {instrumentId && !scope.hasPlans ? <p className="mt-2 text-xs text-[#789097]">เครื่องนี้ยังไม่มีกำหนดการรัน</p> : null}
+        {instrumentId && scope.hasPlans && !scope.testSets.length && !editingRow ? <p className="mt-2 text-xs text-[#789097]">ไม่มี test set อื่นให้เพิ่ม</p> : null}
       </div>
+      {plannedRows.length ? (
+        <div className="space-y-2">
+          <p className="text-sm font-semibold text-[#173d50]">ตั้งไว้แล้วในเครื่องนี้</p>
+          <ul className="divide-y divide-[#edf2f2] rounded-md border border-[#e1ebec]">
+            {plannedRows.map((row) => (
+              <li key={row.set} className={`flex flex-wrap items-center justify-between gap-2 px-3 py-2 ${editingSet === row.set ? 'bg-[#f5fbfa]' : ''}`}>
+                <div className="min-w-0 text-sm text-[#3f5c64]"><span className="font-semibold text-[#173d50]">{row.set}</span> · {row.analytes.length} analyte · {row.plan?.frequency === 'per-run' ? 'ทุก run' : 'ทุกวัน'} · <span className="mono text-xs">{(row.plan?.westgardRules ?? []).map((rule) => RULE_HELP[rule]?.label ?? rule).join(', ') || '—'}</span></div>
+                <div className="flex items-center gap-1">
+                  <button type="button" onClick={() => startEdit(row)} disabled={busy || editingSet === row.set} className="min-h-11 rounded-md px-3 py-2 text-sm font-semibold text-[#0b7f76] hover:bg-[#eef6f5] focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none disabled:text-[#a0b0b4]">แก้ไข</button>
+                  <button type="button" onClick={() => void removeSet(row)} disabled={busy} className="min-h-11 rounded-md px-3 py-2 text-sm font-semibold text-[#a83541] hover:bg-[#fff5f6] focus-visible:ring-2 focus-visible:ring-[#a83541] focus-visible:outline-none disabled:text-[#a0b0b4]">เอาออก</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <div className="space-y-2">
         <p className="text-sm text-[#3f5c64]"><span className="font-semibold text-[#173d50]">Westgard rule:</span> <span className="mono">{rules.map((rule) => RULE_HELP[rule]?.label ?? rule).join(', ') || '—'}</span> <span className="text-xs text-[#789097]">· VL ใช้ vl-standard-v1 ส่วน CD4 ใช้ cd4-legacy อัตโนมัติ</span></p>
         <details className="rounded-md border border-dashed border-[#cfdee0] bg-[#fbfdfd] p-3">
@@ -1152,7 +1214,7 @@ function ControlPlanTask({ data, onOk, onErr, onSaved }: { data: IqcWorkspace; o
           </div>
         </details>
       </div>
-      <div className="flex flex-wrap items-center justify-end gap-3 border-t border-[#e1ebec] pt-4"><Button disabled={busy} onClick={() => void save()}>{busy ? 'กำลังบันทึก…' : 'บันทึก แล้วไปขั้นถัดไป'}</Button></div>
+      <div className="flex flex-wrap items-center justify-end gap-3 border-t border-[#e1ebec] pt-4"><Button disabled={busy} onClick={() => void save()}>{busy ? 'กำลังบันทึก…' : editingRow ? 'บันทึกการแก้ไข' : 'บันทึก แล้วไปขั้นถัดไป'}</Button></div>
     </Card>
   )
 }
