@@ -1,4 +1,4 @@
-import type { IqcAnalyte, IqcControlPlan } from '@/lib/iqc/types'
+import type { IqcAnalyte, IqcControlPlan, IqcInstrument } from '@/lib/iqc/types'
 import { parseTestSets } from '@/lib/iqc/test-sets'
 
 function collectTestSets(analytes: IqcAnalyte[]) {
@@ -26,6 +26,12 @@ export function groupPlannedTestSets(analytes: IqcAnalyte[], controlPlans: IqcCo
     }
   }
   return [...groups.values()].sort((a, b) => a.instrumentName.localeCompare(b.instrumentName) || a.testSet.localeCompare(b.testSet))
+}
+
+/** Active instruments that have no active control plan at all. */
+export function instrumentsWithoutPlans<T extends Pick<IqcInstrument, 'id' | 'isActive'>>(instruments: T[], controlPlans: IqcControlPlan[]) {
+  const planned = new Set(controlPlans.filter((plan) => plan.isActive).map((plan) => plan.instrumentId))
+  return instruments.filter((instrument) => instrument.isActive && !planned.has(instrument.id))
 }
 
 /**

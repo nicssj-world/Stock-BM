@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getIqcControlPlanScope, groupPlannedTestSets } from '@/lib/iqc/control-plan-scope'
+import { getIqcControlPlanScope, groupPlannedTestSets, instrumentsWithoutPlans } from '@/lib/iqc/control-plan-scope'
 import type { IqcAnalyte, IqcControlPlan } from '@/lib/iqc/types'
 
 const analytes = [
@@ -60,5 +60,23 @@ describe('groupPlannedTestSets', () => {
     const inactive = plans.map((plan) => (plan.id === 'plan-cd4' ? { ...plan, isActive: false } : plan))
     expect(groupPlannedTestSets(analytes, inactive, 'instrument-a').map((group) => group.analyteCodes)).toEqual([['%CD3'], ['%CD3']])
     expect(groupPlannedTestSets(analytes, inactive, 'instrument-new')).toEqual([])
+  })
+})
+
+describe('instrumentsWithoutPlans', () => {
+  const instruments = [
+    { id: 'instrument-a', isActive: true },
+    { id: 'instrument-b', isActive: true },
+    { id: 'instrument-new', isActive: true },
+    { id: 'instrument-off', isActive: false },
+  ]
+
+  it('lists active instruments that have no active plan', () => {
+    expect(instrumentsWithoutPlans(instruments, plans).map((instrument) => instrument.id)).toEqual(['instrument-new'])
+  })
+
+  it('treats an instrument whose plans were all deactivated as unplanned', () => {
+    const deactivated = plans.map((plan) => (plan.instrumentId === 'instrument-b' ? { ...plan, isActive: false } : plan))
+    expect(instrumentsWithoutPlans(instruments, deactivated).map((instrument) => instrument.id)).toEqual(['instrument-b', 'instrument-new'])
   })
 })
