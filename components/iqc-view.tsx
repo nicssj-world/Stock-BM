@@ -656,16 +656,30 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
   )
 }
 
+// Reasons flagged dataEntryError are recording mistakes, not QC failures, so a
+// rejected point voided for one of them does not need a corrective action.
+const VOID_REASON_OPTIONS = [
+  { key: 'wrong-value', label: 'ใส่ค่าผิด (key ผิด)', dataEntryError: true },
+  { key: 'wrong-control', label: 'เลือก control / lot / analyte ผิด', dataEntryError: true },
+  { key: 'wrong-datetime', label: 'วันที่ / เวลา run ผิด', dataEntryError: true },
+  { key: 'duplicate', label: 'บันทึกซ้ำ', dataEntryError: true },
+  { key: 'other', label: 'อื่นๆ', dataEntryError: false },
+] as const
+
 function PointDetailCard({ chart, point, run, result, correctiveAction, busy, onVoid, onStartCorrectiveAction, onOpenCorrectiveAction }: { chart: IqcWorkspace['charts'][number]; point: IqcWorkspace['charts'][number]['points'][number]; run: IqcWorkspace['runs'][number] | null; result: IqcWorkspace['runs'][number]['results'][number] | null; correctiveAction: IqcWorkspace['correctiveActions'][number] | null; busy: boolean; onVoid: (reason: string, dataEntryError: boolean) => Promise<string | null>; onStartCorrectiveAction: (context: IqcCorrectiveContext) => void; onOpenCorrectiveAction: (id: string) => void }) {
   const needsAction = point.status === 'warning' || point.status === 'investigate' || point.status === 'rejected'
   const trucountLot = run?.consumables.find((consumable) => consumable.kind === 'trucount-tube' && consumable.lotNumber.trim())
   const [voidOpen, setVoidOpen] = useState(false)
-  const [voidReason, setVoidReason] = useState('')
+  const [voidReasonKey, setVoidReasonKey] = useState('')
+  const [voidOtherText, setVoidOtherText] = useState('')
   const [voidError, setVoidError] = useState<string | null>(null)
-  // A rejected point without a CA can only be voided as a data-entry error;
-  // pressing that labelled button is the declaration, so no extra checkbox.
-  const voidAsDataEntryError = point.status === 'rejected' && !correctiveAction
-  const canSubmitVoid = voidReason.trim().length > 0
+  const voidOption = VOID_REASON_OPTIONS.find((option) => option.key === voidReasonKey) ?? null
+  const isOtherReason = voidReasonKey === 'other'
+  const voidReason = isOtherReason ? voidOtherText.trim() : voidOption?.label ?? ''
+  const voidAsDataEntryError = Boolean(voidOption?.dataEntryError)
+  // A genuinely rejected point needs a CA before void; only data-entry reasons skip it.
+  const blockedByMissingCa = point.status === 'rejected' && !correctiveAction && voidReasonKey !== '' && !voidAsDataEntryError
+  const canSubmitVoid = voidReason.length > 0 && !blockedByMissingCa
 
   async function submitVoid() {
     if (!canSubmitVoid) return
@@ -734,20 +748,25 @@ function PointDetailCard({ chart, point, run, result, correctiveAction, busy, on
       {voidOpen && !point.isVoided ? (
         <div className="space-y-2 rounded-md border border-[#f0c9c9] bg-[#fff7f7] p-3">
           <p className="text-xs font-bold text-[#9b2c2c]">Void ผล IQC จุดนี้</p>
-          <Textarea
-            value={voidReason}
-            maxLength={300}
-            rows={2}
-            placeholder="ระบุเหตุผล เช่น key ค่าผิด ค่าจริงคือ ..."
-            onChange={(e) => setVoidReason(e.target.value)}
-          />
+          <Select value={voidReasonKey} onChange={(e) => { setVoidReasonKey(e.target.value); setVoidError(null) }}>
+            <option value="">— เลือกเหตุผล —</option>
+            {VOID_REASON_OPTIONS.map((option) => (
+              <option key={option.key} value={option.key}>{option.label}</option>
+            ))}
+          </Select>
+          {isOtherReason ? (
+            <Input value={voidOtherText} maxLength={300} placeholder="ระบุเหตุผล" autoFocus onChange={(e) => setVoidOtherText(e.target.value)} />
+          ) : null}
+          {blockedByMissingCa ? (
+            <p className="text-xs text-[#9b2c2c]">ผล rejected ที่ไม่ได้เกิดจากการบันทึกผิด ต้องเปิด Corrective action ด้านบนก่อน void</p>
+          ) : null}
           {voidError ? <p className="rounded-md bg-[#fde8e8] px-3 py-2 text-xs font-semibold text-[#9b2c2c]">{voidError}</p> : null}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => { setVoidOpen(false); setVoidError(null) }}>
               ยกเลิก
             </Button>
             <Button type="button" variant="danger" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy || !canSubmitVoid} onClick={submitVoid}>
-              <Trash2 className="size-3.5" /> {voidAsDataEntryError ? 'Void — บันทึกค่าผิด' : 'ยืนยัน Void'}
+              <Trash2 className="size-3.5" /> ยืนยัน Void
             </Button>
           </div>
         </div>
