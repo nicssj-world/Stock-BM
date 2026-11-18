@@ -2142,9 +2142,10 @@ export async function importIqcRuns(input: {
   return getIqcWorkspace(actor)
 }
 
-export async function voidResult(resultId: string, reason: string, actor: BmActor) {
+export async function voidResult(resultId: string, reason: string, actor: BmActor, options: { dataEntryError?: boolean } = {}) {
   assertAdmin(actor)
   if (!reason.trim()) throw new HttpError(400, 'Void reason is required')
+  const dataEntryError = Boolean(options.dataEntryError)
   const admin = getAdminClient()
   const { data: existing, error: existingError } = await admin
     .from('iqc_result_values')
@@ -2154,18 +2155,22 @@ export async function voidResult(resultId: string, reason: string, actor: BmActo
   fail(existingError)
   if (!existing) throw new HttpError(404, 'IQC result not found')
   if (Boolean((existing as RecordRow).is_voided)) throw new HttpError(400, 'IQC result is already voided')
-  if (asString((existing as RecordRow).status) === 'rejected') {
+  // A genuinely rejected QC run must be investigated (CA) before it can be voided.
+  // A mistyped value is not a QC failure, so the user may declare it as a data-entry
+  // error instead; that declaration is stored in the void reason and the audit log.
+  if (asString((existing as RecordRow).status) === 'rejected' && !dataEntryError) {
     const { count, error: caError } = await admin.from('iqc_corrective_actions').select('id', { count: 'exact', head: true }).eq('run_id', asString((existing as RecordRow).run_id))
     fail(caError)
-    if (!count) throw new HttpError(409, 'ผล rejected ต้องเปิด Corrective action ก่อน void/ปิดงาน')
+    if (!count) throw new HttpError(409, 'ผล rejected ต้องเปิด Corrective action ก่อน void — ถ้าเป็นการบันทึกค่าผิด ให้เลือก "บันทึกค่าผิด"')
   }
+  const storedReason = dataEntryError ? `[บันทึกค่าผิด] ${reason.trim()}` : reason.trim()
   const { error } = await admin
     .from('iqc_result_values')
-    .update({ is_voided: true, void_reason: reason.trim() })
+    .update({ is_voided: true, void_reason: storedReason })
     .eq('id', resultId)
   fail(error)
   await recalculateChartStatuses(asString((existing as RecordRow).control_lot_id), asString((existing as RecordRow).analyte_id), actor)
-  await writeAudit(actor, 'iqc.result.void', 'iqc-result', resultId, { reason: reason.trim() })
+  await writeAudit(actor, 'iqc.result.void', 'iqc-result', resultId, { reason: storedReason, dataEntryError, previousStatus: asString((existing as RecordRow).status) })
   return getIqcWorkspace(actor)
 }
 

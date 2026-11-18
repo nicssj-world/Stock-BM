@@ -273,19 +273,21 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
     }
   }
 
-  async function voidPoint(resultId: string) {
-    const reason = window.prompt('ระบุเหตุผลในการ void ผล IQC จุดนี้:')
-    if (reason == null || !reason.trim()) return
+  // Returns an error message (shown inline next to the void form) or null on success.
+  async function voidPoint(resultId: string, reason: string, dataEntryError: boolean): Promise<string | null> {
     setBusy(`point:${resultId}`)
     try {
       const result = await api<{ iqc: IqcWorkspace }>(`/api/iqc/results/${resultId}/void`, {
         method: 'POST',
-        body: JSON.stringify({ reason: reason.trim() }),
+        body: JSON.stringify({ reason: reason.trim(), dataEntryError }),
       })
       setSelectedPointId(null)
       onOk('Void ผล IQC แล้ว และ refresh chart แล้ว', result.iqc)
+      return null
     } catch (e) {
-      onErr(e instanceof Error ? e.message : 'Void result ไม่สำเร็จ')
+      const message = e instanceof Error ? e.message : 'Void result ไม่สำเร็จ'
+      onErr(message)
+      return message
     } finally {
       setBusy(null)
     }
@@ -632,7 +634,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
           {selectedChart ? (
             <>
               <LjChart chart={selectedChart} selectedResultId={selectedPointId} onPointSelect={(point) => setSelectedPointId(point.resultId)} />
-              {selectedPoint ? <PointDetailCard key={`${selectedChart.key}:${selectedPoint.resultId}`} chart={selectedChart} point={selectedPoint} run={selectedRun} result={selectedRunResult} correctiveAction={linkedCorrectiveAction} busy={busy === `point:${selectedPoint.resultId}`} onVoid={() => voidPoint(selectedPoint.resultId)} onStartCorrectiveAction={onStartCorrectiveAction} onOpenCorrectiveAction={onOpenCorrectiveAction} /> : null}
+              {selectedPoint ? <PointDetailCard key={`${selectedChart.key}:${selectedPoint.resultId}`} chart={selectedChart} point={selectedPoint} run={selectedRun} result={selectedRunResult} correctiveAction={linkedCorrectiveAction} busy={busy === `point:${selectedPoint.resultId}`} onVoid={(reason, dataEntryError) => voidPoint(selectedPoint.resultId, reason, dataEntryError)} onStartCorrectiveAction={onStartCorrectiveAction} onOpenCorrectiveAction={onOpenCorrectiveAction} /> : null}
               <div className="flex justify-end">
                   <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-bold ${selectedChart.policyProfile === 'vl-standard-v1' ? selectedChart.baselineId ? 'border-[#bfe3cf] bg-[#f1fbf4] text-[#18763a]' : 'border-[#d2dee0] bg-[#f6f9f9] text-[#5b7681]' : selectedChart.labLockedAt ? 'border-[#bfe3cf] bg-[#f1fbf4] text-[#18763a]' : 'border-[#eed4a6] bg-[#fff9ed] text-[#a9700f]'}`}>
                     <Lock className="size-3.5" /> {selectedChart.policyProfile === 'vl-standard-v1' ? selectedChart.baselineId ? 'QC baseline approved' : 'รอ QC baseline' : selectedChart.labLockedAt ? 'Lab mean/SD locked' : 'Not locked - use lot action'}
@@ -654,9 +656,23 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
   )
 }
 
-function PointDetailCard({ chart, point, run, result, correctiveAction, busy, onVoid, onStartCorrectiveAction, onOpenCorrectiveAction }: { chart: IqcWorkspace['charts'][number]; point: IqcWorkspace['charts'][number]['points'][number]; run: IqcWorkspace['runs'][number] | null; result: IqcWorkspace['runs'][number]['results'][number] | null; correctiveAction: IqcWorkspace['correctiveActions'][number] | null; busy: boolean; onVoid: () => void; onStartCorrectiveAction: (context: IqcCorrectiveContext) => void; onOpenCorrectiveAction: (id: string) => void }) {
+function PointDetailCard({ chart, point, run, result, correctiveAction, busy, onVoid, onStartCorrectiveAction, onOpenCorrectiveAction }: { chart: IqcWorkspace['charts'][number]; point: IqcWorkspace['charts'][number]['points'][number]; run: IqcWorkspace['runs'][number] | null; result: IqcWorkspace['runs'][number]['results'][number] | null; correctiveAction: IqcWorkspace['correctiveActions'][number] | null; busy: boolean; onVoid: (reason: string, dataEntryError: boolean) => Promise<string | null>; onStartCorrectiveAction: (context: IqcCorrectiveContext) => void; onOpenCorrectiveAction: (id: string) => void }) {
   const needsAction = point.status === 'warning' || point.status === 'investigate' || point.status === 'rejected'
   const trucountLot = run?.consumables.find((consumable) => consumable.kind === 'trucount-tube' && consumable.lotNumber.trim())
+  const [voidOpen, setVoidOpen] = useState(false)
+  const [voidReason, setVoidReason] = useState('')
+  const [dataEntryError, setDataEntryError] = useState(false)
+  const [voidError, setVoidError] = useState<string | null>(null)
+  // A rejected point without a CA can only be voided as a declared data-entry error.
+  const needsDataEntryDeclaration = point.status === 'rejected' && !correctiveAction
+  const canSubmitVoid = voidReason.trim().length > 0 && (!needsDataEntryDeclaration || dataEntryError)
+
+  async function submitVoid() {
+    if (!canSubmitVoid) return
+    setVoidError(null)
+    const message = await onVoid(voidReason, needsDataEntryDeclaration ? dataEntryError : false)
+    if (message) setVoidError(message)
+  }
 
   return (
     <Card className="space-y-3 p-4">
@@ -715,11 +731,42 @@ function PointDetailCard({ chart, point, run, result, correctiveAction, busy, on
           </div>
         </div>
       ) : null}
-      <div className="flex justify-end">
-        <Button type="button" variant="danger" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy || point.isVoided} onClick={onVoid}>
-          <Trash2 className="size-3.5" /> Void result
-        </Button>
-      </div>
+      {voidOpen && !point.isVoided ? (
+        <div className="space-y-2 rounded-md border border-[#f0c9c9] bg-[#fff7f7] p-3">
+          <p className="text-xs font-bold text-[#9b2c2c]">Void ผล IQC จุดนี้</p>
+          <Textarea
+            value={voidReason}
+            maxLength={300}
+            rows={2}
+            placeholder="ระบุเหตุผล เช่น key ค่าผิด ค่าจริงคือ ..."
+            onChange={(e) => setVoidReason(e.target.value)}
+          />
+          {needsDataEntryDeclaration ? (
+            <label className="flex items-start gap-2 text-xs text-[#58474a]">
+              <input type="checkbox" className="mt-0.5" checked={dataEntryError} onChange={(e) => setDataEntryError(e.target.checked)} />
+              <span>
+                ยืนยันว่าเป็น <span className="font-bold">การบันทึกค่าผิด (key ผิด)</span> ไม่ใช่ QC fail จริง — void ได้โดยไม่ต้องเปิด Corrective action
+                (ถ้าเป็น QC fail จริง ให้เปิด Corrective action ด้านบนก่อน)
+              </span>
+            </label>
+          ) : null}
+          {voidError ? <p className="rounded-md bg-[#fde8e8] px-3 py-2 text-xs font-semibold text-[#9b2c2c]">{voidError}</p> : null}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => { setVoidOpen(false); setVoidError(null) }}>
+              ยกเลิก
+            </Button>
+            <Button type="button" variant="danger" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy || !canSubmitVoid} onClick={submitVoid}>
+              <Trash2 className="size-3.5" /> ยืนยัน Void
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex justify-end">
+          <Button type="button" variant="danger" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy || point.isVoided} onClick={() => setVoidOpen(true)}>
+            <Trash2 className="size-3.5" /> Void result
+          </Button>
+        </div>
+      )}
     </Card>
   )
 }
