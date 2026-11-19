@@ -162,8 +162,8 @@ function EntryForm({
 
   const lineLine = selectedType
     ? selectedType.inLineDigest
-      ? `ขึ้นในสรุปเช้า LINE 07:30 · ${form.startDate === form.endDate ? 'เช้าวันนั้น' : 'ทุกเช้าในช่วงนี้'} (ไม่แสดงหมายเหตุ)`
-      : `${selectedType.name} ไม่อยู่ในสรุปเช้า LINE`
+      ? 'แจ้งในกลุ่ม LINE ล่วงหน้า 1 วัน ช่วงบ่าย (ไม่แสดงหมายเหตุ)'
+      : `${selectedType.name} ไม่ได้แจ้งในกลุ่ม LINE`
     : ''
 
   return (
@@ -345,7 +345,7 @@ function TypePanel({ types, onChanged }: { types: CalendarType[]; onChanged: (ty
                 <span className="grid min-w-0 flex-1">
                   <span className="text-sm font-semibold">{type.name}</span>
                   <span className="text-xs text-[#6a838c]">
-                    {KIND_LABEL[type.kind]}{type.inLineDigest ? ' · สรุปเช้า LINE' : ''}{type.isActive ? '' : ' · ปิดใช้งาน'} · ใช้ {type.usageCount} รายการ
+                    {KIND_LABEL[type.kind]}{type.inLineDigest ? ' · แจ้ง LINE' : ''}{type.isActive ? '' : ' · ปิดใช้งาน'} · ใช้ {type.usageCount} รายการ
                   </span>
                 </span>
                 <Button
@@ -403,7 +403,7 @@ function TypePanel({ types, onChanged }: { types: CalendarType[]; onChanged: (ty
           </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" className="size-4 accent-[#0b7f76]" checked={draft.inLineDigest} onChange={(event) => setDraft({ ...draft, inLineDigest: event.target.checked })} />
-            แสดงประเภทนี้ในสรุปเช้า LINE (07:30)
+            แจ้งประเภทนี้ในกลุ่ม LINE ล่วงหน้า 1 วัน (ช่วงบ่าย)
           </label>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" className="size-4 accent-[#0b7f76]" checked={draft.isActive} onChange={(event) => setDraft({ ...draft, isActive: event.target.checked })} />

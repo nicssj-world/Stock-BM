@@ -173,7 +173,7 @@ export function parseGoogleHolidayIcs(text: string, range: { from: string; to: s
   return result.sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name))
 }
 
-/* ---------- LINE morning digest ---------- */
+/* ---------- LINE heads-up digest (sent the workday before) ---------- */
 
 export interface DigestEntry {
   typeName: string
@@ -183,27 +183,61 @@ export interface DigestEntry {
   dayPart: DayPart
 }
 
-/** Never post an empty digest. Workdays need any entry; days off only when someone is on duty. */
-export function shouldSendDigest(dateKey: string, isHoliday: boolean, entries: DigestEntry[]) {
-  if (!isWeekend(dateKey) && !isHoliday) return entries.length > 0
-  return entries.some((entry) => entry.kind === 'duty')
+export interface DigestDay {
+  date: string
+  /** Weekend or a public holiday counted as a day off. */
+  isOffDay: boolean
+  holidayName: string | null
+  entries: DigestEntry[]
 }
 
-export function buildDigestMessage(dateKey: string, entries: DigestEntry[], holidayName: string | null) {
-  const head = `สรุปวัน${THAI_DAYS[dayOfWeek(dateKey)]} ${thaiShortDate(dateKey)} ${Number(dateKey.slice(0, 4)) + 543}`
-  const lines = [head]
-  if (holidayName) lines.push(`วันหยุด: ${holidayName}`)
+/**
+ * Days announced by a digest sent on `today`: tomorrow through the next workday,
+ * so a Friday (or a day before a holiday) also covers the days off in between.
+ */
+export function digestTargetDays(today: string, isOffDay: (dateKey: string) => boolean) {
+  const days: string[] = []
+  for (let day = addDays(today, 1); days.length < 14; day = addDays(day, 1)) {
+    days.push(day)
+    if (!isOffDay(day)) break
+  }
+  return days
+}
+
+/** On days off only duty matters; leave on a Saturday is noise. */
+export function relevantEntries(day: DigestDay) {
+  return day.isOffDay ? day.entries.filter((entry) => entry.kind === 'duty') : day.entries
+}
+
+/** Sent only on workdays, and never empty. */
+export function shouldSendDigest(todayIsOffDay: boolean, days: DigestDay[]) {
+  return !todayIsOffDay && days.some((day) => relevantEntries(day).length > 0)
+}
+
+function dayHeading(day: DigestDay, today: string) {
+  const label = `${THAI_DAYS[dayOfWeek(day.date)]} ${thaiShortDate(day.date)}`
+  const prefix = day.date === addDays(today, 1) ? 'พรุ่งนี้ · ' : ''
+  return `${prefix}${label}${day.holidayName ? ` (${day.holidayName})` : ''}`
+}
+
+export function buildDigestMessage(today: string, days: DigestDay[]) {
   const order: Record<CalendarKind, number> = { duty: 0, leave: 1, other: 2 }
-  const groups = new Map<string, DigestEntry[]>()
-  for (const entry of [...entries].sort((a, b) => order[a.kind] - order[b.kind] || a.sortOrder - b.sortOrder || a.userName.localeCompare(b.userName, 'th'))) {
-    groups.set(entry.typeName, [...(groups.get(entry.typeName) ?? []), entry])
+  const blocks: string[] = []
+  for (const day of days) {
+    const entries = relevantEntries(day)
+    if (!entries.length) continue
+    const groups = new Map<string, DigestEntry[]>()
+    for (const entry of [...entries].sort((a, b) => order[a.kind] - order[b.kind] || a.sortOrder - b.sortOrder || a.userName.localeCompare(b.userName, 'th'))) {
+      groups.set(entry.typeName, [...(groups.get(entry.typeName) ?? []), entry])
+    }
+    const lines = [dayHeading(day, today)]
+    for (const [typeName, items] of groups) {
+      const people = items.map((item) => (item.dayPart === 'full' ? item.userName : `${item.userName} (${DAY_PART_LABEL[item.dayPart]})`))
+      lines.push(`${typeName}: ${people.join(', ')}`)
+    }
+    blocks.push(lines.join('\n'))
   }
-  if (!groups.size) lines.push('', 'ไม่มีใครลงรายการวันนี้')
-  for (const [typeName, items] of groups) {
-    const people = items.map((item) => (item.dayPart === 'full' ? item.userName : `${item.userName} (${DAY_PART_LABEL[item.dayPart]})`))
-    lines.push('', `${typeName}: ${people.join(', ')}`)
-  }
-  return lines.join('\n')
+  return ['แจ้งล่วงหน้า', ...blocks].join('\n\n')
 }
 
 /* ---------- ICS feed for phone calendars ---------- */

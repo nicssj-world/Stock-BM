@@ -16,7 +16,8 @@ import {
   parseGoogleHolidayIcs,
   shouldSendDigest,
   thaiRange,
-  type DigestEntry,
+  digestTargetDays,
+  type DigestDay,
   type FeedEvent,
 } from '@/lib/calendar/rules'
 import {
@@ -665,18 +666,28 @@ async function pushLineText(text: string, retryKey: string) {
   if (!response.ok && response.status !== 409) throw new Error(`LINE ตอบกลับ ${response.status}`)
 }
 
-export async function runMorningDigest(date = todayBangkok()) {
+/** Afternoon heads-up for tomorrow (through the next workday). `date` is the send day. */
+export async function runDigest(date = todayBangkok()) {
   const admin = getAdminClient()
   const users = await loadUsers()
-  const [types, events, holidays] = await Promise.all([loadTypes(), loadEvents(date, date, users), loadHolidays(date, date)])
+  const [types, holidays] = await Promise.all([loadTypes(), loadHolidays(date, addDays(date, 21))])
+  const holidayByDate = new Map<string, string>()
+  for (const holiday of holidays) if (holiday.isDayOff && !holidayByDate.has(holiday.date)) holidayByDate.set(holiday.date, holiday.name)
+  const isOffDay = (day: string) => isWeekend(day) || holidayByDate.has(day)
+  const targets = digestTargetDays(date, isOffDay)
+  const events = await loadEvents(targets[0], targets[targets.length - 1], users)
   const typeById = new Map(types.map((type) => [type.id, type]))
-  const entries: DigestEntry[] = events
-    .filter((event) => covers(event, date))
-    .flatMap((event) => {
-      const type = typeById.get(event.typeId)
-      return type?.inLineDigest ? [{ typeName: type.name, kind: type.kind, sortOrder: type.sortOrder, userName: event.userName, dayPart: event.dayPart }] : []
-    })
-  const holiday = holidays.find((item) => item.isDayOff) ?? null
+  const days: DigestDay[] = targets.map((day) => ({
+    date: day,
+    isOffDay: isOffDay(day),
+    holidayName: holidayByDate.get(day) ?? null,
+    entries: events
+      .filter((event) => covers(event, day))
+      .flatMap((event) => {
+        const type = typeById.get(event.typeId)
+        return type?.inLineDigest ? [{ typeName: type.name, kind: type.kind, sortOrder: type.sortOrder, userName: event.userName, dayPart: event.dayPart }] : []
+      }),
+  }))
 
   const { data: existing, error } = await admin.from('bm_calendar_digest_runs').select('*').eq('digest_date', date).maybeSingle()
   fail(error)
@@ -686,12 +697,12 @@ export async function runMorningDigest(date = todayBangkok()) {
     return { date, status: 'sending', duplicate: true }
   }
 
-  if (!shouldSendDigest(date, Boolean(holiday), entries)) {
+  if (!shouldSendDigest(isOffDay(date), days)) {
     await admin.from('bm_calendar_digest_runs').upsert({ digest_date: date, status: 'skipped', finished_at: new Date().toISOString() })
     return { date, status: 'skipped', duplicate: false }
   }
 
-  const message = buildDigestMessage(date, entries, holiday?.name ?? null)
+  const message = buildDigestMessage(date, days)
   const attempts = Number(run?.attempts ?? 0) + 1
   const claim = run
     ? admin.from('bm_calendar_digest_runs').update({ status: 'sending', message, attempts, started_at: new Date().toISOString(), error: null }).eq('digest_date', date).eq('status', asString(run.status))
@@ -705,9 +716,9 @@ export async function runMorningDigest(date = todayBangkok()) {
     const reason = sendError instanceof Error ? sendError.message : 'send failed'
     await admin.from('bm_calendar_digest_runs').update({ status: 'failed', error: reason, finished_at: new Date().toISOString() }).eq('digest_date', date)
     await writeSystemAudit('calendar.digest_failed', 'calendar-digest', undefined, { date, reason })
-    throw new HttpError(502, `ส่งสรุปเช้าไม่สำเร็จ: ${reason}`)
+    throw new HttpError(502, `ส่งแจ้งล่วงหน้าไม่สำเร็จ: ${reason}`)
   }
   await admin.from('bm_calendar_digest_runs').update({ status: 'sent', finished_at: new Date().toISOString() }).eq('digest_date', date)
-  await writeSystemAudit('calendar.digest_sent', 'calendar-digest', undefined, { date, lines: entries.length })
+  await writeSystemAudit('calendar.digest_sent', 'calendar-digest', undefined, { date, days: days.map((day) => day.date) })
   return { date, status: 'sent', duplicate: false }
 }

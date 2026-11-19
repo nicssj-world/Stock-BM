@@ -5,7 +5,9 @@ import {
   buildDigestMessage,
   buildIcsFeed,
   canEditEntry,
+  digestTargetDays,
   entryPermissionError,
+  isWeekend,
   foldIcsLine,
   isDateKey,
   monthGridRange,
@@ -13,6 +15,7 @@ import {
   parseGoogleHolidayIcs,
   shouldSendDigest,
   weekRange,
+  type DigestDay,
   type DigestEntry,
 } from '@/lib/calendar/rules'
 
@@ -124,25 +127,48 @@ describe('Google holiday parsing', () => {
   })
 })
 
-describe('morning digest', () => {
-  const entries: DigestEntry[] = [
-    { typeName: 'ลาป่วย', kind: 'leave', sortOrder: 30, userName: 'บอม', dayPart: 'full' },
-    { typeName: 'เวรเจาะเลือด', kind: 'duty', sortOrder: 10, userName: 'เจ', dayPart: 'full' },
-    { typeName: 'ลากิจ', kind: 'leave', sortOrder: 20, userName: 'เมย์', dayPart: 'pm' },
-  ]
+describe('heads-up digest (sent the workday before)', () => {
+  const sick: DigestEntry = { typeName: 'ลาป่วย', kind: 'leave', sortOrder: 30, userName: 'บอม', dayPart: 'full' }
+  const blood: DigestEntry = { typeName: 'เวรเจาะเลือด', kind: 'duty', sortOrder: 10, userName: 'เจ', dayPart: 'full' }
+  const halfDay: DigestEntry = { typeName: 'ลากิจ', kind: 'leave', sortOrder: 20, userName: 'เมย์', dayPart: 'pm' }
+  const holidays = new Set(['2026-12-07', '2026-12-10'])
+  const isOffDay = (day: string) => isWeekend(day) || holidays.has(day)
 
-  it('puts duty first and marks half days', () => {
-    expect(buildDigestMessage('2026-11-19', entries, null)).toBe(
-      'สรุปวันพฤหัสบดี 19 พ.ย. 2569\n\nเวรเจาะเลือด: เจ\n\nลากิจ: เมย์ (บ่าย)\n\nลาป่วย: บอม',
-    )
+  it('targets tomorrow on a normal workday', () => {
+    expect(digestTargetDays('2026-11-18', isOffDay)).toEqual(['2026-11-19'])
   })
 
-  it('never sends an empty digest; on days off only when someone is on duty', () => {
-    expect(shouldSendDigest('2026-11-19', false, [])).toBe(false)
-    expect(shouldSendDigest('2026-11-19', false, [entries[0]])).toBe(true)
-    expect(shouldSendDigest('2026-11-21', false, [])).toBe(false)
-    expect(shouldSendDigest('2026-12-10', true, [entries[0]])).toBe(false)
-    expect(shouldSendDigest('2026-11-22', false, [entries[1]])).toBe(true)
+  it('covers the weekend and Monday when sent on Friday', () => {
+    expect(digestTargetDays('2026-11-20', isOffDay)).toEqual(['2026-11-21', '2026-11-22', '2026-11-23'])
+  })
+
+  it('runs through a long weekend into the next workday', () => {
+    // Fri 4 Dec → Sat 5, Sun 6, Mon 7 (substitution holiday), Tue 8
+    expect(digestTargetDays('2026-12-04', isOffDay)).toEqual(['2026-12-05', '2026-12-06', '2026-12-07', '2026-12-08'])
+  })
+
+  it('puts duty first, marks half days and labels tomorrow', () => {
+    const message = buildDigestMessage('2026-11-18', [{ date: '2026-11-19', isOffDay: false, holidayName: null, entries: [sick, blood, halfDay] }])
+    expect(message).toBe('แจ้งล่วงหน้า\n\nพรุ่งนี้ · พฤหัสบดี 19 พ.ย.\nเวรเจาะเลือด: เจ\nลากิจ: เมย์ (บ่าย)\nลาป่วย: บอม')
+  })
+
+  it('shows only duty on days off and skips empty days', () => {
+    const days: DigestDay[] = [
+      { date: '2026-11-21', isOffDay: true, holidayName: null, entries: [blood, sick] },
+      { date: '2026-11-22', isOffDay: true, holidayName: null, entries: [sick] },
+      { date: '2026-11-23', isOffDay: false, holidayName: null, entries: [halfDay] },
+    ]
+    expect(buildDigestMessage('2026-11-20', days)).toBe('แจ้งล่วงหน้า\n\nพรุ่งนี้ · เสาร์ 21 พ.ย.\nเวรเจาะเลือด: เจ\n\nจันทร์ 23 พ.ย.\nลากิจ: เมย์ (บ่าย)')
+  })
+
+  it('never sends empty, and never on a day off', () => {
+    const empty: DigestDay = { date: '2026-11-19', isOffDay: false, holidayName: null, entries: [] }
+    const leaveOnSaturday: DigestDay = { date: '2026-11-21', isOffDay: true, holidayName: null, entries: [sick] }
+    const full: DigestDay = { date: '2026-11-19', isOffDay: false, holidayName: null, entries: [sick] }
+    expect(shouldSendDigest(false, [empty])).toBe(false)
+    expect(shouldSendDigest(false, [leaveOnSaturday])).toBe(false)
+    expect(shouldSendDigest(false, [full])).toBe(true)
+    expect(shouldSendDigest(true, [full])).toBe(false)
   })
 })
 
