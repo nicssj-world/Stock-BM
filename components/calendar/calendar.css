@@ -1,0 +1,232 @@
+/* Team calendar. Light-only like the rest of the app; base values match app/globals.css and components/ui.tsx.
+   Per-type color arrives as --c on the element; tints are mixed from it. */
+.cal {
+  --cal-line: #d6e2e3;
+  --cal-line-soft: #edf2f2;
+  --cal-muted: #6a838c;
+  --cal-fg: #173d50;
+  --cal-accent: #0b7f76;
+  --cal-surface-2: #f4f8f7;
+  --cal-we-bg: #eef3f8;
+  --cal-we-ink: #3f6390;
+  --cal-hol-bg: #fcf0f3;
+  --cal-hol-ink: #b73a5c;
+}
+
+.cal-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  border-radius: 6px;
+  padding: 2px 6px 2px 4px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  text-align: left;
+  background: color-mix(in oklab, var(--c) 12%, white);
+  color: color-mix(in oklab, var(--c) 62%, var(--cal-fg));
+  transition: background-color 150ms ease-out;
+}
+.cal-chip:hover { background: color-mix(in oklab, var(--c) 20%, white); }
+.cal-chip.is-mine { box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--c) 55%, transparent); }
+.cal-chip:focus-visible, .cal-row:focus-visible, .cal-more:focus-visible, .cal-add-day:focus-visible, .cal-strip button:focus-visible {
+  outline: 2px solid var(--cal-accent);
+  outline-offset: 1px;
+}
+
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.cal-cell {
+  position: relative;
+  display: flex;
+  min-height: 128px;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px;
+  border-right: 1px solid var(--cal-line-soft);
+  border-bottom: 1px solid var(--cal-line-soft);
+  background: white;
+}
+.cal-cell:nth-child(7n) { border-right: 0; }
+.cal-cell.is-weekend { background: var(--cal-we-bg); }
+.cal-cell.is-holiday { background: var(--cal-hol-bg); }
+.cal-cell.is-outside { background: var(--cal-surface-2); }
+.cal-cell.is-outside .cal-dnum { opacity: 0.45; }
+.cal-dnum {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 999px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+.cal-cell.is-weekend .cal-dnum { color: var(--cal-we-ink); }
+.cal-cell.is-holiday .cal-dnum { color: var(--cal-hol-ink); font-weight: 600; }
+.cal-cell.is-today .cal-dnum { background: var(--cal-accent); color: white; font-weight: 600; }
+.cal-add-day {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--cal-muted);
+  opacity: 0;
+}
+.cal-cell:hover .cal-add-day, .cal-add-day:focus-visible { opacity: 1; }
+.cal-add-day:hover { background: var(--cal-surface-2); color: var(--cal-accent); }
+@media (hover: none) { .cal-add-day { opacity: 1; } }
+
+.cal-holiday {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 0 2px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--cal-hol-ink);
+}
+.cal-holiday::before { content: ""; flex: none; width: 6px; height: 6px; margin-top: 4px; border-radius: 999px; background: currentColor; }
+.cal-holiday span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.cal-more { border-radius: 6px; padding: 1px 6px; text-align: left; font-size: 0.75rem; font-weight: 600; color: var(--cal-muted); }
+.cal-more:hover { background: var(--cal-surface-2); color: var(--cal-fg); }
+
+.cal-dow.is-weekend { color: var(--cal-we-ink); }
+
+.cal-day-row { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--cal-line-soft); }
+.cal-day-row:last-child { border-bottom: 0; }
+.cal-day-row.is-weekend { background: var(--cal-we-bg); }
+.cal-day-row.is-holiday { background: var(--cal-hol-bg); }
+.cal-day-row.is-weekend .cal-day-num { color: var(--cal-we-ink); }
+.cal-day-row.is-holiday .cal-day-num { color: var(--cal-hol-ink); }
+.cal-day-row.is-today .cal-day-num { color: var(--cal-accent); }
+@media (max-width: 767px) { .cal-day-row { grid-template-columns: 52px minmax(0, 1fr); padding: 12px; } }
+
+.cal-row {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 6px 10px;
+  text-align: left;
+  background: color-mix(in oklab, var(--c) 9%, white);
+  transition: background-color 150ms ease-out;
+}
+.cal-row:hover { background: color-mix(in oklab, var(--c) 16%, white); }
+.cal-badge {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  place-items: center;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--c) 17%, white);
+  color: var(--c);
+}
+.cal-tag { margin-left: auto; flex: none; font-size: 0.72rem; font-weight: 600; color: color-mix(in oklab, var(--c) 62%, var(--cal-fg)); }
+
+.cal-filter {
+  display: inline-flex;
+  min-height: 34px;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--c) 35%, var(--cal-line));
+  padding: 0 12px 0 9px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background: color-mix(in oklab, var(--c) 9%, white);
+  color: color-mix(in oklab, var(--c) 62%, var(--cal-fg));
+}
+.cal-filter[aria-pressed="false"] { border-color: var(--cal-line); background: white; color: var(--cal-muted); opacity: 0.7; }
+
+.cal-strip button { display: grid; min-height: 56px; justify-items: center; gap: 2px; border-radius: 10px; padding: 6px 0 8px; }
+.cal-strip button.is-weekend { color: var(--cal-we-ink); }
+.cal-strip button.is-holiday { color: var(--cal-hol-ink); }
+.cal-strip button[aria-current="date"] { background: var(--cal-accent); color: white; }
+.cal-strip .cal-dot { width: 5px; height: 5px; border-radius: 999px; background: var(--c); }
+.cal-strip button[aria-current="date"] .cal-dot { background: white; }
+
+.cal-pick {
+  display: flex;
+  min-height: 44px;
+  cursor: pointer;
+  align-items: center;
+  gap: 8px;
+  border-radius: 9px;
+  border: 1px solid var(--cal-line);
+  padding: 6px 10px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.cal-pick:has(input:checked) {
+  border-color: var(--c);
+  background: color-mix(in oklab, var(--c) 11%, white);
+  color: color-mix(in oklab, var(--c) 62%, var(--cal-fg));
+  box-shadow: inset 0 0 0 1px var(--c);
+}
+.cal-pick:has(input:focus-visible), .cal-seg-option:has(input:focus-visible) { outline: 2px solid var(--cal-accent); outline-offset: 2px; }
+.cal-pick > svg { color: var(--c); }
+
+.cal-seg-option {
+  display: inline-flex;
+  min-height: 38px;
+  cursor: pointer;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--cal-line);
+  padding: 0 14px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.cal-seg-option:has(input:checked) { border-color: var(--cal-fg); background: var(--cal-fg); color: white; }
+
+.cal-icon-option {
+  display: grid;
+  height: 44px;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px solid var(--cal-line);
+  background: white;
+  color: var(--c);
+}
+.cal-icon-option[aria-pressed="true"] { border-color: var(--c); background: color-mix(in oklab, var(--c) 10%, white); box-shadow: inset 0 0 0 1.5px var(--c); }
+.cal-swatch { width: 32px; height: 32px; border-radius: 999px; border: 2px solid white; background: var(--c); box-shadow: 0 0 0 1px var(--cal-line); }
+.cal-swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--cal-fg); }
+
+dialog.cal-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  margin: auto;
+  border: 1px solid var(--cal-line);
+  border-radius: 14px;
+  padding: 0;
+  color: var(--cal-fg);
+  background: white;
+  box-shadow: 0 24px 60px rgba(10, 30, 36, 0.25);
+}
+dialog.cal-dialog::backdrop { background: rgba(10, 30, 36, 0.45); }
+dialog.cal-dialog[open] { animation: cal-pop 200ms ease-out; }
+@keyframes cal-pop { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
+@media (max-width: 767px) {
+  dialog.cal-dialog {
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 92dvh;
+    margin: auto 0 0;
+    border-radius: 16px 16px 0 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  dialog.cal-dialog[open] { animation: cal-sheet 240ms ease-out; }
+}
+@keyframes cal-sheet { from { opacity: 0.6; transform: translateY(24px); } }
+@media (prefers-reduced-motion: reduce) {
+  dialog.cal-dialog[open] { animation: none; }
+  .cal-chip, .cal-row { transition: none; }
+}

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, BellRing, Biohazard, Boxes, Building2, CalendarCheck, ClipboardCheck, Dna, GitCompareArrows, LineChart, LogOut, MoveRight, PenLine, QrCode, Settings, ShieldCheck, Thermometer, Users } from 'lucide-react'
+import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, BellRing, Biohazard, Boxes, Building2, CalendarCheck, CalendarDays, ClipboardCheck, Dna, GitCompareArrows, LineChart, LogOut, MoveRight, PenLine, QrCode, Settings, ShieldCheck, Thermometer, Users } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import { api } from '@/components/ui'
 
@@ -13,6 +13,7 @@ const homeSection: NavSection = {
   title: 'หน้าหลัก',
   items: [
     { href: '/dashboard', label: 'หน้าหลัก / Home', icon: Activity },
+    { href: '/calendar', label: 'ปฏิทิน / Calendar', icon: CalendarDays },
   ],
 }
 

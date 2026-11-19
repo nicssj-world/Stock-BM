@@ -11,8 +11,10 @@ import type { HivDrtDashboard } from '@/lib/hiv-drt/types'
 import type { EquipmentDashboard } from '@/lib/equipment/types'
 import { formatDate, formatQuantity } from '@/lib/bm/rules'
 import { api, Button, Card, Input, Notice, PageHeader } from '@/components/ui'
+import type { CalendarTodaySummary } from '@/lib/calendar/types'
+import { CalendarTodayCard } from '@/components/calendar/today-card'
 
-export function DashboardView({ actor, stock, env, hpv, hivDrt, equipment }: { actor: BmActor; stock: StockWorkspace; env: EnvDashboard; hpv: HpvDashboard; hivDrt: HivDrtDashboard; equipment: EquipmentDashboard }) {
+export function DashboardView({ actor, stock, env, hpv, hivDrt, equipment, calendarToday = null }: { actor: BmActor; stock: StockWorkspace; env: EnvDashboard; hpv: HpvDashboard; hivDrt: HivDrtDashboard; equipment: EquipmentDashboard; calendarToday?: CalendarTodaySummary | null }) {
   const router = useRouter()
   const [scan, setScan] = useState('')
   const [notice, setNotice] = useState('')
@@ -52,6 +54,8 @@ export function DashboardView({ actor, stock, env, hpv, hivDrt, equipment }: { a
         <QuickAction href="/scan" icon={<QrCode />} label="สแกน" detail="Scan" />
         <QuickAction href="/inventory" icon={<Boxes />} label="คงเหลือ" detail="Inventory" />
       </section>
+
+      {calendarToday ? <CalendarTodayCard summary={calendarToday} /> : null}
 
       <Card className="p-4">
         <form onSubmit={submit} className="grid gap-3 lg:grid-cols-[1fr_auto]">
