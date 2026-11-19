@@ -10,6 +10,9 @@ import { HttpError } from '@/lib/server/errors'
 import { getAdminClient } from '@/lib/supabase/admin'
 
 type RecordRow = Record<string, unknown>
+
+/** Sender name shown on HIV alert messages in LINE (≤20 chars, must not contain "LINE"). */
+const HIV_ALERT_SENDER_NAME = 'HIV LAB Alert'
 type DbError = { message: string; code?: string } | null
 
 function fail(error: DbError, message = 'HIV LAB Alert database operation failed') {
@@ -348,7 +351,8 @@ export async function sendHivLabAlert(id: string, actor: BmActor) {
     response = await fetch('https://api.line.me/v2/bot/message/push', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ to: groupId, messages: [{ type: 'text', text: message }] }),
+      // The OA now has a neutral name; keep HIV alerts labelled as before in the chat.
+      body: JSON.stringify({ to: groupId, messages: [{ type: 'text', text: message, sender: { name: HIV_ALERT_SENDER_NAME } }] }),
       cache: 'no-store',
     })
   } catch {
