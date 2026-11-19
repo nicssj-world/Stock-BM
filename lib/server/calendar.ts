@@ -642,6 +642,14 @@ export async function buildFeedForToken(token: string, scope: 'mine' | 'team') {
 /** Shown as the message's sender instead of the OA name, so the digest is distinguishable from HIV LAB Alert. Max 20 chars, must not contain "LINE". */
 export const DIGEST_SENDER_NAME = 'น้องเบคล่อน'
 
+/** LINE needs an absolute HTTPS PNG (1:1, ≤1MB). Served from public/line/beclon.png on the production domain. */
+function digestSenderIconUrl() {
+  const override = process.env.CALENDAR_LINE_ICON_URL?.trim()
+  if (override) return override
+  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim()
+  return host ? `https://${host}/line/beclon.png` : undefined
+}
+
 async function pushLineText(text: string, retryKey: string) {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN?.trim()
   // Optional separate group for the calendar; falls back to the HIV LAB Alert group.
@@ -650,7 +658,7 @@ async function pushLineText(text: string, retryKey: string) {
   const response = await fetch('https://api.line.me/v2/bot/message/push', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Line-Retry-Key': retryKey },
-    body: JSON.stringify({ to: groupId, messages: [{ type: 'text', text, sender: { name: DIGEST_SENDER_NAME } }] }),
+    body: JSON.stringify({ to: groupId, messages: [{ type: 'text', text, sender: { name: DIGEST_SENDER_NAME, iconUrl: digestSenderIconUrl() } }] }),
     cache: 'no-store',
   })
   // 409 = LINE already accepted this retry key, i.e. the earlier attempt went through.
