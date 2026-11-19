@@ -29,7 +29,7 @@ export function CalendarTodayCard({ summary }: { summary: CalendarTodaySummary }
             <b className="text-[#173d50]">{group.people.join(', ')}</b>
           </span>
         ))}
-        {!summary.duty.length && !offDay ? <span className="text-[#6a838c]">ยังไม่มีใครลงเวรวันนี้</span> : null}
+        {!summary.duty.length && !summary.away.length && !offDay ? <span className="text-[#6a838c]">ยังไม่มีใครลงรายการวันนี้</span> : null}
         {summary.away.length ? (
           <span className="flex flex-wrap items-center gap-1.5">
             <span className="text-[#6a838c]">ลา</span>
