@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addDays,
   addMonths,
+  buildDigestFlex,
   buildDigestMessage,
   buildIcsFeed,
   canEditEntry,
@@ -128,9 +129,9 @@ describe('Google holiday parsing', () => {
 })
 
 describe('heads-up digest (sent the workday before)', () => {
-  const sick: DigestEntry = { typeName: 'ลาป่วย', kind: 'leave', sortOrder: 30, userName: 'บอม', dayPart: 'full' }
-  const blood: DigestEntry = { typeName: 'เวรเจาะเลือด', kind: 'duty', sortOrder: 10, userName: 'เจ', dayPart: 'full' }
-  const halfDay: DigestEntry = { typeName: 'ลากิจ', kind: 'leave', sortOrder: 20, userName: 'เมย์', dayPart: 'pm' }
+  const sick: DigestEntry = { typeName: 'ลาป่วย', iconKey: 'thermometer', colorKey: 'orange', kind: 'leave', sortOrder: 30, userName: 'บอม', dayPart: 'full' }
+  const blood: DigestEntry = { typeName: 'เวรเจาะเลือด', iconKey: 'drop', colorKey: 'rose', kind: 'duty', sortOrder: 10, userName: 'เจ', dayPart: 'full' }
+  const halfDay: DigestEntry = { typeName: 'ลากิจ', iconKey: 'briefcase', colorKey: 'amber', kind: 'leave', sortOrder: 20, userName: 'เมย์', dayPart: 'pm' }
   const holidays = new Set(['2026-12-07', '2026-12-10'])
   const isOffDay = (day: string) => isWeekend(day) || holidays.has(day)
 
@@ -149,7 +150,7 @@ describe('heads-up digest (sent the workday before)', () => {
 
   it('puts duty first, marks half days and labels tomorrow', () => {
     const message = buildDigestMessage('2026-11-18', [{ date: '2026-11-19', isOffDay: false, holidayName: null, entries: [sick, blood, halfDay] }])
-    expect(message).toBe('แจ้งล่วงหน้า\n\nพรุ่งนี้ · พฤหัสบดี 19 พ.ย.\nเวรเจาะเลือด: เจ\nลากิจ: เมย์ (บ่าย)\nลาป่วย: บอม')
+    expect(message).toBe('📅 แจ้งล่วงหน้า\n\nพรุ่งนี้ · พฤหัสบดี 19 พ.ย.\n🩸 เวรเจาะเลือด: เจ\n💼 ลากิจ: เมย์ (บ่าย)\n🤒 ลาป่วย: บอม')
   })
 
   it('shows only duty on days off and skips empty days', () => {
@@ -158,7 +159,23 @@ describe('heads-up digest (sent the workday before)', () => {
       { date: '2026-11-22', isOffDay: true, holidayName: null, entries: [sick] },
       { date: '2026-11-23', isOffDay: false, holidayName: null, entries: [halfDay] },
     ]
-    expect(buildDigestMessage('2026-11-20', days)).toBe('แจ้งล่วงหน้า\n\nพรุ่งนี้ · เสาร์ 21 พ.ย.\nเวรเจาะเลือด: เจ\n\nจันทร์ 23 พ.ย.\nลากิจ: เมย์ (บ่าย)')
+    expect(buildDigestMessage('2026-11-20', days)).toBe('📅 แจ้งล่วงหน้า\n\nพรุ่งนี้ · เสาร์ 21 พ.ย.\n🩸 เวรเจาะเลือด: เจ\n\nจันทร์ 23 พ.ย.\n💼 ลากิจ: เมย์ (บ่าย)')
+  })
+
+  it('builds a Flex bubble with typed colors, alt text and an optional button', () => {
+    const days: DigestDay[] = [{ date: '2026-12-10', isOffDay: true, holidayName: 'วันรัฐธรรมนูญ', entries: [blood] }]
+    const flex = buildDigestFlex('2026-12-09', days, 'https://example.test/calendar')
+    expect(flex.type).toBe('flex')
+    expect(flex.altText.startsWith('📅 แจ้งล่วงหน้า')).toBe(true)
+    expect(flex.altText.length).toBeLessThanOrEqual(400)
+    const json = JSON.stringify(flex.contents)
+    expect(json).toContain('พรุ่งนี้ · พฤหัสบดี 10 ธ.ค.')
+    expect(json).toContain('วันรัฐธรรมนูญ')
+    expect(json).toContain('"color":"#c93a62"')
+    expect(json).toContain('"uri":"https://example.test/calendar"')
+    // every Flex color must be #RRGGBB
+    for (const color of json.match(/"(?:color|backgroundColor)":"[^"]*"/g) ?? []) expect(color).toMatch(/"#[0-9a-f]{6}"$/i)
+    expect(JSON.stringify(buildDigestFlex('2026-12-09', days).contents)).not.toContain('footer')
   })
 
   it('never sends empty, and never on a day off', () => {

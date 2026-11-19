@@ -1,4 +1,5 @@
-import type { CalendarKind, DayPart } from '@/lib/calendar/types'
+import { COLOR_HEX, emojiFor } from '@/lib/calendar/palette'
+import type { CalendarColor, CalendarKind, DayPart } from '@/lib/calendar/types'
 
 /* ---------- date keys (YYYY-MM-DD, calendar dates with no time zone) ---------- */
 
@@ -177,6 +178,8 @@ export function parseGoogleHolidayIcs(text: string, range: { from: string; to: s
 
 export interface DigestEntry {
   typeName: string
+  iconKey: string
+  colorKey: CalendarColor
   kind: CalendarKind
   sortOrder: number
   userName: string
@@ -214,15 +217,19 @@ export function shouldSendDigest(todayIsOffDay: boolean, days: DigestDay[]) {
   return !todayIsOffDay && days.some((day) => relevantEntries(day).length > 0)
 }
 
-function dayHeading(day: DigestDay, today: string) {
-  const label = `${THAI_DAYS[dayOfWeek(day.date)]} ${thaiShortDate(day.date)}`
-  const prefix = day.date === addDays(today, 1) ? 'พรุ่งนี้ · ' : ''
-  return `${prefix}${label}${day.holidayName ? ` (${day.holidayName})` : ''}`
+export interface DigestSection {
+  date: string
+  isTomorrow: boolean
+  /** e.g. "เสาร์ 21 พ.ย." */
+  label: string
+  holidayName: string | null
+  rows: { typeName: string; emoji: string; color: string; people: string }[]
 }
 
-export function buildDigestMessage(today: string, days: DigestDay[]) {
+/** Groups each announced day's entries by type (duty first), dropping days with nothing to say. */
+export function digestSections(today: string, days: DigestDay[]): DigestSection[] {
   const order: Record<CalendarKind, number> = { duty: 0, leave: 1, other: 2 }
-  const blocks: string[] = []
+  const sections: DigestSection[] = []
   for (const day of days) {
     const entries = relevantEntries(day)
     if (!entries.length) continue
@@ -230,14 +237,92 @@ export function buildDigestMessage(today: string, days: DigestDay[]) {
     for (const entry of [...entries].sort((a, b) => order[a.kind] - order[b.kind] || a.sortOrder - b.sortOrder || a.userName.localeCompare(b.userName, 'th'))) {
       groups.set(entry.typeName, [...(groups.get(entry.typeName) ?? []), entry])
     }
-    const lines = [dayHeading(day, today)]
-    for (const [typeName, items] of groups) {
-      const people = items.map((item) => (item.dayPart === 'full' ? item.userName : `${item.userName} (${DAY_PART_LABEL[item.dayPart]})`))
-      lines.push(`${typeName}: ${people.join(', ')}`)
-    }
-    blocks.push(lines.join('\n'))
+    sections.push({
+      date: day.date,
+      isTomorrow: day.date === addDays(today, 1),
+      label: `${THAI_DAYS[dayOfWeek(day.date)]} ${thaiShortDate(day.date)}`,
+      holidayName: day.holidayName,
+      rows: [...groups].map(([typeName, items]) => ({
+        typeName,
+        emoji: emojiFor(items[0].iconKey),
+        color: COLOR_HEX[items[0].colorKey] ?? COLOR_HEX.slate,
+        people: items.map((item) => (item.dayPart === 'full' ? item.userName : `${item.userName} (${DAY_PART_LABEL[item.dayPart]})`)).join(', '),
+      })),
+    })
   }
-  return ['แจ้งล่วงหน้า', ...blocks].join('\n\n')
+  return sections
+}
+
+/** Plain-text version: LINE's notification preview and the fallback when a Flex message is rejected. */
+export function buildDigestMessage(today: string, days: DigestDay[]) {
+  const blocks = digestSections(today, days).map((section) => {
+    const head = `${section.isTomorrow ? 'พรุ่งนี้ · ' : ''}${section.label}${section.holidayName ? ` (${section.holidayName})` : ''}`
+    return [head, ...section.rows.map((row) => `${row.emoji} ${row.typeName}: ${row.people}`)].join('\n')
+  })
+  return ['📅 แจ้งล่วงหน้า', ...blocks].join('\n\n')
+}
+
+const INK = '#173d50'
+const MUTED = '#6a838c'
+
+/** Flex bubble in the app's colors. `calendarUrl` adds an "open calendar" button when known. */
+export function buildDigestFlex(today: string, days: DigestDay[], calendarUrl?: string) {
+  const sections = digestSections(today, days)
+  const body: Record<string, unknown>[] = []
+  sections.forEach((section, index) => {
+    if (index > 0) body.push({ type: 'separator', margin: 'lg', color: '#e1eaeb' })
+    const heading: Record<string, unknown>[] = [
+      { type: 'text', text: section.isTomorrow ? `พรุ่งนี้ · ${section.label}` : section.label, weight: 'bold', size: 'md', color: INK, wrap: true },
+    ]
+    if (section.holidayName) heading.push({ type: 'text', text: section.holidayName, size: 'xs', color: '#b73a5c', wrap: true, margin: 'xs' })
+    body.push({
+      type: 'box',
+      layout: 'vertical',
+      margin: index > 0 ? 'lg' : 'none',
+      spacing: 'sm',
+      contents: [
+        ...heading,
+        ...section.rows.map((row) => ({
+          type: 'box',
+          layout: 'baseline',
+          spacing: 'sm',
+          margin: 'sm',
+          contents: [
+            { type: 'text', text: row.emoji, size: 'sm', flex: 0 },
+            { type: 'text', text: row.typeName, size: 'sm', weight: 'bold', color: row.color, flex: 0 },
+            { type: 'text', text: row.people, size: 'sm', color: INK, wrap: true, flex: 1 },
+          ],
+        })),
+      ],
+    })
+  })
+
+  const bubble: Record<string, unknown> = {
+    type: 'bubble',
+    size: 'mega',
+    header: {
+      type: 'box',
+      layout: 'vertical',
+      backgroundColor: '#0b7f76',
+      paddingAll: '16px',
+      contents: [
+        { type: 'text', text: '📅 แจ้งล่วงหน้า', weight: 'bold', size: 'lg', color: '#ffffff' },
+        { type: 'text', text: 'ปฏิทินทีม · Molecular-CBH', size: 'xs', color: '#cce7eb', margin: 'xs' },
+      ],
+    },
+    body: { type: 'box', layout: 'vertical', paddingAll: '16px', contents: body.length ? body : [{ type: 'text', text: 'ไม่มีรายการ', color: MUTED, size: 'sm' }] },
+    styles: { header: { separator: false } },
+  }
+  if (calendarUrl) {
+    bubble.footer = {
+      type: 'box',
+      layout: 'vertical',
+      paddingAll: '12px',
+      contents: [{ type: 'button', style: 'primary', color: '#0b7f76', height: 'sm', action: { type: 'uri', label: 'เปิดปฏิทิน', uri: calendarUrl } }],
+    }
+  }
+  const altText = buildDigestMessage(today, days)
+  return { type: 'flex', altText: altText.length > 400 ? `${altText.slice(0, 397)}…` : altText, contents: bubble }
 }
 
 /* ---------- ICS feed for phone calendars ---------- */

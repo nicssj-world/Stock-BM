@@ -5,6 +5,7 @@ import type { BmActor, BmRole } from '@/lib/bm/types'
 import { todayBangkok } from '@/lib/bm/rules'
 import {
   addDays,
+  buildDigestFlex,
   buildDigestMessage,
   buildIcsFeed,
   covers,
@@ -638,7 +639,7 @@ export async function buildFeedForToken(token: string, scope: 'mine' | 'team') {
   return buildIcsFeed(scope === 'mine' ? 'เวรและวันลาของฉัน · Molecular-CBH' : 'ปฏิทินทีม · Molecular-CBH', feed)
 }
 
-/* ---------- LINE morning digest ---------- */
+/* ---------- LINE heads-up digest ---------- */
 
 /** Shown as the message's sender instead of the OA name, so the digest is distinguishable from HIV LAB Alert. Max 20 chars, must not contain "LINE". */
 export const DIGEST_SENDER_NAME = 'น้องเบคล่อน'
@@ -647,11 +648,18 @@ export const DIGEST_SENDER_NAME = 'น้องเบคล่อน'
 function digestSenderIconUrl() {
   const override = process.env.CALENDAR_LINE_ICON_URL?.trim()
   if (override) return override
-  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim()
-  return host ? `https://${host}/line/beclon.png` : undefined
+  const origin = productionOrigin()
+  return origin ? `${origin}/line/beclon.png` : undefined
 }
 
-async function pushLineText(text: string, retryKey: string) {
+function productionOrigin() {
+  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim()
+  return host ? `https://${host}` : undefined
+}
+
+class LineRejected extends Error {}
+
+async function pushLine(message: Record<string, unknown>, retryKey: string) {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN?.trim()
   // Optional separate group for the calendar; falls back to the HIV LAB Alert group.
   const groupId = process.env.CALENDAR_LINE_GROUP_ID?.trim() || process.env.LINE_GROUP_ID?.trim()
@@ -659,11 +667,27 @@ async function pushLineText(text: string, retryKey: string) {
   const response = await fetch('https://api.line.me/v2/bot/message/push', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Line-Retry-Key': retryKey },
-    body: JSON.stringify({ to: groupId, messages: [{ type: 'text', text, sender: { name: DIGEST_SENDER_NAME, iconUrl: digestSenderIconUrl() } }] }),
+    body: JSON.stringify({ to: groupId, messages: [{ ...message, sender: { name: DIGEST_SENDER_NAME, iconUrl: digestSenderIconUrl() } }] }),
     cache: 'no-store',
   })
   // 409 = LINE already accepted this retry key, i.e. the earlier attempt went through.
-  if (!response.ok && response.status !== 409) throw new Error(`LINE ตอบกลับ ${response.status}`)
+  if (response.ok || response.status === 409) return
+  const detail = await response.text().catch(() => '')
+  if (response.status === 400) throw new LineRejected(`LINE ไม่รับข้อความ (400) ${detail.slice(0, 200)}`)
+  throw new Error(`LINE ตอบกลับ ${response.status}`)
+}
+
+/** Sends the Flex card; if LINE rejects its structure, falls back to the plain-text version so the heads-up still goes out. */
+async function pushDigest(date: string, days: DigestDay[], text: string) {
+  const origin = productionOrigin()
+  const calendarUrl = origin ? `${origin}/calendar?view=week&date=${addDays(date, 1)}` : undefined
+  try {
+    await pushLine(buildDigestFlex(date, days, calendarUrl), crypto.randomUUID())
+  } catch (error) {
+    if (!(error instanceof LineRejected)) throw error
+    await writeSystemAudit('calendar.digest_flex_rejected', 'calendar-digest', undefined, { date, reason: error.message })
+    await pushLine({ type: 'text', text }, crypto.randomUUID())
+  }
 }
 
 /** Afternoon heads-up for tomorrow (through the next workday). `date` is the send day. */
@@ -685,7 +709,9 @@ export async function runDigest(date = todayBangkok()) {
       .filter((event) => covers(event, day))
       .flatMap((event) => {
         const type = typeById.get(event.typeId)
-        return type?.inLineDigest ? [{ typeName: type.name, kind: type.kind, sortOrder: type.sortOrder, userName: event.userName, dayPart: event.dayPart }] : []
+        return type?.inLineDigest
+          ? [{ typeName: type.name, iconKey: type.iconKey, colorKey: type.colorKey, kind: type.kind, sortOrder: type.sortOrder, userName: event.userName, dayPart: event.dayPart }]
+          : []
       }),
   }))
 
@@ -711,7 +737,7 @@ export async function runDigest(date = todayBangkok()) {
   if (claimError) return { date, status: 'sending', duplicate: true }
 
   try {
-    await pushLineText(message, crypto.randomUUID())
+    await pushDigest(date, days, message)
   } catch (sendError) {
     const reason = sendError instanceof Error ? sendError.message : 'send failed'
     await admin.from('bm_calendar_digest_runs').update({ status: 'failed', error: reason, finished_at: new Date().toISOString() }).eq('digest_date', date)

@@ -37,6 +37,7 @@ import { Umbrella } from '@phosphor-icons/react/dist/csr/Umbrella'
 import { Users } from '@phosphor-icons/react/dist/csr/Users'
 import { Wrench } from '@phosphor-icons/react/dist/csr/Wrench'
 import { CALENDAR_ICON_KEYS, type CalendarIconKey } from '@/lib/calendar/icon-keys'
+import { COLOR_HEX } from '@/lib/calendar/palette'
 import type { CalendarColor } from '@/lib/calendar/types'
 
 const ICONS: Record<CalendarIconKey, Icon> = {
@@ -115,17 +116,7 @@ export const ICON_LABELS: Record<CalendarIconKey, string> = {
 
 export const ICON_KEYS = CALENDAR_ICON_KEYS
 
-/** Text color per type color; tints are derived with color-mix in calendar.css. */
-export const COLOR_HEX: Record<CalendarColor, string> = {
-  teal: '#0f8a7e',
-  rose: '#c93a62',
-  amber: '#b5760a',
-  sky: '#2672b0',
-  violet: '#6f4cbd',
-  green: '#3a8638',
-  orange: '#c45722',
-  slate: '#55677a',
-}
+export { COLOR_HEX }
 
 export const COLOR_LABELS: Record<CalendarColor, string> = {
   teal: 'เขียวน้ำทะเล',
