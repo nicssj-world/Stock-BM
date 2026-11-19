@@ -183,9 +183,9 @@ export interface DigestEntry {
   dayPart: DayPart
 }
 
-/** Workdays always get a digest; days off only when someone is on duty. */
+/** Never post an empty digest. Workdays need any entry; days off only when someone is on duty. */
 export function shouldSendDigest(dateKey: string, isHoliday: boolean, entries: DigestEntry[]) {
-  if (!isWeekend(dateKey) && !isHoliday) return true
+  if (!isWeekend(dateKey) && !isHoliday) return entries.length > 0
   return entries.some((entry) => entry.kind === 'duty')
 }
 

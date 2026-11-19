@@ -137,8 +137,9 @@ describe('morning digest', () => {
     )
   })
 
-  it('sends on workdays, and on days off only when someone is on duty', () => {
-    expect(shouldSendDigest('2026-11-19', false, [])).toBe(true)
+  it('never sends an empty digest; on days off only when someone is on duty', () => {
+    expect(shouldSendDigest('2026-11-19', false, [])).toBe(false)
+    expect(shouldSendDigest('2026-11-19', false, [entries[0]])).toBe(true)
     expect(shouldSendDigest('2026-11-21', false, [])).toBe(false)
     expect(shouldSendDigest('2026-12-10', true, [entries[0]])).toBe(false)
     expect(shouldSendDigest('2026-11-22', false, [entries[1]])).toBe(true)
