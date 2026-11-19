@@ -26,7 +26,9 @@ describe('HIV DRT interface', () => {
     expect(source).toContain('p-3 sm:hidden')
     expect(source).toContain('เลือกแถว Rack')
     expect(source).toContain('grid grid-cols-3 gap-2')
-    expect(source).toContain('แตะช่องปลายทางเพื่อย้ายหรือสลับ')
+    // Tapping a tube only selects it; moving tubes was removed (see hiv-drt-rack-position.test.ts).
+    expect(source).toContain('แตะ tube เพื่อดูรายละเอียด')
+    expect(source).toContain('เลือกตัวอย่างแล้ว · ดูรายละเอียดด้านล่าง')
     expect(source).toContain('hidden overflow-x-auto p-4 sm:block')
   })
 
