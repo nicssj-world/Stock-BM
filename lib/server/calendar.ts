@@ -636,7 +636,7 @@ export async function buildFeedForToken(token: string, scope: 'mine' | 'team') {
   for (const holiday of holidays.filter((item) => item.isDayOff)) {
     feed.push({ uid: `${holiday.id}@molecular-cbh-holiday`, startDate: holiday.date, endDate: holiday.date, summary: `วันหยุด: ${holiday.name}`, updatedAt: `${holiday.date}T00:00:00Z` })
   }
-  return buildIcsFeed(scope === 'mine' ? 'เวรและวันลาของฉัน · Molecular-CBH' : 'ปฏิทินทีม · Molecular-CBH', feed)
+  return buildIcsFeed(scope === 'mine' ? 'เวรและวันลาของฉัน · Genomics-CBH' : 'ปฏิทินทีม · Genomics-CBH', feed)
 }
 
 /* ---------- LINE heads-up digest ---------- */
