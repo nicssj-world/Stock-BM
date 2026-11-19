@@ -123,7 +123,7 @@ export const receiptCreateSchema = z.object({
   temperatureValueC: z.number().finite().nullable().optional(),
   temperatureNote: optionalText(2000),
   coldChainApplicable: z.boolean().optional(),
-  source: z.enum(['manual', 'scan']).optional(),
+  source: z.enum(['manual', 'scan', 'import']).optional(),
   note: optionalText(2000),
   lines: z.array(receiptLineInputSchema).max(500).optional(),
 })
@@ -153,3 +153,20 @@ export type ReceiptLineInput = z.infer<typeof receiptLineInputSchema>
 export type ReceiptUpdateInput = z.infer<typeof receiptUpdateSchema>
 export type ReceiptLineUpdateInput = z.infer<typeof receiptLineUpdateSchema>
 export type ReceiptAssessmentInput = z.infer<typeof receiptAssessmentSchema>
+
+const supplierCode = z.string().trim().min(1).max(120)
+export const supplierCodeCreateSchema = z.object({
+  vendorId: z.string().uuid(),
+  stockItemId: z.string().uuid(),
+  rdthCode: supplierCode.nullable().optional(),
+  materialNo: supplierCode.nullable().optional(),
+  description: z.string().trim().max(500).nullable().optional(),
+}).refine((value) => Boolean(value.rdthCode || value.materialNo), 'ต้องมี RDTH Code หรือ Material No. อย่างน้อยหนึ่งค่า')
+
+export const supplierCodeReviewSchema = z.object({
+  action: z.enum(['approve', 'reject', 'revoke']),
+  note: z.string().trim().max(1000).nullable().optional(),
+})
+
+export type SupplierCodeCreateInput = z.infer<typeof supplierCodeCreateSchema>
+export type SupplierCodeReviewInput = z.infer<typeof supplierCodeReviewSchema>

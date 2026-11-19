@@ -15,7 +15,9 @@ import { ItemPicker } from '@/components/receiving/item-picker'
 import { PackageScan, type PackageScanResolver, type PackageScanResponse } from '@/components/receiving/package-scan'
 import type { ReceiptAssessmentContext } from '@/components/receiving/receipt-assessment-dialog'
 import { ScanTextField } from '@/components/receiving/scan-text-field'
+import { SupplierBillChecklist, SupplierBillUpload, type ImportedLotState } from '@/components/receiving/supplier-bill-import'
 import type { BarcodeScanDiagnostics } from '@/lib/receiving/barcode-diagnostics'
+import { matchSupplierBillRow, supplierBillNote, type SupplierBillImport } from '@/lib/receiving/supplier-bill'
 
 type ScanEvidence = {
   raw: string
@@ -46,6 +48,8 @@ export type ReceiveLineDraft = {
   receiptDecision: ReceiptDecision
   acceptanceReasonCode: AcceptanceReasonCode | null
   acceptanceReasonNote: string | null
+  /** Key of the supplier-Bill LOT this line came from, if any. */
+  importKey?: string | null
 }
 
 export type ReceiveSubmission = {
@@ -55,6 +59,10 @@ export type ReceiveSubmission = {
   receivedDate: string
   lines: ReceiptLineInput[]
   evidence: InvoiceEvidenceImage | null
+  /** Receipt note — set when the lines came from a supplier Bill import. */
+  note: string | null
+  /** True when the lines came from a supplier Bill import (receipt source 'import'). */
+  fromImport: boolean
 }
 
 /**
@@ -67,6 +75,10 @@ export type ReceiveAdapter = {
   /** Preview-only scan diagnostics (raw bytes, normalized GS1, parser errors). */
   onScanDiagnostics?: (diagnostics: BarcodeScanDiagnostics) => void
   submit: (submission: ReceiveSubmission) => Promise<{ receiptId: string; receiptLabel?: string }>
+  /** Parses a supplier Bill (.xlsx) and matches LOTs to the Item Master. Hidden when absent. */
+  importSupplierBill?: (file: File, vendorId: string) => Promise<SupplierBillImport>
+  /** Remembers a Bill code → item for this Vendor; returns the refreshed workspace. */
+  rememberSupplierCode?: (input: { vendorId: string; stockItemId: string; rdthCode: string; materialNo: string; description: string }) => Promise<{ status: 'approved' | 'pending'; receiving: ReceivingWorkspace }>
 }
 
 /** Thrown by an adapter when a draft was saved but not confirmed, so the form must not re-submit it. */
@@ -125,7 +137,12 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const lineKeySeed = useRef(0)
+  const [importedBill, setImportedBill] = useState<SupplierBillImport | null>(null)
+  const [importedLots, setImportedLots] = useState<ImportedLotState[]>([])
+  const [importLocationId, setImportLocationId] = useState(defaultLocation)
+  const [editingImportKey, setEditingImportKey] = useState<string | null>(null)
   const receivedDate = todayBangkok()
+  const pendingImportCount = importedLots.filter((entry) => entry.status === 'pending').length
 
   useEffect(() => {
     if (!lineDialogOpen) return
@@ -168,7 +185,7 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
   function chooseVendor(next: string) {
     setVendorId(next)
     setInvoiceId('')
-    setLines((current) => current.map((line) => ({ ...line, invoiceLineId: null, expectedQty: null })))
+    setLines((current) => current.map((line) => ({ ...line, invoiceLineId: null, expectedQty: line.invoiceLineId ? null : line.expectedQty })))
     patchEditor({ invoiceLineId: '' })
   }
 
@@ -227,6 +244,7 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
       ...(parsed.expiry ? { expiryDate: parsed.expiry } : {}),
       ...(scannedItemId && !editor.itemId ? { itemId: scannedItemId } : {}),
     })
+    setEditingImportKey(null)
     setLineDialogOpen(true)
   }
 
@@ -247,12 +265,18 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
       }
     }
     const invoiceLine = selectedInvoice?.lines.find((line) => line.id === editor.invoiceLineId) ?? null
+    const importedLot = editingImportKey ? importedLots.find((entry) => entry.lot.key === editingImportKey && entry.status === 'pending') ?? null : null
     lineKeySeed.current += 1
+    const key = `line-${lineKeySeed.current}`
+    if (importedLot) markImported(importedLot.lot.key, 'received', key)
+    setEditingImportKey(null)
     setLines((current) => [...current, {
-      key: `line-${lineKeySeed.current}`,
+      key,
+      importKey: importedLot?.lot.key ?? null,
       itemId: editor.itemId!,
       invoiceLineId: invoiceLine?.id ?? null,
-      expectedQty: invoiceLine?.expectedQty ?? null,
+      // With no invoice line, the Bill quantity is the expected quantity for this LOT.
+      expectedQty: invoiceLine?.expectedQty ?? importedLot?.lot.quantity ?? null,
       locationId: editor.locationId,
       lotNumber: selectedItem.trackLot ? editor.lotNumber.trim() : '',
       expiryDate: selectedItem.trackExpiry ? editor.expiryDate : '',
@@ -267,6 +291,106 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
     setEditor(blankEditor(editor.locationId))
     setLineDialogOpen(false)
     setScanResetKey((current) => current + 1)
+  }
+
+  function markImported(lotKey: string, status: ImportedLotState['status'], lineKey: string | null) {
+    setImportedLots((current) => current.map((entry) => entry.lot.key === lotKey ? { ...entry, status, lineKey } : entry))
+  }
+
+  async function importSupplierBill(file: File) {
+    if (!adapter.importSupplierBill) return
+    const bill = await adapter.importSupplierBill(file, vendorId)
+    const billNo = bill.invoiceNumber.trim().toLocaleUpperCase('en-US')
+    if (data.receipts.some((receipt) => receipt.status !== 'cancelled' && receipt.receiptNo?.trim().toLocaleUpperCase('en-US') === billNo)) {
+      throw new Error(`Bill ${bill.invoiceNumber} รับเข้าแล้ว (มีใบรับเข้าเลขนี้อยู่) — ห้าม Import ซ้ำ`)
+    }
+    setImportedBill(bill)
+    setImportedLots(bill.lots.map((lot) => ({ lot, status: 'pending', lineKey: null })))
+    if (!receiptNo.trim()) setReceiptNo(bill.invoiceNumber)
+    if (!importLocationId) setImportLocationId(editor.locationId || defaultLocation)
+  }
+
+  /** Saves the mapping, then re-matches still-unmatched LOTs against the approved codes. */
+  async function rememberImported(lotKey: string, stockItemId: string): Promise<'approved' | 'pending'> {
+    const entry = importedLots.find((candidate) => candidate.lot.key === lotKey)
+    if (!entry || !adapter.rememberSupplierCode || !vendorId) throw new Error('ไม่สามารถบันทึกการจับคู่ได้')
+    const result = await adapter.rememberSupplierCode({ vendorId, stockItemId, rdthCode: entry.lot.rdthCode, materialNo: entry.lot.materialNo, description: entry.lot.description })
+    if (result.status === 'approved') {
+      const aliases = result.receiving.supplierCodes.filter((code) => code.vendorId === vendorId && code.status === 'approved')
+      setImportedLots((current) => current.map((candidate) => candidate.status !== 'pending' || candidate.lot.match.status === 'matched' ? candidate
+        : { ...candidate, lot: { ...candidate.lot, match: matchSupplierBillRow(candidate.lot, result.receiving.items, aliases) } }))
+    }
+    return result.status
+  }
+
+  function resetImport() {
+    setImportedBill(null)
+    setImportedLots([])
+    setEditingImportKey(null)
+  }
+
+  function clearImport() {
+    setLines((current) => current.filter((line) => !line.importKey))
+    resetImport()
+    if (importedBill && receiptNo === importedBill.invoiceNumber) setReceiptNo('')
+  }
+
+  /** One-tap receive of a LOT exactly as the Bill states (matched item, TOR-compliant, no invoice link). */
+  function quickReceiveImported(lotKey: string) {
+    const entry = importedLots.find((candidate) => candidate.lot.key === lotKey && candidate.status === 'pending')
+    if (!entry || entry.lot.match.status !== 'matched' || selectedInvoice || !importLocationId) return
+    const itemId = entry.lot.match.itemId
+    const item = data.items.find((candidate) => candidate.id === itemId)
+    const compliance = torExpiryCompliance(entry.lot.expiry, receivedDate)
+    if (!item || (item.trackExpiry && compliance === 'not_compliant')) return
+    lineKeySeed.current += 1
+    const key = `line-${lineKeySeed.current}`
+    setLines((current) => [...current, {
+      key,
+      importKey: lotKey,
+      itemId,
+      invoiceLineId: null,
+      expectedQty: entry.lot.quantity,
+      locationId: importLocationId,
+      lotNumber: item.trackLot ? entry.lot.lot : '',
+      expiryDate: item.trackExpiry ? entry.lot.expiry : '',
+      receivedQty: entry.lot.quantity,
+      scan: null,
+      compliance: item.trackExpiry ? compliance : 'not_applicable',
+      remainingShelfLifeDays: item.trackExpiry ? remainingShelfLife(entry.lot.expiry, receivedDate) : null,
+      receiptDecision: 'accepted',
+      acceptanceReasonCode: null,
+      acceptanceReasonNote: null,
+    }])
+    markImported(lotKey, 'received', key)
+  }
+
+  /** Opens the normal line dialog prefilled from a Bill LOT; addLine() applies every usual check. */
+  function openImported(lotKey: string) {
+    const entry = importedLots.find((candidate) => candidate.lot.key === lotKey && candidate.status === 'pending')
+    if (!entry) return
+    setEditingImportKey(lotKey)
+    setEditor({
+      ...blankEditor(importLocationId || editor.locationId || defaultLocation),
+      itemId: entry.lot.match.status === 'matched' ? entry.lot.match.itemId : null,
+      lotNumber: entry.lot.lot,
+      expiryDate: entry.lot.expiry,
+      receivedQty: String(entry.lot.quantity),
+    })
+    setLineError(null)
+    setLineDialogOpen(true)
+  }
+
+  function undoImported(lotKey: string) {
+    const entry = importedLots.find((candidate) => candidate.lot.key === lotKey)
+    if (entry?.lineKey) setLines((current) => current.filter((line) => line.key !== entry.lineKey))
+    markImported(lotKey, 'pending', null)
+  }
+
+  function removeLine(lineKey: string) {
+    const line = lines.find((candidate) => candidate.key === lineKey)
+    setLines((current) => current.filter((candidate) => candidate.key !== lineKey))
+    if (line?.importKey) markImported(line.importKey, 'pending', null)
   }
 
   function itemName(itemId: string) {
@@ -335,7 +459,7 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
     setBusy(true)
     setSubmitError(null)
     try {
-      const submission: ReceiveSubmission = { vendorId, invoiceId: invoiceId || null, receiptNo: receiptNo.trim() || null, receivedDate, lines: toSubmissionLines(), evidence }
+      const submission: ReceiveSubmission = { vendorId, invoiceId: invoiceId || null, receiptNo: receiptNo.trim() || null, receivedDate, lines: toSubmissionLines(), evidence, note: importedBill ? supplierBillNote(importedBill) : null, fromImport: Boolean(importedBill) }
       const result = await adapter.submit(submission)
       const context = assessmentContext(result.receiptId, result.receiptLabel ?? (receiptNo.trim() || result.receiptId.slice(0, 8)))
       setLines([])
@@ -346,6 +470,7 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
       setInvoiceId('')
       setStage('edit')
       setEditor(blankEditor(editor.locationId))
+      resetImport()
       onReceived({ receiptId: result.receiptId, assessment: context })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'ยืนยันรับสินค้าไม่สำเร็จ'
@@ -354,6 +479,7 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
         setLines([])
         setEvidence(null)
         setStage('edit')
+        resetImport()
       }
       setSubmitError(message)
       onError?.(message)
@@ -397,18 +523,21 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
           <div className="flex flex-wrap items-center gap-2"><Button type="button" variant="secondary" disabled={!invoiceBarcode.trim()} onClick={() => resolveInvoiceBarcode(invoiceBarcode)}>ค้นหา Invoice</Button>
           {invoiceScanNotice ? <p className="text-xs text-[#315763]" role="status">{invoiceScanNotice}</p> : null}</div>
         </div>
+        {adapter.importSupplierBill ? <div className="sm:col-span-2"><SupplierBillUpload disabled={busy} vendorSelected={Boolean(vendorId)} imported={importedBill} onImport={importSupplierBill} onClear={clearImport} /></div> : null}
         {vendorId && openInvoices.length ? <Field label="ใบส่งของที่รอรับ (Expected receipt)" hint="ไม่บังคับ — ใช้ติดตามรับบางส่วน"><Select value={invoiceId} onChange={(event) => { setInvoiceId(event.target.value); patchEditor({ invoiceLineId: '' }) }}><option value="">ไม่ผูกใบส่งของ</option>{openInvoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.invoiceNo ?? invoice.id.slice(0, 8)} · {invoice.lines.length} รายการ</option>)}</Select></Field> : null}
       </div>
     </Card>
 
     <div>{stepTitle(2, 'รูปใบส่งของ (หลักฐาน)', Boolean(evidence))}<div className="mt-2"><InvoiceImageCrop value={evidence} onChange={setEvidence} disabled={busy} /></div></div>
 
+    {importedLots.length ? <SupplierBillChecklist data={data} lots={importedLots} receivedDate={receivedDate} locationId={importLocationId} onLocationChange={setImportLocationId} quickReceiveBlocked={selectedInvoice ? 'ผูกใบส่งของอยู่ — แต่ละ LOT ต้องเลือกรายการในใบส่งของผ่าน “ตรวจ/แก้ไข”' : null} disabled={busy} onQuickReceive={quickReceiveImported} onOpen={openImported} onNotReceived={(key) => markImported(key, 'not_received', null)} onUndo={undoImported} vendorId={vendorId} onRemember={adapter.rememberSupplierCode ? rememberImported : undefined} /> : null}
+
     <Card className="space-y-4 p-4">
       {stepTitle(3, 'เพิ่มรายการรับ: Scan → Item/Lot/Expiry → จำนวน', lines.length > 0)}
       <PackageScan key={scanResetKey} selectedItemId={editor.itemId} disabled={busy} onUse={applyScan} resolveScan={adapter.resolveScan} onScanDiagnostics={adapter.onScanDiagnostics} />
       <p className="text-xs text-[#58747d]">สแกนเพื่อเติม Item / Lot / Expiry จากนั้นระบุจำนวนที่ได้รับจริงและกดเพิ่มรายการนี้ (สแกนซ้ำไม่เพิ่มจำนวนอัตโนมัติ)</p>
       {editor.scan ? <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#58747d]"><span className="flex items-center gap-1"><ScanLine className="size-4" />ใช้ข้อมูลจาก barcode {editor.scan.standard?.toUpperCase()}{itemAutoSelectedFromScan ? ' · เลือก Item ให้อัตโนมัติจาก GTIN หรือ REF ที่ตรงกับ Item Master — ตรวจสอบก่อนเพิ่มรายการ' : ''}</span><button type="button" className="min-h-11 px-2 font-semibold text-[#0b7f76] underline" onClick={() => patchEditor({ scan: null })}>ล้างข้อมูล barcode</button></div> : null}
-      <Button type="button" variant="secondary" disabled={busy} onClick={() => setLineDialogOpen(true)}><PackagePlus className="size-4" />เพิ่มรายการด้วยตนเอง / กรอกจำนวน</Button>
+      <Button type="button" variant="secondary" disabled={busy} onClick={() => { if (editingImportKey) { setEditingImportKey(null); setEditor(blankEditor(editor.locationId)) } setLineDialogOpen(true) }}><PackagePlus className="size-4" />เพิ่มรายการด้วยตนเอง / กรอกจำนวน</Button>
       {editor.scan ? <p className="text-xs text-[#58747d]">ข้อมูลสแกนถูกเก็บไว้ในแบบร่าง กดกรอกจำนวนเพื่อดำเนินการต่อ</p> : null}
       {lineDialogOpen ? <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#0d2430]/60 sm:items-center sm:p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setLineDialogOpen(false) }}>
         <div ref={lineDialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="เพิ่มรายการรับสินค้า" className="flex max-h-[96dvh] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl outline-none sm:rounded-2xl">
@@ -444,10 +573,11 @@ export function ReceiveWizard({ data, adapter, onReceived, onError }: {
 
     <Card className="space-y-3 p-4">
       {stepTitle(4, `รายการที่จะรับ (${lines.length})`, lines.length > 0)}
-      {lines.length ? <ul className="space-y-2">{lines.map((line, index) => <li key={line.key} className="flex items-start justify-between gap-2 rounded-md border border-[#dce8e9] p-3 text-sm"><div className="min-w-0"><p className="font-semibold text-[#173d50]">#{index + 1} {itemName(line.itemId)}</p><p className="text-xs text-[#58747d]">Lot <span className="mono">{line.lotNumber || '—'}</span> · Exp <span className="mono">{line.expiryDate || '—'}</span> · รับจริง <b>{line.receivedQty}</b>{line.expectedQty != null ? ` / expected ${line.expectedQty}` : ''}</p></div><Button type="button" variant="ghost" aria-label={`ลบรายการ ${index + 1}`} disabled={busy} onClick={() => setLines((current) => current.filter((candidate) => candidate.key !== line.key))}><Trash2 className="size-4" /></Button></li>)}</ul> : <p className="text-sm text-[#81979c]">ยังไม่มีรายการ — เพิ่มจากขั้นตอนที่ 3</p>}
+      {lines.length ? <ul className="space-y-2">{lines.map((line, index) => <li key={line.key} className="flex items-start justify-between gap-2 rounded-md border border-[#dce8e9] p-3 text-sm"><div className="min-w-0"><p className="font-semibold text-[#173d50]">#{index + 1} {itemName(line.itemId)}</p><p className="text-xs text-[#58747d]">Lot <span className="mono">{line.lotNumber || '—'}</span> · Exp <span className="mono">{line.expiryDate || '—'}</span> · รับจริง <b>{line.receivedQty}</b>{line.expectedQty != null ? ` / expected ${line.expectedQty}` : ''}</p></div><Button type="button" variant="ghost" aria-label={`ลบรายการ ${index + 1}`} disabled={busy} onClick={() => removeLine(line.key)}><Trash2 className="size-4" /></Button></li>)}</ul> : <p className="text-sm text-[#81979c]">ยังไม่มีรายการ — เพิ่มจากขั้นตอนที่ 3</p>}
       {submitError ? <Notice tone="danger">{submitError}</Notice> : null}
       {!vendorId && lines.length ? <Notice tone="warning">กรุณาเลือก Vendor ก่อนตรวจสอบ</Notice> : null}
-      <Button type="button" disabled={busy || !vendorId || !lines.length} onClick={() => setStage('review')}><FileText className="size-4" />ตรวจสอบก่อนยืนยัน</Button>
+      {pendingImportCount ? <Notice tone="warning">ยังมี {pendingImportCount} LOT จาก Excel Bill ที่ยังไม่ได้ตรวจรับ — รับ หรือกด “ไม่ได้รับ” ให้ครบก่อน</Notice> : null}
+      <Button type="button" disabled={busy || !vendorId || !lines.length || pendingImportCount > 0} onClick={() => setStage('review')}><FileText className="size-4" />ตรวจสอบก่อนยืนยัน</Button>
     </Card>
   </div>
 }

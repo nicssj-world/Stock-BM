@@ -6,6 +6,7 @@ import { ClipboardCheck, ClipboardList } from 'lucide-react'
 import { remainingShelfLife, torExpiryCompliance } from '@/lib/bm/shelf-life'
 import { receiptQuantitySummary, type ReceiptAssessmentAnswers } from '@/lib/receiving/assessment'
 import { cumulativeReceived, receiptIssues } from '@/lib/receiving/rules'
+import type { SupplierBillImport } from '@/lib/receiving/supplier-bill'
 import type { Receipt, ReceivingWorkspace } from '@/lib/receiving/types'
 import { api, Button, Card, Notice, StatusBadge } from '@/components/ui'
 import { AttachmentList } from '@/components/attachments'
@@ -47,6 +48,17 @@ export function ReceiptDraft({ data, onSaved, onError }: { data: ReceivingWorksp
   const pending = data.assessments.filter((item) => item.status === 'pending')
 
   const adapter: ReceiveAdapter = {
+    async importSupplierBill(file, vendorId) {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('vendorId', vendorId)
+      return api<SupplierBillImport>('/api/receiving/import/supplier-bill', { method: 'POST', body: form })
+    },
+    async rememberSupplierCode(input) {
+      const result = await api<{ status: 'approved' | 'pending'; receiving: ReceivingWorkspace }>('/api/receiving/supplier-codes', { method: 'POST', body: JSON.stringify(input) })
+      onSaved(result.receiving, result.status === 'approved' ? 'จำการจับคู่รหัสผู้ขายแล้ว — ครั้งหน้าระบบจะจับคู่ให้อัตโนมัติ' : 'ส่งการจับคู่รหัสผู้ขายให้ Admin อนุมัติแล้ว (ดูที่แท็บ รหัสผู้ขาย)')
+      return result
+    },
     async submit(submission) {
       const created = await api<{ receiptId: string; receiving: ReceivingWorkspace }>('/api/receiving/receipts', {
         method: 'POST',
@@ -55,7 +67,8 @@ export function ReceiptDraft({ data, onSaved, onError }: { data: ReceivingWorksp
           invoiceId: submission.invoiceId,
           receiptNo: submission.receiptNo,
           receivedDate: submission.receivedDate,
-          source: submission.lines.some((line) => line.barcodeRaw) ? 'scan' : 'manual',
+          source: submission.fromImport ? 'import' : submission.lines.some((line) => line.barcodeRaw) ? 'scan' : 'manual',
+          note: submission.note,
           lines: submission.lines,
         }),
       })

@@ -31,7 +31,7 @@ export type InvoiceStatus = 'draft' | 'open' | 'closed' | 'cancelled'
 // 'ocr' remains allowed by the historical column check but is no longer written.
 export type InvoiceSource = 'manual' | 'ocr'
 export type ReceiptStatus = 'draft' | 'confirmed' | 'cancelled'
-export type ReceiptSource = 'manual' | 'ocr' | 'scan'
+export type ReceiptSource = 'manual' | 'ocr' | 'scan' | 'import'
 export type MatchMethod = 'exact_unique' | 'exact_ambiguous' | 'similar' | 'manual' | 'unmatched'
 export type ClosureState = 'open' | 'complete' | 'short_closed' | 'cancelled'
 export type LotMode = 'existing' | 'new' | 'not_tracked'
@@ -156,6 +156,27 @@ export interface ReceivingPolicy {
   isApproved: boolean
 }
 
+export type SupplierCodeStatus = 'pending' | 'approved' | 'rejected' | 'revoked'
+
+/** Remembered supplier Bill code → Item Master mapping, scoped to one Vendor. */
+export interface SupplierItemCode {
+  id: string
+  vendorId: string
+  codeKind: 'rdth' | 'material'
+  codeRaw: string
+  codeNormalized: string
+  stockItemId: string
+  descriptionText: string | null
+  status: SupplierCodeStatus
+  requestedBy: string
+  requestedByName: string | null
+  requestedAt: string
+  reviewedBy: string | null
+  reviewedByName: string | null
+  reviewedAt: string | null
+  reviewNote: string | null
+}
+
 export interface ReceivingWorkspace {
   vendors: Vendor[]
   invoices: Invoice[]
@@ -163,6 +184,8 @@ export interface ReceivingWorkspace {
   items: { id: string; itemCode: string; name: string; unit: string; trackLot: boolean; trackExpiry: boolean; catalogNo?: string | null; manufacturer?: string | null; supplier?: string | null }[]
   locations: { id: string; code: string; name: string; isActive: boolean }[]
   assessments: ReceiptAssessment[]
+  /** Pending and approved remembered supplier codes (rejected/revoked are history only). */
+  supplierCodes: SupplierItemCode[]
   policy: ReceivingPolicy
 }
 

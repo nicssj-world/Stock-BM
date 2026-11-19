@@ -95,6 +95,7 @@ export function Stock1PreviewAcceptance() {
     items: PREVIEW_ITEMS,
     locations: PREVIEW_LOCATIONS,
     assessments,
+    supplierCodes: [],
     policy: { id: 'preview-policy', version: 1, isEnabled: true, expiryExceptionEnabled: false, expiryExceptionMinRole: null, expiryExceptionRequiresSecondApproval: null, isApproved: false },
   }), [receipts, assessments])
 

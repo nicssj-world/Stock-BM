@@ -2,13 +2,14 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { FileText, History, PackageCheck } from 'lucide-react'
+import { FileText, History, PackageCheck, Tags } from 'lucide-react'
 import type { ReceivingWorkspace } from '@/lib/receiving/types'
 import { Card, Notice, PageHeader, StatCard, StatusBadge, Tabs } from '@/components/ui'
 import { InvoiceEditor } from '@/components/receiving/invoice-editor'
 import { ReceiptDraft } from '@/components/receiving/receipt-draft'
+import { SupplierCodesPanel } from '@/components/receiving/supplier-codes-panel'
 
-type ReceivingTab = 'receive' | 'invoices' | 'history'
+type ReceivingTab = 'receive' | 'invoices' | 'history' | 'codes'
 
 export function ReceivingView({ initialData, isAdmin = false }: { initialData: ReceivingWorkspace; isAdmin?: boolean }) {
   const [data, setData] = useState(initialData)
@@ -24,10 +25,12 @@ export function ReceivingView({ initialData, isAdmin = false }: { initialData: R
     setNotice({ tone: 'danger', text })
   }
 
+  const pendingCodes = data.supplierCodes.filter((code) => code.status === 'pending').length
   const tabs = [
     { key: 'receive' as const, label: 'รับเข้า / Receive', icon: PackageCheck },
     { key: 'invoices' as const, label: 'ใบส่งของ / Invoices', icon: FileText },
     { key: 'history' as const, label: 'ประวัติ / History', icon: History },
+    { key: 'codes' as const, label: `รหัสผู้ขาย${pendingCodes ? ` (${pendingCodes})` : ''}`, icon: Tags },
   ]
 
   return (
@@ -43,6 +46,7 @@ export function ReceivingView({ initialData, isAdmin = false }: { initialData: R
       {tab === 'receive' ? <ReceiptDraft data={data} onSaved={onSaved} onError={onError} /> : null}
       {tab === 'invoices' ? <InvoiceEditor data={data} onSaved={onSaved} onError={onError} canCloseShort={isAdmin} /> : null}
       {tab === 'history' ? <HistoryList data={data} /> : null}
+      {tab === 'codes' ? <SupplierCodesPanel data={data} isAdmin={isAdmin} onSaved={onSaved} onError={onError} /> : null}
     </div>
   )
 }

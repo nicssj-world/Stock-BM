@@ -25,6 +25,7 @@ import type {
 } from '@/lib/receiving/api-schemas'
 import { writeAudit } from '@/lib/server/audit'
 import { HttpError } from '@/lib/server/errors'
+import { listSupplierCodes } from '@/lib/server/supplier-codes'
 import { listVendors } from '@/lib/server/vendors'
 import { getAdminClient } from '@/lib/supabase/admin'
 
@@ -200,7 +201,7 @@ function toReceipt(row: RecordRow, lines: ReceiptLine[]): Receipt {
 export async function getReceivingWorkspace(_actor: BmActor): Promise<ReceivingWorkspace> {
   const policy = await assertReceivingEnabled()
   const admin = getAdminClient()
-  const [vendors, { data: invoiceData, error: invoiceError }, { data: invoiceLineData, error: invoiceLineError }, { data: receiptData, error: receiptError }, { data: receiptLineData, error: receiptLineError }, { data: itemData, error: itemError }, { data: locationData, error: locationError }, { data: assessmentData, error: assessmentError }] = await Promise.all([
+  const [vendors, { data: invoiceData, error: invoiceError }, { data: invoiceLineData, error: invoiceLineError }, { data: receiptData, error: receiptError }, { data: receiptLineData, error: receiptLineError }, { data: itemData, error: itemError }, { data: locationData, error: locationError }, { data: assessmentData, error: assessmentError }, supplierCodes] = await Promise.all([
     listVendors(),
     admin.from('bm_invoices').select('*').order('created_at', { ascending: false }),
     admin.from('bm_invoice_lines').select('*').order('sort_order').order('line_no'),
@@ -209,6 +210,7 @@ export async function getReceivingWorkspace(_actor: BmActor): Promise<ReceivingW
     admin.from('bm_stock_items').select('id,item_code,name,unit,track_lot,track_expiry,catalog_no,manufacturer,supplier').eq('is_active', true).order('item_code'),
     admin.from('bm_stock_locations').select('id,code,name,is_active').eq('is_active', true).order('code'),
     admin.from('bm_receipt_assessments').select('*').order('created_at', { ascending: false }),
+    listSupplierCodes(),
   ])
   fail(invoiceError)
   fail(invoiceLineError)
@@ -235,6 +237,7 @@ export async function getReceivingWorkspace(_actor: BmActor): Promise<ReceivingW
     items: ((itemData ?? []) as RecordRow[]).map((row) => ({ id: asString(row.id), itemCode: asString(row.item_code), name: asString(row.name), unit: asString(row.unit), trackLot: Boolean(row.track_lot), trackExpiry: Boolean(row.track_expiry), catalogNo: nullableString(row.catalog_no), manufacturer: nullableString(row.manufacturer), supplier: nullableString(row.supplier) })),
     locations: ((locationData ?? []) as RecordRow[]).map((row) => ({ id: asString(row.id), code: asString(row.code), name: asString(row.name), isActive: Boolean(row.is_active) })),
     assessments: ((assessmentData ?? []) as RecordRow[]).map(toAssessment),
+    supplierCodes,
     policy,
   }
 }
