@@ -307,7 +307,7 @@ export function buildDigestFlex(today: string, days: DigestDay[], calendarUrl?: 
       paddingAll: '16px',
       contents: [
         { type: 'text', text: '📅 แจ้งล่วงหน้า', weight: 'bold', size: 'lg', color: '#ffffff' },
-        { type: 'text', text: 'ปฏิทินทีม · Molecular-CBH', size: 'xs', color: '#cce7eb', margin: 'xs' },
+        { type: 'text', text: 'ปฏิทินทีม · Genomics-CBH', size: 'xs', color: '#cce7eb', margin: 'xs' },
       ],
     },
     body: { type: 'box', layout: 'vertical', paddingAll: '16px', contents: body.length ? body : [{ type: 'text', text: 'ไม่มีรายการ', color: MUTED, size: 'sm' }] },
