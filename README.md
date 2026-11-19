@@ -72,7 +72,8 @@ migration หลักตามลำดับนี้: `20260901150000_portal_
 สำหรับปฏิทินทีม (`/calendar`) ให้ apply `20261119000100_bm_team_calendar.sql` แล้วตั้ง env
 `CRON_SECRET` (สตริงสุ่มยาว ≥ 16 ตัว) ใน Vercel ระบบมี cron 2 ตัวใน `vercel.json`:
 ซิงค์วันหยุดจาก Google ตี 3 และส่งสรุปเช้าเข้ากลุ่ม LINE 07:30 (ใช้ `LINE_CHANNEL_ACCESS_TOKEN`
-และ `LINE_GROUP_ID` ชุดเดียวกับ HIV LAB Alert) หลัง apply ให้ Admin กด "วันหยุด → ซิงค์ตอนนี้" หนึ่งครั้ง
+และ `LINE_GROUP_ID` ชุดเดียวกับ HIV LAB Alert; ถ้าต้องการส่งเข้ากลุ่มอื่นให้ตั้ง `CALENDAR_LINE_GROUP_ID`
+ข้อความแสดงชื่อผู้ส่งเป็น "น้องเบคล่อน") หลัง apply ให้ Admin กด "วันหยุด → ซิงค์ตอนนี้" หนึ่งครั้ง
 ลิงก์ปฏิทินมือถือ `/api/calendar/feed/<token>.ics` เปิดได้โดยไม่ต้อง login เพราะ token ในลิงก์คือรหัสผ่าน
 
 ## Bootstrap Admin

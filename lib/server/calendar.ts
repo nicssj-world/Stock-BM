@@ -639,14 +639,18 @@ export async function buildFeedForToken(token: string, scope: 'mine' | 'team') {
 
 /* ---------- LINE morning digest ---------- */
 
+/** Shown as the message's sender instead of the OA name, so the digest is distinguishable from HIV LAB Alert. Max 20 chars, must not contain "LINE". */
+export const DIGEST_SENDER_NAME = 'น้องเบคล่อน'
+
 async function pushLineText(text: string, retryKey: string) {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN?.trim()
-  const groupId = process.env.LINE_GROUP_ID?.trim()
+  // Optional separate group for the calendar; falls back to the HIV LAB Alert group.
+  const groupId = process.env.CALENDAR_LINE_GROUP_ID?.trim() || process.env.LINE_GROUP_ID?.trim()
   if (!token || !groupId) throw new Error('ยังไม่ได้ตั้งค่า LINE_CHANNEL_ACCESS_TOKEN หรือ LINE_GROUP_ID')
   const response = await fetch('https://api.line.me/v2/bot/message/push', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Line-Retry-Key': retryKey },
-    body: JSON.stringify({ to: groupId, messages: [{ type: 'text', text }] }),
+    body: JSON.stringify({ to: groupId, messages: [{ type: 'text', text, sender: { name: DIGEST_SENDER_NAME } }] }),
     cache: 'no-store',
   })
   // 409 = LINE already accepted this retry key, i.e. the earlier attempt went through.
