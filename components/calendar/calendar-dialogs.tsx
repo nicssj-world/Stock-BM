@@ -1,10 +1,10 @@
 'use client'
 
 import { useEffect, useId, useMemo, useState, type FormEvent } from 'react'
-import { Copy, LoaderCircle, RefreshCw, Trash2 } from 'lucide-react'
+import { CalendarRange, Clock3, Copy, LoaderCircle, Pencil, RefreshCw, StickyNote, Trash2, UserRound } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import { formatThaiDateTime } from '@/lib/bm/thai-date'
-import { DAY_PART_LABEL, entryPermissionError, isLockedForStaff, KIND_LABEL, STAFF_EDIT_WINDOW_DAYS, THAI_DAYS_SHORT, THAI_MONTHS_SHORT, dayOfWeek } from '@/lib/calendar/rules'
+import { DAY_PART_LABEL, entryPermissionError, isLockedForStaff, KIND_LABEL, STAFF_EDIT_WINDOW_DAYS, THAI_DAYS_SHORT, THAI_MONTHS_SHORT, dayOfWeek, daysBetween, thaiRange } from '@/lib/calendar/rules'
 import {
   CALENDAR_COLORS,
   CALENDAR_KINDS,
@@ -66,10 +66,152 @@ export function EntryDialog({
   onDeleted: (id: string) => Promise<void>
 }) {
   const labelId = useId()
+  const [editing, setEditing] = useState(false)
+  const [seenDraft, setSeenDraft] = useState(draft)
+  // Each newly opened entry starts on the read-only details view.
+  if (draft !== seenDraft) {
+    setSeenDraft(draft)
+    setEditing(false)
+  }
+  const showForm = Boolean(draft && (!draft.id || editing))
+  const title = !draft?.id ? 'ลงรายการ' : editing ? 'แก้ไขรายการ' : 'รายละเอียด'
   return (
-    <Modal open={Boolean(draft)} onClose={onClose} title={draft?.id ? 'แก้ไขรายการ' : 'ลงรายการ'} labelId={labelId}>
-      {draft ? <EntryForm key={draft.id ?? `new-${draft.startDate}`} draft={draft} onClose={onClose} actor={actor} today={today} types={types} users={users} onSaved={onSaved} onDeleted={onDeleted} /> : null}
+    <Modal open={Boolean(draft)} onClose={onClose} title={title} labelId={labelId}>
+      {draft && showForm ? (
+        <EntryForm key={draft.id ?? `new-${draft.startDate}`} draft={draft} onClose={draft.id ? () => setEditing(false) : onClose} actor={actor} today={today} types={types} users={users} onSaved={onSaved} onDeleted={onDeleted} />
+      ) : null}
+      {draft && !showForm ? <EntryDetails key={draft.id} draft={draft} onClose={onClose} onEdit={() => setEditing(true)} actor={actor} today={today} types={types} users={users} /> : null}
     </Modal>
+  )
+}
+
+function useEntryHistory(id: string | null) {
+  const [history, setHistory] = useState<CalendarHistoryEntry[] | null>(null)
+  useEffect(() => {
+    if (!id) return
+    let alive = true
+    api<{ history: CalendarHistoryEntry[] }>(`/api/calendar/entries/${id}/history`)
+      .then((result) => alive && setHistory(result.history))
+      .catch(() => alive && setHistory([]))
+    return () => {
+      alive = false
+    }
+  }, [id])
+  return history
+}
+
+function EntryHistory({ history }: { history: CalendarHistoryEntry[] | null }) {
+  return (
+    <details className="border-t border-[#edf2f2] pt-2.5 text-xs text-[#6a838c]">
+      <summary className="flex min-h-8 cursor-pointer items-center font-semibold">
+        {history === null ? 'กำลังโหลดประวัติ…' : history.length ? `ประวัติ · ${history.length} ครั้ง · ล่าสุด ${history[history.length - 1].actorName} ${formatThaiDateTime(history[history.length - 1].at)}` : 'ไม่มีประวัติ'}
+      </summary>
+      {history?.length ? (
+        <ol className="mt-1.5 grid list-decimal gap-1 pl-5">
+          {history.map((item, index) => (
+            <li key={`${item.at}-${index}`}>
+              <span className="mono text-[11px]">{formatThaiDateTime(item.at)}</span> · {item.actorName}{' '}
+              {item.action === 'create' ? 'ลงรายการ' : item.action === 'delete' ? 'ลบ' : item.changes.length ? `แก้ ${item.changes.join(', ')}` : 'บันทึก (ไม่มีการเปลี่ยน)'}
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </details>
+  )
+}
+
+function lineDigestText(type: CalendarType | undefined) {
+  if (!type) return ''
+  return type.inLineDigest ? 'แจ้งในกลุ่ม LINE ล่วงหน้า 1 วัน ช่วงบ่าย (ไม่แสดงหมายเหตุ)' : `${type.name} ไม่ได้แจ้งในกลุ่ม LINE`
+}
+
+function LineDigestNote({ text }: { text: string }) {
+  if (!text) return null
+  return (
+    <p className="flex items-center gap-2.5 rounded-[10px] border border-[#d6e2e3] px-3 py-2.5 text-[13px] text-[#173d50]">
+      <span aria-hidden="true" className="grid size-7 flex-none place-items-center rounded-[7px] bg-[#06c755] text-[9.5px] font-bold text-white">LINE</span>
+      {text}
+    </p>
+  )
+}
+
+function DetailRow({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-[104px_minmax(0,1fr)] items-start gap-3 border-b border-[#edf2f2] py-2.5 last:border-b-0">
+      <dt className="flex items-center gap-2 text-[13px] text-[#55727c]"><span aria-hidden="true" className="text-[#8ba0a5]">{icon}</span>{label}</dt>
+      <dd className="min-w-0 text-sm text-[#173d50]">{children}</dd>
+    </div>
+  )
+}
+
+function EntryDetails({
+  draft,
+  onClose,
+  onEdit,
+  actor,
+  today,
+  types,
+  users,
+}: {
+  draft: EntryDraft
+  onClose: () => void
+  onEdit: () => void
+  actor: BmActor
+  today: string
+  types: CalendarType[]
+  users: CalendarUser[]
+}) {
+  const history = useEntryHistory(draft.id)
+  const type = types.find((item) => item.id === draft.typeId)
+  const ownerName = users.find((user) => user.id === draft.userId)?.displayName ?? 'ผู้ใช้ที่ไม่อยู่ในทีมแล้ว'
+  const canEdit = entryPermissionError(actor, { userId: draft.userId, endDate: draft.endDate }, today) === null
+  const days = daysBetween(draft.startDate, draft.endDate) + 1
+  const buddhistYear = Number(draft.endDate.slice(0, 4)) + 543
+  const note = draft.note.trim()
+
+  return (
+    <div className="grid gap-4">
+      <div className="cal-detail-head" style={type ? colorVar(type.colorKey) : undefined}>
+        <span className="cal-badge !size-11">{type ? <CalendarIcon iconKey={type.iconKey} size={24} /> : null}</span>
+        <span className="grid min-w-0 flex-1">
+          <span className="truncate text-base font-bold text-[#173d50]">{type?.name ?? 'ประเภทที่ถูกลบ'}</span>
+          <span className="text-xs text-[#55727c]">{type ? KIND_LABEL[type.kind] : ''}</span>
+        </span>
+        {canEdit ? (
+          <button type="button" onClick={onEdit} aria-label="แก้ไขรายการ" title="แก้ไขรายการ" className="cal-detail-edit">
+            <Pencil className="size-[18px]" />
+          </button>
+        ) : null}
+      </div>
+
+      <dl className="grid">
+        <DetailRow icon={<UserRound className="size-4" />} label="ของ">
+          <span className="font-semibold">{ownerName}</span>{draft.userId === actor.id ? <span className="ml-1 text-[#55727c]">(ฉัน)</span> : null}
+        </DetailRow>
+        <DetailRow icon={<CalendarRange className="size-4" />} label="วันที่">
+          <span className="font-semibold">{thaiRange(draft.startDate, draft.endDate)} {buddhistYear}</span>
+          {days > 1 ? <span className="ml-1.5 text-[#55727c]">· {days} วัน</span> : null}
+        </DetailRow>
+        <DetailRow icon={<Clock3 className="size-4" />} label="ช่วงเวลา">
+          <span className="font-semibold">{DAY_PART_LABEL[draft.dayPart]}</span>
+        </DetailRow>
+        <DetailRow icon={<StickyNote className="size-4" />} label="หมายเหตุ">
+          {note ? <span className="whitespace-pre-wrap break-words">{note}</span> : <span className="text-[#6a838c]">ไม่มี</span>}
+        </DetailRow>
+      </dl>
+
+      <LineDigestNote text={lineDigestText(type)} />
+
+      {!canEdit ? (
+        <p className="text-xs text-[#55727c]">{draft.userId !== actor.id ? 'ดูได้อย่างเดียว แก้ได้เฉพาะเจ้าของรายการหรือ Admin' : `รายการนี้ผ่านมาเกิน ${STAFF_EDIT_WINDOW_DAYS} วันแล้ว แก้ไม่ได้ ติดต่อ Admin`}</p>
+      ) : null}
+
+      <EntryHistory history={history} />
+
+      <div className="flex justify-end">
+        <Button type="button" variant="secondary" onClick={onClose}>ปิด</Button>
+      </div>
+    </div>
   )
 }
 
@@ -96,24 +238,13 @@ function EntryForm({
   const [busy, setBusy] = useState<'' | 'save' | 'delete'>('')
   const [error, setError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [history, setHistory] = useState<CalendarHistoryEntry[] | null>(null)
+  const history = useEntryHistory(draft.id)
   const isNew = !draft.id
   const isAdmin = actor.role === 'Admin'
   const choosable = types.filter((type) => type.isActive || type.id === draft.typeId)
   const selectedType = types.find((type) => type.id === form.typeId)
   const readOnly = !isNew && entryPermissionError(actor, { userId: draft.userId, endDate: draft.endDate }, today) !== null
   const lockedForStaff = !isNew && isLockedForStaff(draft.endDate, today)
-
-  useEffect(() => {
-    if (!draft.id) return
-    let alive = true
-    api<{ history: CalendarHistoryEntry[] }>(`/api/calendar/entries/${draft.id}/history`)
-      .then((result) => alive && setHistory(result.history))
-      .catch(() => alive && setHistory([]))
-    return () => {
-      alive = false
-    }
-  }, [draft.id])
 
   const peopleOptions = isAdmin ? users : users.filter((user) => user.id === actor.id)
   const ownerMissing = !peopleOptions.some((user) => user.id === form.userId)
@@ -160,11 +291,7 @@ function EntryForm({
     }
   }
 
-  const lineLine = selectedType
-    ? selectedType.inLineDigest
-      ? 'แจ้งในกลุ่ม LINE ล่วงหน้า 1 วัน ช่วงบ่าย (ไม่แสดงหมายเหตุ)'
-      : `${selectedType.name} ไม่ได้แจ้งในกลุ่ม LINE`
-    : ''
+  const lineLine = lineDigestText(selectedType)
 
   return (
     <form onSubmit={submit} className="grid gap-4" noValidate>
@@ -231,30 +358,9 @@ function EntryForm({
         </label>
       </fieldset>
 
-      {lineLine ? (
-        <p className="flex items-center gap-2.5 rounded-[10px] border border-[#d6e2e3] px-3 py-2.5 text-[13px] text-[#173d50]">
-          <span aria-hidden="true" className="grid size-7 flex-none place-items-center rounded-[7px] bg-[#06c755] text-[9.5px] font-bold text-white">LINE</span>
-          {lineLine}
-        </p>
-      ) : null}
+      <LineDigestNote text={lineLine} />
 
-      {!isNew ? (
-        <details className="border-t border-[#edf2f2] pt-2.5 text-xs text-[#6a838c]">
-          <summary className="flex min-h-8 cursor-pointer items-center font-semibold">
-            {history === null ? 'กำลังโหลดประวัติ…' : history.length ? `ประวัติ · ${history.length} ครั้ง · ล่าสุด ${history[history.length - 1].actorName} ${formatThaiDateTime(history[history.length - 1].at)}` : 'ไม่มีประวัติ'}
-          </summary>
-          {history?.length ? (
-            <ol className="mt-1.5 grid list-decimal gap-1 pl-5">
-              {history.map((item, index) => (
-                <li key={`${item.at}-${index}`}>
-                  <span className="mono text-[11px]">{formatThaiDateTime(item.at)}</span> · {item.actorName}{' '}
-                  {item.action === 'create' ? 'ลงรายการ' : item.action === 'delete' ? 'ลบ' : item.changes.length ? `แก้ ${item.changes.join(', ')}` : 'บันทึก (ไม่มีการเปลี่ยน)'}
-                </li>
-              ))}
-            </ol>
-          ) : null}
-        </details>
-      ) : null}
+      {!isNew ? <EntryHistory history={history} /> : null}
 
       {error ? <p role="alert" className="text-[13px] font-semibold text-[#af3541]">{error}</p> : null}
 
