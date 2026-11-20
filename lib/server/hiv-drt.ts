@@ -53,6 +53,7 @@ function sampleFromRow(row: RecordRow, names: Map<string, string>, alertIds: Map
     id: asString(row.id),
     barcode: asString(row.barcode),
     outlabLn: nullableString(row.outlab_ln),
+    ward: nullableString(row.ward),
     hivLabAlertId: alertIds.get(asString(row.id)) ?? null,
     status: asString(row.status) as HivDrtSample['status'],
     fromStorage: Boolean(row.from_storage),
@@ -248,6 +249,29 @@ export async function updateHivDrtOutlabLn(id: string, outlabLn: string | null, 
   return getHivDrtWorkspace(actor)
 }
 
+export async function updateHivDrtWard(id: string, ward: string | null, actor: BmActor) {
+  assertHivDrtAccess(actor)
+  const admin = getAdminClient()
+  const { data: sample, error: sampleError } = await admin
+    .from('bm_hiv_drt_samples')
+    .select('id,barcode,status')
+    .eq('id', id)
+    .maybeSingle()
+  fail(sampleError)
+  const row = sample as RecordRow | null
+  if (!row) throw new HttpError(404, 'ไม่พบ tube')
+  if (asString(row.status) !== 'checked_out') throw new HttpError(409, 'แก้ไข Ward ได้เฉพาะรายการที่กำลังรอผล')
+  const normalizedWard = ward?.trim() || null
+  const updatedAt = new Date().toISOString()
+  const { error } = await admin
+    .from('bm_hiv_drt_samples')
+    .update({ ward: normalizedWard, updated_at: updatedAt })
+    .eq('id', id)
+  fail(error)
+  await writeAudit(actor, 'hiv_drt.sample.ward.update', 'hiv-drt-sample', id, { barcode: asString(row.barcode), ward: normalizedWard })
+  return getHivDrtWorkspace(actor)
+}
+
 export async function deleteHivDrtSample(id: string, actor: BmActor) {
   assertHivDrtAccess(actor)
   const admin = getAdminClient()
@@ -261,11 +285,12 @@ export async function deleteHivDrtSample(id: string, actor: BmActor) {
   return getHivDrtWorkspace(actor)
 }
 
-export async function checkoutHivDrtSample(input: { barcode: string; destination?: string | null }, actor: BmActor) {
+export async function checkoutHivDrtSample(input: { barcode: string; destination?: string | null; ward?: string | null }, actor: BmActor) {
   assertHivDrtAccess(actor)
   const admin = getAdminClient()
   const barcode = input.barcode.trim()
   const destination = input.destination?.trim() || 'LAB Rama'
+  const ward = input.ward?.trim() || null
   const checkedOutAt = new Date().toISOString()
   const tatDueOn = addBusinessDays(bangkokDateKey(checkedOutAt), HIV_DRT_TAT_BUSINESS_DAYS)
   const { data: sample, error: sampleError } = await admin.from('bm_hiv_drt_samples').select('id,status').eq('barcode', barcode).maybeSingle()
@@ -283,6 +308,7 @@ export async function checkoutHivDrtSample(input: { barcode: string; destination
         checked_out_at: checkedOutAt,
         checked_out_by: actor.id,
         checkout_destination: destination,
+        ward,
         tat_due_on: tatDueOn,
         created_by: actor.id,
       })
@@ -303,13 +329,14 @@ export async function checkoutHivDrtSample(input: { barcode: string; destination
         checked_out_at: checkedOutAt,
         checked_out_by: actor.id,
         checkout_destination: destination,
+        ward,
         tat_due_on: tatDueOn,
         updated_at: checkedOutAt,
       })
       .eq('id', id)
     fail(error)
   }
-  await writeAudit(actor, 'hiv_drt.sample.checkout', 'hiv-drt-sample', id, { barcode, destination, fromStorage, tatDueOn })
+  await writeAudit(actor, 'hiv_drt.sample.checkout', 'hiv-drt-sample', id, { barcode, destination, ward, fromStorage, tatDueOn })
   return getHivDrtWorkspace(actor)
 }
 

@@ -73,6 +73,13 @@ describe('HIV DRT interface', () => {
     expect(source).toContain("method: 'PATCH'")
   })
 
+  it('shows an editable Ward column in place of the destination lab on the tracking list', () => {
+    expect(source).toContain('<th className="px-4 py-3">Ward</th><th className="px-4 py-3">Checkout</th>')
+    expect(source).not.toContain('<th className="px-4 py-3">Lab ปลายทาง</th>')
+    expect(source).toContain('JSON.stringify({ barcode, destination, ward })')
+    expect(source).toContain('wardDraft.trim() || null')
+  })
+
   it('adds staff navigation and actionable dashboard links', () => {
     expect(shell).toContain("href: '/hiv-drt'")
     expect(shell).toContain("title: 'Management'")

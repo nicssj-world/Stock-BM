@@ -6,6 +6,7 @@ export interface HivDrtSample {
   id: string
   barcode: string
   outlabLn: string | null
+  ward: string | null
   hivLabAlertId: string | null
   status: HivDrtSampleStatus
   fromStorage: boolean

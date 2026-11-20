@@ -567,17 +567,20 @@ function RackRow({ row, byPosition, selectedSampleId, highlightSampleId, onSelec
 function TrackingPanel({ workspace, busy, mutate, initialFilter, setNotice }: { workspace: HivDrtWorkspace; busy: boolean; mutate: (url: string, options: RequestInit, success: string) => Promise<boolean>; initialFilter: string | null; setNotice: (notice: NoticeState) => void }) {
   const [barcode, setBarcode] = useState('')
   const [destination, setDestination] = useState('LAB Rama')
+  const [ward, setWard] = useState('')
   const [search, setSearch] = useState('')
   const [onlyOverdue, setOnlyOverdue] = useState(initialFilter === 'overdue')
   const [editingOutlabLnId, setEditingOutlabLnId] = useState<string | null>(null)
   const [outlabLnDraft, setOutlabLnDraft] = useState('')
+  const [editingWardId, setEditingWardId] = useState<string | null>(null)
+  const [wardDraft, setWardDraft] = useState('')
   const today = todayBangkok()
   const waiting = useMemo(() => workspace.samples.filter((sample) => sample.status === 'checked_out')
     .filter((sample) => !onlyOverdue || getHivDrtTatState(sample.checkedOutAt, sample.status, today) === 'overdue')
     .filter((sample) => {
       const query = search.trim().toLowerCase()
       const outlabLn = normalizeHivDrtOutlabLn(sample.outlabLn)
-      return !query || sample.barcode.toLowerCase().includes(query) || outlabLn?.toLowerCase().includes(query) || sample.checkoutDestination?.toLowerCase().includes(query)
+      return !query || sample.barcode.toLowerCase().includes(query) || outlabLn?.toLowerCase().includes(query) || sample.ward?.toLowerCase().includes(query) || sample.checkoutDestination?.toLowerCase().includes(query)
     }), [onlyOverdue, search, today, workspace.samples])
 
   const camera = useCameraScanner({ onScan: setBarcode, onError: (text) => setNotice({ tone: 'danger', text }), stopOnScan: true })
@@ -585,8 +588,8 @@ function TrackingPanel({ workspace, busy, mutate, initialFilter, setNotice }: { 
   async function checkout(event: React.FormEvent) {
     event.preventDefault()
     if (!barcode.trim()) return
-    const ok = await mutate('/api/hiv-drt/checkout', { method: 'POST', body: JSON.stringify({ barcode, destination }) }, `Checkout ${barcode.trim()} เพื่อส่งตรวจแล้ว`)
-    if (ok) setBarcode('')
+    const ok = await mutate('/api/hiv-drt/checkout', { method: 'POST', body: JSON.stringify({ barcode, destination, ward }) }, `Checkout ${barcode.trim()} เพื่อส่งตรวจแล้ว`)
+    if (ok) { setBarcode(''); setWard('') }
   }
 
   async function receive(sample: HivDrtSample) {
@@ -609,12 +612,28 @@ function TrackingPanel({ workspace, busy, mutate, initialFilter, setNotice }: { 
     if (ok) cancelOutlabLnEdit()
   }
 
+  function startWardEdit(sample: HivDrtSample) {
+    setEditingWardId(sample.id)
+    setWardDraft(sample.ward ?? '')
+  }
+
+  function cancelWardEdit() {
+    setEditingWardId(null)
+    setWardDraft('')
+  }
+
+  async function saveWard(sample: HivDrtSample) {
+    const ok = await mutate(`/api/hiv-drt/samples/${sample.id}`, { method: 'PATCH', body: JSON.stringify({ ward: wardDraft.trim() || null }) }, `บันทึก Ward ของ ${sample.barcode} แล้ว`)
+    if (ok) cancelWardEdit()
+  }
+
   return (
     <div className="grid gap-4 xl:grid-cols-[380px_minmax(0,1fr)]">
       <Card className="h-fit overflow-hidden">
         <div className="border-b border-[#dce8e9] bg-[#123944] p-4 text-white"><div className="flex items-center gap-3"><div className="grid size-9 place-items-center rounded-lg bg-[#0b7f76]"><ArrowRightFromLine className="size-5" /></div><div><p className="text-[10px] font-bold tracking-[.16em] text-[#7ee3d8] uppercase">Checkout</p><h2 className="font-bold">ส่ง HIV Genotyping Test</h2></div></div></div>
         <form onSubmit={checkout} className="space-y-4 p-4">
           <Field label="Barcode / Sample ID" hint="รองรับทั้ง tube จาก Storage และ Direct Checkout"><Input autoFocus value={barcode} onChange={(event) => setBarcode(event.target.value)} className="mono" placeholder="Scan or type barcode" /></Field>
+          <Field label="Ward" hint="หอผู้ป่วย / หน่วยงานที่ส่งตรวจ (ไม่บังคับ)"><Input value={ward} onChange={(event) => setWard(event.target.value)} placeholder="ระบุ Ward" /></Field>
           <Field label="Lab ปลายทาง" hint="หากเว้นว่าง ระบบจะใช้ LAB Rama"><Input value={destination} onChange={(event) => setDestination(event.target.value)} placeholder="LAB Rama" /></Field>
           <div className="rounded-lg border border-[#c9dedf] bg-[#f3f9f9] p-3 text-xs leading-5 text-[#58747d]"><Clock3 className="mr-1 inline size-4 text-[#0b7f76]" /> ระบบกำหนด TAT 18 วันทำการอัตโนมัติ ไม่นับวัน Checkout เสาร์ และอาทิตย์</div>
           <div className="flex gap-2"><Button disabled={busy || !barcode.trim()} className="flex-1"><Send className="size-4" /> ยืนยัน Checkout</Button><Button type="button" variant="secondary" onClick={camera.toggle}>{camera.cameraOn ? <X className="size-4" /> : <Camera className="size-4" />}</Button></div>
@@ -622,8 +641,8 @@ function TrackingPanel({ workspace, busy, mutate, initialFilter, setNotice }: { 
         </form>
       </Card>
       <Card className="overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-[#dce8e9] bg-[#fbfdfd] p-4 lg:flex-row lg:items-center lg:justify-between"><div><h2 className="font-bold text-[#173d50]">รายการรอผล</h2><p className="mt-1 text-xs text-[#789097]">เรียงรายการเกิน TAT ขึ้นก่อน</p></div><div className="flex flex-col gap-2 sm:flex-row"><div className="relative"><Search className="absolute top-2.5 left-3 size-4 text-[#8ba0a5]" /><Input value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" placeholder="ค้นหา Barcode หรือ Lab" /></div><label className="flex items-center gap-2 rounded-md border border-[#cfdee0] bg-white px-3 py-2 text-xs font-semibold text-[#58747d]"><input type="checkbox" checked={onlyOverdue} onChange={(event) => setOnlyOverdue(event.target.checked)} className="accent-[#b33b46]" /> เฉพาะเกิน TAT</label></div></div>
-         <div className="overflow-x-auto"><table className="w-full min-w-[1040px] text-left text-sm"><thead className="bg-[#f4f8f8] text-[10px] font-bold tracking-[.08em] text-[#718a91] uppercase"><tr><th className="px-4 py-3">Tube</th><th className="px-4 py-3">LN Outlab</th><th className="px-4 py-3">Lab ปลายทาง</th><th className="px-4 py-3">Checkout</th><th className="px-4 py-3">TAT</th><th className="px-4 py-3">สถานะ</th><th className="px-4 py-3 text-right">Action</th></tr></thead><tbody className="divide-y divide-[#edf2f2]">{waiting.sort((a, b) => Number(getHivDrtTatState(b.checkedOutAt, b.status, today) === 'overdue') - Number(getHivDrtTatState(a.checkedOutAt, a.status, today) === 'overdue')).map((sample) => <tr key={sample.id} className="hover:bg-[#f8fbfb]"><td className="px-4 py-3"><strong className="mono text-[#173d50]">{sample.barcode}</strong><p className="mt-1 text-[11px] text-[#8ba0a5]">{sample.fromStorage ? `${sample.storedRackCode} · ${formatHivDrtPosition(sample.storedPosition)}` : 'Direct checkout'}</p></td><td className="px-4 py-3">{editingOutlabLnId === sample.id ? <div className="flex min-w-48 items-center gap-1"><Input autoFocus value={outlabLnDraft} onChange={(event) => setOutlabLnDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void saveOutlabLn(sample); if (event.key === 'Escape') cancelOutlabLnEdit() }} placeholder="LN Outlab" className="mono" /><Button type="button" disabled={busy} onClick={() => void saveOutlabLn(sample)} className="!min-h-8 !shrink-0 !whitespace-nowrap !px-2 !py-1 !text-xs">บันทึก</Button></div> : <span className="mono text-[#315763]">{formatHivDrtOutlabLn(sample.outlabLn)}</span>}</td><td className="px-4 py-3 text-[#315763]">{sample.checkoutDestination}</td><td className="px-4 py-3 text-xs text-[#58747d]">{sample.checkedOutAt ? formatDateTime(sample.checkedOutAt) : '-'}</td><td className="px-4 py-3"><p className="font-semibold text-[#315763]">ครบ {formatDate(sample.tatDueOn)}</p><p className="mt-1 text-[11px] text-[#8ba0a5]">ผ่าน {sample.checkedOutAt ? businessDaysElapsed(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(new Date(sample.checkedOutAt)), today) : 0} วันทำการ</p></td><td className="px-4 py-3"><TatBadge sample={sample} /></td><td className="px-4 py-3"><div className="flex items-center justify-end gap-1.5 whitespace-nowrap"><Button className="!min-h-8 !shrink-0 !whitespace-nowrap !px-2 !py-1 !text-xs" disabled={busy} onClick={() => void receive(sample)}><Check className="size-3.5" /> ได้รับผลแล้ว</Button><Button type="button" variant="secondary" className="!min-h-8 !shrink-0 !whitespace-nowrap !px-2 !py-1 !text-xs" disabled={busy} onClick={() => startOutlabLnEdit(sample)}>+ LN Outlab</Button><Button variant="danger" className="!min-h-8 !shrink-0 !whitespace-nowrap !px-2 !py-1 !text-xs" disabled={busy} onClick={() => void deleteSampleRecord(sample, mutate)}><Trash2 className="size-3.5" /> ลบ</Button></div></td></tr>)}</tbody></table></div>
+        <div className="flex flex-col gap-3 border-b border-[#dce8e9] bg-[#fbfdfd] p-4 lg:flex-row lg:items-center lg:justify-between"><div><h2 className="font-bold text-[#173d50]">รายการรอผล</h2><p className="mt-1 text-xs text-[#789097]">เรียงรายการเกิน TAT ขึ้นก่อน</p></div><div className="flex flex-col gap-2 sm:flex-row"><div className="relative"><Search className="absolute top-2.5 left-3 size-4 text-[#8ba0a5]" /><Input value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" placeholder="ค้นหา Barcode, Ward หรือ Lab" /></div><label className="flex items-center gap-2 rounded-md border border-[#cfdee0] bg-white px-3 py-2 text-xs font-semibold text-[#58747d]"><input type="checkbox" checked={onlyOverdue} onChange={(event) => setOnlyOverdue(event.target.checked)} className="accent-[#b33b46]" /> เฉพาะเกิน TAT</label></div></div>
+         <div className="overflow-x-auto"><table className="w-full min-w-[1040px] text-left text-sm"><thead className="bg-[#f4f8f8] text-[10px] font-bold tracking-[.08em] text-[#718a91] uppercase"><tr><th className="px-4 py-3">Tube</th><th className="px-4 py-3">LN Outlab</th><th className="px-4 py-3">Ward</th><th className="px-4 py-3">Checkout</th><th className="px-4 py-3">TAT</th><th className="px-4 py-3">สถานะ</th><th className="px-4 py-3 text-right">Action</th></tr></thead><tbody className="divide-y divide-[#edf2f2]">{waiting.sort((a, b) => Number(getHivDrtTatState(b.checkedOutAt, b.status, today) === 'overdue') - Number(getHivDrtTatState(a.checkedOutAt, a.status, today) === 'overdue')).map((sample) => <tr key={sample.id} className="hover:bg-[#f8fbfb]"><td className="px-4 py-3"><strong className="mono text-[#173d50]">{sample.barcode}</strong><p className="mt-1 text-[11px] text-[#8ba0a5]">{sample.fromStorage ? `${sample.storedRackCode} · ${formatHivDrtPosition(sample.storedPosition)}` : 'Direct checkout'}</p></td><td className="px-4 py-3">{editingOutlabLnId === sample.id ? <div className="flex min-w-48 items-center gap-1"><Input autoFocus value={outlabLnDraft} onChange={(event) => setOutlabLnDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void saveOutlabLn(sample); if (event.key === 'Escape') cancelOutlabLnEdit() }} placeholder="LN Outlab" className="mono" /><Button type="button" disabled={busy} onClick={() => void saveOutlabLn(sample)} className="!min-h-8 !shrink-0 !whitespace-nowrap !px-2 !py-1 !text-xs">บันทึก</Button></div> : <span className="mono text-[#315763]">{formatHivDrtOutlabLn(sample.outlabLn)}</span>}</td><td className="px-4 py-3">{editingWardId === sample.id ? <div className="flex min-w-44 items-center gap-1"><Input autoFocus value={wardDraft} onChange={(event) => setWardDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void saveWard(sample); if (event.key === 'Escape') cancelWardEdit() }} placeholder="Ward" /><Button type="button" disabled={busy} onClick={() => void saveWard(sample)} className="!min-h-8 !shrink-0 !whitespace-nowrap !px-2 !py-1 !text-xs">บันทึก</Button></div> : <button type="button" disabled={busy} onClick={() => startWardEdit(sample)} title="คลิกเพื่อแก้ไข Ward" className="-mx-1 rounded px-1 text-left text-[#315763] hover:bg-[#eef6f6]">{sample.ward ?? <span className="text-xs font-semibold text-[#0b7f76]">+ Ward</span>}</button>}</td><td className="px-4 py-3 text-xs text-[#58747d]">{sample.checkedOutAt ? formatDateTime(sample.checkedOutAt) : '-'}</td><td className="px-4 py-3"><p className="font-semibold text-[#315763]">ครบ {formatDate(sample.tatDueOn)}</p><p className="mt-1 text-[11px] text-[#8ba0a5]">ผ่าน {sample.checkedOutAt ? businessDaysElapsed(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(new Date(sample.checkedOutAt)), today) : 0} วันทำการ</p></td><td className="px-4 py-3"><TatBadge sample={sample} /></td><td className="px-4 py-3"><div className="flex items-center justify-end gap-1.5 whitespace-nowrap"><Button className="!min-h-8 !shrink-0 !whitespace-nowrap !px-2 !py-1 !text-xs" disabled={busy} onClick={() => void receive(sample)}><Check className="size-3.5" /> ได้รับผลแล้ว</Button><Button type="button" variant="secondary" className="!min-h-8 !shrink-0 !whitespace-nowrap !px-2 !py-1 !text-xs" disabled={busy} onClick={() => startOutlabLnEdit(sample)}>+ LN Outlab</Button><Button variant="danger" className="!min-h-8 !shrink-0 !whitespace-nowrap !px-2 !py-1 !text-xs" disabled={busy} onClick={() => void deleteSampleRecord(sample, mutate)}><Trash2 className="size-3.5" /> ลบ</Button></div></td></tr>)}</tbody></table></div>
         {!waiting.length ? <EmptyState icon={<CheckCircle2 />} text={onlyOverdue ? 'ไม่มีรายการเกิน TAT' : 'ไม่มีรายการรอผล'} /> : null}
       </Card>
     </div>
