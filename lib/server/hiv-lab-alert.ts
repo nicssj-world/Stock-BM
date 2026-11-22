@@ -8,6 +8,7 @@ import { buildHivLabAlertMessage, maskPatientName } from '@/lib/hiv-lab-alert/ru
 import { writeAudit } from '@/lib/server/audit'
 import { HttpError } from '@/lib/server/errors'
 import { getAdminClient } from '@/lib/supabase/admin'
+import { selectAll } from '@/lib/supabase/select-all'
 
 type RecordRow = Record<string, unknown>
 
@@ -96,7 +97,7 @@ export async function getHivLabAlertWorkspace(actor: BmActor): Promise<HivLabAle
       .order('created_at', { ascending: false })
       .limit(500),
     admin.from('bm_hiv_drt_racks').select('id,rack_code,capacity,next_position').order('created_at', { ascending: false }).limit(200),
-    admin.from('bm_hiv_drt_samples').select('id,status,current_rack_id,current_position,stored_rack_code,stored_position').limit(5000),
+    selectAll((from, to) => admin.from('bm_hiv_drt_samples').select('id,status,current_rack_id,current_position,stored_rack_code,stored_position').order('id').range(from, to)),
   ])
   fail(alertError)
   fail(rackError)

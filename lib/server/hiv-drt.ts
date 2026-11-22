@@ -15,6 +15,7 @@ import type { HivDrtDashboard, HivDrtRack, HivDrtSample, HivDrtWorkspace } from 
 import { writeAudit } from '@/lib/server/audit'
 import { HttpError } from '@/lib/server/errors'
 import { getAdminClient } from '@/lib/supabase/admin'
+import { selectAll } from '@/lib/supabase/select-all'
 
 type RecordRow = Record<string, unknown>
 type DbError = { message: string; code?: string } | null
@@ -81,8 +82,8 @@ export async function getHivDrtWorkspace(actor: BmActor): Promise<HivDrtWorkspac
   const admin = getAdminClient()
   const [{ data: rackData, error: rackError }, { data: sampleData, error: sampleError }, { data: alertData, error: alertError }] = await Promise.all([
     admin.from('bm_hiv_drt_racks').select('*').order('created_at', { ascending: false }).limit(200),
-    admin.from('bm_hiv_drt_samples').select('*').order('created_at', { ascending: false }).limit(5000),
-    admin.from('bm_hiv_lab_alerts').select('id,hiv_drt_sample_id').limit(5000),
+    selectAll((from, to) => admin.from('bm_hiv_drt_samples').select('*').order('created_at', { ascending: false }).order('id').range(from, to)),
+    selectAll((from, to) => admin.from('bm_hiv_lab_alerts').select('id,hiv_drt_sample_id').order('id').range(from, to)),
   ])
   fail(rackError)
   fail(sampleError)
@@ -401,11 +402,13 @@ export async function destroyHivDrtSample(id: string, actor: BmActor) {
 }
 
 export async function getHivDrtDashboardData(): Promise<HivDrtDashboard> {
-  const { data, error } = await getAdminClient()
+  const admin = getAdminClient()
+  const { data, error } = await selectAll((from, to) => admin
     .from('bm_hiv_drt_samples')
     .select('status,checked_out_at,destroy_due_on')
     .in('status', ['stored', 'checked_out'])
-    .limit(10000)
+    .order('id')
+    .range(from, to))
   fail(error)
   const today = todayBangkok()
   const rows = (data ?? []) as RecordRow[]
