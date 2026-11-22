@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { AlertTriangle, CheckCircle2, ChevronDown, FileSpreadsheet, GitCompareArrows, Pencil, Plus, Printer, Search, Settings2, Trash2, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronDown, ClipboardList, FileSpreadsheet, GitCompareArrows, Pencil, Plus, Printer, Search, Settings2, Trash2, X } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { LotVerification, LotVerifParallelRow, LotVerifStatus, LotVerifWorkspace } from '@/lib/lotverif/types'
 import { calculateParallelComparison } from '@/lib/lotverif/compare'
@@ -463,14 +463,14 @@ function VerificationCard({ verification: v, data, actor, initialExpanded, onCha
 
       {v.conclusion ? (
         <div
-          className={`mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 ${isPositiveConclusion(v.conclusion) ? 'border-[#b9dfc7] bg-[#effaf3] text-[#236b39]' : 'border-[#efc7cc] bg-[#fff5f6] text-[#a83541]'}`}
+          className={`mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 ${CONCLUSION_STYLE[conclusionTone(v)]}`}
           aria-label={`สรุปผล ${v.conclusion}`}
         >
           <div className="flex items-center gap-3">
-            {isPositiveConclusion(v.conclusion) ? <CheckCircle2 className="size-6 shrink-0" aria-hidden="true" /> : <AlertTriangle className="size-6 shrink-0" aria-hidden="true" />}
+            {conclusionTone(v) === 'positive' ? <CheckCircle2 className="size-6 shrink-0" aria-hidden="true" /> : conclusionTone(v) === 'negative' ? <AlertTriangle className="size-6 shrink-0" aria-hidden="true" /> : <ClipboardList className="size-6 shrink-0" aria-hidden="true" />}
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.12em]">สรุปผล</p>
-              <p className="text-lg font-bold leading-tight">{v.conclusion}</p>
+              <p className={conclusionTone(v) === 'pending' ? 'text-sm font-medium leading-snug' : 'text-lg font-bold leading-tight'}>{v.conclusion}</p>
             </div>
           </div>
           {v.releasedByName ? <p className="text-xs font-medium">อนุมัติใช้โดย {v.releasedByName}{v.releasedAt ? ` · ${formatDate(v.releasedAt.slice(0, 10))}` : ''}</p> : null}
@@ -548,6 +548,23 @@ function VerificationCard({ verification: v, data, actor, initialExpanded, onCha
       ) : null}
     </Card>
   )
+}
+
+type ConclusionTone = 'positive' | 'negative' | 'pending'
+
+const CONCLUSION_STYLE: Record<ConclusionTone, string> = {
+  positive: 'border-[#b9dfc7] bg-[#effaf3] text-[#236b39]',
+  negative: 'border-[#efc7cc] bg-[#fff5f6] text-[#a83541]',
+  pending: 'border-[#dfe9ea] bg-[#f7fbfb] text-[#315763]',
+}
+
+// An open verification only has a working note, so it stays neutral; the colour
+// follows the recorded outcome once the verification is decided.
+function conclusionTone(v: Pick<LotVerification, 'status' | 'conclusion'>): ConclusionTone {
+  if (v.status === 'failed' || v.status === 'rejected') return 'negative'
+  if (v.status === 'passed' || v.status === 'released') return 'positive'
+  if (v.status === 'draft' || v.status === 'in-progress') return 'pending'
+  return isPositiveConclusion(v.conclusion ?? '') ? 'positive' : 'negative'
 }
 
 function isPositiveConclusion(value: string) {
