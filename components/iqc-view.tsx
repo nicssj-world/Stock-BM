@@ -9,6 +9,7 @@ import { findCorrectiveActionForPoint, runsWithoutCorrectiveActions } from '@/li
 import { filterIqcChartsByInstrumentVisibility, type IqcChartInstrumentVisibility } from '@/lib/iqc/chart-instrument-visibility'
 import { hasTestSet, parseTestSets } from '@/lib/iqc/test-sets'
 import { groupPlannedTestSets } from '@/lib/iqc/control-plan-scope'
+import { activeLotsAwaitingFirstResult } from '@/lib/iqc/lots-without-charts'
 import { findNewRun, pickDefaultInstrumentId, readRememberedInstrumentId, rememberInstrumentId, worstRunStatus } from '@/lib/iqc/entry-defaults'
 import { formatDate, formatDateTime } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
@@ -180,7 +181,7 @@ export function IqcView({ actor, initialData, initialTab = 'enter', initialSetup
         </Card>
       ) : null}
 
-      {tab === 'charts' ? <ChartsOverviewTab data={scoped} isAdmin={canManageIqc} onOk={ok} onErr={err} onOpenCorrectiveAction={openCorrectiveAction} onStartCorrectiveAction={openCorrectiveDraft} /> : null}
+      {tab === 'charts' ? <ChartsOverviewTab data={scoped} allCharts={data.charts} testSet={panelFilterVisible ? selectedPanel : 'all'} isAdmin={canManageIqc} onOk={ok} onErr={err} onOpenCorrectiveAction={openCorrectiveAction} onStartCorrectiveAction={openCorrectiveDraft} /> : null}
       {tab === 'enter' ? <EnterTab data={scoped} onOk={ok} onErr={err} onViewCharts={() => setTab('charts')} onStartCorrectiveAction={openCorrectiveDraft} /> : null}
       {tab === 'sixsigma' ? <SixSigmaTab data={scoped} /> : null}
       {tab === 'uncertainty' ? <UncertaintyTab data={scoped} isAdmin={canManageIqc} onOk={ok} onErr={err} /> : null}
@@ -219,7 +220,7 @@ function fmtCompact(value: number | null) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value)
 }
 
-function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction, onStartCorrectiveAction }: { data: IqcWorkspace; isAdmin: boolean; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void; onOpenCorrectiveAction: (id: string) => void; onStartCorrectiveAction: (context: IqcCorrectiveContext) => void }) {
+function ChartsOverviewTab({ data, allCharts, testSet, isAdmin, onOk, onErr, onOpenCorrectiveAction, onStartCorrectiveAction }: { data: IqcWorkspace; allCharts: IqcWorkspace['charts']; testSet: string; isAdmin: boolean; onOk: (t: string, d: IqcWorkspace) => void; onErr: (t: string) => void; onOpenCorrectiveAction: (id: string) => void; onStartCorrectiveAction: (context: IqcCorrectiveContext) => void }) {
   const [busy, setBusy] = useState<string | null>(null)
   // Open on what needs attention; fall back to everything when all is in control.
   const [statusFilter, setStatusFilter] = useState<ChartStatusFilter>(() => {
@@ -310,8 +311,7 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
   const activeInstrumentIds = new Set(data.instruments.map((instrument) => instrument.id))
   const instrumentVisibleCharts = filterIqcChartsByInstrumentVisibility(data.charts, activeInstrumentIds, instrumentVisibility)
   const visibleLotCharts = instrumentVisibleCharts.filter((chart) => lotsById.get(chart.controlLotId)?.isActive === (lotVisibility === 'active'))
-  const chartLotIds = new Set(instrumentVisibleCharts.map((chart) => chart.controlLotId))
-  const activeLotsWithoutCharts = data.controlLots.filter((lot) => lot.isActive && !chartLotIds.has(lot.id))
+  const activeLotsWithoutCharts = activeLotsAwaitingFirstResult(data.controlLots, allCharts, testSet)
   const attentionKeys = new Set(visibleLotCharts.filter((chart) => chart.status !== 'accepted' || expiringLotIds.has(chart.controlLotId)).map((chart) => chart.key))
   const rejectedCount = visibleLotCharts.filter((chart) => chart.status === 'rejected').length
   const warningCount = visibleLotCharts.filter((chart) => chart.status === 'warning').length
@@ -506,10 +506,10 @@ function ChartsOverviewTab({ data, isAdmin, onOk, onErr, onOpenCorrectiveAction,
         </div>
       </Card>
 
-      {lotVisibility === 'active' && instrumentVisibility === 'active' && activeLotsWithoutCharts.length ? <div className="rounded-lg border border-[#eed4a6] bg-[#fff9ed] px-3 py-2.5 text-xs text-[#795d2d]">
-        <span className="font-bold text-[#8b5a08]">Active Control lot ที่ยังไม่มีผล/กราฟ:</span>{' '}
+      {lotVisibility === 'active' && instrumentVisibility === 'active' && activeLotsWithoutCharts.length ? <div className="rounded-lg border border-[#dfe9ea] bg-[#f7fbfb] px-3 py-2.5 text-xs text-[#58747d]">
+        <span className="font-bold text-[#315763]">Lot ใหม่ที่รอผลแรก:</span>{' '}
         {activeLotsWithoutCharts.map((lot) => `${lot.controlMaterialName} · Lot ${lot.lotNumber}`).join(', ')}
-        <span className="ml-1">(จะแสดงในรายการกราฟหลังบันทึกผล)</span>
+        <span className="ml-1">(กราฟจะขึ้นเองหลังบันทึกผลครั้งแรก ไม่ต้องทำอะไร)</span>
       </div> : null}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(520px,1.25fr)]">
