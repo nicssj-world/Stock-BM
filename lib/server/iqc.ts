@@ -2165,6 +2165,64 @@ export async function importIqcRuns(input: {
   return getIqcWorkspace(actor)
 }
 
+// Data-entry correction: move one result to the control lot that was actually used.
+// Only between lots of the same control material (same test and level), so the value
+// and its evaluation stay comparable; both series are re-evaluated and the change is
+// written to the audit log with the old lot, the new lot and the reason.
+export async function correctResultControlLot(resultId: string, input: { controlLotId: string; reason: string }, actor: BmActor) {
+  assertAdmin(actor)
+  const reason = input.reason.trim()
+  if (!reason) throw new HttpError(400, 'ต้องระบุเหตุผลที่แก้ Control lot')
+  const admin = getAdminClient()
+  const { data: existing, error: existingError } = await admin
+    .from('iqc_result_values')
+    .select('control_lot_id,analyte_id,run_id,is_voided')
+    .eq('id', resultId)
+    .maybeSingle()
+  fail(existingError)
+  if (!existing) throw new HttpError(404, 'IQC result not found')
+  const row = existing as RecordRow
+  if (Boolean(row.is_voided)) throw new HttpError(400, 'ผลนี้ถูก void แล้ว')
+  const fromLotId = asString(row.control_lot_id)
+  if (fromLotId === input.controlLotId) throw new HttpError(400, 'ผลนี้อยู่ใน Control lot นี้อยู่แล้ว')
+  const { data: lotRows, error: lotError } = await admin
+    .from('iqc_control_lots')
+    .select('id,lot_number,control_material_id')
+    .in('id', [fromLotId, input.controlLotId])
+  fail(lotError)
+  const lots = new Map(((lotRows ?? []) as RecordRow[]).map((lot) => [asString(lot.id), lot]))
+  const fromLot = lots.get(fromLotId)
+  const toLot = lots.get(input.controlLotId)
+  if (!toLot) throw new HttpError(404, 'ไม่พบ Control lot ปลายทาง')
+  if (!fromLot || asString(fromLot.control_material_id) !== asString(toLot.control_material_id)) {
+    throw new HttpError(409, 'ย้ายได้เฉพาะระหว่าง lot ของ Control material เดียวกัน')
+  }
+  const { data: duplicate, error: duplicateError } = await admin
+    .from('iqc_result_values')
+    .select('id')
+    .eq('run_id', asString(row.run_id))
+    .eq('analyte_id', asString(row.analyte_id))
+    .eq('control_lot_id', input.controlLotId)
+    .eq('is_voided', false)
+    .limit(1)
+  fail(duplicateError)
+  if ((duplicate ?? []).length) throw new HttpError(409, 'run นี้มีผลของ analyte นี้ใน lot ปลายทางอยู่แล้ว')
+  const { error } = await admin.from('iqc_result_values').update({ control_lot_id: input.controlLotId }).eq('id', resultId)
+  fail(error)
+  const analyteId = asString(row.analyte_id)
+  await recalculateChartStatuses(fromLotId, analyteId, actor)
+  await recalculateChartStatuses(input.controlLotId, analyteId, actor)
+  await writeAudit(actor, 'iqc.result.correctLot', 'iqc-result', resultId, {
+    reason,
+    runId: asString(row.run_id),
+    analyteId,
+    fromLotId,
+    fromLotNumber: asString(fromLot.lot_number),
+    toLotId: input.controlLotId,
+    toLotNumber: asString(toLot.lot_number),
+  })
+}
+
 export async function voidResult(resultId: string, reason: string, actor: BmActor, options: { dataEntryError?: boolean } = {}) {
   assertAdmin(actor)
   if (!reason.trim()) throw new HttpError(400, 'Void reason is required')
