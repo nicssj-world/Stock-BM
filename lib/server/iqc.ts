@@ -55,6 +55,29 @@ import { getAdminClient } from '@/lib/supabase/admin'
 
 type RecordRow = Record<string, unknown>
 const NO_REQUIRED_LEVEL = '__no_required_level__'
+
+// Control-plan levels are derived from the analyte codes of a test set (e.g. "HBV-VL (HPC)"),
+// so they are checked across the whole run. An analyte code's own level wins; the lot's
+// material level (e.g. "HPC/LPC") is only a fallback for analytes without a level in their code.
+function runEnteredLevels(
+  values: { controlLotId: string; analyteId: string }[],
+  analyteById: Map<string, { code: string }>,
+  lotLevelById: Map<string, string | null>,
+) {
+  const levels = new Set<string>()
+  for (const value of values) {
+    const codeLevel = analyteById.get(value.analyteId)?.code.match(/\((HPC|LPC|Normal)\)/i)?.[1]
+    if (codeLevel) {
+      levels.add(codeLevel.toLowerCase())
+      continue
+    }
+    const materialLevel = lotLevelById.get(value.controlLotId)
+    if (!materialLevel) continue
+    levels.add(materialLevel.trim().toLowerCase())
+    for (const part of materialLevel.split('/')) if (part.trim()) levels.add(part.trim().toLowerCase())
+  }
+  return levels
+}
 const CD4_ANALYTE_CODES = new Set(['%CD3', '%CD4', 'AbsCD3', 'AbsCD4'])
 
 function fail(error: { message: string } | null, message = 'IQC database operation failed') {
@@ -1867,8 +1890,8 @@ export async function createRun(input: {
   for (const plan of plans.filter((item) => item.frequency === 'per-run')) {
     if (!effectiveInstrumentId) throw new HttpError(400, `ต้องเลือก Instrument เพื่อใช้ control plan ของ ${analyteById.get(plan.analyteId)?.code ?? 'analyte'}`)
     if (plan.instrumentId !== effectiveInstrumentId) continue
-    const enteredLevels = new Set(input.values.filter((value) => value.analyteId === plan.analyteId).map((value) => lotLevelById.get(value.controlLotId)).filter((level): level is string => Boolean(level)))
-    const missing = plan.requiredLevels.filter((level) => !enteredLevels.has(level))
+    const enteredLevels = runEnteredLevels(input.values, analyteById, lotLevelById)
+    const missing = plan.requiredLevels.filter((level) => !enteredLevels.has(level.trim().toLowerCase()))
     if (missing.length) throw new HttpError(400, `Control plan ต้องบันทึก ${analyteById.get(plan.analyteId)?.code ?? 'analyte'} ระดับ ${missing.join(', ')} ในทุก run`)
   }
 
