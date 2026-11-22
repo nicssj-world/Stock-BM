@@ -333,7 +333,7 @@ export default async function IqcMonthlyReportPage({ searchParams }: { searchPar
             {items.length ? items.map((item) => (
               <tr key={item.key}>
                 <td>{item.analyteCode}</td>
-                <td>{item.materialName}{item.level ? ` L${item.level}` : ''} · {item.lotNumber}</td>
+                <td>{item.materialName}{item.level ? ` (${item.level})` : ''} · {item.lotNumber}</td>
                 <td>{item.instrumentLabel ?? item.chart?.instrumentName ?? '—'}</td>
                 <td className="num">{item.points.length}</td>
                 <td className="num">{item.points.filter((point) => !point.voided && point.status === 'rejected').length || ''}</td>
