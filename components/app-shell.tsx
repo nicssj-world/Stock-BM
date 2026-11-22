@@ -61,7 +61,7 @@ const monitoringSection: NavSection = {
     { href: '/morning-talk', label: 'Morning Talk', icon: Users },
     { href: '/environment', label: 'อุณหภูมิ / Temperature', icon: Thermometer },
     { href: '/lot-verification', label: 'Lot verification', icon: GitCompareArrows },
-    { href: '/instrument-comparison', label: 'เทียบเครื่อง / Method comparison', icon: Scale },
+    { href: '/instrument-comparison', label: 'Method comparison', icon: Scale },
   ],
 }
 
@@ -134,7 +134,7 @@ export function AppShell({ actor, receivingEnabled, children }: { actor: BmActor
                     aria-current={active ? 'page' : undefined}
                     className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition focus-visible:ring-2 focus-visible:ring-[#7ee3d8] focus-visible:outline-none lg:w-full ${active ? 'bg-[#0b7f76] text-white' : 'text-[#b9d6dc] hover:bg-white/8 hover:text-white'}`}
                   >
-                    <Icon className="size-4" />
+                    <Icon className="size-4 shrink-0" />
                     <span className="whitespace-nowrap">{label}</span>
                   </Link>
                 )
