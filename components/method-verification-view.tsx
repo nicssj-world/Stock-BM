@@ -8,8 +8,11 @@ import type { BmActor } from '@/lib/bm/types'
 import type { CompareScale } from '@/lib/instcomp/compare'
 import { evaluateStudy, SECTION_LABEL, type StudyEvaluation } from '@/lib/methodverif/evaluate'
 import { parseGrid, type Verdict } from '@/lib/methodverif/stats'
+import { PAIR_LIMIT_MIN_PERCENT, parsePastedPairs, type ComparePair } from '@/lib/instcomp/compare'
+import { BlandAltmanChart, diffUnit, ScatterChart } from '@/components/instcomp-charts'
 import {
   METHODVERIF_SECTIONS,
+  type ComparisonData,
   type LinearityData,
   type LodData,
   type MethodVerifSection,
@@ -45,6 +48,15 @@ const VERDICT: Record<Verdict, { tone: StatusTone; label: string }> = {
 }
 
 const SECTION_SHORT: Record<MethodVerifSection, string> = { precision: 'Precision', lod: 'LoD', linearity: 'Linearity', comparison: 'Comparison' }
+
+const CATEGORY_LABEL: Record<ComparePair['category'], string> = {
+  quantitative: '',
+  'both-not-detected': 'ND ทั้งคู่',
+  'detected-outside-range': 'นอกช่วงวัด',
+  discordant: 'ไม่ตรงกัน',
+  incomplete: 'ไม่ครบ',
+  invalid: 'อ่านค่าไม่ได้',
+}
 
 function fmt(value: number | null | undefined, digits = 3) {
   return value == null || !Number.isFinite(value) ? '—' : value.toFixed(digits)
@@ -106,7 +118,6 @@ export function MethodVerificationView({ actor, initialData }: { actor: BmActor;
           <StudyCard
             key={`${study.id}:${study.updatedAt}`}
             study={study}
-            data={data}
             open={openId === study.id}
             isAdmin={isAdmin}
             onToggle={() => setOpenId((current) => (current === study.id ? null : study.id))}
@@ -128,6 +139,7 @@ function CreateForm({ data, onCreated, onError }: { data: MethodVerifWorkspace; 
   const [scale, setScale] = useState<CompareScale>('log10')
   const [unit, setUnit] = useState('')
   const [startedOn, setStartedOn] = useState('')
+  const [referenceLabel, setReferenceLabel] = useState('')
   const [sections, setSections] = useState<MethodVerifSection[]>([...METHODVERIF_SECTIONS])
 
   function pickAnalyte(id: string) {
@@ -155,6 +167,7 @@ function CreateForm({ data, onCreated, onError }: { data: MethodVerifWorkspace; 
           unit: unit || null,
           requiredSections: sections,
           startedOn: startedOn || null,
+          referenceLabel: sections.includes('comparison') ? referenceLabel || null : null,
         }),
       })
       onCreated(result.id)
@@ -191,6 +204,7 @@ function CreateForm({ data, onCreated, onError }: { data: MethodVerifWorkspace; 
           </Field>
           <Field label="หน่วย"><Input value={unit} onChange={(event) => setUnit(event.target.value)} placeholder="cp/mL, IU/mL" /></Field>
           <Field label="วันที่เริ่มทวนสอบ"><Input type="date" value={startedOn} onChange={(event) => setStartedOn(event.target.value)} /></Field>
+          {sections.includes('comparison') ? <Field label="เครื่องเดิมที่ใช้เทียบ (Method comparison)"><Input value={referenceLabel} onChange={(event) => setReferenceLabel(event.target.value)} placeholder="เช่น cobas 8800 Sn5046" /></Field> : null}
           <Field label="ชื่อรายการ (ไม่บังคับ)"><Input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="สร้างให้อัตโนมัติถ้าเว้นว่าง" /></Field>
         </div>
         <fieldset>
@@ -215,7 +229,7 @@ function CreateForm({ data, onCreated, onError }: { data: MethodVerifWorkspace; 
   )
 }
 
-function StudyCard({ study, data, open, isAdmin, onToggle, onDone, onError }: { study: MethodVerifStudy; data: MethodVerifWorkspace; open: boolean; isAdmin: boolean; onToggle: () => void; onDone: (text: string) => void; onError: (error: unknown) => void }) {
+function StudyCard({ study, open, isAdmin, onToggle, onDone, onError }: { study: MethodVerifStudy; open: boolean; isAdmin: boolean; onToggle: () => void; onDone: (text: string) => void; onError: (error: unknown) => void }) {
   const evaluation = useMemo(() => evaluateStudy(study), [study])
   const verdict = VERDICT[evaluation.overall]
   return (
@@ -233,23 +247,22 @@ function StudyCard({ study, data, open, isAdmin, onToggle, onDone, onError }: { 
         <StatusBadge tone={STATUS_TONE[study.status]} label={STATUS_LABEL[study.status]} />
         <ChevronDown className={`size-4 text-[#789097] transition ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
       </button>
-      {open ? <StudyDetail study={study} data={data} isAdmin={isAdmin} onDone={onDone} onError={onError} /> : null}
+      {open ? <StudyDetail study={study} isAdmin={isAdmin} onDone={onDone} onError={onError} /> : null}
     </Card>
   )
 }
 
-function StudyDetail({ study, data, isAdmin, onDone, onError }: { study: MethodVerifStudy; data: MethodVerifWorkspace; isAdmin: boolean; onDone: (text: string) => void; onError: (error: unknown) => void }) {
+function StudyDetail({ study, isAdmin, onDone, onError }: { study: MethodVerifStudy; isAdmin: boolean; onDone: (text: string) => void; onError: (error: unknown) => void }) {
   const locked = study.status === 'approved'
   const [precision, setPrecision] = useState<PrecisionData>(study.precision)
   const [lod, setLod] = useState<LodData>(study.lod)
   const [linearity, setLinearity] = useState<LinearityData>(study.linearity)
-  const [comparisonId, setComparisonId] = useState(study.comparison?.id ?? '')
+  const [comparison, setComparison] = useState<ComparisonData>(study.comparison)
   const [conclusion, setConclusion] = useState(study.conclusion ?? '')
   const [busy, setBusy] = useState(false)
-  const comparison = data.comparisons.find((item) => item.id === comparisonId) ?? null
   const evaluation = useMemo(() => evaluateStudy({ ...study, precision, lod, linearity, comparison }), [study, precision, lod, linearity, comparison])
-  const dirty = JSON.stringify({ precision, lod, linearity, comparisonId, conclusion })
-    !== JSON.stringify({ precision: study.precision, lod: study.lod, linearity: study.linearity, comparisonId: study.comparison?.id ?? '', conclusion: study.conclusion ?? '' })
+  const dirty = JSON.stringify({ precision, lod, linearity, comparison, conclusion })
+    !== JSON.stringify({ precision: study.precision, lod: study.lod, linearity: study.linearity, comparison: study.comparison, conclusion: study.conclusion ?? '' })
 
   async function patch(body: Record<string, unknown>, text: string) {
     setBusy(true)
@@ -264,7 +277,7 @@ function StudyDetail({ study, data, isAdmin, onDone, onError }: { study: MethodV
   }
 
   function saveBody() {
-    return { precision, lod, linearity, instcompStudyId: comparisonId || null, conclusion }
+    return { precision, lod, linearity, comparison, conclusion }
   }
 
   async function remove() {
@@ -299,22 +312,7 @@ function StudyDetail({ study, data, isAdmin, onDone, onError }: { study: MethodV
       {required.has('precision') ? <PrecisionEditor value={precision} onChange={setPrecision} scale={study.scale} locked={locked} evaluation={evaluation} /> : null}
       {required.has('lod') ? <LodEditor value={lod} onChange={setLod} unit={study.unit} locked={locked} evaluation={evaluation} /> : null}
       {required.has('linearity') ? <LinearityEditor value={linearity} onChange={setLinearity} scale={study.scale} unit={study.unit} locked={locked} evaluation={evaluation} /> : null}
-      {required.has('comparison') ? (
-        <Section title={SECTION_LABEL.comparison} verdict={evaluation.sections.comparison.verdict} reasons={evaluation.sections.comparison.reasons}>
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="min-w-72 flex-1">
-              <Field label="รายการ Method comparison ที่ใช้เป็นหลักฐาน">
-                <Select disabled={locked} value={comparisonId} onChange={(event) => setComparisonId(event.target.value)}>
-                  <option value="">— เลือกรายการ —</option>
-                  {data.comparisons.map((item) => <option key={item.id} value={item.id}>{item.title} · {STATUS_LABEL[item.status as MethodVerifStatus] ?? item.status}</option>)}
-                </Select>
-              </Field>
-            </div>
-            <Link href="/instrument-comparison" className="text-sm font-semibold text-[#0b7f76] hover:underline">เปิด Method comparison</Link>
-          </div>
-          {!data.comparisons.length ? <p className="text-xs text-[#789097]">ยังไม่มีรายการ Method comparison — สร้างที่เมนู Method comparison ก่อน แล้วกลับมาเลือก</p> : null}
-        </Section>
-      ) : null}
+      {required.has('comparison') ? <ComparisonEditor value={comparison} onChange={setComparison} scale={study.scale} candidateLabel={study.instrumentLabel} locked={locked} evaluation={evaluation} /> : null}
 
       <div className="space-y-2">
         <Field label="สรุปผล / ความเห็น">
@@ -512,6 +510,101 @@ function LinearityEditor({ value, onChange, scale, unit, locked, evaluation }: {
         </div>
       ) : null}
       {result.slope != null ? <p className="mono text-xs text-[#315763]">Regression (ผลวัด vs คาดหวัง{scale === 'log10' ? ', log10' : ''}): slope {fmt(result.slope)} · intercept {fmt(result.intercept)} · r {fmt(result.r, 4)}</p> : null}
+    </Section>
+  )
+}
+
+function ComparisonEditor({ value, onChange, scale, candidateLabel, locked, evaluation }: { value: ComparisonData; onChange: (next: ComparisonData) => void; scale: CompareScale; candidateLabel: string; locked: boolean; evaluation: StudyEvaluation }) {
+  const unit = diffUnit(scale)
+  const { pairs, summary } = evaluation.comparison
+  const referenceLabel = value.referenceLabel.trim() || 'เครื่องเดิม'
+  const chartStudy = { scale, pairLimit: value.pairLimit, referenceLabel, candidateLabel }
+  const rows = value.samples.length ? value.samples : [{ sampleLabel: '', referenceRaw: '', candidateRaw: '' }]
+  const setRow = (index: number, patch: Partial<ComparisonData['samples'][number]>) => onChange({ ...value, samples: rows.map((row, i) => (i === index ? { ...row, ...patch } : row)) })
+  const signed = (n: number | null) => (n == null ? '—' : `${n >= 0 ? '+' : ''}${fmt(n)}`)
+  const stats: [string, string][] = [
+    ['คู่เชิงปริมาณ', String(summary.quantitativeN)],
+    [`Bias เฉลี่ย (${unit})`, signed(summary.meanBias)],
+    [`SD ผลต่าง (${unit})`, fmt(summary.sdDifference)],
+    ['95% Limits of agreement', summary.loaLower == null ? '—' : `${fmt(summary.loaLower)} ถึง ${fmt(summary.loaUpper)}`],
+    ['คู่ในเกณฑ์รายคู่', summary.withinPairLimitPercent == null ? '—' : `${summary.withinPairLimitN}/${summary.quantitativeN} (${summary.withinPairLimitPercent}%)`],
+    ['Detected / ND concordance', summary.concordancePercent == null ? '—' : `${summary.concordancePercent}% (ไม่ตรง ${summary.discordantN})`],
+  ]
+  return (
+    <Section title={SECTION_LABEL.comparison} verdict={evaluation.sections.comparison.verdict} reasons={evaluation.sections.comparison.reasons}>
+      <p className="text-xs text-[#789097]">ตรวจตัวอย่างผู้ป่วยชุดเดียวกันบนเครื่องเดิมและเครื่องใหม่ (แนะนำ 20–40 ราย กระจายทั้งค่าต่ำ กลาง สูง) ผลต่าง = ใหม่ − เดิม{scale === 'log10' ? ' (log10)' : ' (%)'} · ผล &lt;LoQ ไม่นำมาคำนวณ bias แต่ต้อง detected/ND ตรงกัน</p>
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="min-w-56 flex-1"><Field label="เครื่องเดิม (อ้างอิง)"><Input disabled={locked} value={value.referenceLabel} onChange={(event) => onChange({ ...value, referenceLabel: event.target.value })} placeholder="เช่น cobas 8800 Sn5046" /></Field></div>
+        <div className="w-36"><Field label={`Bias เฉลี่ย ≤ ± (${unit})`}><Input type="number" step="any" min={0} disabled={locked} value={value.biasLimit} onChange={(event) => onChange({ ...value, biasLimit: Number(event.target.value) > 0 ? Number(event.target.value) : value.biasLimit })} /></Field></div>
+        <div className="w-36"><Field label={`รายคู่ ≤ ± (${unit})`}><Input type="number" step="any" min={0} disabled={locked} value={value.pairLimit} onChange={(event) => onChange({ ...value, pairLimit: Number(event.target.value) > 0 ? Number(event.target.value) : value.pairLimit })} /></Field></div>
+        <div className="w-28"><Field label="จำนวนคู่ขั้นต่ำ"><Input type="number" min={2} disabled={locked} value={value.minPairs} onChange={(event) => onChange({ ...value, minPairs: Math.max(2, Number(event.target.value) || 2) })} /></Field></div>
+      </div>
+      <p className="text-[11px] text-[#789097]">ผ่านเมื่อ bias เฉลี่ยอยู่ในเกณฑ์ · คู่ที่ผลต่างอยู่ในเกณฑ์รายคู่ ≥ {PAIR_LIMIT_MIN_PERCENT}% · ไม่มีคู่ที่ detected/ND ขัดกัน · จำนวนคู่เชิงปริมาณครบขั้นต่ำ</p>
+
+      <div className="grid gap-px overflow-hidden rounded-md border border-[#dbe8e9] bg-[#dbe8e9] sm:grid-cols-2 xl:grid-cols-3">
+        {stats.map(([label, text]) => (
+          <div key={label} className="bg-white px-3 py-2">
+            <p className="text-[11px] font-semibold text-[#789097]">{label}</p>
+            <p className="mono text-sm font-bold text-[#173d50]">{text}</p>
+          </div>
+        ))}
+      </div>
+
+      {summary.quantitativeN >= 2 ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <BlandAltmanChart pairs={pairs} summary={summary} study={chartStudy} />
+          <ScatterChart pairs={pairs} study={chartStudy} />
+        </div>
+      ) : null}
+
+      {!locked ? (
+        <div className="flex flex-wrap gap-2">
+          <PasteBox
+            hint="วางจาก Excel 3 คอลัมน์: ตัวอย่าง · เครื่องเดิม · เครื่องใหม่ (หรือ 2 คอลัมน์ไม่มีชื่อตัวอย่าง) — รองรับ 1.2E+05, 1,200, <20, Target Not Detected"
+            placeholder={'S001\t1.25E+05\t1.31E+05'}
+            onApply={(grid) => {
+              const parsed = parsePastedPairs(grid.map((cells) => cells.join('\t')).join('\n')).map((row) => ({ sampleLabel: row.sampleLabel ?? '', referenceRaw: row.referenceRaw ?? '', candidateRaw: row.candidateRaw ?? '' }))
+              onChange({ ...value, samples: [...value.samples.filter((row) => row.sampleLabel || row.referenceRaw || row.candidateRaw), ...parsed].slice(0, 500) })
+            }}
+          />
+          <Button type="button" variant="secondary" onClick={() => onChange({ ...value, samples: [...rows, { sampleLabel: '', referenceRaw: '', candidateRaw: '' }] })}><Plus className="size-4" /> เพิ่มแถว</Button>
+        </div>
+      ) : null}
+
+      <div className="overflow-x-auto rounded-md border border-[#e1ebec]">
+        <table className="w-full min-w-[720px] text-left text-xs">
+          <thead className="bg-[#f7fbfb] text-[#789097]">
+            <tr>
+              <th className="w-10 px-2 py-2">#</th>
+              <th className="px-2 py-2">ตัวอย่าง</th>
+              <th className="px-2 py-2">{referenceLabel}</th>
+              <th className="px-2 py-2">{candidateLabel}</th>
+              <th className="px-2 py-2 text-right">ผลต่าง ({unit})</th>
+              <th className="px-2 py-2">สถานะ</th>
+              {!locked ? <th className="w-10 px-2 py-2" /> : null}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#edf2f2]">
+            {rows.map((row, index) => {
+              const pair = pairs[index]
+              const flag = pair?.category === 'quantitative'
+                ? (pair.withinPairLimit ? null : { tone: 'rejected' as StatusTone, label: `เกิน ±${value.pairLimit}` })
+                : pair && CATEGORY_LABEL[pair.category] ? { tone: (pair.category === 'discordant' || pair.category === 'invalid' ? 'rejected' : 'neutral') as StatusTone, label: CATEGORY_LABEL[pair.category] } : null
+              return (
+                <tr key={index}>
+                  <td className="px-2 py-1 text-[#9aafb4]">{index + 1}</td>
+                  <td className="px-2 py-1"><Input aria-label={`ตัวอย่างแถว ${index + 1}`} disabled={locked} className="min-h-8 py-1" value={row.sampleLabel} onChange={(event) => setRow(index, { sampleLabel: event.target.value })} /></td>
+                  <td className="px-2 py-1"><Input aria-label={`ผลเครื่องเดิมแถว ${index + 1}`} disabled={locked} className="mono min-h-8 py-1" value={row.referenceRaw} onChange={(event) => setRow(index, { referenceRaw: event.target.value })} /></td>
+                  <td className="px-2 py-1"><Input aria-label={`ผลเครื่องใหม่แถว ${index + 1}`} disabled={locked} className="mono min-h-8 py-1" value={row.candidateRaw} onChange={(event) => setRow(index, { candidateRaw: event.target.value })} /></td>
+                  <td className="mono px-2 py-1 text-right">{pair?.difference != null ? `${pair.difference >= 0 ? '+' : ''}${fmt(pair.difference, scale === 'log10' ? 2 : 1)}` : '—'}</td>
+                  <td className="px-2 py-1">{flag ? <StatusBadge tone={flag.tone} label={flag.label} /> : pair?.category === 'quantitative' ? <span className="text-[#2f7d44]">ในเกณฑ์</span> : null}</td>
+                  {!locked ? <td className="px-2 py-1"><button type="button" aria-label={`ลบแถว ${index + 1}`} onClick={() => onChange({ ...value, samples: rows.filter((_, i) => i !== index) })} className="rounded p-1 text-[#af3541] hover:bg-[#fff1f2]"><Trash2 className="size-4" /></button></td> : null}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
     </Section>
   )
 }

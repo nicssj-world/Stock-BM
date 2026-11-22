@@ -3,6 +3,8 @@
 import type { ComparePair, CompareScale, CompareSummary } from '@/lib/instcomp/compare'
 import type { InstCompStudy } from '@/lib/instcomp/types'
 
+export type ChartStudy = Pick<InstCompStudy, 'scale' | 'pairLimit' | 'referenceLabel' | 'candidateLabel'>
+
 export function fmt(value: number | null | undefined, digits = 3) {
   return value == null || !Number.isFinite(value) ? '—' : value.toFixed(digits)
 }
@@ -58,7 +60,7 @@ function ChartFrame({ title, xLabel, yLabel, children, x, y }: { title: string; 
   )
 }
 
-export function BlandAltmanChart({ pairs, summary, study }: { pairs: ComparePair[]; summary: CompareSummary; study: InstCompStudy }) {
+export function BlandAltmanChart({ pairs, summary, study }: { pairs: ComparePair[]; summary: CompareSummary; study: ChartStudy }) {
   const points = pairs.filter((pair) => pair.category === 'quantitative')
   const unit = diffUnit(study.scale)
   const xValues = points.map((pair) => pair.mean as number)
@@ -90,7 +92,7 @@ export function BlandAltmanChart({ pairs, summary, study }: { pairs: ComparePair
   )
 }
 
-export function ScatterChart({ pairs, study }: { pairs: ComparePair[]; study: InstCompStudy }) {
+export function ScatterChart({ pairs, study }: { pairs: ComparePair[]; study: ChartStudy }) {
   const points = pairs.filter((pair) => pair.category === 'quantitative')
   const all = points.flatMap((pair) => [pair.referenceStat as number, pair.candidateStat as number])
   const domain = padDomain(all, 0.05)

@@ -1,16 +1,16 @@
 import 'server-only'
 
 import type { BmActor } from '@/lib/bm/types'
-import type { InstCompStatus } from '@/lib/instcomp/types'
 import { evaluateStudy } from '@/lib/methodverif/evaluate'
 import type { CreateMethodVerifInput, UpdateMethodVerifInput } from '@/lib/methodverif/schema'
 import {
+  defaultComparison,
   defaultLinearity,
   defaultLod,
   defaultPrecision,
   METHODVERIF_SECTIONS,
+  type ComparisonData,
   type LinearityData,
-  type LinkedComparison,
   type LodData,
   type MethodVerifSection,
   type MethodVerifStatus,
@@ -75,20 +75,29 @@ function linearityOf(value: unknown, scale: 'linear' | 'log10'): LinearityData {
   }
 }
 
+function comparisonOf(value: unknown, scale: 'linear' | 'log10'): ComparisonData {
+  const data = asObject(value)
+  const base = defaultComparison(scale)
+  return {
+    referenceLabel: typeof data.referenceLabel === 'string' ? data.referenceLabel : base.referenceLabel,
+    biasLimit: typeof data.biasLimit === 'number' ? data.biasLimit : base.biasLimit,
+    pairLimit: typeof data.pairLimit === 'number' ? data.pairLimit : base.pairLimit,
+    minPairs: typeof data.minPairs === 'number' ? data.minPairs : base.minPairs,
+    samples: Array.isArray(data.samples) ? (data.samples as ComparisonData['samples']) : [],
+  }
+}
+
 async function loadContext() {
   const admin = getAdminClient()
-  const [{ data: instrumentRows, error: instrumentError }, { data: analyteRows, error: analyteError }, { data: comparisonRows, error: comparisonError }] = await Promise.all([
+  const [{ data: instrumentRows, error: instrumentError }, { data: analyteRows, error: analyteError }] = await Promise.all([
     admin.from('iqc_instruments').select('id,code,name,is_active').order('code'),
     admin.from('iqc_analytes').select('id,code,scale,unit,data_type,is_active').eq('data_type', 'quantitative').order('code'),
-    admin.from('instcomp_studies').select('id,title,status').order('created_at', { ascending: false }),
   ])
   fail(instrumentError)
   fail(analyteError)
-  fail(comparisonError)
   return {
     instruments: ((instrumentRows ?? []) as RecordRow[]).map((row) => ({ id: asString(row.id), code: asString(row.code), name: asString(row.name), isActive: Boolean(row.is_active) })),
     analytes: ((analyteRows ?? []) as RecordRow[]).filter((row) => row.is_active !== false).map((row) => ({ id: asString(row.id), code: asString(row.code), scale: asString(row.scale) === 'log10' ? 'log10' as const : 'linear' as const, unit: nullableString(row.unit) })),
-    comparisons: ((comparisonRows ?? []) as RecordRow[]).map((row): LinkedComparison => ({ id: asString(row.id), title: asString(row.title), status: asString(row.status) as InstCompStatus })),
   }
 }
 
@@ -101,7 +110,6 @@ async function mapStudies(rows: RecordRow[], context: Awaited<ReturnType<typeof 
     for (const row of (data ?? []) as RecordRow[]) names.set(asString(row.id), asString(row.display_name))
   }
   const instrumentById = new Map(context.instruments.map((item) => [item.id, item]))
-  const comparisonById = new Map(context.comparisons.map((item) => [item.id, item]))
   return rows.map((row) => {
     const scale = scaleOf(row)
     const instrument = instrumentById.get(asString(row.instrument_id))
@@ -118,7 +126,7 @@ async function mapStudies(rows: RecordRow[], context: Awaited<ReturnType<typeof 
       precision: precisionOf(row.precision_data),
       lod: lodOf(row.lod_data),
       linearity: linearityOf(row.linearity_data, scale),
-      comparison: comparisonById.get(asString(row.instcomp_study_id)) ?? null,
+      comparison: comparisonOf(row.comparison_data, scale),
       status: asString(row.status) as MethodVerifStatus,
       conclusion: nullableString(row.conclusion),
       startedOn: nullableString(row.started_on),
@@ -169,6 +177,7 @@ export async function createMethodVerifStudy(input: CreateMethodVerifInput, acto
       precision_data: defaultPrecision(),
       lod_data: defaultLod(),
       linearity_data: defaultLinearity(input.scale),
+      comparison_data: { ...defaultComparison(input.scale), referenceLabel: input.referenceLabel?.trim() ?? '' },
       started_on: input.startedOn || null,
       created_by: actor.id,
     })
@@ -199,22 +208,20 @@ export async function updateMethodVerifStudy(id: string, patch: UpdateMethodVeri
   if (patch.precision !== undefined) update.precision_data = patch.precision
   if (patch.lod !== undefined) update.lod_data = patch.lod
   if (patch.linearity !== undefined) update.linearity_data = patch.linearity
-  if (patch.instcompStudyId !== undefined) update.instcomp_study_id = patch.instcompStudyId
+  if (patch.comparison !== undefined) update.comparison_data = patch.comparison
   if (patch.conclusion !== undefined) update.conclusion = clean(patch.conclusion)
-  const dataChanged = patch.precision !== undefined || patch.lod !== undefined || patch.linearity !== undefined || patch.instcompStudyId !== undefined
+  const dataChanged = patch.precision !== undefined || patch.lod !== undefined || patch.linearity !== undefined || patch.comparison !== undefined
   if (dataChanged && current.status === 'draft' && !patch.status) update.status = 'in-progress'
 
   if (patch.status) {
     if (patch.status === 'passed' || patch.status === 'approved') {
-      const context = await loadContext()
-      const nextComparisonId = patch.instcompStudyId !== undefined ? patch.instcompStudyId : current.comparison?.id ?? null
       const evaluation = evaluateStudy({
         scale: patch.scale ?? current.scale,
         requiredSections: patch.requiredSections ?? current.requiredSections,
         precision: patch.precision ?? current.precision,
         lod: patch.lod ?? current.lod,
         linearity: patch.linearity ?? current.linearity,
-        comparison: context.comparisons.find((item) => item.id === nextComparisonId) ?? null,
+        comparison: patch.comparison ?? current.comparison,
       })
       if (evaluation.overall !== 'passed') throw new HttpError(409, `ยังไม่ผ่านเกณฑ์: ${evaluation.reasons.slice(0, 4).join(' · ')}`)
     }

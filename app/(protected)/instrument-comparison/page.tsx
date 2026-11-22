@@ -1,8 +1,7 @@
-import { InstrumentComparisonView } from '@/components/instrument-comparison-view'
-import { requireFullPageActor } from '@/lib/server/auth'
-import { getInstCompWorkspace } from '@/lib/server/instcomp'
+import { redirect } from 'next/navigation'
 
-export default async function InstrumentComparisonPage() {
-  const actor = await requireFullPageActor()
-  return <InstrumentComparisonView actor={actor} initialData={await getInstCompWorkspace(actor)} />
+// Method comparison now lives inside each Method verification record
+// (the lab compares instruments only as part of verifying a replacement).
+export default function InstrumentComparisonPage() {
+  redirect('/method-verification')
 }

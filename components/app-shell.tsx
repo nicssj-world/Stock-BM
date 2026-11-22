@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, BellRing, Biohazard, Boxes, Building2, CalendarCheck, CalendarDays, ClipboardCheck, Dna, GitCompareArrows, FlaskConical, Scale, LineChart, LogOut, MoveRight, PenLine, QrCode, Settings, ShieldCheck, Thermometer, Users } from 'lucide-react'
+import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, BellRing, Biohazard, Boxes, Building2, CalendarCheck, CalendarDays, ClipboardCheck, Dna, GitCompareArrows, FlaskConical, LineChart, LogOut, MoveRight, PenLine, QrCode, Settings, ShieldCheck, Thermometer, Users } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import { api } from '@/components/ui'
 
@@ -61,7 +61,6 @@ const monitoringSection: NavSection = {
     { href: '/morning-talk', label: 'Morning Talk', icon: Users },
     { href: '/environment', label: 'อุณหภูมิ / Temperature', icon: Thermometer },
     { href: '/lot-verification', label: 'Lot verification', icon: GitCompareArrows },
-    { href: '/instrument-comparison', label: 'Method comparison', icon: Scale },
     { href: '/method-verification', label: 'Method verification', icon: FlaskConical },
   ],
 }

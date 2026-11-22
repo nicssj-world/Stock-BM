@@ -1,4 +1,4 @@
-import type { InstCompStatus } from '@/lib/instcomp/types'
+import { compareInstruments, type ComparePair, type CompareSummary } from '@/lib/instcomp/compare'
 import { linearityVerification, lodVerification, precisionLevel, type LinearityResult, type LodResult, type PrecisionLevelResult, type Verdict } from '@/lib/methodverif/stats'
 import type { MethodVerifSection, MethodVerifStudy } from '@/lib/methodverif/types'
 
@@ -12,6 +12,7 @@ export interface StudyEvaluation {
   precisionOutcome: SectionOutcome
   lod: LodResult
   linearity: LinearityResult
+  comparison: { pairs: ComparePair[]; summary: CompareSummary }
   comparisonOutcome: SectionOutcome
   sections: Record<MethodVerifSection, SectionOutcome>
   overall: Verdict
@@ -32,12 +33,6 @@ function combine(verdicts: Verdict[]): Verdict {
   return 'passed'
 }
 
-export function comparisonVerdict(status: InstCompStatus | null | undefined): SectionOutcome {
-  if (!status) return { verdict: 'insufficient', reasons: ['ยังไม่ได้เลือกรายการ Method comparison'] }
-  if (status === 'approved' || status === 'passed') return { verdict: 'passed', reasons: [] }
-  if (status === 'failed' || status === 'rejected') return { verdict: 'failed', reasons: ['รายการ Method comparison ไม่ผ่านเกณฑ์'] }
-  return { verdict: 'insufficient', reasons: ['รายการ Method comparison ยังไม่ได้สรุปผล'] }
-}
 
 export function evaluateStudy(study: Pick<MethodVerifStudy, 'scale' | 'requiredSections' | 'precision' | 'lod' | 'linearity' | 'comparison'>): StudyEvaluation {
   const levels = study.precision.levels
@@ -47,7 +42,11 @@ export function evaluateStudy(study: Pick<MethodVerifStudy, 'scale' | 'requiredS
     : { verdict: 'insufficient', reasons: ['ยังไม่ได้เพิ่ม level'] }
   const lod = lodVerification(study.lod)
   const linearity = linearityVerification(study.linearity.points, study.scale, study.linearity.limit)
-  const comparisonOutcome = comparisonVerdict(study.comparison?.status)
+  const comparison = compareInstruments(
+    study.comparison.samples.map((sample, index) => ({ rowNo: index + 1, sampleLabel: sample.sampleLabel || null, referenceRaw: sample.referenceRaw, candidateRaw: sample.candidateRaw })),
+    { scale: study.scale, biasLimit: study.comparison.biasLimit, pairLimit: study.comparison.pairLimit, minPairs: study.comparison.minPairs },
+  )
+  const comparisonOutcome: SectionOutcome = { verdict: comparison.summary.verdict, reasons: comparison.summary.reasons }
   const sections: Record<MethodVerifSection, SectionOutcome> = {
     precision: precisionOutcome,
     lod: { verdict: lod.verdict, reasons: lod.reasons },
@@ -60,6 +59,7 @@ export function evaluateStudy(study: Pick<MethodVerifStudy, 'scale' | 'requiredS
     precisionOutcome,
     lod,
     linearity,
+    comparison,
     comparisonOutcome,
     sections,
     overall: combine(required.map((section) => sections[section].verdict)),

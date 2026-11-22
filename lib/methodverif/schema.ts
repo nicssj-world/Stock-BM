@@ -26,6 +26,14 @@ export const linearitySchema = z.object({
   points: z.array(z.object({ expected: optionalNumber, values: z.array(raw).max(10) })).max(20),
 })
 
+export const comparisonSchema = z.object({
+  referenceLabel: z.string().trim().max(120),
+  biasLimit: z.number().finite().positive(),
+  pairLimit: z.number().finite().positive(),
+  minPairs: z.number().int().min(2).max(500),
+  samples: z.array(z.object({ sampleLabel: z.string().trim().max(80), referenceRaw: raw, candidateRaw: raw })).max(500),
+})
+
 const sections = z.array(z.enum(['precision', 'lod', 'linearity', 'comparison'])).min(1)
 
 export const createMethodVerifSchema = z.object({
@@ -37,13 +45,14 @@ export const createMethodVerifSchema = z.object({
   unit: z.string().trim().max(40).nullable().optional(),
   requiredSections: sections,
   startedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  referenceLabel: z.string().trim().max(120).nullable().optional(),
 })
 
 export const updateMethodVerifSchema = createMethodVerifSchema.partial().extend({
   precision: precisionSchema.optional(),
   lod: lodSchema.optional(),
   linearity: linearitySchema.optional(),
-  instcompStudyId: z.string().uuid().nullable().optional(),
+  comparison: comparisonSchema.optional(),
   status: z.enum(['draft', 'in-progress', 'passed', 'failed', 'approved', 'rejected']).optional(),
   conclusion: z.string().trim().max(3000).nullable().optional(),
 })
