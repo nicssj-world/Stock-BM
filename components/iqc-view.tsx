@@ -10,6 +10,7 @@ import { filterIqcChartsByInstrumentVisibility, type IqcChartInstrumentVisibilit
 import { hasTestSet, parseTestSets } from '@/lib/iqc/test-sets'
 import { groupPlannedTestSets } from '@/lib/iqc/control-plan-scope'
 import { activeLotsAwaitingFirstResult } from '@/lib/iqc/lots-without-charts'
+import { chartNeedsAttention, isAwaitingBaselineData, VL_BASELINE_MIN_POINTS } from '@/lib/iqc/chart-attention'
 import { findNewRun, pickDefaultInstrumentId, readRememberedInstrumentId, rememberInstrumentId, worstRunStatus } from '@/lib/iqc/entry-defaults'
 import { formatDate, formatDateTime } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea } from '@/components/ui'
@@ -225,7 +226,7 @@ function ChartsOverviewTab({ data, allCharts, testSet, isAdmin, onOk, onErr, onO
   // Open on what needs attention; fall back to everything when all is in control.
   const [statusFilter, setStatusFilter] = useState<ChartStatusFilter>(() => {
     const activeLotIds = new Set(data.controlLots.filter((lot) => lot.isActive).map((lot) => lot.id))
-    return data.charts.some((chart) => activeLotIds.has(chart.controlLotId) && chart.status !== 'accepted') ? 'attention' : 'all'
+    return data.charts.some((chart) => activeLotIds.has(chart.controlLotId) && chartNeedsAttention(chart, false)) ? 'attention' : 'all'
   })
   const [lotVisibility, setLotVisibility] = useState<LotVisibility>('active')
   const [instrumentVisibility, setInstrumentVisibility] = useState<IqcChartInstrumentVisibility>('active')
@@ -312,11 +313,12 @@ function ChartsOverviewTab({ data, allCharts, testSet, isAdmin, onOk, onErr, onO
   const instrumentVisibleCharts = filterIqcChartsByInstrumentVisibility(data.charts, activeInstrumentIds, instrumentVisibility)
   const visibleLotCharts = instrumentVisibleCharts.filter((chart) => lotsById.get(chart.controlLotId)?.isActive === (lotVisibility === 'active'))
   const activeLotsWithoutCharts = activeLotsAwaitingFirstResult(data.controlLots, allCharts, testSet)
-  const attentionKeys = new Set(visibleLotCharts.filter((chart) => chart.status !== 'accepted' || expiringLotIds.has(chart.controlLotId)).map((chart) => chart.key))
+  const attentionKeys = new Set(visibleLotCharts.filter((chart) => chartNeedsAttention(chart, expiringLotIds.has(chart.controlLotId))).map((chart) => chart.key))
   const rejectedCount = visibleLotCharts.filter((chart) => chart.status === 'rejected').length
   const warningCount = visibleLotCharts.filter((chart) => chart.status === 'warning').length
   const investigateCount = visibleLotCharts.filter((chart) => chart.status === 'investigate').length
   const notEvaluatedCount = visibleLotCharts.filter((chart) => chart.status === 'not_evaluated').length
+  const awaitingBaselineCount = visibleLotCharts.filter((chart) => isAwaitingBaselineData(chart)).length
   const legacyCharts = visibleLotCharts.filter((chart) => chart.policyProfile !== 'vl-standard-v1')
   const unlockedCount = legacyCharts.filter((chart) => !chart.labLockedAt).length
   const expiringCount = new Set(visibleLotCharts.filter((chart) => expiringLotIds.has(chart.controlLotId)).map((chart) => chart.controlLotId)).size
@@ -365,7 +367,7 @@ function ChartsOverviewTab({ data, allCharts, testSet, isAdmin, onOk, onErr, onO
               <ListFilter className="size-4" /> Needs attention
             </div>
             <div className="mono mt-2 text-2xl font-bold text-[#173d50]">{attentionKeys.size}</div>
-            <p className="mt-1 text-xs text-[#789097]">warning, investigate, rejected หรือยังไม่ประเมิน</p>
+            <p className="mt-1 text-xs text-[#789097]">warning, investigate, rejected หรือ lot ที่ต้องดำเนินการ</p>
           </button>
           <button
             type="button"
@@ -421,7 +423,7 @@ function ChartsOverviewTab({ data, allCharts, testSet, isAdmin, onOk, onErr, onO
               <AlertTriangle className="size-4" /> Not evaluated
             </div>
             <div className="mono mt-2 text-2xl font-bold text-[#5b7681]">{notEvaluatedCount}</div>
-            <p className="mt-1 text-xs text-[#789097]">baseline not active</p>
+            <p className="mt-1 text-xs text-[#789097]">{awaitingBaselineCount ? `${awaitingBaselineCount} รอ baseline (ยังไม่ครบ ${VL_BASELINE_MIN_POINTS} จุด)` : 'baseline not active'}</p>
           </button>
           <button
             type="button"
