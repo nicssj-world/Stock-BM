@@ -11,7 +11,7 @@ type RecordRow = Record<string, unknown>
 
 export const INSTCOMP_ATTACHMENT_ENTITY = 'instcomp-study'
 
-function fail(error: { message: string } | null, message = 'Instrument comparison database operation failed') {
+function fail(error: { message: string } | null, message = 'Method comparison database operation failed') {
   if (error) throw new HttpError(400, error.message || message)
 }
 const asString = (value: unknown) => (typeof value === 'string' ? value : '')
@@ -106,7 +106,7 @@ export async function getInstCompWorkspace(actor: BmActor): Promise<InstCompWork
 export async function getInstCompStudy(id: string, actor: BmActor): Promise<InstCompStudy> {
   const workspace = await getInstCompWorkspace(actor)
   const study = workspace.studies.find((candidate) => candidate.id === id)
-  if (!study) throw new HttpError(404, 'ไม่พบรายการเปรียบเทียบเครื่อง')
+  if (!study) throw new HttpError(404, 'ไม่พบรายการ Method comparison')
   return study
 }
 
@@ -150,7 +150,7 @@ function studyColumns(input: InstCompStudyInput) {
 async function loadStudy(id: string) {
   const { data, error } = await getAdminClient().from('instcomp_studies').select('*').eq('id', id).maybeSingle()
   fail(error)
-  if (!data) throw new HttpError(404, 'ไม่พบรายการเปรียบเทียบเครื่อง')
+  if (!data) throw new HttpError(404, 'ไม่พบรายการ Method comparison')
   return data as RecordRow
 }
 

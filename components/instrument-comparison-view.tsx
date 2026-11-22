@@ -87,8 +87,8 @@ export function InstrumentComparisonView({ actor, initialData }: { actor: BmActo
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Method comparison · ISO 15189 7.3.7.4"
-        title="เปรียบเทียบเครื่อง"
+        eyebrow="Quality · ISO 15189 7.3.7.4 · CLSI EP09"
+        title="Method comparison"
         description="ตรวจตัวอย่างคนไข้ชุดเดียวกันบนเครื่องเดิมและเครื่องใหม่ แล้วประเมิน bias ตามเกณฑ์ของห้องปฏิบัติการ (CLSI EP09)"
         actions={<Button onClick={() => setShowCreate((value) => !value)}><Plus className="size-4" /> สร้างรายการใหม่</Button>}
       />
@@ -105,7 +105,7 @@ export function InstrumentComparisonView({ actor, initialData }: { actor: BmActo
       {showCreate ? <CreateStudyForm data={data} onCreated={(id) => { setShowCreate(false); done('สร้างรายการแล้ว — กรอกหรือวางผลตัวอย่างได้เลย', id) }} onError={failed} /> : null}
 
       {data.studies.length === 0 && !showCreate ? (
-        <Card className="p-8 text-center text-sm text-[#8198a0]">ยังไม่มีรายการเปรียบเทียบเครื่อง</Card>
+        <Card className="p-8 text-center text-sm text-[#8198a0]">ยังไม่มีรายการ Method comparison</Card>
       ) : null}
 
       <div className="space-y-3">
@@ -194,7 +194,7 @@ function CreateStudyForm({ data, onCreated, onError }: { data: InstCompWorkspace
   return (
     <Card className="p-5">
       <form onSubmit={submit} className="space-y-4">
-        <h2 className="text-base font-bold text-[#173d50]">สร้างรายการเปรียบเทียบเครื่อง</h2>
+        <h2 className="text-base font-bold text-[#173d50]">สร้างรายการ Method comparison</h2>
         <div className="grid gap-3 md:grid-cols-3">
           <Field label="Analyte ในระบบ IQC (ไม่บังคับ)">
             <Select value={analyteId} onChange={(event) => pickAnalyte(event.target.value)}>

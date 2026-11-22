@@ -12,7 +12,7 @@ import { requireFullPageActor } from '@/lib/server/auth'
 import { HttpError } from '@/lib/server/errors'
 import { getInstCompStudy, INSTCOMP_ATTACHMENT_ENTITY } from '@/lib/server/instcomp'
 
-export const metadata: Metadata = { title: 'Instrument comparison report' }
+export const metadata: Metadata = { title: 'Method comparison report' }
 
 const STATUS_LABEL: Record<InstCompStatus, string> = {
   draft: 'ร่าง',
@@ -60,13 +60,13 @@ export default async function InstrumentComparisonReportPage({ params }: { param
   return (
     <main className="report-page">
       <div className="toolbar print-hidden">
-        <Link href="/instrument-comparison">กลับ เปรียบเทียบเครื่อง</Link>
+        <Link href="/instrument-comparison">กลับ Method comparison</Link>
         <PrintButton />
       </div>
 
       <section className="sheet">
         <div className="doc-code">สถานะ: {STATUS_LABEL[study.status]}</div>
-        <h1>รายงานการเปรียบเทียบผลระหว่างเครื่องตรวจวิเคราะห์</h1>
+        <h1>รายงาน Method comparison</h1>
         <p className="subhead">{REPORT_SUBHEAD} · ISO 15189:2022 ข้อ 7.3.2 / 7.3.7.4 · CLSI EP09</p>
 
         <table className="info">

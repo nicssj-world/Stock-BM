@@ -68,6 +68,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       { header: 'หมายเหตุ', width: 24, value: (pair) => noteByRow.get(pair.rowNo)?.note },
     ], pairs)
 
-    return xlsxResponse(book, `instrument-comparison_${study.testName}_${todayStamp()}.xlsx`)
+    return xlsxResponse(book, `method-comparison_${study.testName}_${todayStamp()}.xlsx`)
   })
 }
