@@ -346,7 +346,15 @@ export async function getLotVerifWorkspace(actor: BmActor): Promise<LotVerifWork
   }
   const options = await loadLotOptions(instrumentIdsByEquipment, instrumentIdsByAnalyte, (statsData ?? []) as RecordRow[])
   const analyteById = new Map(analyteRows.map((row) => [asString(row.id), row]))
-  const instrumentById = new Map(instrumentRecords.map((instrument) => [instrument.id, instrument]))
+  // Verifications can point at an instrument that has since been deactivated (e.g. a
+  // replaced analyzer); look those up separately so the card still shows its name.
+  const instrumentLabels = new Map<string, { code: string; name: string }>(instrumentRecords.map((instrument) => [instrument.id, { code: instrument.code, name: instrument.name }]))
+  const missingInstrumentIds = [...new Set(verRows.map((row) => asString(row.instrument_id)).filter((id) => id && !instrumentLabels.has(id)))]
+  if (missingInstrumentIds.length) {
+    const { data: inactiveRows, error: inactiveError } = await admin.from('iqc_instruments').select('id,code,name').in('id', missingInstrumentIds)
+    fail(inactiveError)
+    for (const row of (inactiveRows ?? []) as RecordRow[]) instrumentLabels.set(asString(row.id), { code: asString(row.code), name: `${asString(row.name)} (ปิดใช้งาน)` })
+  }
   const names = await getNameMap(
     verRows.flatMap((row) => [asString(row.performed_by), asString(row.reviewed_by), asString(row.released_by), asString(row.created_by)]),
   )
@@ -402,8 +410,8 @@ export async function getLotVerifWorkspace(actor: BmActor): Promise<LotVerifWork
     return {
       id: asString(row.id),
       instrumentId: nullableString(row.instrument_id),
-      instrumentCode: row.instrument_id ? instrumentById.get(asString(row.instrument_id))?.code ?? null : null,
-      instrumentName: row.instrument_id ? instrumentById.get(asString(row.instrument_id))?.name ?? null : null,
+      instrumentCode: row.instrument_id ? instrumentLabels.get(asString(row.instrument_id))?.code ?? null : null,
+      instrumentName: row.instrument_id ? instrumentLabels.get(asString(row.instrument_id))?.name ?? null : null,
       subjectKind: asString(row.subject_kind) as LotVerifSubjectKind,
       title: nullableString(row.title),
       newStockLotId,
