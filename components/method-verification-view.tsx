@@ -44,6 +44,8 @@ const VERDICT: Record<Verdict, { tone: StatusTone; label: string }> = {
   insufficient: { tone: 'not_evaluated', label: 'ข้อมูลยังไม่พอ' },
 }
 
+const SECTION_SHORT: Record<MethodVerifSection, string> = { precision: 'Precision', lod: 'LoD', linearity: 'Linearity', comparison: 'Comparison' }
+
 function fmt(value: number | null | undefined, digits = 3) {
   return value == null || !Number.isFinite(value) ? '—' : value.toFixed(digits)
 }
@@ -223,7 +225,7 @@ function StudyCard({ study, data, open, isAdmin, onToggle, onDone, onError }: { 
         <div className="min-w-0 flex-1">
           <p className="font-bold text-[#173d50]">{study.title}</p>
           <p className="text-xs text-[#789097]">
-            {study.instrumentLabel} · {study.requiredSections.map((section) => `${SECTION_LABEL[section].split(' ')[0]} ${evaluation.sections[section].verdict === 'passed' ? '✓' : evaluation.sections[section].verdict === 'failed' ? '✗' : '…'}`).join(' · ')}
+            {study.instrumentLabel} · {study.requiredSections.map((section) => `${SECTION_SHORT[section]} ${evaluation.sections[section].verdict === 'passed' ? '✓' : evaluation.sections[section].verdict === 'failed' ? '✗' : '…'}`).join(' · ')}
             {study.startedOn ? ` · เริ่ม ${formatDate(study.startedOn)}` : ''}
           </p>
         </div>
