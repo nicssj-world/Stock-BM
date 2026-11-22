@@ -503,10 +503,10 @@ function BlandAltmanChart({ pairs, summary, study }: { pairs: ComparePair[]; sum
   const y = padDomain(yValues, 0.08)
   const sx = scaleLinear(x, [PAD.left, W - PAD.right])
   const sy = scaleLinear(y, [H - PAD.bottom, PAD.top])
-  const line = (value: number, color: string, dash: string, label: string) => (
+  const line = (value: number, color: string, dash: string, label: string, side: 'start' | 'end' = 'end') => (
     <g>
       <line x1={PAD.left} x2={W - PAD.right} y1={sy(value)} y2={sy(value)} stroke={color} strokeDasharray={dash} strokeWidth="1.2" />
-      <text x={W - PAD.right - 2} y={sy(value) - 3} textAnchor="end" fontSize="9" fill={color}>{label}</text>
+      <text x={side === 'end' ? W - PAD.right - 2 : PAD.left + 4} y={sy(value) - 3} textAnchor={side} fontSize="9" fill={color} paintOrder="stroke" stroke="#ffffff" strokeWidth="3">{label}</text>
     </g>
   )
   return (
@@ -514,7 +514,7 @@ function BlandAltmanChart({ pairs, summary, study }: { pairs: ComparePair[]; sum
       {line(0, '#9aafb4', '0', '0')}
       {line(study.pairLimit, '#c02a37', '2 3', `+${study.pairLimit} เกณฑ์`)}
       {line(-study.pairLimit, '#c02a37', '2 3', `−${study.pairLimit} เกณฑ์`)}
-      {summary.meanBias != null ? line(summary.meanBias, '#0b7f76', '0', `bias ${fmt(summary.meanBias)}`) : null}
+      {summary.meanBias != null ? line(summary.meanBias, '#0b7f76', '0', `bias ${fmt(summary.meanBias)}`, 'start') : null}
       {summary.loaUpper != null ? line(summary.loaUpper, '#a9700f', '5 3', `+1.96SD ${fmt(summary.loaUpper)}`) : null}
       {summary.loaLower != null ? line(summary.loaLower, '#a9700f', '5 3', `−1.96SD ${fmt(summary.loaLower)}`) : null}
       {points.map((pair) => (

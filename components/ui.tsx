@@ -90,7 +90,7 @@ export function Notice({ children, tone = 'info' }: { children: ReactNode; tone?
     danger: 'border-[#efc7cc] bg-[#fff5f6] text-[#a83541]',
     success: 'border-[#c6e2ca] bg-[#f3faf4] text-[#4b7b51]',
   }
-  return <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${styles[tone]}`}><AlertTriangle className="mt-0.5 size-4 shrink-0" />{children}</div>
+  return <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${styles[tone]}`}>{tone === 'success' ? <CheckCircle2 className="mt-0.5 size-4 shrink-0" /> : <AlertTriangle className="mt-0.5 size-4 shrink-0" />}{children}</div>
 }
 
 export type StatusTone = 'accepted' | 'warning' | 'investigate' | 'rejected' | 'not_evaluated' | 'neutral'
