@@ -52,6 +52,7 @@ import { deleteEntityAttachments } from '@/lib/server/attachments'
 import { HttpError } from '@/lib/server/errors'
 import { refreshPortalEquipmentReference } from '@/lib/server/portal-equipment-references'
 import { getAdminClient } from '@/lib/supabase/admin'
+import { selectAll } from '@/lib/supabase/select-all'
 
 type RecordRow = Record<string, unknown>
 const NO_REQUIRED_LEVEL = '__no_required_level__'
@@ -491,10 +492,10 @@ export async function getIqcWorkspace(actor: BmActor): Promise<IqcWorkspace> {
     admin.from('iqc_control_lots').select('*').order('created_at', { ascending: false }),
     admin.from('iqc_control_specs').select('*'),
     admin.from('iqc_baselines').select('*').order('version', { ascending: false }),
-    admin.from('iqc_baseline_candidates').select('*'),
-    admin.from('iqc_runs').select('*').order('run_datetime', { ascending: false }).limit(500),
-    admin.from('iqc_run_consumables').select('*'),
-    admin.from('iqc_result_values').select('*').limit(5000),
+    selectAll((from, to) => admin.from('iqc_baseline_candidates').select('*').order('id').range(from, to)),
+    selectAll((from, to) => admin.from('iqc_runs').select('*').order('run_datetime', { ascending: false }).order('id').range(from, to)),
+    selectAll((from, to) => admin.from('iqc_run_consumables').select('*').order('id').range(from, to)),
+    selectAll((from, to) => admin.from('iqc_result_values').select('*').order('id').range(from, to)),
     admin.from('iqc_corrective_actions').select('*').order('created_at', { ascending: false }).limit(200),
     admin.from('iqc_tea_specs').select('*').eq('is_active', true),
     admin.from('iqc_uncertainty_budgets').select('*, iqc_uncertainty_components(*)').order('evaluated_at', { ascending: false }),
@@ -1123,7 +1124,7 @@ export async function getIqcBaselineReview(actor: BmActor, input: IqcBaselineRev
     admin.from('iqc_control_specs').select('*').eq('control_lot_id', input.controlLotId).eq('analyte_id', input.analyteId).maybeSingle(),
     admin.from('iqc_control_plans').select('westgard_rules,policy_profile').eq('analyte_id', input.analyteId).eq('instrument_id', input.instrumentId).eq('is_active', true).maybeSingle(),
     admin.from('iqc_baselines').select('*').eq('control_lot_id', input.controlLotId).eq('analyte_id', input.analyteId).eq('instrument_id', input.instrumentId).eq('state', 'approved').order('version', { ascending: false }).limit(1),
-    admin.from('iqc_result_values').select('id,run_id,control_lot_id,analyte_id,numeric_value,stat_value,qualitative_value,z_score,status,is_voided,void_reason,iqc_runs(run_datetime,instrument_id)').eq('control_lot_id', input.controlLotId).eq('analyte_id', input.analyteId),
+    selectAll((from, to) => admin.from('iqc_result_values').select('id,run_id,control_lot_id,analyte_id,numeric_value,stat_value,qualitative_value,z_score,status,is_voided,void_reason,iqc_runs(run_datetime,instrument_id)').eq('control_lot_id', input.controlLotId).eq('analyte_id', input.analyteId).order('id').range(from, to)),
   ])
   fail(analyteError)
   fail(lotError)
@@ -1677,10 +1678,13 @@ export async function createTeaSpec(input: {
 // Pooled IQC relative SD (%) across all control lots for an analyte, computed on
 // accepted, non-voided stat values. Returns the pooled RSD, total n, and lot count.
 async function computePooledIqc(analyteId: string) {
-  const { data, error } = await getAdminClient()
+  const admin = getAdminClient()
+  const { data, error } = await selectAll((from, to) => admin
     .from('iqc_result_values')
     .select('control_lot_id,stat_value,status,is_voided')
     .eq('analyte_id', analyteId)
+    .order('id')
+    .range(from, to))
   fail(error)
   const byLot = new Map<string, number[]>()
   for (const row of (data ?? []) as RecordRow[]) {
@@ -1822,7 +1826,7 @@ export async function upsertControlPlan(input: {
     updated_at: new Date().toISOString(),
   })), { onConflict: 'analyte_id,instrument_id' }).select('id')
   fail(error)
-  const { data: resultRows, error: resultError } = await admin.from('iqc_result_values').select('control_lot_id,analyte_id').in('analyte_id', analyteIds)
+  const { data: resultRows, error: resultError } = await selectAll((from, to) => admin.from('iqc_result_values').select('control_lot_id,analyte_id').in('analyte_id', analyteIds).order('id').range(from, to))
   fail(resultError)
   const affectedCharts = new Map<string, { controlLotId: string; analyteId: string }>()
   for (const row of resultRows ?? []) {
@@ -1860,11 +1864,13 @@ export async function createRun(input: {
   const [{ data: analyteRows, error: aErr }, { data: specRows, error: sErr }, { data: priorRows, error: pErr }, { data: planRows, error: planErr }, { data: baselineRows, error: baselineErr }, { data: lotRows, error: lotErr }, { data: materialRows, error: materialErr }] = await Promise.all([
     admin.from('iqc_analytes').select('*').in('id', analyteIds),
     admin.from('iqc_control_specs').select('*').in('control_lot_id', lotIds).in('analyte_id', analyteIds),
-    admin
+    selectAll((from, to) => admin
       .from('iqc_result_values')
       .select('control_lot_id,analyte_id,stat_value,status,is_voided,iqc_runs(run_datetime,instrument_id)')
       .in('control_lot_id', lotIds)
-      .in('analyte_id', analyteIds),
+      .in('analyte_id', analyteIds)
+      .order('id')
+      .range(from, to)),
     admin.from('iqc_control_plans').select('*').in('analyte_id', analyteIds).eq('is_active', true),
     admin.from('iqc_baselines').select('*').eq('state', 'approved').in('control_lot_id', lotIds).in('analyte_id', analyteIds).eq('instrument_id', effectiveInstrumentId),
     admin.from('iqc_control_lots').select('id,control_material_id').in('id', lotIds),
@@ -2060,11 +2066,13 @@ export async function importIqcRuns(input: {
   const [{ data: analyteRows, error: aErr }, { data: specRows, error: sErr }, { data: priorRows, error: pErr }, { data: planRows, error: planErr }, { data: baselineRows, error: baselineErr }] = await Promise.all([
     admin.from('iqc_analytes').select('*').in('id', input.analyteIds),
     admin.from('iqc_control_specs').select('*').eq('control_lot_id', input.controlLotId).in('analyte_id', input.analyteIds),
-    admin
+    selectAll((from, to) => admin
       .from('iqc_result_values')
       .select('analyte_id,stat_value,status,is_voided,iqc_runs(run_datetime,instrument_id)')
       .eq('control_lot_id', input.controlLotId)
-      .in('analyte_id', input.analyteIds),
+      .in('analyte_id', input.analyteIds)
+      .order('id')
+      .range(from, to)),
     admin.from('iqc_control_plans').select('*').in('analyte_id', input.analyteIds).eq('instrument_id', instrumentId).eq('is_active', true),
     admin.from('iqc_baselines').select('*').eq('control_lot_id', input.controlLotId).eq('instrument_id', instrumentId).eq('state', 'approved').in('analyte_id', input.analyteIds),
   ])
@@ -2257,11 +2265,13 @@ export async function voidResult(resultId: string, reason: string, actor: BmActo
 
 async function getUsableLabValues(controlLotId: string, analyteId: string) {
   const admin = getAdminClient()
-  const { data: valueRows, error } = await admin
+  const { data: valueRows, error } = await selectAll((from, to) => admin
     .from('iqc_result_values')
     .select('stat_value,is_voided,status')
     .eq('control_lot_id', controlLotId)
     .eq('analyte_id', analyteId)
+    .order('id')
+    .range(from, to))
   fail(error)
   const usable = ((valueRows ?? []) as RecordRow[])
     .filter((row) => !Boolean(row.is_voided) && asString(row.status) !== 'rejected' && row.stat_value != null)
@@ -2283,7 +2293,7 @@ function controlPlanFor(plans: IqcControlPlan[], analyteId: string, instrumentId
 async function assertAllLotAnalytesLockable(controlLotId: string) {
   const admin = getAdminClient()
   const [{ data: resultRows, error: resultError }, { data: specRows, error: specError }] = await Promise.all([
-    admin.from('iqc_result_values').select('analyte_id').eq('control_lot_id', controlLotId),
+    selectAll((from, to) => admin.from('iqc_result_values').select('analyte_id').eq('control_lot_id', controlLotId).order('id').range(from, to)),
     admin.from('iqc_control_specs').select('analyte_id').eq('control_lot_id', controlLotId),
   ])
   fail(resultError)
@@ -2311,7 +2321,7 @@ async function assertLegacyLockAllowed(controlLotId: string, analyteId: string) 
 async function assertLegacyLotLockAllowed(controlLotId: string) {
   const admin = getAdminClient()
   const [{ data: resultRows, error: resultError }, { data: specRows, error: specError }] = await Promise.all([
-    admin.from('iqc_result_values').select('analyte_id').eq('control_lot_id', controlLotId),
+    selectAll((from, to) => admin.from('iqc_result_values').select('analyte_id').eq('control_lot_id', controlLotId).order('id').range(from, to)),
     admin.from('iqc_control_specs').select('analyte_id').eq('control_lot_id', controlLotId),
   ])
   fail(resultError)
@@ -2416,7 +2426,7 @@ async function buildVlEvaluationPayload(controlLotId: string, override?: VlBasel
   const [{ data: analyteRows, error: analyteError }, { data: baselineRows, error: baselineError }, { data: valueRows, error: valueError }, { data: planRows, error: planError }] = await Promise.all([
     admin.from('iqc_analytes').select('*').ilike('code', '%-VL%'),
     admin.from('iqc_baselines').select('*').eq('control_lot_id', controlLotId).eq('state', 'approved'),
-    admin.from('iqc_result_values').select('id,run_id,analyte_id,numeric_value,stat_value,qualitative_value,z_score,status,is_voided,iqc_runs(run_datetime,instrument_id)').eq('control_lot_id', controlLotId),
+    selectAll((from, to) => admin.from('iqc_result_values').select('id,run_id,analyte_id,numeric_value,stat_value,qualitative_value,z_score,status,is_voided,iqc_runs(run_datetime,instrument_id)').eq('control_lot_id', controlLotId).order('id').range(from, to)),
     admin.from('iqc_control_plans').select('analyte_id,instrument_id,westgard_rules,policy_profile').eq('is_active', true),
   ])
   fail(analyteError)
@@ -2429,7 +2439,7 @@ async function buildVlEvaluationPayload(controlLotId: string, override?: VlBasel
   // in this table yet and remain included by default.
   const approvedBaselineIds = ((baselineRows ?? []) as RecordRow[]).map((row) => asString(row.id)).filter(Boolean)
   const { data: candidateRows, error: candidateError } = approvedBaselineIds.length
-    ? await admin.from('iqc_baseline_candidates').select('baseline_id,result_id,included').in('baseline_id', approvedBaselineIds)
+    ? await selectAll((from, to) => admin.from('iqc_baseline_candidates').select('baseline_id,result_id,included').in('baseline_id', approvedBaselineIds).order('id').range(from, to))
     : { data: [], error: null }
   fail(candidateError)
   const excludedResultIds = new Set(
@@ -2572,11 +2582,13 @@ async function recalculateChartStatuses(controlLotId: string, analyteId: string,
   const [{ data: analyteRow, error: analyteError }, { data: specRows, error: specError }, { data: valueRows, error: valueError }, { data: planRows, error: planError }] = await Promise.all([
     admin.from('iqc_analytes').select('*').eq('id', analyteId).maybeSingle(),
     admin.from('iqc_control_specs').select('*').eq('control_lot_id', controlLotId).eq('analyte_id', analyteId),
-    admin
+    selectAll((from, to) => admin
       .from('iqc_result_values')
       .select('id,stat_value,numeric_value,qualitative_value,is_voided,iqc_runs(run_datetime,instrument_id)')
       .eq('control_lot_id', controlLotId)
-      .eq('analyte_id', analyteId),
+      .eq('analyte_id', analyteId)
+      .order('id')
+      .range(from, to)),
     admin.from('iqc_control_plans').select('instrument_id,westgard_rules').eq('analyte_id', analyteId).eq('is_active', true),
   ])
   fail(analyteError)
