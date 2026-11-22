@@ -3,6 +3,7 @@
 import Image from 'next/image'
 import { useCallback, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { PenLine, Upload } from 'lucide-react'
 import { api, Button, Field, Input, Notice } from '@/components/ui'
 import { SignaturePad, type SignaturePadHandle } from '@/components/signature-pad'
 import { toSignaturePng } from '@/lib/signature-png'
@@ -11,6 +12,7 @@ import { toSignaturePng } from '@/lib/signature-png'
 export function SignatureSettings({ position, signature }: { position: string | null; signature: string | null }) {
   const router = useRouter()
   const pad = useRef<SignaturePadHandle | null>(null)
+  const fileInput = useRef<HTMLInputElement | null>(null)
   const [title, setTitle] = useState(position ?? '')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -39,8 +41,13 @@ export function SignatureSettings({ position, signature }: { position: string | 
       <div className="space-y-2 rounded-xl border border-[#d3e1e3] p-3"><p className="text-xs text-[#81979c]">ลายเซ็นปัจจุบัน</p>
         {signature ? <div className="grid justify-items-start gap-2"><Image src={signature} alt="ลายเซ็นปัจจุบันของคุณ" width={450} height={130} unoptimized className="h-auto max-h-24 w-auto rounded border border-[#d3e1e3] bg-white" /><Button type="button" variant="secondary" disabled={pending} onClick={() => { if (window.confirm('ลบลายเซ็นของคุณ?')) run(() => api('/api/vendors/signer', { method: 'DELETE' }), 'ลบลายเซ็นแล้ว') }}>ลบลายเซ็น</Button></div> : <p className="text-sm text-[#6a838c]">ยังไม่มีลายเซ็น</p>}</div>
       <SignaturePad label="เซ็นใหม่ด้วยนิ้วหรือปากกา" onReady={ready} />
-      <div className="flex flex-wrap gap-2"><Button type="button" disabled={pending} onClick={saveDrawn}>บันทึกลายเซ็นที่เซ็น</Button></div>
-      <label className="block"><span className="mb-1 block text-xs font-semibold text-[#58747d]">หรืออัปโหลดรูปลายเซ็น (PNG, JPG, WebP)</span><input className="block w-full text-sm" type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => { upload(e.target.files?.[0]); e.target.value = '' }} /></label></div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" disabled={pending} onClick={saveDrawn}><PenLine className="size-4" aria-hidden="true" /> บันทึกลายเซ็นที่เซ็น</Button>
+        <span className="text-xs text-[#81979c]">หรือ</span>
+        <Button type="button" variant="secondary" disabled={pending} onClick={() => fileInput.current?.click()}><Upload className="size-4" aria-hidden="true" /> อัปโหลดรูปลายเซ็น</Button>
+        <span className="text-xs text-[#81979c]">PNG, JPG หรือ WebP</span>
+        <input ref={fileInput} className="sr-only" type="file" tabIndex={-1} aria-hidden="true" accept="image/png,image/jpeg,image/webp" onChange={(e) => { upload(e.target.files?.[0]); e.target.value = '' }} />
+      </div></div>
     {message && <Notice tone="success">{message}</Notice>}{error && <Notice tone="danger">{error}</Notice>}
   </div>
 }
