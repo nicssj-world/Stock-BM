@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowDownToLine, ArrowUpFromLine, FileDown, History, MoveRight, PackageCheck, PackageSearch, Pencil, Printer, RotateCcw, X } from 'lucide-react'
+import { ArrowDownToLine, ArrowUpFromLine, FileDown, History, MoveRight, PackageCheck, PackageSearch, Pencil, Printer, RotateCcw, Trash2, X } from 'lucide-react'
 import type { BmActor, StockItem, StockLot, StockTransaction, StockWorkspace } from '@/lib/bm/types'
 import { formatDate, formatDateTime, formatQuantity } from '@/lib/bm/rules'
 import { stockItemMatchesVendor } from '@/lib/bm/stock-vendor-filter'
@@ -9,6 +9,7 @@ import { printLotLabel } from '@/lib/bm/label-print'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select } from '@/components/ui'
 import { Pagination, usePagination } from '@/components/pagination'
 import { StockMetric, StockMetricStrip, StockModuleShell, StockPanelTitle } from '@/components/stock-module-shell'
+import { DiscardExpiredDialog } from '@/components/discard-expired-dialog'
 
 const INVENTORY_PAGE_SIZE = 8
 
@@ -26,6 +27,7 @@ export function InventoryView({ actor, initialData, defaultLocationId }: { actor
   const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
   const [actionLot, setActionLot] = useState<{ item: StockItem; lot: StockLot } | null>(null)
   const [editLot, setEditLot] = useState<{ item: StockItem; lot: StockLot } | null>(null)
+  const [discardLot, setDiscardLot] = useState<{ item: StockItem; lot: StockLot } | null>(null)
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
 
   const visibleItems = useMemo(() => {
@@ -138,7 +140,8 @@ export function InventoryView({ actor, initialData, defaultLocationId }: { actor
         </div>
       </Card>
       {mobileDetailOpen && selectedItem ? <MobileItemDetailDrawer actor={actor} item={selectedItem} transactions={itemTransactions} locations={data.locations} onReverse={reverse} onLotAction={setActionLot} onEditLot={setEditLot} onClose={() => setMobileDetailOpen(false)} /> : null}
-      {actionLot ? <LotActionSheet actor={actor} item={actionLot.item} lot={actionLot.lot} locations={data.locations} onEdit={() => { setEditLot(actionLot); setActionLot(null) }} onClose={() => setActionLot(null)} /> : null}
+      {actionLot ? <LotActionSheet actor={actor} item={actionLot.item} lot={actionLot.lot} locations={data.locations} onEdit={() => { setEditLot(actionLot); setActionLot(null) }} onDiscard={() => { setDiscardLot(actionLot); setActionLot(null) }} onClose={() => setActionLot(null)} /> : null}
+      {discardLot ? <DiscardExpiredDialog item={discardLot.item} lot={discardLot.lot} onClose={() => setDiscardLot(null)} onDone={(stock, text) => { setData(stock); setDiscardLot(null); setNotice({ tone: 'success', text }) }} /> : null}
       {editLot ? <LotEditDialog item={editLot.item} lot={editLot.lot} onClose={() => setEditLot(null)} onSaved={(stock) => { setData(stock); setEditLot(null); setNotice({ tone: 'success', text: 'แก้ไข Lot และวันหมดอายุทั้งระบบแล้ว' }) }} onError={(text) => setNotice({ tone: 'danger', text })} /> : null}
     </StockModuleShell>
   )
@@ -268,7 +271,7 @@ function LotCard({ actor, lot, item, locations, onLotAction, onEditLot }: { acto
   </div>
 }
 
-function LotActionSheet({ actor, item, lot, locations, onEdit, onClose }: { actor: BmActor; item: StockItem; lot: StockLot; locations: StockWorkspace['locations']; onEdit: () => void; onClose: () => void }) {
+function LotActionSheet({ actor, item, lot, locations, onEdit, onDiscard, onClose }: { actor: BmActor; item: StockItem; lot: StockLot; locations: StockWorkspace['locations']; onEdit: () => void; onDiscard: () => void; onClose: () => void }) {
   const firstLocationId = lot.balances[0]?.locationId
   const firstLocation = locations.find((location) => location.id === firstLocationId)
   const issueHref = `/movements?mode=issue&lotId=${lot.id}${firstLocationId ? `&locationId=${firstLocationId}` : ''}`
@@ -292,6 +295,7 @@ function LotActionSheet({ actor, item, lot, locations, onEdit, onClose }: { acto
           <button type="button" onClick={onClose} className="flex size-9 shrink-0 items-center justify-center rounded-md text-[#789097] hover:bg-[#eef5f4]"><X className="size-5" /></button>
         </div>
         <div className="grid gap-2 p-3">
+          {lot.expiryState === 'expired' && lot.totalOnHand > 0 ? <Button variant="danger" className="h-12 w-full" onClick={onDiscard}><Trash2 className="size-4" /> ตัดทิ้ง (หมดอายุ) ทั้ง lot</Button> : null}
           {actor.role === 'Admin' ? <Button variant="secondary" className="h-12 w-full" onClick={onEdit}><Pencil className="size-4" /> แก้ไข Lot / Expiry ทั้งระบบ</Button> : null}
           <Button className="h-12 w-full" onClick={() => { window.location.href = issueHref }}><ArrowUpFromLine className="size-4" /> ตัด stock / Issue</Button>
           <Button variant="secondary" className="h-12 w-full" onClick={() => { window.location.href = moveHref }}><MoveRight className="size-4" /> ย้ายที่ / Move</Button>

@@ -961,6 +961,52 @@ export async function quickIssueByCode(code: string, actor: BmActor): Promise<{ 
   }
 }
 
+export const EXPIRED_DISCARD_PURPOSE = 'ทิ้ง — หมดอายุ'
+
+// Write off every remaining unit of an expired lot in one step: one issue
+// transaction per location through the normal issue RPC, so balances, the ledger
+// and the audit trail look exactly like a manual issue of expired stock.
+export async function discardExpiredLot(lotId: string, input: { note?: string | null }, actor: BmActor) {
+  const stock = await getStockWorkspace(actor)
+  const item = stock.items.find((candidate) => candidate.lots.some((lot) => lot.id === lotId))
+  const lot = item?.lots.find((candidate) => candidate.id === lotId)
+  if (!item || !lot) throw new HttpError(404, 'ไม่พบ lot')
+  if (lot.expiryState !== 'expired') throw new HttpError(409, `Lot ${lot.lotNumber} ยังไม่หมดอายุ`)
+  const balances = lot.balances.filter((balance) => balance.onHand > 0)
+  if (!balances.length) throw new HttpError(409, `Lot ${lot.lotNumber} ไม่มียอดคงเหลือแล้ว`)
+  const admin = getAdminClient()
+  const results: { locationCode: string; quantity: number; ok: boolean; error?: string }[] = []
+  for (const balance of balances) {
+    const { data, error } = await admin.rpc('issue_bm_stock', {
+      p_lot: lotId,
+      p_location: balance.locationId,
+      p_quantity: balance.onHand,
+      p_purpose_text: EXPIRED_DISCARD_PURPOSE,
+      p_reference_text: null,
+      p_note: clean(input.note),
+      p_override_reason: 'ตัดทิ้ง lot หมดอายุ',
+      p_expired_confirmed: true,
+      p_actor: actor.id,
+    })
+    if (error) {
+      results.push({ locationCode: balance.locationCode, quantity: balance.onHand, ok: false, error: error.message })
+      continue
+    }
+    await writeAudit(actor, 'stock.discardExpired', 'stock-transaction', asString(data), {
+      lotId,
+      lotNumber: lot.lotNumber,
+      itemCode: item.itemCode,
+      locationId: balance.locationId,
+      quantity: balance.onHand,
+      note: clean(input.note),
+    })
+    results.push({ locationCode: balance.locationCode, quantity: balance.onHand, ok: true })
+  }
+  const failed = results.filter((result) => !result.ok)
+  if (failed.length === results.length) throw new HttpError(400, failed[0]?.error || 'ตัดทิ้งไม่สำเร็จ')
+  return { stock: await getStockWorkspace(actor), results }
+}
+
 // Batch issue: one ledger transaction per line (the issue RPC is per-lot). Lines are
 // independent — a failure on one does not roll back others; results report per line.
 export async function issueBatch(input: {
