@@ -22,7 +22,7 @@ export const PRINT_SHEET_CSS = `
   .sheet-grid th { background: #f1f4f5; font-weight: 700; text-align: left; }
   .sheet-grid th.num { text-align: right; }
   .sheet-grid th.center { text-align: center; }
-  .sheet-grid.fixed { table-layout: fixed; }
+  .sheet-grid.sheet-fixed { table-layout: fixed; }
   .num { text-align: right; font-variant-numeric: tabular-nums; font-family: "IBM Plex Mono", ui-monospace, monospace; }
   .center { text-align: center; }
   .bad { color: #a40012; font-weight: 700; }

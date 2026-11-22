@@ -37,7 +37,7 @@ function PrecisionRaw({ study }: { study: MethodVerifStudy }) {
     <>
       <h2>ภาคผนวก ก: ผล Precision รายวัน</h2>
       {levels.map((level, index) => (
-        <table key={index} className="sheet-grid fixed" style={{ marginTop: 6 }}>
+        <table key={index} className="sheet-grid sheet-fixed" style={{ marginTop: 6 }}>
           <thead>
             <tr><th>{level.label}</th>{Array.from({ length: replicates }, (_, r) => <th key={r} className="num">ซ้ำ {r + 1}</th>)}</tr>
           </thead>
