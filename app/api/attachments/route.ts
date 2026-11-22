@@ -18,6 +18,7 @@ const MODULES: AttachmentModule[] = [
   "lotverif",
   "hpv",
   "equipment",
+  "instcomp",
 ];
 const MAX_BYTES = 15 * 1024 * 1024;
 const EQA_CERTIFICATE_READY_STATUSES = new Set(["submitted", "evaluated", "closed"]);

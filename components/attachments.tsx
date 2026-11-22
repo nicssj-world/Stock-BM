@@ -5,7 +5,7 @@ import Image from 'next/image'
 import { Download, Eye, FileUp, Loader2, Paperclip, Trash2, X } from 'lucide-react'
 import { api } from '@/components/ui'
 
-type AttachmentModule = 'iqc' | 'eqa' | 'stock' | 'env' | 'lotverif' | 'hpv' | 'equipment'
+type AttachmentModule = 'iqc' | 'eqa' | 'stock' | 'env' | 'lotverif' | 'hpv' | 'equipment' | 'instcomp'
 
 interface Attachment {
   id: string

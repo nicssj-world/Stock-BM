@@ -8,7 +8,7 @@ import { getAdminClient } from "@/lib/supabase/admin";
 const BUCKET = "bm-quality";
 
 export type AttachmentModule =
-  "iqc" | "eqa" | "stock" | "env" | "lotverif" | "hpv" | "equipment";
+  "iqc" | "eqa" | "stock" | "env" | "lotverif" | "hpv" | "equipment" | "instcomp";
 
 export interface AttachmentRecord {
   id: string;
