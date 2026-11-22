@@ -30,7 +30,7 @@ function ParallelSection({ v }: { v: LotVerification }) {
     <>
       <h2>ผล Parallel comparison · {v.parallelAnalyteCode ?? '—'}{v.parallelAnalyteName ? ` (${v.parallelAnalyteName})` : ''}</h2>
       <p className="muted">ผลวัดกรอกเป็น {unit || 'ค่าผลตรวจ'}; {scale === 'log10' ? 'แปลงเป็น log10 ก่อนคำนวณ' : 'คำนวณในสเกล linear'} · Mean/SD ของ Control อยู่ในสเกล {scale}</p>
-      <table className="grid">
+      <table className="sheet-grid">
         <thead>
           <tr>
             <th className="center">Level</th>
@@ -65,7 +65,7 @@ function ParallelSection({ v }: { v: LotVerification }) {
         </tbody>
       </table>
       {summary ? (
-        <table className="grid" style={{ marginTop: 8 }}>
+        <table className="sheet-grid" style={{ marginTop: 8 }}>
           <tbody>
             <tr><th>Mean Lot เดิม (Xc)</th><td className="num">{num(summary.currentMean)}</td><th>Mean Lot ใหม่ (Xn)</th><td className="num">{num(summary.newMean)}</td></tr>
             <tr><th>Mean รวม (Xb)</th><td className="num">{num(summary.allSampleMean)}</td><th>CV ที่ใช้ (level {summary.selectedLevel ?? '—'})</th><td className="num">{summary.selectedCvPercent == null ? '—' : `${summary.selectedCvPercent.toFixed(2)}%`}</td></tr>
@@ -84,7 +84,7 @@ function MeasurementSection({ v }: { v: LotVerification }) {
   return (
     <>
       <h2>ผลเปรียบเทียบ ({v.measurements.length} รายการ)</h2>
-      <table className="grid">
+      <table className="sheet-grid">
         <thead>
           <tr>
             <th>Analyte / ตัวอย่าง</th>

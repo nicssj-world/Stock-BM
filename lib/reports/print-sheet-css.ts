@@ -17,9 +17,9 @@ export const PRINT_SHEET_CSS = `
   .info { width: 100%; border-collapse: collapse; }
   .info th { text-align: left; font-weight: 700; width: 26%; padding: 2px 6px 2px 0; vertical-align: top; }
   .info td { padding: 2px 0; vertical-align: top; }
-  .grid { width: 100%; border-collapse: collapse; table-layout: auto; }
-  .grid th, .grid td { border: 1px solid #333; padding: 3px 5px; vertical-align: top; }
-  .grid th { background: #f1f4f5; font-weight: 700; text-align: left; }
+  .sheet-grid { width: 100%; border-collapse: collapse; table-layout: auto; }
+  .sheet-grid th, .sheet-grid td { border: 1px solid #333; padding: 3px 5px; vertical-align: top; }
+  .sheet-grid th { background: #f1f4f5; font-weight: 700; text-align: left; }
   .num { text-align: right; font-variant-numeric: tabular-nums; font-family: "IBM Plex Mono", ui-monospace, monospace; }
   .center { text-align: center; }
   .bad { color: #a40012; font-weight: 700; }

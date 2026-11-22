@@ -88,7 +88,7 @@ export default async function InstrumentComparisonReportPage({ params }: { param
         </table>
 
         <h2>สรุปสถิติ</h2>
-        <table className="grid">
+        <table className="sheet-grid">
           <tbody>
             <tr><th>จำนวนตัวอย่างทั้งหมด</th><td className="num">{summary.totalRows}</td><th>คู่เชิงปริมาณ (n)</th><td className="num">{summary.quantitativeN}</td></tr>
             <tr><th>Bias เฉลี่ย ({unit})</th><td className="num">{signed(summary.meanBias)}</td><th>SD ของผลต่าง ({unit})</th><td className="num">{fmt(summary.sdDifference)}</td></tr>
@@ -132,7 +132,7 @@ export default async function InstrumentComparisonReportPage({ params }: { param
 
       <section className="sheet sheet-break">
         <h2 style={{ marginTop: 0 }}>ภาคผนวก: ผลตัวอย่างรายคู่ ({pairs.length} ราย)</h2>
-        <table className="grid">
+        <table className="sheet-grid">
           <thead>
             <tr>
               <th className="center">#</th>

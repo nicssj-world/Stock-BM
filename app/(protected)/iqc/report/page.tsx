@@ -171,7 +171,7 @@ function ChartSection({ item, monthLabel }: { item: MonthChart; monthLabel: stri
         </figure>
       </div>
 
-      <table className="grid" style={{ marginTop: 8 }}>
+      <table className="sheet-grid" style={{ marginTop: 8 }}>
         <tbody>
           <tr>
             <th>สถิติเดือนนี้ (ไม่รวม void)</th>
@@ -191,7 +191,7 @@ function ChartSection({ item, monthLabel }: { item: MonthChart; monthLabel: stri
       </table>
 
       <h2>ผล QC รายจุด</h2>
-      <table className="grid">
+      <table className="sheet-grid">
         <thead>
           <tr>
             <th>วันเวลา</th>
@@ -220,7 +220,7 @@ function ChartSection({ item, monthLabel }: { item: MonthChart; monthLabel: stri
 
       <h2>Corrective action ในเดือนนี้</h2>
       {item.actions.length ? (
-        <table className="grid">
+        <table className="sheet-grid">
           <thead><tr><th>วันที่</th><th>ปัญหา</th><th>สาเหตุ / การแก้ไข</th><th>สถานะ</th></tr></thead>
           <tbody>
             {item.actions.map((action) => (
@@ -327,7 +327,7 @@ export default async function IqcMonthlyReportPage({ searchParams }: { searchPar
       <section className="sheet">
         <h1>รายงานการควบคุมคุณภาพภายใน (IQC) ประจำเดือน</h1>
         <p className="subhead">{REPORT_SUBHEAD} · เดือน{thaiMonth(month)}</p>
-        <table className="grid">
+        <table className="sheet-grid">
           <thead><tr><th>Analyte</th><th>Control / Lot</th><th>เครื่อง</th><th className="num">จุด</th><th className="num">Reject</th><th className="num">เตือน/ตรวจสอบ</th><th className="num">CA</th></tr></thead>
           <tbody>
             {items.length ? items.map((item) => (
