@@ -103,6 +103,13 @@ export async function getInstCompWorkspace(actor: BmActor): Promise<InstCompWork
   }
 }
 
+export async function getInstCompStudy(id: string, actor: BmActor): Promise<InstCompStudy> {
+  const workspace = await getInstCompWorkspace(actor)
+  const study = workspace.studies.find((candidate) => candidate.id === id)
+  if (!study) throw new HttpError(404, 'ไม่พบรายการเปรียบเทียบเครื่อง')
+  return study
+}
+
 export interface InstCompStudyInput {
   title: string
   testName: string

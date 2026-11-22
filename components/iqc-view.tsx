@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { AlertTriangle, CalendarClock, Calculator, ChevronDown, ClipboardList, Eye, Gauge, Layers3, Lock, LineChart, ListFilter, PlusCircle, Printer, Search, Settings, Sigma, Trash2, Wrench } from 'lucide-react'
+import { AlertTriangle, CalendarClock, Calculator, ChevronDown, ClipboardList, Eye, FileSpreadsheet, Gauge, Layers3, Lock, LineChart, ListFilter, PlusCircle, Printer, Search, Settings, Sigma, Trash2, Wrench } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import { LAB_LOCK_MIN_POINTS, type IqcCorrectiveAction, type IqcUncertaintyBudget, type IqcWorkspace } from '@/lib/iqc/types'
 import { findCorrectiveActionForPoint, runsWithoutCorrectiveActions } from '@/lib/iqc/corrective-actions'
@@ -131,7 +131,17 @@ export function IqcView({ actor, initialData, initialTab = 'enter', initialSetup
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-5">
-      <PageHeader eyebrow="Internal Quality Control" title="IQC" description="Levey-Jennings, Westgard rules, ควบคุมคุณภาพภายในต่อ analyte / control lot" />
+      <PageHeader
+        eyebrow="Internal Quality Control"
+        title="IQC"
+        description="Levey-Jennings, Westgard rules, ควบคุมคุณภาพภายในต่อ analyte / control lot"
+        actions={(
+          <div className="flex flex-wrap gap-2">
+            <a href="/api/iqc/export" title="ผล IQC ย้อนหลัง 12 เดือน" className="inline-flex min-h-10 items-center gap-1.5 rounded-md border border-[#b8c8cc] bg-white px-3 py-2 text-sm font-bold text-[#173d50] hover:bg-[#f4f8f8]"><FileSpreadsheet className="size-4" /> Export Excel</a>
+            <Link href="/iqc/report" className="inline-flex min-h-10 items-center gap-1.5 rounded-md border border-[#b8c8cc] bg-white px-3 py-2 text-sm font-bold text-[#173d50] hover:bg-[#f4f8f8]"><Printer className="size-4" /> รายงานประจำเดือน</Link>
+          </div>
+        )}
+      />
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
 
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
@@ -637,7 +647,8 @@ function ChartsOverviewTab({ data, allCharts, testSet, isAdmin, onOk, onErr, onO
             <>
               <LjChart chart={selectedChart} selectedResultId={selectedPointId} onPointSelect={(point) => setSelectedPointId(point.resultId)} />
               {selectedPoint ? <PointDetailCard key={`${selectedChart.key}:${selectedPoint.resultId}`} chart={selectedChart} point={selectedPoint} run={selectedRun} result={selectedRunResult} correctiveAction={linkedCorrectiveAction} busy={busy === `point:${selectedPoint.resultId}`} onVoid={(reason, dataEntryError) => voidPoint(selectedPoint.resultId, reason, dataEntryError)} onStartCorrectiveAction={onStartCorrectiveAction} onOpenCorrectiveAction={onOpenCorrectiveAction} /> : null}
-              <div className="flex justify-end">
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                  <Link href={`/iqc/report?chart=${encodeURIComponent(selectedChart.key)}`} className="inline-flex items-center gap-1 rounded-full border border-[#b8c8cc] bg-white px-2.5 py-1 text-xs font-bold text-[#173d50] hover:bg-[#f4f8f8]"><Printer className="size-3.5" /> พิมพ์รายงานเดือนนี้</Link>
                   <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-bold ${selectedChart.policyProfile === 'vl-standard-v1' ? selectedChart.baselineId ? 'border-[#bfe3cf] bg-[#f1fbf4] text-[#18763a]' : 'border-[#d2dee0] bg-[#f6f9f9] text-[#5b7681]' : selectedChart.labLockedAt ? 'border-[#bfe3cf] bg-[#f1fbf4] text-[#18763a]' : 'border-[#eed4a6] bg-[#fff9ed] text-[#a9700f]'}`}>
                     <Lock className="size-3.5" /> {selectedChart.policyProfile === 'vl-standard-v1' ? selectedChart.baselineId ? 'QC baseline approved' : 'รอ QC baseline' : selectedChart.labLockedAt ? 'Lab mean/SD locked' : 'Not locked - use lot action'}
                 </span>

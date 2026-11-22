@@ -1035,3 +1035,10 @@ export async function deleteVerification(id: string, actor: BmActor): Promise<vo
     title: nullableString((verification as RecordRow).title),
   })
 }
+
+export async function getLotVerification(id: string, actor: BmActor): Promise<LotVerification> {
+  const workspace = await getLotVerifWorkspace(actor)
+  const verification = workspace.verifications.find((candidate) => candidate.id === id)
+  if (!verification) throw new HttpError(404, 'ไม่พบรายการ lot verification')
+  return verification
+}

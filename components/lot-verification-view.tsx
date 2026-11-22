@@ -3,10 +3,11 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { AlertTriangle, CheckCircle2, ChevronDown, GitCompareArrows, Pencil, Plus, Search, Settings2, Trash2, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronDown, FileSpreadsheet, GitCompareArrows, Pencil, Plus, Printer, Search, Settings2, Trash2, X } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { LotVerification, LotVerifParallelRow, LotVerifStatus, LotVerifWorkspace } from '@/lib/lotverif/types'
 import { calculateParallelComparison } from '@/lib/lotverif/compare'
+import { LOTVERIF_METHOD_LABEL, LOTVERIF_STATUS_LABEL, parallelReasonLabel } from '@/lib/lotverif/labels'
 import { formatDate } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, type StatusTone, Textarea } from '@/components/ui'
 import { AttachmentList } from '@/components/attachments'
@@ -19,21 +20,10 @@ const STATUS_TONE: Record<LotVerifStatus, StatusTone> = {
   released: 'accepted',
   rejected: 'rejected',
 }
-const STATUS_LABEL: Record<LotVerifStatus, string> = {
-  draft: 'ร่าง',
-  'in-progress': 'กำลังทำ',
-  passed: 'ผ่าน',
-  failed: 'ไม่ผ่าน',
-  released: 'อนุมัติใช้',
-  rejected: 'ปฏิเสธ',
-}
+const STATUS_LABEL = LOTVERIF_STATUS_LABEL
 
 const FOLLOW_UP_STATUSES: LotVerifStatus[] = ['draft', 'in-progress', 'passed', 'failed']
-const METHOD_LABEL: Record<LotVerification['method'], string> = {
-  'parallel-comparison': 'Parallel comparison (เทียบผลเดิม/ใหม่)',
-  'qc-acceptance': 'QC acceptance (ประเมินผล QC)',
-  'patient-comparison': 'Patient comparison (เทียบตัวอย่างผู้ป่วย)',
-}
+const METHOD_LABEL = LOTVERIF_METHOD_LABEL
 const METHOD_HELP: Record<LotVerification['method'], string> = {
   'parallel-comparison': 'เลือก Analyte แล้วกรอกผลที่วัดจาก Lot เดิมและ Lot ใหม่ โดยใช้ Control levels ประกอบการคำนวณ ต้องบันทึกอย่างน้อย 2 จาก 3 levels',
   'qc-acceptance': 'บันทึกผลและเกณฑ์ QC ตาม SOP ของห้องปฏิบัติการ วิธีนี้ไม่ใช้ Parallel index',
@@ -108,7 +98,7 @@ export function LotVerificationView({ actor, initialData }: { actor: BmActor; in
         eyebrow="Monitoring"
         title="Lot-to-lot verification"
         description="สร้างรายการ → บันทึกผล → สรุปผ่าน/ไม่ผ่าน → ผู้ดูแลระบบอนุมัติใช้"
-        actions={<Button onClick={() => setCreating((v) => !v)}>{creating ? <X className="size-4" /> : <Plus className="size-4" />} {creating ? 'ปิดฟอร์ม' : 'สร้าง verification'}</Button>}
+        actions={<div className="flex flex-wrap gap-2"><a href="/api/lot-verification/export" className="inline-flex min-h-10 items-center gap-1.5 rounded-md border border-[#b8c8cc] bg-white px-3 py-2 text-sm font-bold text-[#173d50] hover:bg-[#f4f8f8]"><FileSpreadsheet className="size-4" /> Export Excel</a><Button onClick={() => setCreating((v) => !v)}>{creating ? <X className="size-4" /> : <Plus className="size-4" />} {creating ? 'ปิดฟอร์ม' : 'สร้าง verification'}</Button></div>}
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -529,6 +519,11 @@ function VerificationCard({ verification: v, data, actor, initialExpanded, onCha
             <AttachmentList module="lotverif" entityType="verification" entityId={v.id} kind="verification-report" canDelete={isAdmin} label="รายงาน / CoA" />
           </div>
 
+          <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+            {parallelDraftDirty ? <span className="text-xs text-[#a9700f]">รายงานใช้ข้อมูลที่บันทึกแล้วเท่านั้น</span> : null}
+            <Link href={`/lot-verification/report/${v.id}`} className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[#b8c8cc] bg-white px-3 py-1.5 text-xs font-bold text-[#173d50] hover:bg-[#f4f8f8]"><Printer className="size-4" /> พิมพ์รายงาน</Link>
+          </div>
+
           {canChangeStatus ? (
             <div className="mt-3 border-t border-[#eef3f3] pt-3">
               <div className="space-y-2">
@@ -615,16 +610,6 @@ function asNullableNumber(value: string) {
 
 function displayParallelNumber(value: number | null, digits = 3) {
   return value == null || !Number.isFinite(value) ? '—' : value.toFixed(digits)
-}
-
-function parallelReasonLabel(reason: NonNullable<LotVerification['parallelSummary']>['reason']) {
-  if (reason === 'insufficient-levels') return 'ต้องมีข้อมูลอย่างน้อย 2 level'
-  if (reason === 'incomplete-level') return 'ผลเดิม/ผลใหม่ของบาง level ไม่ครบ'
-  if (reason === 'invalid-control-stats') return 'Mean/SD ของ Control ไม่ถูกต้อง'
-  if (reason === 'invalid-log-value') return 'ค่า Viral load ต้องมากกว่า 0'
-  if (reason === 'invalid-denominator') return 'ตัวหารคำนวณไม่ได้หรือเป็นศูนย์'
-  if (reason === 'invalid-criteria') return 'เกณฑ์ไม่ถูกต้อง'
-  return 'คำนวณแล้ว'
 }
 
 function ParallelComparisonPanel({
