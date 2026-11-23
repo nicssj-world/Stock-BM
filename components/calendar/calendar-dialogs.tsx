@@ -77,7 +77,7 @@ export function EntryDialog({
   const showForm = Boolean(draft && (!draft.id || editing))
   const title = !draft?.id ? 'ลงรายการ' : editing ? 'แก้ไขรายการ' : 'รายละเอียด'
   return (
-    <Modal open={Boolean(draft)} onClose={onClose} title={title} labelId={labelId}>
+    <Modal open={Boolean(draft)} onClose={onClose} title={title} labelId={labelId} dismissOnBackdrop={!showForm}>
       {draft && showForm ? (
         <EntryForm key={draft.id ?? `new-${draft.startDate}`} draft={draft} onClose={draft.id ? () => setEditing(false) : onClose} actor={actor} today={today} types={types} users={users} onSaved={onSaved} onDeleted={onDeleted} />
       ) : null}
@@ -433,16 +433,23 @@ type TypeDraft = {
 
 export function TypeDialog({ open, onClose, types, onChanged }: { open: boolean; onClose: () => void; types: CalendarType[]; onChanged: (types: CalendarType[]) => void }) {
   const labelId = useId()
+  const [editing, setEditing] = useState(false)
+  function close() {
+    setEditing(false)
+    onClose()
+  }
   return (
-    <Modal open={open} onClose={onClose} title="ประเภทรายการ" labelId={labelId}>
-      <TypePanel types={types} onChanged={onChanged} />
+    <Modal open={open} onClose={close} title="ประเภทรายการ" labelId={labelId} dismissOnBackdrop={!editing}>
+      <TypePanel types={types} onChanged={onChanged} onEditingChange={setEditing} />
     </Modal>
   )
 }
 
 /** Mounted only while the dialog is open, so its draft resets every time. */
-function TypePanel({ types, onChanged }: { types: CalendarType[]; onChanged: (types: CalendarType[]) => void }) {
+function TypePanel({ types, onChanged, onEditingChange }: { types: CalendarType[]; onChanged: (types: CalendarType[]) => void; onEditingChange: (editing: boolean) => void }) {
   const [draft, setDraft] = useState<TypeDraft | null>(null)
+  const isEditing = draft !== null
+  useEffect(() => onEditingChange(isEditing), [isEditing, onEditingChange])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 

@@ -3,8 +3,25 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 
-/** Native <dialog>: focus trap, Escape and backdrop come from the browser. Bottom sheet on phones (calendar.css). */
-export function Modal({ open, onClose, title, children, labelId }: { open: boolean; onClose: () => void; title: string; children: ReactNode; labelId: string }) {
+/**
+ * Native <dialog>: focus trap, Escape and backdrop come from the browser. Bottom sheet on phones (calendar.css).
+ * `dismissOnBackdrop={false}` while a form is being filled, so a stray click outside never discards it.
+ */
+export function Modal({
+  open,
+  onClose,
+  title,
+  children,
+  labelId,
+  dismissOnBackdrop = true,
+}: {
+  open: boolean
+  onClose: () => void
+  title: string
+  children: ReactNode
+  labelId: string
+  dismissOnBackdrop?: boolean
+}) {
   const ref = useRef<HTMLDialogElement>(null)
 
   useEffect(() => {
@@ -21,7 +38,7 @@ export function Modal({ open, onClose, title, children, labelId }: { open: boole
       aria-labelledby={labelId}
       onClose={onClose}
       onClick={(event) => {
-        if (event.target === event.currentTarget) onClose()
+        if (dismissOnBackdrop && event.target === event.currentTarget) onClose()
       }}
     >
       {open ? (
