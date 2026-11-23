@@ -80,6 +80,8 @@ export const THAI_DAYS_SHORT = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 
 export const THAI_MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม']
 export const THAI_MONTHS_SHORT = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
 export const DAY_PART_LABEL: Record<DayPart, string> = { full: 'ทั้งวัน', am: 'เช้า', pm: 'บ่าย' }
+/** Sort rank within a day: whole-day first, then morning, then afternoon. */
+export const DAY_PART_ORDER: Record<DayPart, number> = { full: 0, am: 1, pm: 2 }
 export const KIND_LABEL: Record<CalendarKind, string> = { duty: 'เวร/หน้าที่', leave: 'การลา', other: 'กิจกรรม' }
 
 export function thaiShortDate(dateKey: string) {
@@ -242,7 +244,7 @@ export function digestSections(today: string, days: DigestDay[]): DigestSection[
     const entries = relevantEntries(day)
     if (!entries.length) continue
     const groups = new Map<string, DigestEntry[]>()
-    for (const entry of [...entries].sort((a, b) => order[a.kind] - order[b.kind] || a.sortOrder - b.sortOrder || a.userName.localeCompare(b.userName, 'th'))) {
+    for (const entry of [...entries].sort((a, b) => order[a.kind] - order[b.kind] || a.sortOrder - b.sortOrder || a.typeName.localeCompare(b.typeName, 'th') || DAY_PART_ORDER[a.dayPart] - DAY_PART_ORDER[b.dayPart] || a.userName.localeCompare(b.userName, 'th'))) {
       groups.set(entry.typeName, [...(groups.get(entry.typeName) ?? []), entry])
     }
     sections.push({

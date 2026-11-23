@@ -153,6 +153,14 @@ describe('heads-up digest (sent the workday before)', () => {
     expect(message).toBe('📅 แจ้งล่วงหน้า\n\nพรุ่งนี้ · พฤหัสบดี 19 พ.ย.\n🩸 เวรเจาะเลือด: เจ\n💼 ลากิจ: เมย์ (บ่าย)\n🤒 ลาป่วย: บอม')
   })
 
+  it('lists morning before afternoon within a type', () => {
+    const base: DigestEntry = { typeName: 'ประชุม / อบรม', iconKey: 'presentation', colorKey: 'violet', kind: 'other', sortOrder: 50, userName: 'ก', dayPart: 'pm' }
+    const pm = { ...base, userName: 'ก', dayPart: 'pm' as const }
+    const am = { ...base, userName: 'ข', dayPart: 'am' as const }
+    const message = buildDigestMessage('2026-11-25', [{ date: '2026-11-26', isOffDay: false, holidayName: null, entries: [pm, am] }])
+    expect(message).toContain('ข (เช้า), ก (บ่าย)')
+  })
+
   it('adds the title after the person but never the note', () => {
     const meeting: DigestEntry = { typeName: 'ประชุม / อบรม', iconKey: 'presentation', colorKey: 'violet', kind: 'other', sortOrder: 50, userName: 'เมย์', dayPart: 'pm', title: 'ประชุม QC' }
     const training: DigestEntry = { ...meeting, userName: 'บอม', dayPart: 'full', title: 'อบรม ISO 15189' }

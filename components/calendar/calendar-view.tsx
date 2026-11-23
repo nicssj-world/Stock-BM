@@ -10,6 +10,7 @@ import {
   covers,
   dayOfWeek,
   DAY_PART_LABEL,
+  DAY_PART_ORDER,
   eachDay,
   isWeekend,
   KIND_LABEL,
@@ -143,6 +144,8 @@ export function CalendarView({
           return (
             KIND_ORDER[ta?.kind ?? 'other'] - KIND_ORDER[tb?.kind ?? 'other'] ||
             (ta?.sortOrder ?? 0) - (tb?.sortOrder ?? 0) ||
+            a.typeId.localeCompare(b.typeId) ||
+            DAY_PART_ORDER[a.dayPart] - DAY_PART_ORDER[b.dayPart] ||
             a.userName.localeCompare(b.userName, 'th')
           )
         }),
