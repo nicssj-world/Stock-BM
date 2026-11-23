@@ -42,11 +42,13 @@ describe('EQA clickable readiness navigation', () => {
     expect(shared).toContain("type === 'round-receipt' ? ['analyst', 'technical-manager'] : APPROVAL_ROLES")
   })
 
-  it('hides the add-result form after submission and edits a result in its own row', () => {
+  it('edits the whole result table in place and saves it in one request, adding rows only until submission', () => {
+    const resultsTable = fs.readFileSync(new URL('./eqa/results-table.tsx', import.meta.url), 'utf8')
     expect(roundsTab).toContain("const canAddResults = statusIndex <= roundStatusIndex('submitted')")
-    expect(roundsTab).toContain('{!editingResult && canAddResults ? <form')
-    expect(roundsTab).toContain("const isEditing = editingResult?.id === result.id")
-    expect(roundsTab).toContain('onClick={() => saveResult()}')
+    expect(roundsTab).toContain('canAddRows={canAddResults}')
+    expect(resultsTable).toContain('{canAddRows ? <Button')
+    expect(resultsTable).toContain("/results`, { method: 'PUT'")
+    expect(server).toContain("if (inserts.length && ROUND_STATUS_ORDER.indexOf(")
   })
 
   it('allows an EQA result to be explicitly linked to the IQC analyte used for Six Sigma bias', () => {

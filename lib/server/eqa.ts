@@ -605,7 +605,7 @@ export async function updateRoundReceipt(id: string, input: EqaRoundReceiptInput
     update.scheme_id = asString((item as RecordRow).scheme_id)
   }
   fail((await admin.from('eqa_rounds').update(update).eq('id', id)).error)
-  const savedRound = (await getEqaWorkspace(actor)).rounds.find((round) => round.id === id)
+  const savedRound = await roundReadinessSnapshot(admin, id)
   // A partial receipt can be saved as a draft, but results should not appear
   // until the receipt fields themselves are complete. Result-code/value gaps
   // are intentionally ignored here because they belong to the next step.
@@ -622,6 +622,27 @@ export async function updateRoundReceipt(id: string, input: EqaRoundReceiptInput
   }
   await writeAudit(actor, 'eqa.round.receipt.update', 'eqa-round', id, { ...input }); return getEqaWorkspace(actor)
 }
+// The receipt fields and sample results that readiness checks need, read for
+// one round only -- instead of rebuilding the whole workspace mid-save.
+async function roundReadinessSnapshot(admin: ReturnType<typeof getAdminClient>, id: string) {
+  const [{ data: row, error }, { data: results, error: resultsError }] = await Promise.all([
+    admin.from('eqa_rounds').select('*').eq('id', id).maybeSingle(),
+    admin.from('eqa_results').select('sample_code,submitted_value,outcome').eq('round_id', id),
+  ])
+  fail(error); fail(resultsError); if (!row) return null
+  const r = row as RecordRow
+  return {
+    id, planItemId: nullableString(r.plan_item_id), externalSentDate: nullableString(r.external_sent_date), sampleReceivedDate: nullableString(r.sample_received_date),
+    packageCondition: nullableString(r.package_condition) as EqaCondition | null, packageNote: nullableString(r.package_note),
+    receivedTemperature: nullableString(r.received_temperature) as EqaTemperatureCondition | null, receivedTemperatureNote: nullableString(r.received_temperature_note),
+    sampleCondition: nullableString(r.sample_condition) as EqaCondition | null, sampleConditionNote: nullableString(r.sample_condition_note),
+    storageCondition: nullableString(r.storage_condition) as EqaTemperatureCondition | null, storageTemperatureC: nullableNumber(r.storage_temperature_c), storageNote: nullableString(r.storage_note),
+    specimenType: nullableString(r.specimen_type), receiverId: nullableString(r.receiver_id), analystId: nullableString(r.analyst_id), analysisDate: nullableString(r.analysis_date),
+    submissionDate: nullableString(r.submission_date), submissionMethod: nullableString(r.submission_method),
+    results: (results as RecordRow[]).map((result) => ({ sampleCode: nullableString(result.sample_code), submittedValue: nullableString(result.submitted_value), outcome: asString(result.outcome) as EqaOutcome })) as EqaRound['results'],
+  }
+}
+
 async function syncRoundSummary(admin: ReturnType<typeof getAdminClient>, roundId: string) {
   const { data, error } = await admin.from('eqa_results').select('outcome').eq('round_id', roundId)
   fail(error)
@@ -635,9 +656,9 @@ export async function confirmRoundEvaluation(id: string, input: { summaryNote?: 
   const { data: round, error: roundError } = await admin.from('eqa_rounds').select('status').eq('id', id).maybeSingle()
   fail(roundError); if (!round) throw new HttpError(404, 'Round not found')
   if (asString((round as RecordRow).status) !== 'submitted') throw new HttpError(400, 'ยืนยันรับผลประเมินได้เฉพาะ round ที่ส่งผลแล้ว')
-  const workspaceRound = (await getEqaWorkspace(actor)).rounds.find((item) => item.id === id)
-  if (!workspaceRound) throw new HttpError(404, 'Round not found')
-  const receiptReadiness = roundReceiptReadiness(workspaceRound)
+  const snapshot = await roundReadinessSnapshot(admin, id)
+  if (!snapshot) throw new HttpError(404, 'Round not found')
+  const receiptReadiness = roundReceiptReadiness(snapshot)
   if (receiptReadiness.length) throw new HttpError(409, receiptReadiness.join(' | '))
   const { data: results, error: resultsError } = await admin.from('eqa_results').select('outcome,sample_code,submitted_value').eq('round_id', id)
   fail(resultsError)
@@ -672,6 +693,44 @@ export async function updateResult(id: string, input: { analyte: string; sampleC
   fail((await admin.from('eqa_results').update({ analyte: input.analyte.trim(), sample_code: clean(input.sampleCode), submitted_value: clean(input.submittedValue), unit: clean(input.unit), ct_value: input.ctValue ?? null, evaluation_score: input.evaluationScore ?? null, outcome: input.outcome, iqc_analyte_id: input.iqcAnalyteId || null, assigned_value: clean(input.assignedValue) }).eq('id', id)).error)
   const roundId = asString((current as RecordRow).round_id); await syncRoundSummary(admin, roundId); await invalidateResultDocuments(roundId); await writeAudit(actor, 'eqa.result.update', 'eqa-result', id, input); return getEqaWorkspace(actor)
 }
+type EqaResultInput = { id?: string; analyte: string; sampleCode: string; submittedValue: string; unit?: string | null; ctValue?: number | null; evaluationScore?: number | null; outcome: EqaOutcome; iqcAnalyteId?: string | null; assignedValue?: string | null }
+
+/**
+ * Saves a round's whole result table in one request: rows with an id are
+ * updates, rows without are new samples. Documents are invalidated and the
+ * round summary recomputed once, instead of once per row.
+ */
+export async function saveRoundResults(roundId: string, rows: EqaResultInput[], actor: BmActor) {
+  assertOperator(actor); const admin = getAdminClient()
+  const { data: round, error: roundError } = await admin.from('eqa_rounds').select('status').eq('id', roundId).maybeSingle(); fail(roundError); if (!round) throw new HttpError(404, 'Round not found')
+  const updates = rows.filter((row) => row.id)
+  const inserts = rows.filter((row) => !row.id)
+  // New samples belong to the submission step; after that only the provider's
+  // evaluation of the existing samples is recorded.
+  if (inserts.length && ROUND_STATUS_ORDER.indexOf(asString((round as RecordRow).status) as EqaRoundStatus) > ROUND_STATUS_ORDER.indexOf('submitted')) throw new HttpError(400, 'รอบนี้บันทึกผลประเมินแล้ว เพิ่มตัวอย่างใหม่ไม่ได้')
+  if (new Set(updates.map((row) => row.id)).size !== updates.length) throw new HttpError(400, 'มีผลซ้ำกันในรายการที่ส่งมา')
+  const createdBy = new Map<string, string>()
+  if (updates.length) {
+    const { data: existing, error } = await admin.from('eqa_results').select('id,created_by').eq('round_id', roundId).in('id', updates.map((row) => row.id!)); fail(error)
+    if ((existing ?? []).length !== updates.length) throw new HttpError(400, 'มีผลที่ไม่ได้อยู่ในรอบนี้')
+    for (const row of existing as RecordRow[]) createdBy.set(asString(row.id), asString(row.created_by))
+  }
+  const iqcIds = [...new Set(rows.map((row) => row.iqcAnalyteId).filter((id): id is string => Boolean(id)))]
+  if (iqcIds.length) {
+    const { data: analytes, error } = await admin.from('iqc_analytes').select('id').in('id', iqcIds); fail(error)
+    if ((analytes ?? []).length !== iqcIds.length) throw new HttpError(400, 'ไม่พบ IQC panel ที่เลือก')
+  }
+  const fields = (row: EqaResultInput) => ({ analyte: row.analyte.trim(), sample_code: row.sampleCode.trim(), submitted_value: row.submittedValue.trim(), unit: clean(row.unit), ct_value: row.ctValue ?? null, evaluation_score: row.evaluationScore ?? null, outcome: row.outcome, iqc_analyte_id: row.iqcAnalyteId || null, assigned_value: clean(row.assignedValue) })
+  // Updates go through one upsert on ids already checked to be in this round.
+  // Postgres checks NOT NULL on the proposed row before resolving the
+  // conflict, so each row carries its own unchanged created_by.
+  if (updates.length) fail((await admin.from('eqa_results').upsert(updates.map((row) => ({ id: row.id!, round_id: roundId, created_by: createdBy.get(row.id!)!, ...fields(row) })), { onConflict: 'id' })).error)
+  if (inserts.length) fail((await admin.from('eqa_results').insert(inserts.map((row) => ({ round_id: roundId, ...fields(row), created_by: actor.id })))).error)
+  await syncRoundSummary(admin, roundId); await invalidateResultDocuments(roundId)
+  await writeAudit(actor, 'eqa.result.saveRound', 'eqa-round', roundId, { updated: updates.length, created: inserts.length, results: rows })
+  return getEqaWorkspace(actor)
+}
+
 export async function setRoundIqcPanel(roundId: string, iqcAnalyteId: string | null, actor: BmActor) {
   assertOperator(actor); const admin = getAdminClient()
   const { data: round, error: roundError } = await admin.from('eqa_rounds').select('id').eq('id', roundId).maybeSingle(); fail(roundError); if (!round) throw new HttpError(404, 'Round not found')
