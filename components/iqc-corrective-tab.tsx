@@ -11,6 +11,7 @@ import {
 } from '@/lib/corrective-actions'
 import { formatDate, formatDateTime } from '@/lib/bm/rules'
 import { api, Button, Card, Input, Notice, Select, StatusBadge } from '@/components/ui'
+import { EffectivenessForm } from '@/components/corrective-effectiveness-form'
 import { AttachmentList } from '@/components/attachments'
 import { CorrectiveActionForm, type CorrectiveActionSubmitIntent } from '@/components/corrective-action-form'
 
@@ -138,6 +139,7 @@ export function StructuredCorrectiveTab({ data, actor, onOk, onErr, focusId, ini
   const [createVersion, setCreateVersion] = useState(0)
   const [localFocusId, setLocalFocusId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [verifyingId, setVerifyingId] = useState<string | null>(null)
   const [actionFilter, setActionFilter] = useState<IqcCorrectiveActionFilter>('active')
   const [query, setQuery] = useState('')
   const [expandedActionIds, setExpandedActionIds] = useState<Set<string>>(new Set())
@@ -277,9 +279,10 @@ export function StructuredCorrectiveTab({ data, actor, onOk, onErr, focusId, ini
     setBusy(true)
     try {
       const result = await api<{ iqc: IqcWorkspace }>(`/api/iqc/corrective-actions/${id}/close`, { method: 'POST', body: JSON.stringify(body) })
-      onOk(body.effectivenessOutcome ? (body.effectivenessOutcome === 'effective' ? 'ยืนยันผลการแก้ไขแล้ว และปิด CAPA' : 'บันทึกว่า ineffective และเปิด CAPA ต่อ') : 'ส่ง CAPA เพื่อรอยืนยันผลการแก้ไขแล้ว', result.iqc)
+      onOk(body.effectivenessOutcome ? (body.effectivenessOutcome === 'effective' ? 'ยืนยันผลการแก้ไขแล้ว และปิด CAPA' : 'บันทึกว่าไม่ได้ผล และเปิด CAPA ต่อ') : 'ส่ง CAPA เพื่อรอยืนยันผลการแก้ไขแล้ว', result.iqc)
       setEditingActionId(null)
-    } catch (error) { onErr(error instanceof Error ? error.message : 'ปิดไม่สำเร็จ') } finally { setBusy(false) }
+      return true
+    } catch (error) { onErr(error instanceof Error ? error.message : 'ปิดไม่สำเร็จ'); return false } finally { setBusy(false) }
   }
 
   async function saveEditing(action: IqcCorrectiveAction, value: CorrectiveActionDraft, intent: CorrectiveActionSubmitIntent) {
@@ -318,10 +321,7 @@ export function StructuredCorrectiveTab({ data, actor, onOk, onErr, focusId, ini
       onErr('กรอกข้อมูล Corrective Action ให้ครบก่อนยืนยันผลการแก้ไข')
       return
     }
-    const effective = window.confirm('ยืนยันว่าการแก้ไขนี้มีประสิทธิผลหรือไม่?\nกด OK = effective, Cancel = ineffective')
-    const note = window.prompt('บันทึกผลการยืนยันการแก้ไข:')
-    if (!note?.trim()) return
-    await close(id, { effectivenessOutcome: effective ? 'effective' : 'ineffective', effectivenessNote: note.trim() })
+    setVerifyingId(id)
   }
 
   async function remove(id: string) {
@@ -416,10 +416,11 @@ export function StructuredCorrectiveTab({ data, actor, onOk, onErr, focusId, ini
                 </button>
                 <div className="flex shrink-0 items-center gap-1 p-3">
                   {action.status === 'open' ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => void closeAction(action)}>{needsCompletion ? 'กรอกให้ครบก่อนปิด' : 'ส่งตรวจผล'}</Button> : null}
-                  {action.status === 'awaiting-effectiveness' ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => void verify(action.id)}>{needsCompletion ? 'กรอกให้ครบก่อนยืนยัน' : 'ยืนยันผลการแก้ไข'}</Button> : null}
+                  {action.status === 'awaiting-effectiveness' && verifyingId !== action.id ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => void verify(action.id)}>{needsCompletion ? 'กรอกให้ครบก่อนยืนยัน' : 'ยืนยันผลการแก้ไข'}</Button> : null}
                   <Button variant="danger" className="min-h-8 px-2 py-1.5" disabled={busy} onClick={() => void remove(action.id)} aria-label={`ลบ corrective action ${action.problem}`}><Trash2 className="size-3.5" /></Button>
                 </div>
               </div>
+              {verifyingId === action.id && action.status === 'awaiting-effectiveness' ? <div className="border-t border-[#e8efef] px-4 py-3"><EffectivenessForm busy={busy} onCancel={() => setVerifyingId(null)} onSubmit={async (outcome, note) => { const ok = await close(action.id, { effectivenessOutcome: outcome, effectivenessNote: note.trim() }); if (ok) setVerifyingId(null); return ok }} /></div> : null}
               {isExpanded ? <div className="border-t border-[#e8efef] px-4 pb-4 pt-3">
                 {editingActionId === action.id ? <CorrectiveActionForm
                   key={`iqc-edit-${action.id}`}
