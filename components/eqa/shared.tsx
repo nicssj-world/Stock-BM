@@ -2,7 +2,8 @@
 'use client'
 
 import { useCallback, useRef, useState } from 'react'
-import { CheckCircle2, LoaderCircle, PenLine, X } from 'lucide-react'
+import Link from 'next/link'
+import { CheckCircle2, FileText, LoaderCircle, PenLine, X } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type {
   EqaApprovalRole, EqaAssignedApprovalRole, EqaDocumentApproval, EqaDocumentState, EqaDocumentType, EqaWorkspace,
@@ -21,7 +22,7 @@ export type NoticeState = { tone: 'success' | 'danger'; text: string } | null
 export type Update = (text: string, data: EqaWorkspace) => void
 
 export const APPROVAL_ROLES: EqaAssignedApprovalRole[] = ['technical-manager', 'quality-manager', 'section-head', 'department-head']
-export const STATUS_TONE: Record<string, StatusTone> = { scheduled: 'neutral', received: 'warning', submitted: 'accepted', evaluated: 'accepted', closed: 'neutral' }
+export const STATUS_TONE: Record<string, StatusTone> = { scheduled: 'neutral', received: 'warning', submitted: 'warning', evaluated: 'accepted', closed: 'neutral' }
 export const OUTCOME_TONE: Record<string, StatusTone> = { acceptable: 'accepted', warning: 'warning', unacceptable: 'rejected', 'not-evaluated': 'neutral' }
 export const THAI_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
 
@@ -48,6 +49,9 @@ export function ApprovalPanel({ actor, data, type, entityId, state, approvals, r
 }) {
   const allRoles: EqaApprovalRole[] = type === 'round-receipt' ? ['analyst', 'technical-manager'] : APPROVAL_ROLES
   const roles = visibleRoles ? allRoles.filter((role) => visibleRoles.includes(role)) : allRoles
+  // Shown inside the role's card: the page banner is far above on a phone.
+  const [cardError, setCardError] = useState<{ role: EqaApprovalRole; text: string } | null>(null)
+  function failFor(role: EqaApprovalRole, text: string) { setCardError({ role, text }); onErr(text) }
   const [busyRole, setBusyRole] = useState<EqaApprovalRole | null>(null)
   const [signingRole, setSigningRole] = useState<EqaApprovalRole | null>(null)
   const [signerName, setSignerName] = useState('')
@@ -66,11 +70,13 @@ export function ApprovalPanel({ actor, data, type, entityId, state, approvals, r
   }
 
   async function revoke(role: EqaApprovalRole) {
+    if (!window.confirm(`ถอนลายเซ็น${roleName(role)}ใช่ไหม?\nเอกสารจะกลับเป็น "ยังลงนามไม่ครบ" และต้องลงนามบทบาทนี้ใหม่`)) return
+    setCardError(null)
     setBusyRole(role)
     try {
       const result = await api<{ eqa: EqaWorkspace }>(`/api/eqa/documents/${type}/${entityId}/approvals`, { method: 'DELETE', body: JSON.stringify({ approvalRole: role }) })
       onOk(`ถอนลายเซ็น${roleName(role)}แล้ว`, result.eqa)
-    } catch (error) { onErr(error instanceof Error ? error.message : 'ดำเนินการไม่สำเร็จ') } finally { setBusyRole(null) }
+    } catch (error) { failFor(role, error instanceof Error ? error.message : 'ดำเนินการไม่สำเร็จ') } finally { setBusyRole(null) }
   }
 
   function canSign(role: EqaApprovalRole) {
@@ -84,7 +90,8 @@ export function ApprovalPanel({ actor, data, type, entityId, state, approvals, r
     setSignerName(defaultName)
     // The user's own role signs as themselves. An unassigned role defaults to a
     // signer without an account (drawn on this device), but can be switched.
-    setSignAs(isOwnRole(role) === true ? 'self' : 'other')
+    setSignAs(isOwnRole(role) === false ? 'other' : 'self')
+    setCardError(null)
     pad.current = null
     mySignature.current = null
   }
@@ -113,7 +120,7 @@ export function ApprovalPanel({ actor, data, type, entityId, state, approvals, r
       const remembered = remember && drawn ? await mySignature.current?.rememberIfRequested(drawn) : false
       cancelSigning()
       onOk(`ลงนาม${roleName(role)}แล้ว${remembered ? ' · เก็บลายเซ็นไว้ใช้ครั้งต่อไปแล้ว' : ''}`, payload.eqa)
-    } catch (error) { onErr(error instanceof Error ? error.message : 'ลงนามไม่สำเร็จ') } finally { setBusyRole(null) }
+    } catch (error) { failFor(role, error instanceof Error ? error.message : 'ลงนามไม่สำเร็จ') } finally { setBusyRole(null) }
   }
 
   async function sign(role: EqaApprovalRole) {
@@ -122,19 +129,19 @@ export function ApprovalPanel({ actor, data, type, entityId, state, approvals, r
     let drawn: File | null = null
     if (signAs === 'self') {
       const handle = mySignature.current
-      if (!handle?.isReady()) return onErr('กรุณาวาดลายเซ็นก่อนลงนาม')
+      if (!handle?.isReady()) return failFor(role, 'กรุณาวาดลายเซ็นก่อนลงนาม')
       if (handle.usesSaved()) form.set('useSavedSignature', '1')
       else {
         drawn = await handle.drawnFile()
-        if (!drawn) return onErr('อ่านลายเซ็นไม่สำเร็จ กรุณาเซ็นใหม่อีกครั้ง')
+        if (!drawn) return failFor(role, 'อ่านลายเซ็นไม่สำเร็จ กรุณาเซ็นใหม่อีกครั้ง')
         form.set('signerName', actor.displayName)
         form.set('signature', drawn)
       }
     } else {
-      if (!signerName.trim()) return onErr('กรุณากรอกชื่อ-นามสกุลผู้ลงนาม')
-      if (pad.current?.isEmpty() !== false) return onErr('กรุณาวาดลายเซ็นก่อนลงนาม')
+      if (!signerName.trim()) return failFor(role, 'กรุณากรอกชื่อ-นามสกุลผู้ลงนาม')
+      if (pad.current?.isEmpty() !== false) return failFor(role, 'กรุณาวาดลายเซ็นก่อนลงนาม')
       drawn = (await pad.current?.toFile()) ?? null
-      if (!drawn) return onErr('อ่านลายเซ็นไม่สำเร็จ กรุณาเซ็นใหม่อีกครั้ง')
+      if (!drawn) return failFor(role, 'อ่านลายเซ็นไม่สำเร็จ กรุณาเซ็นใหม่อีกครั้ง')
       form.set('signerName', signerName.trim())
       form.set('signature', drawn)
     }
@@ -148,8 +155,10 @@ export function ApprovalPanel({ actor, data, type, entityId, state, approvals, r
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-bold text-[#173d50]">ลงนามรับรองเอกสาร</p>
-          <p className="mt-0.5 text-[11px] text-[#789097]">เอกสาร revision {state.revision} · ลงนามครบแล้วจึงถือว่าเอกสารสมบูรณ์</p>
+          <p className="mt-0.5 text-xs text-[#789097]">ฉบับแก้ไขที่ {state.revision} · ลงนามครบทุกบทบาทแล้วจึงถือว่าเอกสารสมบูรณ์</p>
+          <p className="mt-1 text-xs text-[#58747d]">การลงนามแต่ละบทบาท ถือว่าผู้ลงนามได้ทบทวนเอกสารฉบับแก้ไขที่ {state.revision} นี้แล้ว</p>
         </div>
+        <Link href={`/eqa/report/${type}/${entityId}`} className="inline-flex min-h-11 items-center gap-1 rounded-md border border-[#b8c8cc] bg-white px-3 text-xs font-bold text-[#173d50] hover:bg-[#f7fbfb] sm:min-h-9"><FileText className="size-3.5" aria-hidden="true" />ดูเอกสารฉบับเต็ม</Link>
         <StatusBadge tone={state.status === 'approved' ? 'accepted' : 'warning'} label={state.status === 'approved' ? 'ลงนามครบ' : `รอลงนาม ${pendingCount} บทบาท`} />
       </div>
       {readiness.length ? (
@@ -182,8 +191,8 @@ export function ApprovalPanel({ actor, data, type, entityId, state, approvals, r
               <div className="mt-3 flex h-20 items-center justify-center rounded-md border border-dashed border-[#b9d6d0] bg-[#fbfefc] p-2"><img src={`/api/attachments/${approval!.signatureAttachmentId}`} alt={`ลายเซ็น ${approval!.signerName ?? roleName(role)}`} className="max-h-full max-w-full object-contain" /></div>
               <p className="mt-2 font-semibold text-[#315763]">{approval!.signerName ?? approval!.approvedByName}</p>
               <p className="mt-0.5 text-[11px] text-[#789097]">ลงนามเมื่อ {formatDateTime(approval!.approvedAt)}</p>
-              <p className="mt-0.5 text-[10px] text-[#9aafb4]">บันทึกโดยบัญชี {approval!.approvedByName}</p>
-              {approval && (approval.approvedById === actor.id || actor.role === 'Admin') ? <Button variant="ghost" className="mt-2 min-h-9 px-2 py-1 text-xs" disabled={busyRole === role} onClick={() => revoke(role)}>ถอนลายเซ็น</Button> : null}
+              <p className="mt-0.5 text-[11px] text-[#8197a0]">บันทึกโดยบัญชี {approval!.approvedByName}</p>
+              {approval && (approval.approvedById === actor.id || actor.role === 'Admin') ? <Button variant="ghost" className="mt-2 min-h-11 px-3 py-1 text-xs sm:min-h-9" disabled={busyRole === role} onClick={() => revoke(role)}>ถอนลายเซ็น</Button> : null}
             </> : <>
               {lockedReason ? <p className="mt-3 rounded-md border border-dashed border-[#dbe6e7] bg-[#fbfdfd] px-2 py-1.5 text-[11px] leading-4 text-[#58747d]">ยังลงนามไม่ได้ · {lockedReason.target && onNavigate ? <button type="button" className="text-left font-semibold text-[#0b7f76] underline decoration-dotted hover:text-[#173d50]" onClick={() => onNavigate(lockedReason.target!)}>{lockedReason.message}</button> : lockedReason.message}</p> : legacyApproval ? <p className="mt-3 rounded-md border border-[#eed4a6] bg-[#fffaf0] px-2 py-1.5 text-[11px] leading-4 text-[#8b5c0b]">มีการยืนยันเดิมโดย {approval!.approvedByName} แต่ยังไม่มีภาพลายเซ็น</p> : <p className="mt-3 min-h-8 text-[#789097]">{isOwnRole(role) === true ? 'รอคุณลงนาม' : assigneeName ? `รอ ${assigneeName} ลงนาม` : 'ยังไม่มีผู้ลงนามในระบบ · ใช้เครื่องนี้กรอกชื่อและเซ็นได้'}</p>}
               {canAct && signingRole !== role && isOwnRole(role) === true && mine.signature ? <>
@@ -208,6 +217,7 @@ export function ApprovalPanel({ actor, data, type, entityId, state, approvals, r
                 <div className="flex flex-wrap gap-2"><Button type="button" className="min-h-10 px-3 text-xs" disabled={busyRole === role} onClick={() => sign(role)}>{busyRole === role ? <LoaderCircle className="size-4 animate-spin" /> : <PenLine className="size-4" />}ลงนาม</Button><Button type="button" variant="secondary" className="min-h-10 px-3 text-xs" disabled={busyRole === role} onClick={cancelSigning}><X className="size-4" />ยกเลิก</Button></div>
               </div> : null}
             </>}
+            {cardError?.role === role ? <p role="alert" className="mt-2 rounded-md border border-[#f0c9cd] bg-[#fff7f7] px-2 py-1.5 text-xs font-semibold text-[#a83541]">{cardError.text}</p> : null}
           </div>
         })}
       </div>

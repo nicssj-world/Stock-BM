@@ -83,14 +83,22 @@ export function Loading({ label = 'กำลังโหลด / Loading' }: { l
   return <span className="inline-flex items-center gap-2 text-sm text-[#6c858d]"><LoaderCircle className="size-4 animate-spin" />{label}</span>
 }
 
-export function Notice({ children, tone = 'info' }: { children: ReactNode; tone?: 'info' | 'warning' | 'danger' | 'success' }) {
+export function Notice({ children, tone = 'info', onDismiss }: { children: ReactNode; tone?: 'info' | 'warning' | 'danger' | 'success'; onDismiss?: () => void }) {
   const styles = {
     info: 'border-[#bddedc] bg-[#f1faf9] text-[#176b68]',
     warning: 'border-[#eed4a6] bg-[#fff9ed] text-[#99601b]',
     danger: 'border-[#efc7cc] bg-[#fff5f6] text-[#a83541]',
     success: 'border-[#c6e2ca] bg-[#f3faf4] text-[#4b7b51]',
   }
-  return <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${styles[tone]}`}>{tone === 'success' ? <CheckCircle2 className="mt-0.5 size-4 shrink-0" /> : <AlertTriangle className="mt-0.5 size-4 shrink-0" />}{children}</div>
+  // Errors and confirmations are announced to screen readers when they appear.
+  const role = tone === 'danger' ? 'alert' : tone === 'success' ? 'status' : undefined
+  return (
+    <div role={role} className={`flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${styles[tone]}`}>
+      {tone === 'success' ? <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" /> : <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />}
+      <div className="min-w-0 flex-1">{children}</div>
+      {onDismiss ? <button type="button" onClick={onDismiss} aria-label="ปิดข้อความ" className="-my-1 -mr-1 inline-flex size-9 shrink-0 items-center justify-center rounded-md opacity-70 transition hover:bg-black/5 hover:opacity-100 focus-visible:ring-2 focus-visible:ring-current focus-visible:outline-none"><XCircle className="size-4" aria-hidden="true" /></button> : null}
+    </div>
+  )
 }
 
 export type StatusTone = 'accepted' | 'warning' | 'investigate' | 'rejected' | 'not_evaluated' | 'neutral'
@@ -114,7 +122,7 @@ export function StatusBadge({ tone, label }: { tone: StatusTone; label: string }
   )
 }
 
-export function StatCard({ label, value, tone = 'neutral', hint }: { label: string; value: ReactNode; tone?: StatusTone; hint?: string }) {
+export function StatCard({ label, value, tone = 'neutral', hint, onClick }: { label: string; value: ReactNode; tone?: StatusTone; hint?: string; onClick?: () => void }) {
   const accent = {
     accepted: 'text-[#2f7d44]',
     warning: 'text-[#a9700f]',
@@ -123,13 +131,14 @@ export function StatCard({ label, value, tone = 'neutral', hint }: { label: stri
     not_evaluated: 'text-[#5b7681]',
     neutral: 'text-[#173d50]',
   }[tone]
-  return (
-    <Card className="p-4">
-      <p className="text-[11px] font-bold tracking-[0.14em] text-[#789097] uppercase">{label}</p>
-      <p className={`mono mt-2 text-2xl font-bold tabular-nums ${accent}`}>{value}</p>
-      {hint ? <p className="mt-1 text-xs text-[#8ba0a5]">{hint}</p> : null}
-    </Card>
-  )
+  const body = <>
+    <p className="text-[11px] font-bold tracking-[0.14em] text-[#789097] uppercase">{label}</p>
+    <p className={`mono mt-2 text-2xl font-bold tabular-nums ${accent}`}>{value}</p>
+    {hint ? <p className="mt-1 text-xs text-[#8ba0a5]">{hint}</p> : null}
+  </>
+  // A card that leads somewhere is a real button (keyboard and screen reader).
+  if (onClick) return <Card className="p-0"><button type="button" onClick={onClick} className="block w-full rounded-[inherit] p-4 text-left transition hover:bg-[#f7fbfb] focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none">{body}</button></Card>
+  return <Card className="p-4">{body}</Card>
 }
 
 export function Tabs<T extends string>({ tabs, active, onChange }: { tabs: { key: T; label: string; icon?: typeof CheckCircle2 }[]; active: T; onChange: (key: T) => void }) {
@@ -143,7 +152,19 @@ export function Tabs<T extends string>({ tabs, active, onChange }: { tabs: { key
             type="button"
             role="tab"
             aria-selected={on}
+            tabIndex={on ? 0 : -1}
             onClick={() => onChange(key)}
+            onKeyDown={(event) => {
+              // Arrow keys move between tabs (WAI-ARIA tabs pattern).
+              const keys = tabs.map((tab) => tab.key)
+              const index = keys.indexOf(key)
+              const next = event.key === 'ArrowRight' ? keys[(index + 1) % keys.length] : event.key === 'ArrowLeft' ? keys[(index - 1 + keys.length) % keys.length] : event.key === 'Home' ? keys[0] : event.key === 'End' ? keys[keys.length - 1] : null
+              if (next == null) return
+              event.preventDefault()
+              onChange(next)
+              const buttons = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+              buttons?.[keys.indexOf(next)]?.focus()
+            }}
             className={`flex min-h-11 items-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-semibold transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${on ? 'bg-[#0b7f76] text-white' : 'text-[#58747d] hover:bg-[#eef6f5]'}`}
           >
             {Icon ? <Icon className="size-4" aria-hidden="true" /> : null}

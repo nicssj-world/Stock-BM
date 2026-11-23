@@ -12,6 +12,12 @@ import { formatDate, formatDateTime } from '@/lib/bm/rules'
 import { capaAwaitingEffectiveness, isEqaStaff } from '@/lib/eqa/rules'
 import { api, Button, Card, Notice, StatusBadge } from '@/components/ui'
 import { EffectivenessForm } from '@/components/corrective-effectiveness-form'
+import { OUTCOME_LABELS } from '@/components/eqa/results-table'
+
+// Thai labels instead of raw stored values on screen.
+const SUMMARY_LABELS: Record<string, string> = { pass: 'ผ่านเกณฑ์', fail: 'ไม่ผ่านเกณฑ์', 'not-evaluated': 'ยังไม่ประเมิน' }
+const EFFECTIVENESS_LABELS: Record<string, string> = { effective: 'ได้ผล', ineffective: 'ไม่ได้ผล', pending: 'รอยืนยัน' }
+const outcomeLabel = (outcome: string) => OUTCOME_LABELS[outcome as keyof typeof OUTCOME_LABELS] ?? outcome
 import { AttachmentList } from '@/components/attachments'
 import {
   CorrectiveActionForm,
@@ -95,9 +101,9 @@ function contextSummary(round: EqaWorkspace['rounds'][number] | null, resultId: 
   return (
     <div className="space-y-1 px-1 text-xs text-[#55727c]">
       {round ? <p>Round: <span className="font-semibold text-[#173d50]">{round.roundLabel}</span> · {round.planItemName ?? round.schemeName}</p> : <p className="text-[#9aafb4]">เลือก Round เพื่อโหลดบริบท</p>}
-      {result ? <p>ผลตัวอย่างที่เกี่ยวข้อง: <span className="font-semibold text-[#173d50]">{result.sampleCode ?? '-'} · {result.analyte}</span> · {result.outcome}</p> : resultId ? <p className="text-[#c02a37]">ไม่พบผลตัวอย่างที่ลิงก์</p> : null}
+      {result ? <p>ผลตัวอย่างที่เกี่ยวข้อง: <span className="font-semibold text-[#173d50]">{result.sampleCode ?? '-'} · {result.analyte}</span> · {outcomeLabel(result.outcome)}</p> : resultId ? <p className="text-[#c02a37]">ไม่พบผลตัวอย่างที่ลิงก์</p> : null}
       {linked ? <p className="font-semibold text-[#a9700f]">มี Corrective Action เดิมสำหรับบริบทนี้แล้ว</p> : null}
-      <p className="text-[11px] text-[#8ba0a5]">ผู้รับผิดชอบและ Due date กรอกตามการติดตามงาน</p>
+      <p className="text-[11px] text-[#8ba0a5]">ผู้รับผิดชอบและวันครบกำหนด กรอกตามการติดตามงาน</p>
     </div>
   )
 }
@@ -187,17 +193,17 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
   }, [effectiveFocusId, data.correctiveActions])
 
   const systemSignals = selectedResult ? [
-    `Outcome จากผู้จัด: ${selectedResult.outcome}`,
+    `ผลประเมินจากผู้จัด: ${outcomeLabel(selectedResult.outcome)}`,
     `Submitted: ${selectedResult.submittedValue ?? '-'} · Assigned: ${selectedResult.assignedValue ?? '-'}`,
     `Score: ${selectedResult.evaluationScore ?? '-'}`,
-  ] : selectedRound ? [`ผลสรุปรอบจากระบบ: ${selectedRound.summaryOutcome}`, `${selectedRound.results.length} ผลตัวอย่างในรอบนี้`] : []
+  ] : selectedRound ? [`ผลสรุปรอบจากระบบ: ${SUMMARY_LABELS[selectedRound.summaryOutcome] ?? selectedRound.summaryOutcome}`, `${selectedRound.results.length} ผลตัวอย่างในรอบนี้`] : []
   const suggestedIssueTypes = selectedResult?.outcome === 'warning'
     ? ['eqa-warning']
     : selectedResult?.outcome === 'unacceptable'
       ? ['eqa-unacceptable']
        : selectedRound?.summaryOutcome === 'fail' ? ['result-out-of-control'] : []
   const suggestedProblem = selectedResult
-    ? `EQA ${selectedResult.analyte} ผลประเมินจากผู้จัดเป็น ${selectedResult.outcome}`
+    ? `EQA ${selectedResult.analyte} ผลประเมินจากผู้จัดเป็น ${outcomeLabel(selectedResult.outcome)}`
     : selectedRound?.summaryOutcome === 'fail' ? `EQA ${selectedRound.roundLabel} สรุปผลจากระบบไม่ผ่านเกณฑ์` : ''
 
   async function create(value: CorrectiveActionDraft) {
@@ -293,6 +299,7 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
       <p className="text-xs font-bold text-[#0b7f76]">ขั้นตอนที่ 4 · ติดตาม Corrective Action (CAPA)</p>
       <p className="mt-1 text-sm text-[#6a838c]">เริ่มจากผล EQA ที่ Warning/Unacceptable แล้วบันทึกสาเหตุ การแก้ไข ผลการแก้ไข และการป้องกันเกิดซ้ำ</p>
     </div>
+    <div className="order-2 lg:order-none">
     <CorrectiveActionForm
       key={`eqa-create-${createVersion}-${effectiveRoundId}-${effectiveResultId}`}
       idPrefix="eqa-corrective-create"
@@ -309,7 +316,7 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
         {selectedRound?.results.length ? <label className="block text-xs font-semibold text-[#58747d]">ผลตัวอย่างที่เกี่ยวข้อง (ถ้ามี)
            <select className="mt-1 min-h-11 w-full rounded-md border border-[#cfdee0] bg-white px-3 py-2 text-sm text-[#173d50] outline-none focus:border-[#0b7f76] focus:ring-3 focus:ring-[#0b7f76]/10" value={effectiveResultId} onChange={(event) => setResultId(event.target.value)} disabled={directContextLocked}>
             <option value="">— ทั้ง round —</option>
-            {resultOptions.map((result) => <option key={result.id} value={result.id}>{result.sampleCode ?? '-'} · {result.analyte} · {result.outcome}</option>)}
+            {resultOptions.map((result) => <option key={result.id} value={result.id}>{result.sampleCode ?? '-'} · {result.analyte} · {outcomeLabel(result.outcome)}</option>)}
           </select>
         </label> : null}
         {contextSummary(selectedRound, effectiveResultId || null, data.correctiveActions)}
@@ -321,7 +328,8 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
       busy={busy}
       onSubmit={create}
     />
-    <div className="space-y-3">
+    </div>
+    <div className="order-1 space-y-3 lg:order-none">
       <Card className="space-y-3 p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -331,9 +339,9 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
           <div className="flex flex-wrap gap-1">
             {([
               ['active', `กำลังดำเนินการ ${actionCounts.open + actionCounts.awaitingEffectiveness}`],
-              ['open', `Open ${actionCounts.open}`],
+              ['open', `ยังแก้ไขไม่เสร็จ ${actionCounts.open}`],
               ['awaiting-effectiveness', `รอยืนยันผลการแก้ไข ${actionCounts.awaitingEffectiveness}`],
-              ['closed', `Closed ${actionCounts.closed}`],
+              ['closed', `ปิดแล้ว ${actionCounts.closed}`],
               ['all', `ทั้งหมด ${data.correctiveActions.length}`],
             ] as [EqaCorrectiveActionFilter, string][]).map(([value, label]) => <button key={value} type="button" aria-pressed={!showingFocusedHistory && actionFilter === value} onClick={() => selectActionFilter(value)} className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${!showingFocusedHistory && actionFilter === value ? 'border-[#0b7f76] bg-[#e6f5f2] text-[#08766e]' : 'border-[#d6e2e3] bg-white text-[#58747d] hover:bg-[#f3f9f9]'}`}>{label}</button>)}
           </div>
@@ -356,12 +364,12 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
                 </div>
                 <p className="mt-1 truncate text-xs font-semibold text-[#58747d]">{resultLabel(action)}</p>
                 <p className="mt-1 truncate text-sm text-[#3f5c64]">{action.problem}</p>
-                <p className="mt-1 text-[11px] text-[#9aafb4]">โดย {action.createdByName ?? '-'}{action.ownerName ? ` · ผู้รับผิดชอบ ${action.ownerName}` : ''}{action.dueDate ? ` · Due ${formatDate(action.dueDate)}` : ''}</p>
+                <p className="mt-1 text-[11px] text-[#9aafb4]">โดย {action.createdByName ?? '-'}{action.ownerName ? ` · ผู้รับผิดชอบ ${action.ownerName}` : ''}{action.dueDate ? ` · ครบกำหนด ${formatDate(action.dueDate)}` : ''}</p>
               </button>
               <div className="flex shrink-0 items-center gap-1 p-3">
                 {action.status === 'open' ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => void closeAction(action)}>{needsCompletion ? 'กรอกให้ครบก่อนปิด' : 'ปิด'}</Button> : null}
                 {capaAwaitingEffectiveness(action) && verifyingId !== action.id ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => setVerifyingId(action.id)}>ยืนยันประสิทธิผล</Button> : null}
-                <Button variant="danger" className="min-h-8 px-2 py-1.5" disabled={busy} onClick={() => void remove(action.id)} aria-label={`ลบ corrective action ${action.problem}`}><Trash2 className="size-3.5" /></Button>
+                {actor.role === 'Admin' ? <Button variant="danger" className="min-h-11 px-3 py-1.5 sm:min-h-8 sm:px-2" disabled={busy} onClick={() => void remove(action.id)} aria-label={`ลบ corrective action ${action.problem}`}><Trash2 className="size-3.5" aria-hidden="true" /></Button> : null}
               </div>
             </div>
             {verifyingId === action.id && capaAwaitingEffectiveness(action) ? <div className="border-t border-[#e8efef] px-4 py-3"><EffectivenessForm busy={busy} onCancel={() => setVerifyingId(null)} onSubmit={async (outcome, note) => { const ok = await verifyEffectiveness(action.id, outcome, note); if (ok) setVerifyingId(null); return ok }} /></div> : null}
@@ -372,7 +380,7 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
                 module="eqa"
                 mode="edit"
                 context={contextSummary(data.rounds.find((round) => round.id === action.roundId) ?? null, action.resultId, data.correctiveActions)}
-                systemSignals={data.rounds.find((round) => round.id === action.roundId)?.results.find((result) => result.id === action.resultId) ? [`Outcome จากผู้จัด: ${data.rounds.find((round) => round.id === action.roundId)?.results.find((result) => result.id === action.resultId)?.outcome}`] : []}
+                systemSignals={data.rounds.find((round) => round.id === action.roundId)?.results.find((result) => result.id === action.resultId) ? [`ผลประเมินจากผู้จัด: ${outcomeLabel(data.rounds.find((round) => round.id === action.roundId)?.results.find((result) => result.id === action.resultId)?.outcome ?? '')}`] : []}
                 ownerOptions={data.users.filter((user) => isEqaStaff(user) || user.id === action.ownerId)}
                 initialValue={actionToDraft(action)}
                 busy={busy}
@@ -386,7 +394,7 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
                 {action.correctionOutcome ? <p className="text-xs text-[#789097]">ผลการแก้ไขทันที: {action.correctionOutcome}{action.correctionOutcomeNote ? ` · ${action.correctionOutcomeNote}` : ''}</p> : null}
                 {action.preventiveAction ? <p className="text-xs text-[#789097]">ป้องกันเกิดซ้ำ: {action.preventiveAction}</p> : null}
                 {action.ownerName || action.dueDate ? <p className="text-xs text-[#789097]">Owner: {action.ownerName ?? '-'} · Due: {formatDate(action.dueDate)}</p> : null}
-                {action.effectivenessNote ? <p className="text-xs text-[#789097]">ผลการยืนยันการแก้ไข: {action.effectivenessOutcome} · {action.effectivenessNote}{action.effectivenessVerifiedByName ? ` · ตรวจโดย ${action.effectivenessVerifiedByName}` : ''}{action.effectivenessVerifiedAt ? ` (${formatDateTime(action.effectivenessVerifiedAt)})` : ''}</p> : null}
+                {action.effectivenessNote ? <p className="text-xs text-[#789097]">ผลการยืนยันการแก้ไข: {EFFECTIVENESS_LABELS[action.effectivenessOutcome] ?? action.effectivenessOutcome} · {action.effectivenessNote}{action.effectivenessVerifiedByName ? ` · ตรวจโดย ${action.effectivenessVerifiedByName}` : ''}{action.effectivenessVerifiedAt ? ` (${formatDateTime(action.effectivenessVerifiedAt)})` : ''}</p> : null}
                 {action.status !== 'closed' ? <div className="mt-3 flex justify-end"><Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => startEditing(action)}>แก้ไข</Button></div> : null}
               </>}
               <div className="mt-3">

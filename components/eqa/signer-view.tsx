@@ -1,8 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import Link from 'next/link'
-import { FileText } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { EqaWorkspace } from '@/lib/eqa/types'
 import { EQA_APPROVAL_ROLE_LABELS } from '@/lib/eqa/types'
@@ -26,6 +24,11 @@ export function EqaSignerView({ actor, initialData }: { actor: BmActor; initialD
   const myRoles = data.approverAssignments.filter((assignment) => assignment.userId === actor.id).map((assignment) => assignment.approvalRole)
   const documents = signableDocuments(data, myRoles)
   const pending = documents.filter((document) => document.roles.some((role) => !isSignedBy(document, role)))
+  // Ready to sign now vs still being prepared by the unit: an outside approver
+  // can't fix missing data, so those are listed apart and only for awareness.
+  const ready = pending.filter((document) => document.readiness.length === 0)
+  const preparing = pending.filter((document) => document.readiness.length > 0)
+  const [showPreparing, setShowPreparing] = useState(false)
   const signed = documents.filter((document) => !pending.includes(document))
 
   const renderDocument = (document: SignableDocument) => (
@@ -36,9 +39,6 @@ export function EqaSignerView({ actor, initialData }: { actor: BmActor; initialD
           <h2 className="mt-0.5 font-bold text-[#173d50]">{document.title}</h2>
           {document.subtitle ? <p className="mt-0.5 text-xs text-[#789097]">{document.subtitle}</p> : null}
         </div>
-        <Link href={document.reportHref} className="inline-flex min-h-10 items-center gap-2 rounded-md border border-[#cfe1e0] bg-white px-3 text-xs font-semibold text-[#0b7f76] hover:bg-[#f2faf8] focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none">
-          <FileText className="size-4" aria-hidden="true" />ดูเอกสารก่อนลงนาม
-        </Link>
       </div>
       <ApprovalPanel actor={actor} data={data} type={document.type} entityId={document.entityId} state={document.state} approvals={document.approvals} readiness={document.readiness} visibleRoles={document.roles} onOk={ok} onErr={err} />
     </Card>
@@ -46,7 +46,7 @@ export function EqaSignerView({ actor, initialData }: { actor: BmActor; initialD
 
   return (
     <div className="mx-auto max-w-5xl space-y-5">
-      <PageHeader eyebrow="External Quality Assessment" title="เอกสาร EQA ที่รอคุณลงนาม" description="เปิดดูเอกสารฉบับเต็มก่อน แล้วลงนามตามบทบาทของคุณ · บันทึกลายเซ็นไว้ที่หน้า “ลายเซ็นของฉัน” เพื่อกดลงนามได้ในครั้งเดียว" />
+      <PageHeader eyebrow="External Quality Assessment" title="เอกสาร EQA ที่รอคุณลงนาม" description="กด “ดูเอกสารฉบับเต็ม” เพื่อทบทวนก่อน แล้วลงนามตามบทบาทของคุณ · บันทึกลายเซ็นไว้ที่หน้า “ลายเซ็นของฉัน” เพื่อกดลงนามได้ในครั้งเดียว" />
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
       {myRoles.length === 0 ? (
         <Notice tone="warning">บัญชีนี้ยังไม่ได้รับมอบหมายบทบาทลงนาม · ติดต่อ Admin ให้กำหนดที่ EQA → จัดการ → ผู้อนุมัติ</Notice>
@@ -56,10 +56,19 @@ export function EqaSignerView({ actor, initialData }: { actor: BmActor; initialD
             <span>บทบาทของคุณ:</span>
             {myRoles.map((role) => <StatusBadge key={role} tone="neutral" label={EQA_APPROVAL_ROLE_LABELS[role]} />)}
           </div>
-          {pending.length ? pending.map(renderDocument) : <Card className="p-6 text-center text-sm text-[#58747d]">ไม่มีเอกสารที่รอคุณลงนามตอนนี้</Card>}
+          <h2 className="text-sm font-bold text-[#173d50]">พร้อมให้คุณลงนาม ({ready.length})</h2>
+          {ready.length ? ready.map(renderDocument) : <Card className="p-6 text-center text-sm text-[#58747d]">ไม่มีเอกสารที่พร้อมให้คุณลงนามตอนนี้</Card>}
+          {preparing.length ? (
+            <div className="space-y-3">
+              <button type="button" onClick={() => setShowPreparing((value) => !value)} className="min-h-11 text-sm font-semibold text-[#58747d] hover:underline focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none" aria-expanded={showPreparing}>
+                {showPreparing ? 'ซ่อน' : 'แสดง'}เอกสารที่หน่วยงานยังเตรียมข้อมูลไม่ครบ ({preparing.length}) · ยังลงนามไม่ได้
+              </button>
+              {showPreparing ? preparing.map(renderDocument) : null}
+            </div>
+          ) : null}
           {signed.length ? (
             <div className="space-y-3">
-              <button type="button" onClick={() => setShowSigned((value) => !value)} className="min-h-10 text-sm font-semibold text-[#0b7f76] hover:underline focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none" aria-expanded={showSigned}>
+              <button type="button" onClick={() => setShowSigned((value) => !value)} className="min-h-11 text-sm font-semibold text-[#0b7f76] hover:underline focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none" aria-expanded={showSigned}>
                 {showSigned ? 'ซ่อน' : 'แสดง'}เอกสารที่คุณลงนามแล้ว ({signed.length})
               </button>
               {showSigned ? signed.map(renderDocument) : null}

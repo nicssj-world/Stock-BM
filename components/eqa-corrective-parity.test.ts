@@ -11,7 +11,7 @@ describe('EQA corrective action parity with IQC', () => {
 
   it('supports ownership, due dates, and an optional effectiveness follow-up', () => {
     expect(source).toContain('ผู้รับผิดชอบ')
-    expect(source).toContain('Due date')
+    expect(source).toContain('วันครบกำหนด')
     expect(source).toContain('ยืนยันประสิทธิผล')
     expect(source).toContain('/verify-effectiveness')
   })

@@ -1,11 +1,12 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import type { EqaResult, EqaRound, EqaWorkspace } from '@/lib/eqa/types'
 import { analyteDefaultUnit, analyteScopeOptions, type EqaReadinessTarget } from '@/lib/eqa/rules'
 import { api, Button, Input, Select } from '@/components/ui'
 import type { Update } from '@/components/eqa/shared'
+import { useUnsavedChanges } from '@/components/eqa/unsaved'
 
 export const OUTCOME_LABELS: Record<EqaResult['outcome'], string> = {
   acceptable: 'ผ่าน (acceptable)', warning: 'ไม่ผ่าน (warning)', unacceptable: 'ไม่ผ่าน (unacceptable)', 'not-evaluated': 'รอประเมิน',
@@ -54,10 +55,12 @@ const isBlank = (row: Draft) => !row.sampleCode.trim() && !row.submittedValue.tr
  * The round's whole result table, editable in place: submitted values first,
  * then the provider's reference, score and outcome. Everything is saved with
  * one request (PUT /api/eqa/rounds/[id]/results), like IQC's run entry.
- * The parent remounts it (key) whenever the saved results change.
+ * Wide screens get a table; phones get one card per sample. The parent
+ * remounts it (key) whenever the saved results change, and is told how many
+ * rows hold unsaved edits so it can hold back steps that would ignore them.
  */
-export function RoundResultsTable({ round, data, canAddRows, defaultIqcAnalyteId, onNavigate, onOk, onErr }: {
-  round: EqaRound; data: EqaWorkspace; canAddRows: boolean; defaultIqcAnalyteId: string | null
+export function RoundResultsTable({ round, data, canAddRows, defaultIqcAnalyteId, onDirtyChange, onNavigate, onOk, onErr }: {
+  round: EqaRound; data: EqaWorkspace; canAddRows: boolean; defaultIqcAnalyteId: string | null; onDirtyChange?: (count: number) => void
   onNavigate: (target: EqaReadinessTarget) => void; onOk: Update; onErr: (text: string) => void
 }) {
   const analyteOptions = useMemo(() => analyteScopeOptions(data.schemes.find((scheme) => scheme.id === round.schemeId)?.analyteScope), [data.schemes, round.schemeId])
@@ -69,14 +72,22 @@ export function RoundResultsTable({ round, data, canAddRows, defaultIqcAnalyteId
   }
   const [rows, setRows] = useState<Draft[]>(() => round.results.length ? round.results.map(toDraft) : canAddRows ? [blankRow(-1)] : [])
   const [busy, setBusy] = useState(false)
+  // Errors next to the buttons: the page banner is out of view this far down.
+  // (Success is shown by the round card: a save remounts this table.)
+  const [error, setError] = useState<string | null>(null)
 
   const changed = rows.filter((row) => {
     if (!row.id) return !isBlank(row)
     const before = original.get(row.id)
     return !before || EDITABLE.some((field) => row[field] !== before[field])
   })
+  useUnsavedChanges(`eqa-results-${round.id}`, changed.length > 0)
+  useEffect(() => { onDirtyChange?.(changed.length) }, [changed.length, onDirtyChange])
+  useEffect(() => () => onDirtyChange?.(0), [onDirtyChange])
 
+  function fail(text: string) { setError(text); onErr(text) }
   function update(key: string, patch: Partial<Draft>) {
+    setError(null)
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)))
   }
   function selectAnalyte(key: string, analyte: string) {
@@ -94,15 +105,15 @@ export function RoundResultsTable({ round, data, canAddRows, defaultIqcAnalyteId
     if (!window.confirm(`ลบผล ${row.sampleCode || row.analyte} ใช่ไหม?${unsaved ? `\nการแก้ไขอีก ${unsaved} รายการที่ยังไม่บันทึกจะหายไป` : ''}`)) return
     setBusy(true)
     try { const response = await api<{ eqa: EqaWorkspace }>(`/api/eqa/results/${row.id}`, { method: 'DELETE' }); onOk('ลบผลแล้ว', response.eqa) }
-    catch (error) { onErr(error instanceof Error ? error.message : 'ลบผลไม่สำเร็จ') } finally { setBusy(false) }
+    catch (error) { fail(error instanceof Error ? error.message : 'ลบผลไม่สำเร็จ') } finally { setBusy(false) }
   }
 
   async function saveAll() {
-    if (!changed.length) return onErr('ยังไม่มีการแก้ไข')
+    if (!changed.length) return fail('ยังไม่มีการแก้ไข')
     const incomplete = changed.find((row) => !row.sampleCode.trim() || !row.analyte.trim() || !row.submittedValue.trim())
-    if (incomplete) return onErr('กรอกรหัสตัวอย่าง รายการทดสอบ และผลที่ส่งให้ครบทุกแถวก่อนบันทึก')
+    if (incomplete) return fail(`${incomplete.sampleCode || 'แถวใหม่'}: กรอกรหัสตัวอย่าง รายการทดสอบ และผลที่ส่งให้ครบก่อนบันทึก`)
     const number = (value: string) => (value.trim() ? Number(value) : null)
-    if (changed.some((row) => [row.ctValue, row.evaluationScore].some((value) => value.trim() && !Number.isFinite(Number(value))))) return onErr('Ct และคะแนนต้องเป็นตัวเลข')
+    if (changed.some((row) => [row.ctValue, row.evaluationScore].some((value) => value.trim() && !Number.isFinite(Number(value))))) return fail('Ct และคะแนนต้องเป็นตัวเลข')
     setBusy(true)
     try {
       const results = changed.map((row) => ({
@@ -111,13 +122,70 @@ export function RoundResultsTable({ round, data, canAddRows, defaultIqcAnalyteId
       }))
       const response = await api<{ eqa: EqaWorkspace }>(`/api/eqa/rounds/${round.id}/results`, { method: 'PUT', body: JSON.stringify({ results }) })
       onOk(`บันทึกผล ${results.length} รายการแล้ว`, response.eqa)
-    } catch (error) { onErr(error instanceof Error ? error.message : 'บันทึกผลไม่สำเร็จ') } finally { setBusy(false) }
+    } catch (error) { fail(error instanceof Error ? error.message : 'บันทึกผลไม่สำเร็จ') } finally { setBusy(false) }
   }
 
   if (!rows.length && !canAddRows) return null
+
+  // One set of controls per row, laid out as a table row or as a card.
+  const fieldsFor = (row: Draft, index: number) => {
+    const label = row.sampleCode || `แถว ${index + 1}`
+    const isLogScale = data.iqcAnalytes.find((analyte) => analyte.id === row.iqcAnalyteId)?.scale === 'log10' || /\b(?:HIV|HBV|HCV)[\w-]*\s*VL\b/i.test(row.analyte)
+    const log10 = isLogScale ? copiesToLog10(row.submittedValue) : null
+    const saved = row.id ? round.results.find((result) => result.id === row.id) : undefined
+    const correctiveAction = saved ? data.correctiveActions.find((action) => action.roundId === round.id && action.resultId === saved.id) ?? data.correctiveActions.find((action) => action.roundId === round.id && !action.resultId) ?? null : null
+    return {
+      label,
+      isChanged: changed.includes(row),
+      sampleCode: <Input aria-label={`รหัสตัวอย่าง ${label}`} className="min-w-24" value={row.sampleCode} onChange={(event) => update(row.key, { sampleCode: event.target.value })} />,
+      analyte: analyteOptions.length ? (
+        <Select aria-label={`รายการทดสอบ ${label}`} className="min-w-36" value={row.analyte} onChange={(event) => selectAnalyte(row.key, event.target.value)}>
+          <option value="">— เลือก —</option>
+          {row.analyte && !analyteOptions.includes(row.analyte) ? <option value={row.analyte}>{row.analyte}</option> : null}
+          {analyteOptions.map((analyte) => <option key={analyte} value={analyte}>{analyte}</option>)}
+        </Select>
+      ) : <Input aria-label={`รายการทดสอบ ${label}`} className="min-w-32" value={row.analyte} onChange={(event) => update(row.key, { analyte: event.target.value })} />,
+      submitted: <>
+        <div className="flex min-w-44 gap-1"><Input aria-label={`ผลที่ส่ง ${label}`} value={row.submittedValue} onChange={(event) => update(row.key, { submittedValue: event.target.value })} /><Input aria-label={`หน่วย ${label}`} className="w-20" value={row.unit} onChange={(event) => update(row.key, { unit: event.target.value })} /></div>
+        {log10 != null ? <span className="mt-1 inline-block rounded bg-[#e8f5f3] px-1.5 py-0.5 text-[11px] font-semibold text-[#176d65]">log10 {log10.toFixed(3)}</span> : null}
+      </>,
+      ct: <Input aria-label={`Ct ${label}`} inputMode="decimal" className="w-full sm:w-20" value={row.ctValue} onChange={(event) => update(row.key, { ctValue: event.target.value })} />,
+      assigned: <Input aria-label={`ค่าอ้างอิง ${label}`} className="min-w-28" placeholder="Positive / Negative" value={row.assignedValue} onChange={(event) => update(row.key, { assignedValue: event.target.value })} />,
+      score: <Input aria-label={`คะแนน ${label}`} inputMode="decimal" className="w-full sm:w-20" value={row.evaluationScore} onChange={(event) => update(row.key, { evaluationScore: event.target.value })} />,
+      outcome: (
+        <Select aria-label={`ผลประเมิน ${label}`} className={`min-w-36 rounded-full border-0 px-3 py-1.5 text-xs font-semibold ${outcomeSelectClass(row.outcome)}`} value={row.outcome} onChange={(event) => update(row.key, { outcome: event.target.value as EqaResult['outcome'] })}>
+          {Object.entries(OUTCOME_LABELS).map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+        </Select>
+      ),
+      actions: (
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="danger" className="min-h-11 px-3 sm:min-h-9 sm:px-2" title={`ลบ ${label}`} aria-label={`ลบ ${label}`} disabled={busy} onClick={() => removeRow(row)}><Trash2 className="size-4" aria-hidden="true" /></Button>
+          {saved && (saved.outcome === 'warning' || saved.outcome === 'unacceptable') ? <Button type="button" variant="secondary" className="min-h-11 px-3 text-xs whitespace-nowrap sm:min-h-9" onClick={() => onNavigate({ kind: 'corrective', roundId: round.id, resultId: saved.id })}>{correctiveAction ? 'เปิด CAPA เดิม' : 'เปิด CAPA'}</Button> : null}
+        </div>
+      ),
+    }
+  }
+
   return (
     <div className="mt-3 space-y-2">
-      <div className="overflow-x-auto rounded-md border border-[#e9eff0]">
+      {/* Phones: one card per sample, no sideways scrolling. */}
+      <div className="space-y-2 sm:hidden">
+        {rows.map((row, index) => {
+          const fields = fieldsFor(row, index)
+          return (
+            <div key={row.key} className={`space-y-2 rounded-md border p-3 text-xs ${fields.isChanged ? 'border-[#eed4a6] bg-[#fffbf0]' : 'border-[#e3ebec] bg-white'}`}>
+              <div className="flex items-center justify-between gap-2"><p className="font-bold text-[#315763]">ตัวอย่าง {index + 1}</p>{fields.actions}</div>
+              <label className="block font-semibold text-[#58747d]">รหัสตัวอย่าง{fields.sampleCode}</label>
+              <label className="block font-semibold text-[#58747d]">รายการทดสอบ{fields.analyte}</label>
+              <div className="font-semibold text-[#58747d]">ผลที่ส่ง / หน่วย{fields.submitted}</div>
+              <div className="grid grid-cols-2 gap-2"><label className="block font-semibold text-[#58747d]">Ct{fields.ct}</label><label className="block font-semibold text-[#58747d]">คะแนนจากผู้จัด{fields.score}</label></div>
+              <label className="block font-semibold text-[#58747d]">ค่าอ้างอิงจากผู้จัด{fields.assigned}</label>
+              <div className="font-semibold text-[#58747d]">ผลประเมินจากผู้จัด{fields.outcome}</div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="hidden overflow-x-auto rounded-md border border-[#e9eff0] sm:block">
         <table className="w-full min-w-[960px] text-left text-xs">
           <thead className="bg-[#f6fafa] text-[#55727c]">
             <tr>
@@ -133,40 +201,17 @@ export function RoundResultsTable({ round, data, canAddRows, defaultIqcAnalyteId
           </thead>
           <tbody className="divide-y divide-[#eef3f3]">
             {rows.map((row, index) => {
-              const label = row.sampleCode || `แถว ${index + 1}`
-              const isLogScale = data.iqcAnalytes.find((analyte) => analyte.id === row.iqcAnalyteId)?.scale === 'log10' || /\b(?:HIV|HBV|HCV)[\w-]*\s*VL\b/i.test(row.analyte)
-              const log10 = isLogScale ? copiesToLog10(row.submittedValue) : null
-              const saved = row.id ? round.results.find((result) => result.id === row.id) : undefined
-              const correctiveAction = saved ? data.correctiveActions.find((action) => action.roundId === round.id && action.resultId === saved.id) ?? data.correctiveActions.find((action) => action.roundId === round.id && !action.resultId) ?? null : null
-              const isChanged = changed.includes(row)
+              const fields = fieldsFor(row, index)
               return (
-                <tr key={row.key} className={isChanged ? 'bg-[#fffbf0]' : undefined}>
-                  <td className="p-1.5"><Input aria-label={`รหัสตัวอย่าง ${label}`} className="min-w-24" value={row.sampleCode} onChange={(event) => update(row.key, { sampleCode: event.target.value })} /></td>
-                  <td className="p-1.5">{analyteOptions.length ? (
-                    <Select aria-label={`รายการทดสอบ ${label}`} className="min-w-36" value={row.analyte} onChange={(event) => selectAnalyte(row.key, event.target.value)}>
-                      <option value="">— เลือก —</option>
-                      {row.analyte && !analyteOptions.includes(row.analyte) ? <option value={row.analyte}>{row.analyte}</option> : null}
-                      {analyteOptions.map((analyte) => <option key={analyte} value={analyte}>{analyte}</option>)}
-                    </Select>
-                  ) : <Input aria-label={`รายการทดสอบ ${label}`} className="min-w-32" value={row.analyte} onChange={(event) => update(row.key, { analyte: event.target.value })} />}</td>
-                  <td className="p-1.5">
-                    <div className="flex min-w-44 gap-1"><Input aria-label={`ผลที่ส่ง ${label}`} value={row.submittedValue} onChange={(event) => update(row.key, { submittedValue: event.target.value })} /><Input aria-label={`หน่วย ${label}`} className="w-20" value={row.unit} onChange={(event) => update(row.key, { unit: event.target.value })} /></div>
-                    {log10 != null ? <span className="mt-1 inline-block rounded bg-[#e8f5f3] px-1.5 py-0.5 text-[10px] font-semibold text-[#176d65]">log10 {log10.toFixed(3)}</span> : null}
-                  </td>
-                  <td className="p-1.5"><Input aria-label={`Ct ${label}`} inputMode="decimal" className="w-20" value={row.ctValue} onChange={(event) => update(row.key, { ctValue: event.target.value })} /></td>
-                  <td className="p-1.5"><Input aria-label={`ค่าอ้างอิง ${label}`} className="min-w-28" placeholder="Positive / Negative" value={row.assignedValue} onChange={(event) => update(row.key, { assignedValue: event.target.value })} /></td>
-                  <td className="p-1.5"><Input aria-label={`คะแนน ${label}`} inputMode="decimal" className="w-20" value={row.evaluationScore} onChange={(event) => update(row.key, { evaluationScore: event.target.value })} /></td>
-                  <td className="p-1.5">
-                    <Select aria-label={`ผลประเมิน ${label}`} className={`min-w-36 rounded-full border-0 px-3 py-1.5 text-xs font-semibold ${outcomeSelectClass(row.outcome)}`} value={row.outcome} onChange={(event) => update(row.key, { outcome: event.target.value as EqaResult['outcome'] })}>
-                      {Object.entries(OUTCOME_LABELS).map(([value, text]) => <option key={value} value={value}>{text}</option>)}
-                    </Select>
-                  </td>
-                  <td className="p-1.5">
-                    <div className="flex items-center gap-1">
-                      <Button type="button" variant="danger" className="min-h-8 px-2 py-1" title={`ลบ ${label}`} aria-label={`ลบ ${label}`} disabled={busy} onClick={() => removeRow(row)}><Trash2 className="size-3.5" /></Button>
-                      {saved && (saved.outcome === 'warning' || saved.outcome === 'unacceptable') ? <Button type="button" variant="secondary" className="min-h-8 px-2 py-1 text-[11px] whitespace-nowrap" onClick={() => onNavigate({ kind: 'corrective', roundId: round.id, resultId: saved.id })}>{correctiveAction ? 'เปิด CAPA เดิม' : 'เปิด CAPA'}</Button> : null}
-                    </div>
-                  </td>
+                <tr key={row.key} className={fields.isChanged ? 'bg-[#fffbf0]' : undefined}>
+                  <td className="p-1.5">{fields.sampleCode}</td>
+                  <td className="p-1.5">{fields.analyte}</td>
+                  <td className="p-1.5">{fields.submitted}</td>
+                  <td className="p-1.5">{fields.ct}</td>
+                  <td className="p-1.5">{fields.assigned}</td>
+                  <td className="p-1.5">{fields.score}</td>
+                  <td className="p-1.5">{fields.outcome}</td>
+                  <td className="p-1.5">{fields.actions}</td>
                 </tr>
               )
             })}
@@ -174,10 +219,11 @@ export function RoundResultsTable({ round, data, canAddRows, defaultIqcAnalyteId
         </table>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        {canAddRows ? <Button type="button" variant="secondary" className="min-h-9 px-3 text-xs" onClick={addRow}><Plus className="size-4" />เพิ่มตัวอย่าง</Button> : null}
-        <Button type="button" className="min-h-9 px-3 text-xs" disabled={busy || !changed.length} onClick={saveAll}>{busy ? 'กำลังบันทึก…' : changed.length ? `บันทึกทั้งหมด (${changed.length} รายการ)` : 'บันทึกทั้งหมด'}</Button>
+        {canAddRows ? <Button type="button" variant="secondary" className="min-h-11 px-3 text-xs sm:min-h-9" onClick={addRow}><Plus className="size-4" aria-hidden="true" />เพิ่มตัวอย่าง</Button> : null}
+        <Button type="button" className="min-h-11 px-3 text-xs sm:min-h-9" disabled={busy || !changed.length} onClick={saveAll}>{busy ? 'กำลังบันทึก…' : changed.length ? `บันทึกทั้งหมด (${changed.length} รายการ)` : 'บันทึกทั้งหมด'}</Button>
         {changed.length ? <span className="text-xs font-semibold text-[#a9700f]">มีการแก้ไขที่ยังไม่บันทึก</span> : null}
       </div>
+      {error ? <p role="alert" className="text-xs font-semibold text-[#a83541]">{error}</p> : null}
     </div>
   )
 }
