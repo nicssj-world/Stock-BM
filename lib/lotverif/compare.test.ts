@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { difference, meanPercentBias, measurementValues, percentDiff, withinCriteria, calculateParallelComparison } from '@/lib/lotverif/compare'
+import { defaultResultKind, difference, meanPercentBias, measurementValues, percentDiff, withinCriteria, calculateParallelComparison } from '@/lib/lotverif/compare'
 
 describe('lot-to-lot compare', () => {
   it('difference is new minus old', () => {
@@ -112,5 +112,17 @@ describe('measurementValues', () => {
 
   it('leaves an empty side empty', () => {
     expect(measurementValues('', '3.5')).toEqual({ oldValue: null, newValue: 3.5, oldQualitative: null, newQualitative: null })
+  })
+})
+
+describe('defaultResultKind', () => {
+  it('picks a result for negative control levels and qualitative analytes', () => {
+    expect(defaultResultKind({ code: 'HBV-VL (Normal)', name: 'HBV viral load normal control', dataType: 'quantitative' })).toBe('qualitative')
+    expect(defaultResultKind({ code: 'HPV', name: 'HPV genotyping', dataType: 'qualitative' })).toBe('qualitative')
+  })
+
+  it('takes a number for other levels and when no analyte is chosen', () => {
+    expect(defaultResultKind({ code: 'HBV-VL (HPC)', name: 'HBV viral load high control', dataType: 'quantitative' })).toBe('number')
+    expect(defaultResultKind(null)).toBe('number')
   })
 })

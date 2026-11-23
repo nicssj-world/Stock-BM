@@ -44,6 +44,20 @@ export function measurementValues(oldRaw: string, newRaw: string) {
     : { oldValue: null, newValue: null, oldQualitative: oldText || null, newQualitative: newText || null }
 }
 
+/** Results offered as a pick-list for a qualitative pair, so both lots are spelled the same. */
+export const QUALITATIVE_RESULTS = ['Not detected', 'Detected', 'Negative', 'Positive'] as const
+
+/**
+ * How a measurement row is entered for an analyte: a qualitative analyte, or a
+ * negative control level such as "HBV-VL (Normal)", gives a result to pick
+ * (Not detected / Detected ...); everything else is a number.
+ */
+export function defaultResultKind(analyte: { code: string; name: string; dataType: string } | null | undefined): 'number' | 'qualitative' {
+  if (!analyte) return 'number'
+  if (analyte.dataType === 'qualitative') return 'qualitative'
+  return /\((?:normal|negative|neg)\)/i.test(`${analyte.code} ${analyte.name}`) ? 'qualitative' : 'number'
+}
+
 export interface ParallelControlInput {
   level: number
   /** Mean/SD are supplied in the IQC calculation scale. */

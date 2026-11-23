@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { AlertTriangle, CheckCircle2, ChevronDown, ClipboardList, FileSpreadsheet, GitCompareArrows, Pencil, Plus, Printer, Search, Settings2, Trash2, X } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { LotVerification, LotVerifParallelRow, LotVerifStatus, LotVerifWorkspace } from '@/lib/lotverif/types'
-import { calculateParallelComparison, measurementValues } from '@/lib/lotverif/compare'
+import { calculateParallelComparison, defaultResultKind, measurementValues, QUALITATIVE_RESULTS } from '@/lib/lotverif/compare'
 import { LOTVERIF_METHOD_LABEL, LOTVERIF_STATUS_LABEL, parallelReasonLabel } from '@/lib/lotverif/labels'
 import { formatDate } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, type StatusTone, Textarea } from '@/components/ui'
@@ -915,11 +915,18 @@ function MeasurementTable({ verification: v }: { verification: LotVerification }
   )
 }
 
-// Common qualitative results offered while typing; any other text is accepted.
-const QUALITATIVE_RESULTS = ['Not detected', 'Detected', 'Negative', 'Positive', 'Target not detected']
-
 function AddMeasurement({ verification: v, data, onAdded }: { verification: LotVerification; data: LotVerifWorkspace; onAdded: () => void }) {
-  const [row, setRow] = useState({ analyteId: '', sampleLabel: '', oldValue: '', newValue: '', acceptancePercent: '' })
+  const emptyRow = { analyteId: '', sampleLabel: '', kind: 'number' as 'number' | 'qualitative', oldValue: '', newValue: '', acceptancePercent: '' }
+  const [row, setRow] = useState(emptyRow)
+  // A qualitative result is picked from a list so both lots are spelled the
+  // same (they are compared as text); a number is typed into a number field.
+  function selectAnalyte(analyteId: string) {
+    const kind = defaultResultKind(data.analytes.find((a) => a.id === analyteId))
+    setRow((current) => ({ ...current, analyteId, kind, ...(kind !== current.kind ? { oldValue: '', newValue: '' } : {}) }))
+  }
+  function selectKind(kind: 'number' | 'qualitative') {
+    setRow((current) => (kind === current.kind ? current : { ...current, kind, oldValue: '', newValue: '' }))
+  }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -940,11 +947,11 @@ function AddMeasurement({ verification: v, data, onAdded }: { verification: LotV
             // Numbers are compared by %diff; text such as "Not detected" is a
             // qualitative result compared by agreement.
             ...measurementValues(row.oldValue, row.newValue),
-            acceptancePercent: row.acceptancePercent === '' ? null : Number(row.acceptancePercent),
+            acceptancePercent: row.kind === 'qualitative' || row.acceptancePercent === '' ? null : Number(row.acceptancePercent),
           }],
         }),
       })
-      setRow({ analyteId: '', sampleLabel: '', oldValue: '', newValue: '', acceptancePercent: '' })
+      setRow(emptyRow)
       onAdded()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'เพิ่มไม่สำเร็จ')
@@ -954,21 +961,32 @@ function AddMeasurement({ verification: v, data, onAdded }: { verification: LotV
   }
 
   return (
-    <form onSubmit={add} className="mt-3 grid items-end gap-2 rounded-md border border-[#e3ebec] bg-[#f8fbfb] p-3 sm:grid-cols-6">
+    <form onSubmit={add} className="mt-3 grid items-end gap-2 rounded-md border border-[#e3ebec] bg-[#f8fbfb] p-3 sm:grid-cols-7">
       <Field label="Analyte">
-        <Select value={row.analyteId} onChange={(e) => setRow({ ...row, analyteId: e.target.value })}>
+        <Select value={row.analyteId} onChange={(e) => selectAnalyte(e.target.value)}>
           <option value="">— ไม่ระบุ —</option>
           {data.analytes.map((a) => <option key={a.id} value={a.id}>{a.code}</option>)}
         </Select>
       </Field>
       <Field label="Sample"><Input value={row.sampleLabel} onChange={(e) => setRow({ ...row, sampleLabel: e.target.value })} placeholder="QC L1" /></Field>
-      <datalist id={`lotverif-qualitative-${v.id}`}>{QUALITATIVE_RESULTS.map((value) => <option key={value} value={value} />)}</datalist>
-      <Field label="ค่าเดิม"><Input list={`lotverif-qualitative-${v.id}`} placeholder="ตัวเลข / Not detected" value={row.oldValue} onChange={(e) => setRow({ ...row, oldValue: e.target.value })} /></Field>
-      <Field label="ค่าใหม่"><Input list={`lotverif-qualitative-${v.id}`} placeholder="ตัวเลข / Not detected" value={row.newValue} onChange={(e) => setRow({ ...row, newValue: e.target.value })} /></Field>
-      <Field label="เกณฑ์ %"><Input type="number" step="any" value={row.acceptancePercent} onChange={(e) => setRow({ ...row, acceptancePercent: e.target.value })} placeholder="10" /></Field>
+      <Field label="ชนิดผล">
+        <Select value={row.kind} onChange={(e) => selectKind(e.target.value as 'number' | 'qualitative')}>
+          <option value="number">ตัวเลข</option>
+          <option value="qualitative">เชิงคุณภาพ (เลือก)</option>
+        </Select>
+      </Field>
+      {row.kind === 'qualitative' ? <>
+        <Field label="ค่าเดิม"><Select value={row.oldValue} onChange={(e) => setRow({ ...row, oldValue: e.target.value })} required><option value="">— เลือก —</option>{QUALITATIVE_RESULTS.map((value) => <option key={value} value={value}>{value}</option>)}</Select></Field>
+        <Field label="ค่าใหม่"><Select value={row.newValue} onChange={(e) => setRow({ ...row, newValue: e.target.value })} required><option value="">— เลือก —</option>{QUALITATIVE_RESULTS.map((value) => <option key={value} value={value}>{value}</option>)}</Select></Field>
+        <Field label="เกณฑ์ %"><Input disabled value="" placeholder="เทียบว่าตรงกัน" aria-label="เกณฑ์ % (ไม่ใช้กับผลเชิงคุณภาพ)" /></Field>
+      </> : <>
+        <Field label="ค่าเดิม"><Input type="number" step="any" value={row.oldValue} onChange={(e) => setRow({ ...row, oldValue: e.target.value })} /></Field>
+        <Field label="ค่าใหม่"><Input type="number" step="any" value={row.newValue} onChange={(e) => setRow({ ...row, newValue: e.target.value })} /></Field>
+        <Field label="เกณฑ์ %"><Input type="number" step="any" value={row.acceptancePercent} onChange={(e) => setRow({ ...row, acceptancePercent: e.target.value })} placeholder="10" /></Field>
+      </>}
       <Button type="submit" disabled={busy}>{busy ? '…' : 'เพิ่ม'}</Button>
-      <p className="text-[11px] text-[#789097] sm:col-span-6">ค่าที่เป็นตัวเลขทั้งคู่ คิด %diff เทียบเกณฑ์ % · ค่าที่เป็นข้อความ เช่น Not detected / Positive เทียบว่าตรงกันหรือไม่</p>
-      {error ? <div className="sm:col-span-6"><Notice tone="danger">{error}</Notice></div> : null}
+      <p className="text-[11px] text-[#789097] sm:col-span-7">ตัวเลข: คิด %diff เทียบเกณฑ์ % · เชิงคุณภาพ: เลือกผลจากรายการ แล้วเทียบว่าตรงกันหรือไม่ · analyte ระดับ Normal จะเลือกชนิดเชิงคุณภาพให้อัตโนมัติ</p>
+      {error ? <div className="sm:col-span-7"><Notice tone="danger">{error}</Notice></div> : null}
     </form>
   )
 }
