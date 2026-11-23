@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { difference, meanPercentBias, percentDiff, withinCriteria, calculateParallelComparison } from '@/lib/lotverif/compare'
+import { difference, meanPercentBias, measurementValues, percentDiff, withinCriteria, calculateParallelComparison } from '@/lib/lotverif/compare'
 
 describe('lot-to-lot compare', () => {
   it('difference is new minus old', () => {
@@ -93,5 +93,24 @@ describe('lot-to-lot compare', () => {
 
     expect(result.passed).toBeNull()
     expect(result.reason).toBe('insufficient-levels')
+  })
+})
+
+describe('measurementValues', () => {
+  it('compares two numbers quantitatively', () => {
+    expect(measurementValues('1,200', ' 1180 ')).toEqual({ oldValue: 1200, newValue: 1180, oldQualitative: null, newQualitative: null })
+  })
+
+  it('keeps text results such as Not detected as qualitative', () => {
+    expect(measurementValues('Not detected', 'Not detected')).toEqual({ oldValue: null, newValue: null, oldQualitative: 'Not detected', newQualitative: 'Not detected' })
+  })
+
+  it('treats a number against text as qualitative so they show as discordant', () => {
+    expect(measurementValues('Not detected', '25')).toEqual({ oldValue: null, newValue: null, oldQualitative: 'Not detected', newQualitative: '25' })
+    expect(measurementValues('<20', '<20').oldQualitative).toBe('<20')
+  })
+
+  it('leaves an empty side empty', () => {
+    expect(measurementValues('', '3.5')).toEqual({ oldValue: null, newValue: 3.5, oldQualitative: null, newQualitative: null })
   })
 })

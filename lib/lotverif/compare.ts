@@ -23,6 +23,27 @@ export function meanPercentBias(pairs: { oldValue: number; newValue: number }[])
   return diffs.length ? mean(diffs) : 0
 }
 
+/**
+ * Splits a typed old/new pair into what a measurement stores. Two numbers are
+ * compared quantitatively (difference, % against the limit). Anything else --
+ * "Not detected", "Positive", "<20" -- is a qualitative result, and both sides
+ * are kept as text so the pair is judged on agreement (concordance).
+ */
+export function measurementValues(oldRaw: string, newRaw: string) {
+  const asNumber = (raw: string) => {
+    const text = raw.trim().replace(/,/g, '')
+    return text !== '' && /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(text) ? Number(text) : null
+  }
+  const oldText = oldRaw.trim()
+  const newText = newRaw.trim()
+  const oldNumber = asNumber(oldText)
+  const newNumber = asNumber(newText)
+  const quantitative = (oldText === '' || oldNumber != null) && (newText === '' || newNumber != null)
+  return quantitative
+    ? { oldValue: oldNumber, newValue: newNumber, oldQualitative: null, newQualitative: null }
+    : { oldValue: null, newValue: null, oldQualitative: oldText || null, newQualitative: newText || null }
+}
+
 export interface ParallelControlInput {
   level: number
   /** Mean/SD are supplied in the IQC calculation scale. */

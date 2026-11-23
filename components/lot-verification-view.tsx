@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { AlertTriangle, CheckCircle2, ChevronDown, ClipboardList, FileSpreadsheet, GitCompareArrows, Pencil, Plus, Printer, Search, Settings2, Trash2, X } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import type { LotVerification, LotVerifParallelRow, LotVerifStatus, LotVerifWorkspace } from '@/lib/lotverif/types'
-import { calculateParallelComparison } from '@/lib/lotverif/compare'
+import { calculateParallelComparison, measurementValues } from '@/lib/lotverif/compare'
 import { LOTVERIF_METHOD_LABEL, LOTVERIF_STATUS_LABEL, parallelReasonLabel } from '@/lib/lotverif/labels'
 import { formatDate } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, type StatusTone, Textarea } from '@/components/ui'
@@ -915,6 +915,9 @@ function MeasurementTable({ verification: v }: { verification: LotVerification }
   )
 }
 
+// Common qualitative results offered while typing; any other text is accepted.
+const QUALITATIVE_RESULTS = ['Not detected', 'Detected', 'Negative', 'Positive', 'Target not detected']
+
 function AddMeasurement({ verification: v, data, onAdded }: { verification: LotVerification; data: LotVerifWorkspace; onAdded: () => void }) {
   const [row, setRow] = useState({ analyteId: '', sampleLabel: '', oldValue: '', newValue: '', acceptancePercent: '' })
   const [busy, setBusy] = useState(false)
@@ -934,8 +937,9 @@ function AddMeasurement({ verification: v, data, onAdded }: { verification: LotV
             analyteId: row.analyteId || null,
             analyteLabel: analyte ? analyte.name : null,
             sampleLabel: row.sampleLabel.trim() || null,
-            oldValue: row.oldValue === '' ? null : Number(row.oldValue),
-            newValue: row.newValue === '' ? null : Number(row.newValue),
+            // Numbers are compared by %diff; text such as "Not detected" is a
+            // qualitative result compared by agreement.
+            ...measurementValues(row.oldValue, row.newValue),
             acceptancePercent: row.acceptancePercent === '' ? null : Number(row.acceptancePercent),
           }],
         }),
@@ -958,10 +962,12 @@ function AddMeasurement({ verification: v, data, onAdded }: { verification: LotV
         </Select>
       </Field>
       <Field label="Sample"><Input value={row.sampleLabel} onChange={(e) => setRow({ ...row, sampleLabel: e.target.value })} placeholder="QC L1" /></Field>
-      <Field label="ค่าเดิม"><Input type="number" step="any" value={row.oldValue} onChange={(e) => setRow({ ...row, oldValue: e.target.value })} /></Field>
-      <Field label="ค่าใหม่"><Input type="number" step="any" value={row.newValue} onChange={(e) => setRow({ ...row, newValue: e.target.value })} /></Field>
+      <datalist id={`lotverif-qualitative-${v.id}`}>{QUALITATIVE_RESULTS.map((value) => <option key={value} value={value} />)}</datalist>
+      <Field label="ค่าเดิม"><Input list={`lotverif-qualitative-${v.id}`} placeholder="ตัวเลข / Not detected" value={row.oldValue} onChange={(e) => setRow({ ...row, oldValue: e.target.value })} /></Field>
+      <Field label="ค่าใหม่"><Input list={`lotverif-qualitative-${v.id}`} placeholder="ตัวเลข / Not detected" value={row.newValue} onChange={(e) => setRow({ ...row, newValue: e.target.value })} /></Field>
       <Field label="เกณฑ์ %"><Input type="number" step="any" value={row.acceptancePercent} onChange={(e) => setRow({ ...row, acceptancePercent: e.target.value })} placeholder="10" /></Field>
       <Button type="submit" disabled={busy}>{busy ? '…' : 'เพิ่ม'}</Button>
+      <p className="text-[11px] text-[#789097] sm:col-span-6">ค่าที่เป็นตัวเลขทั้งคู่ คิด %diff เทียบเกณฑ์ % · ค่าที่เป็นข้อความ เช่น Not detected / Positive เทียบว่าตรงกันหรือไม่</p>
       {error ? <div className="sm:col-span-6"><Notice tone="danger">{error}</Notice></div> : null}
     </form>
   )
