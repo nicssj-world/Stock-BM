@@ -261,6 +261,7 @@ async function getAttachmentRow(id: string) {
 export async function assertAttachmentAccess(id: string, actor: BmActor): Promise<void> {
   const row = await getAttachmentRow(id)
   if (asString(row.module) === 'equipment' && actor.role === 'Assistant') throw new HttpError(403, 'Equipment permission required')
+  if (actor.role === 'Signer' && asString(row.module) !== 'eqa') throw new HttpError(403, 'Signer may only view EQA attachments')
 }
 
 export async function signedUrl(id: string): Promise<string> {

@@ -14,7 +14,7 @@ function asString(value: unknown) {
 
 function asBmRole(value: unknown): BmRole {
   const role = asString(value)
-  if (role === 'Admin' || role === 'Assistant') return role
+  if (role === 'Admin' || role === 'Assistant' || role === 'Signer') return role
   return 'Staff'
 }
 
@@ -44,9 +44,26 @@ export async function getActor(): Promise<BmActor | null> {
   }
 }
 
-export async function requireActor() {
+/** Where each role lands after signing in. */
+export function homePathForRole(role: BmRole) {
+  return role === 'Assistant' ? '/hpv' : role === 'Signer' ? '/eqa' : '/dashboard'
+}
+
+const SIGNER_DENIED = 'บัญชีผู้ลงนามใช้ได้เฉพาะการลงนามเอกสาร EQA และจัดการลายเซ็นของตัวเอง'
+
+/** Any signed-in role, Signer included. Only routes a Signer may use call this. */
+export async function requireAnyActor() {
   const actor = await getActor()
   if (!actor) throw new HttpError(401, 'Unauthorized')
+  return actor
+}
+
+// Signer is denied by default: every API that goes through requireActor (and
+// the helpers built on it) rejects it. Routes a Signer needs opt in explicitly
+// with requireAnyActor / requireSigningActor.
+export async function requireActor() {
+  const actor = await requireAnyActor()
+  if (actor.role === 'Signer') throw new HttpError(403, SIGNER_DENIED)
   return actor
 }
 
@@ -64,9 +81,23 @@ export async function requireStockOperator() {
   return actor
 }
 
-export async function requirePageActor() {
+/** Admin, Staff or Signer: signing documents and managing one's own signature. */
+export async function requireSigningActor() {
+  const actor = await requireAnyActor()
+  if (actor.role === 'Assistant') throw new HttpError(403, 'Stock Staff or Admin permission required')
+  return actor
+}
+
+/** Signed-in, any role: only for the shared protected layout. */
+export async function requireLayoutActor() {
   const actor = await getActor()
   if (!actor) redirect('/login')
+  return actor
+}
+
+export async function requirePageActor() {
+  const actor = await requireLayoutActor()
+  if (actor.role === 'Signer') redirect(homePathForRole(actor.role))
   return actor
 }
 
@@ -76,8 +107,15 @@ export async function requireFullPageActor() {
   return actor
 }
 
+/** Pages a Signer may open: EQA and their own signature. */
+export async function requireSigningPageActor() {
+  const actor = await requireLayoutActor()
+  if (actor.role === 'Assistant') redirect('/hpv')
+  return actor
+}
+
 export async function requireAdminPageActor() {
   const actor = await requirePageActor()
-  if (actor.role !== 'Admin') redirect(actor.role === 'Assistant' ? '/hpv' : '/dashboard')
+  if (actor.role !== 'Admin') redirect(homePathForRole(actor.role))
   return actor
 }

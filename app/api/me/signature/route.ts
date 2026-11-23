@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { requireStockOperator } from '@/lib/server/auth'
+import { requireSigningActor } from '@/lib/server/auth'
 import { clearMySignature, getMySigner, saveMySignature } from '@/lib/server/vendor-evaluation'
 import { readJson, respond } from '@/lib/server/route'
 
@@ -10,7 +10,7 @@ const putSchema = z.object({ signaturePng: z.string().max(400000) }).strict()
 // owner can read or change it; the database validates the PNG.
 export async function GET() {
   return respond(async () => {
-    const signer = await getMySigner(await requireStockOperator())
+    const signer = await getMySigner(await requireSigningActor())
     return { signature: signer.signature }
   })
 }
@@ -18,14 +18,14 @@ export async function GET() {
 export async function PUT(request: Request) {
   return respond(async () => {
     const body = await readJson(request, putSchema)
-    await saveMySignature(body.signaturePng, await requireStockOperator())
+    await saveMySignature(body.signaturePng, await requireSigningActor())
     return { ok: true }
   })
 }
 
 export async function DELETE() {
   return respond(async () => {
-    await clearMySignature(await requireStockOperator())
+    await clearMySignature(await requireSigningActor())
     return { ok: true }
   })
 }

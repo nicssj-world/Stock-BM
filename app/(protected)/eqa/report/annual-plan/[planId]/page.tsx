@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
-import { requireFullPageActor } from '@/lib/server/auth'
+import { requireSigningPageActor } from '@/lib/server/auth'
 import { getEqaWorkspace } from '@/lib/server/eqa'
 import { EQA_DOCUMENT_CODES } from '@/lib/eqa/types'
 import { EqaApprovalGrid, EqaReportFrame, eqaBackHref } from '@/components/eqa-report-frame'
@@ -12,7 +12,7 @@ const MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.'
 function Tick({ show }: { show: boolean }) { return show ? <span className="css-tick" aria-label="เลือก" /> : null }
 
 export default async function EqaAnnualPlanReportPage({ params, searchParams }: { params: Promise<{ planId: string }>; searchParams: Promise<{ tab?: string }> }) {
-  const actor = await requireFullPageActor()
+  const actor = await requireSigningPageActor()
   const workspace = await getEqaWorkspace(actor)
   const { planId } = await params
   const { tab } = await searchParams

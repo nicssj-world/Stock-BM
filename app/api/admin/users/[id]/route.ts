@@ -7,7 +7,7 @@ const schema = z.object({
   displayName: z.string().trim().min(1).max(120).optional(),
   genomicRole: z.enum(['Admin', 'CBH-Staff']).optional(),
   genomicActive: z.boolean().optional(),
-  stockRole: z.enum(['Admin', 'Staff', 'Assistant']).optional(),
+  stockRole: z.enum(['Admin', 'Staff', 'Assistant', 'Signer']).optional(),
   stockActive: z.boolean().optional(),
 })
 

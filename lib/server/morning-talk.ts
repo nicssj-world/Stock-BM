@@ -91,7 +91,7 @@ async function loadUsers(): Promise<{ active: MorningTalkUser[]; allById: Map<st
       id: asString(row.id),
       ephisId: asString(row.ephis_id),
       displayName: asString(row.display_name),
-      role: access?.role === 'Admin' || access?.role === 'Assistant' ? access.role : 'Staff',
+      role: access?.role === 'Admin' || access?.role === 'Assistant' || access?.role === 'Signer' ? access.role : 'Staff',
       active: Boolean(row.is_active) && Boolean(access?.is_active),
     }
   })

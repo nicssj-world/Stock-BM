@@ -1,4 +1,4 @@
-import { requireActor } from "@/lib/server/auth";
+import { requireActor, requireAnyActor } from "@/lib/server/auth";
 import {
   assertAttachmentAccess,
   deleteAttachment,
@@ -17,7 +17,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const actor = await requireActor();
+    const actor = await requireAnyActor();
     const id = (await params).id;
     await assertAttachmentAccess(id, actor);
     const url = await signedUrl(id);

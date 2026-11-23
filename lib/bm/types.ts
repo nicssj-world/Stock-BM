@@ -1,4 +1,9 @@
-export type BmRole = 'Admin' | 'Staff' | 'Assistant'
+/**
+ * Signer: an approver from outside this unit (quality manager, group head).
+ * Can only view EQA documents and sign the roles assigned to them, and manage
+ * their own signature. Every other page and API rejects it (see lib/server/auth.ts).
+ */
+export type BmRole = 'Admin' | 'Staff' | 'Assistant' | 'Signer'
 export type GenomicRole = 'Admin' | 'CBH-Staff'
 export type StockTransactionType = 'receive' | 'issue' | 'move' | 'adjustment' | 'reversal'
 export type ExpiryState = 'ok' | 'expiring' | 'expired' | 'none'

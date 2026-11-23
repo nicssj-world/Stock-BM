@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { requireActor } from '@/lib/server/auth'
+import { requireSigningActor } from '@/lib/server/auth'
 import { HttpError } from '@/lib/server/errors'
 import { approveEqaDocument, revokeEqaDocumentApproval } from '@/lib/server/eqa'
 import { readJson, respond } from '@/lib/server/route'
@@ -27,9 +27,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ typ
     const signature = form.get('signature')
     if (!useSavedSignature && !(signature instanceof File)) throw new HttpError(400, 'กรุณาวาดลายเซ็นก่อนลงนาม')
     const body = (useSavedSignature ? savedSignerSchema : signerSchema).parse({ approvalRole: text(form, 'approvalRole'), signerName: text(form, 'signerName') })
-    return { eqa: await approveEqaDocument(route.type, route.id, body.approvalRole, await requireActor(), { signerName: body.signerName ?? '', signature: signature instanceof File ? signature : null, useSavedSignature }) }
+    return { eqa: await approveEqaDocument(route.type, route.id, body.approvalRole, await requireSigningActor(), { signerName: body.signerName ?? '', signature: signature instanceof File ? signature : null, useSavedSignature }) }
   })
 }
 export async function DELETE(request: Request, { params }: { params: Promise<{ type: string; id: string }> }) {
-  return respond(async () => { const route = paramsSchema.parse(await params); const body = await readJson(request, bodySchema); return { eqa: await revokeEqaDocumentApproval(route.type, route.id, body.approvalRole, await requireActor()) } })
+  return respond(async () => { const route = paramsSchema.parse(await params); const body = await readJson(request, bodySchema); return { eqa: await revokeEqaDocumentApproval(route.type, route.id, body.approvalRole, await requireSigningActor()) } })
 }

@@ -7,7 +7,7 @@ const schema = z.object({
   ephisId: z.string().regex(/^\d+$/),
   displayName: z.string().trim().min(1).max(120),
   password: z.string().min(8).max(128),
-  stockRole: z.enum(['Admin', 'Staff', 'Assistant']),
+  stockRole: z.enum(['Admin', 'Staff', 'Assistant', 'Signer']),
   genomicRole: z.enum(['Admin', 'CBH-Staff']).optional(),
 })
 

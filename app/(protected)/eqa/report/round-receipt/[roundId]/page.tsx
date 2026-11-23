@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element -- signed attachment URLs must remain direct for browser print output. */
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
-import { requireFullPageActor } from '@/lib/server/auth'
+import { requireSigningPageActor } from '@/lib/server/auth'
 import { getEqaWorkspace } from '@/lib/server/eqa'
 import { EQA_DOCUMENT_CODES } from '@/lib/eqa/types'
 import { EqaApprovalGrid, EqaReportFrame, eqaBackHref } from '@/components/eqa-report-frame'
@@ -14,7 +14,7 @@ function approvalDate(value: string | undefined) { return value ? new Intl.DateT
 function Box({ checked }: { checked: boolean }) { return <span className={`choice-box ${checked ? 'checked' : ''}`} aria-hidden="true" /> }
 
 export default async function EqaRoundReceiptReportPage({ params, searchParams }: { params: Promise<{ roundId: string }>; searchParams: Promise<{ tab?: string }> }) {
-  const actor = await requireFullPageActor(); const workspace = await getEqaWorkspace(actor)
+  const actor = await requireSigningPageActor(); const workspace = await getEqaWorkspace(actor)
   const { roundId } = await params
   const { tab } = await searchParams
   const round = workspace.rounds.find((item) => item.id === roundId); if (!round) notFound()

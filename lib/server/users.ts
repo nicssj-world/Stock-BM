@@ -25,7 +25,7 @@ function asString(value: unknown) {
 
 function asBmRole(value: unknown): BmRole {
   const role = asString(value)
-  if (role === 'Admin' || role === 'Assistant') return role
+  if (role === 'Admin' || role === 'Assistant' || role === 'Signer') return role
   return 'Staff'
 }
 

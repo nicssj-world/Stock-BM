@@ -828,6 +828,8 @@ export async function approveEqaDocument(type: EqaDocumentType, entityId: string
     // records the real signer's typed name and drawn signature on the shared
     // device.
     if (assignment && actor.role !== 'Admin' && assignment.userId !== actor.id) throw new HttpError(403, 'คุณไม่ได้รับมอบหมายบทบาทลงนามนี้')
+    // A Signer account signs only the roles assigned to it, never an unassigned one on someone else's behalf.
+    if (actor.role === 'Signer' && assignment?.userId !== actor.id) throw new HttpError(403, 'คุณไม่ได้รับมอบหมายบทบาทลงนามนี้')
     assignedSignerName = assignment?.userName ?? null
     assignedSignerId = assignment?.userId ?? null
   }

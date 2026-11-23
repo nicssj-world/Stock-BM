@@ -1,4 +1,4 @@
-import { requireActor } from "@/lib/server/auth";
+import { requireActor, requireAnyActor } from "@/lib/server/auth";
 import { assertVendorIssueAttachmentAllowed } from "@/lib/server/vendors";
 import {
   listAttachments,
@@ -54,9 +54,11 @@ function asModule(value: string): AttachmentModule {
 
 export async function GET(request: Request) {
   return respond(async () => {
-    const actor = await requireActor();
+    const actor = await requireAnyActor();
     const url = new URL(request.url);
     const mod = asModule(url.searchParams.get("module") ?? "");
+    if (actor.role === "Signer" && mod !== "eqa")
+      throw new HttpError(403, "Signer may only view EQA attachments");
     if (mod === "equipment" && actor.role === "Assistant")
       throw new HttpError(403, "Equipment permission required");
     const entityType = (url.searchParams.get("entityType") ?? "").trim();

@@ -13,4 +13,12 @@ describe('loginRedirectPath', () => {
   it('always sends assistants to the HPV workspace', () => {
     expect(loginRedirectPath('Assistant', '/inventory')).toBe('/hpv')
   })
+
+  it('keeps signers on EQA or their own signature page', () => {
+    expect(loginRedirectPath('Signer', '/inventory')).toBe('/eqa')
+    expect(loginRedirectPath('Signer', null)).toBe('/eqa')
+    expect(loginRedirectPath('Signer', '/eqa/report/annual-plan/abc')).toBe('/eqa/report/annual-plan/abc')
+    expect(loginRedirectPath('Signer', '/my-signature')).toBe('/my-signature')
+    expect(loginRedirectPath('Signer', '/eqa-evil')).toBe('/eqa')
+  })
 })

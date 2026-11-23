@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
-import { requireFullPageActor } from '@/lib/server/auth'
+import { requireSigningPageActor } from '@/lib/server/auth'
 import { getEqaWorkspace } from '@/lib/server/eqa'
 import { EQA_DOCUMENT_CODES } from '@/lib/eqa/types'
 import type { EqaResult } from '@/lib/eqa/types'
@@ -14,7 +14,7 @@ function uniqueSampleCodes(results: EqaResult[]) { return [...new Set(results.ma
 function resultLabels(results: EqaResult[]) { return [...new Map(results.map((result) => { const label = `${result.sampleCode ?? '-'} · ${result.analyte}`; return [label, label] })).values()] }
 
 export default async function EqaAnnualSummaryReportPage({ params, searchParams }: { params: Promise<{ planItemId: string }>; searchParams: Promise<{ tab?: string }> }) {
-  const actor = await requireFullPageActor(); const workspace = await getEqaWorkspace(actor)
+  const actor = await requireSigningPageActor(); const workspace = await getEqaWorkspace(actor)
   const { planItemId } = await params
   const { tab } = await searchParams
   const summary = workspace.annualSummaries.find((item) => item.planItem.id === planItemId); if (!summary) notFound()
