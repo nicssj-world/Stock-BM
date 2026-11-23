@@ -10,7 +10,7 @@ import {
 } from '@/lib/corrective-actions'
 import { formatDate, formatDateTime } from '@/lib/bm/rules'
 import { capaAwaitingEffectiveness, isEqaStaff } from '@/lib/eqa/rules'
-import { api, Button, Card, Notice, StatusBadge } from '@/components/ui'
+import { api, Button, Card, Notice, StatusBadge, Textarea } from '@/components/ui'
 import { AttachmentList } from '@/components/attachments'
 import {
   CorrectiveActionForm,
@@ -108,6 +108,7 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
   const [createVersion, setCreateVersion] = useState(0)
   const [localFocusId, setLocalFocusId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [verifyingId, setVerifyingId] = useState<string | null>(null)
   const [actionFilter, setActionFilter] = useState<EqaCorrectiveActionFilter>('active')
   const [query, setQuery] = useState('')
   const [expandedActionIds, setExpandedActionIds] = useState<Set<string>>(new Set())
@@ -259,16 +260,15 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
     await close(action.id)
   }
 
-  async function verifyEffectiveness(id: string) {
-    const effective = window.confirm('ยืนยันว่าการแก้ไขนี้มีประสิทธิผลหรือไม่?\nกด OK = effective, Cancel = ineffective')
-    const note = window.prompt('บันทึกผลการยืนยันการแก้ไข:')
-    if (!note?.trim()) return
+  async function verifyEffectiveness(id: string, outcome: 'effective' | 'ineffective', note: string) {
     setBusy(true)
     try {
-      const result = await api<{ eqa: EqaWorkspace }>(`/api/eqa/corrective-actions/${id}/verify-effectiveness`, { method: 'POST', body: JSON.stringify({ outcome: effective ? 'effective' : 'ineffective', note: note.trim() }) })
-      onOk(effective ? 'ยืนยันประสิทธิผลแล้ว' : 'บันทึกว่า ineffective และเปิด CAPA ต่อ', result.eqa)
-    } catch (error) { onErr(error instanceof Error ? error.message : 'ยืนยันไม่สำเร็จ') } finally { setBusy(false) }
+      const result = await api<{ eqa: EqaWorkspace }>(`/api/eqa/corrective-actions/${id}/verify-effectiveness`, { method: 'POST', body: JSON.stringify({ outcome, note: note.trim() }) })
+      onOk(outcome === 'effective' ? 'ยืนยันประสิทธิผลแล้ว' : 'บันทึกว่าไม่ได้ผล และเปิด CAPA ต่อ', result.eqa)
+      return true
+    } catch (error) { onErr(error instanceof Error ? error.message : 'ยืนยันไม่สำเร็จ'); return false } finally { setBusy(false) }
   }
+
 
   async function remove(id: string) {
     if (!window.confirm('ลบ Corrective action นี้ใช่ไหม?\n\nรายการและไฟล์แนบทั้งหมดจะถูกลบถาวร')) return
@@ -359,10 +359,11 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
               </button>
               <div className="flex shrink-0 items-center gap-1 p-3">
                 {action.status === 'open' ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => void closeAction(action)}>{needsCompletion ? 'กรอกให้ครบก่อนปิด' : 'ปิด'}</Button> : null}
-                {action.status === 'closed' && action.effectivenessOutcome === 'pending' ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => void verifyEffectiveness(action.id)}>ยืนยันประสิทธิผล</Button> : null}
+                {capaAwaitingEffectiveness(action) && verifyingId !== action.id ? <Button variant="secondary" className="min-h-8 px-3 py-1.5 text-xs" disabled={busy} onClick={() => setVerifyingId(action.id)}>ยืนยันประสิทธิผล</Button> : null}
                 <Button variant="danger" className="min-h-8 px-2 py-1.5" disabled={busy} onClick={() => void remove(action.id)} aria-label={`ลบ corrective action ${action.problem}`}><Trash2 className="size-3.5" /></Button>
               </div>
             </div>
+            {verifyingId === action.id && capaAwaitingEffectiveness(action) ? <div className="border-t border-[#e8efef] px-4 py-3"><EffectivenessForm busy={busy} onCancel={() => setVerifyingId(null)} onSubmit={async (outcome, note) => { const ok = await verifyEffectiveness(action.id, outcome, note); if (ok) setVerifyingId(null); return ok }} /></div> : null}
             {isExpanded ? <div className="border-t border-[#e8efef] px-4 pb-4 pt-3">
               {editingActionId === action.id ? <CorrectiveActionForm
                 key={`eqa-edit-${action.id}`}
@@ -398,4 +399,32 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
       {!filteredActions.length ? <Card className="p-8 text-center text-sm text-[#8198a0]"><ClipboardList className="mx-auto mb-2 size-6 text-[#b8c9cd]" />{data.correctiveActions.length ? 'ไม่พบ corrective action ที่ตรงเงื่อนไข' : 'ยังไม่มี corrective action'}</Card> : null}
     </div>
   </div>
+}
+
+/** Confirms a closed CAPA's effectiveness: an explicit choice plus a note (instead of OK/Cancel dialogs). */
+function EffectivenessForm({ busy, onSubmit, onCancel }: { busy: boolean; onSubmit: (outcome: 'effective' | 'ineffective', note: string) => Promise<boolean>; onCancel: () => void }) {
+  const [outcome, setOutcome] = useState<'effective' | 'ineffective' | ''>('')
+  const [note, setNote] = useState('')
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    if (!outcome || !note.trim()) return
+    await onSubmit(outcome, note)
+  }
+  return (
+    <form onSubmit={submit} className="space-y-2 rounded-md border border-[#dce7e8] bg-[#f8fbfb] p-3">
+      <p className="text-xs font-bold text-[#315763]">ผลการยืนยันการแก้ไข</p>
+      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="ผลการยืนยันการแก้ไข">
+        {([['effective', 'ได้ผล · ปิด CAPA'], ['ineffective', 'ไม่ได้ผล · เปิด CAPA ต่อ']] as const).map(([value, text]) => (
+          <label key={value} className={`inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-md border px-3 text-xs font-semibold ${outcome === value ? 'border-[#0b7f76] bg-[#e6f5f2] text-[#08766e]' : 'border-[#d6e2e3] bg-white text-[#58747d]'}`}>
+            <input type="radio" name="effectiveness" value={value} checked={outcome === value} onChange={() => setOutcome(value)} className="accent-[#0b7f76]" />{text}
+          </label>
+        ))}
+      </div>
+      <Textarea aria-label="บันทึกผลการยืนยัน" rows={2} placeholder="เช่น ผล EQA รอบถัดไปผ่านเกณฑ์ / ทวนสอบ IQC แล้วอยู่ในเกณฑ์" value={note} onChange={(event) => setNote(event.target.value)} />
+      <div className="flex gap-2">
+        <Button className="min-h-8 px-3 text-xs" disabled={busy || !outcome || !note.trim()}>บันทึกผลการยืนยัน</Button>
+        <Button type="button" variant="ghost" className="min-h-8 px-3 text-xs" onClick={onCancel}>ยกเลิก</Button>
+      </div>
+    </form>
+  )
 }

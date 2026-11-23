@@ -4,68 +4,11 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { FileText } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
-import type { EqaApprovalRole, EqaDocumentApproval, EqaDocumentState, EqaDocumentType, EqaWorkspace } from '@/lib/eqa/types'
+import type { EqaWorkspace } from '@/lib/eqa/types'
 import { EQA_APPROVAL_ROLE_LABELS } from '@/lib/eqa/types'
-import { annualSummaryIssues, roundReceiptIssues, roundStatusIndex, type EqaReadinessIssue } from '@/lib/eqa/rules'
 import { Card, Notice, PageHeader, StatusBadge } from '@/components/ui'
-import { APPROVAL_ROLES, ApprovalPanel, type NoticeState, type Update } from '@/components/eqa/shared'
-
-type SignerDocument = {
-  key: string
-  type: EqaDocumentType
-  entityId: string
-  title: string
-  subtitle: string
-  reportHref: string
-  state: EqaDocumentState
-  approvals: EqaDocumentApproval[]
-  readiness: EqaReadinessIssue[]
-  roles: EqaApprovalRole[]
-}
-
-const TYPE_LABEL: Record<EqaDocumentType, string> = {
-  'annual-plan': 'แผน EQA ประจำปี',
-  'round-receipt': 'แบบรับตัวอย่าง',
-  'annual-summary': 'สรุปผล EQA รายปี',
-}
-
-function signerDocuments(data: EqaWorkspace, myRoles: EqaApprovalRole[]): SignerDocument[] {
-  const mine = (roles: EqaApprovalRole[]) => roles.filter((role) => myRoles.includes(role))
-  const documents: SignerDocument[] = []
-  for (const plan of data.annualPlans) {
-    documents.push({
-      key: `annual-plan:${plan.id}`, type: 'annual-plan', entityId: plan.id,
-      title: `แผน EQA ประจำปี ${plan.planYear + 543}`, subtitle: [plan.workSection, plan.departmentName].filter(Boolean).join(' · '),
-      reportHref: `/eqa/report/annual-plan/${plan.id}`, state: plan.documentState, approvals: plan.approvals,
-      readiness: plan.readiness.map((message) => ({ message })), roles: mine(APPROVAL_ROLES),
-    })
-  }
-  for (const summary of data.annualSummaries) {
-    documents.push({
-      key: `annual-summary:${summary.planItem.id}`, type: 'annual-summary', entityId: summary.planItem.id,
-      title: summary.planItem.sampleSetName, subtitle: `ปี ${summary.plan.planYear + 543} · ${summary.planItem.projectName} · ${summary.rounds.length}/${summary.planItem.expectedRounds ?? '-'} รอบ`,
-      reportHref: `/eqa/report/annual-summary/${summary.planItem.id}`, state: summary.documentState, approvals: summary.approvals,
-      readiness: annualSummaryIssues(summary.planItem, summary.rounds, data.correctiveActions), roles: mine(APPROVAL_ROLES),
-    })
-  }
-  for (const round of data.rounds) {
-    // The technical manager signs a receipt only after the analyst has signed
-    // and the round's evaluation is saved (same rule as the rounds tab).
-    const analystSigned = round.approvals.some((approval) => approval.approvalRole === 'analyst' && approval.signatureAttachmentId)
-    if (!analystSigned || roundStatusIndex(round.status) < roundStatusIndex('evaluated')) continue
-    documents.push({
-      key: `round-receipt:${round.id}`, type: 'round-receipt', entityId: round.id,
-      title: `${round.planItemName ?? round.schemeName} · ${round.roundLabel}`, subtitle: round.providerName,
-      reportHref: `/eqa/report/round-receipt/${round.id}`, state: round.documentState, approvals: round.approvals,
-      readiness: roundReceiptIssues(round), roles: mine(['technical-manager']),
-    })
-  }
-  return documents.filter((document) => document.roles.length > 0)
-}
-
-function isSignedBy(document: SignerDocument, role: EqaApprovalRole) {
-  return Boolean(document.approvals.find((approval) => approval.approvalRole === role)?.signatureAttachmentId)
-}
+import { ApprovalPanel, type NoticeState, type Update } from '@/components/eqa/shared'
+import { DOCUMENT_TYPE_LABEL, isSignedBy, signableDocuments, type SignableDocument } from '@/components/eqa/signable-documents'
 
 /**
  * EQA for a Signer account (an approver from outside the unit): only the
@@ -81,15 +24,15 @@ export function EqaSignerView({ actor, initialData }: { actor: BmActor; initialD
   const err = (text: string) => setNotice({ tone: 'danger', text })
 
   const myRoles = data.approverAssignments.filter((assignment) => assignment.userId === actor.id).map((assignment) => assignment.approvalRole)
-  const documents = signerDocuments(data, myRoles)
+  const documents = signableDocuments(data, myRoles)
   const pending = documents.filter((document) => document.roles.some((role) => !isSignedBy(document, role)))
   const signed = documents.filter((document) => !pending.includes(document))
 
-  const renderDocument = (document: SignerDocument) => (
+  const renderDocument = (document: SignableDocument) => (
     <Card key={document.key} className="p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[11px] font-bold tracking-wide text-[#0b7f76]">{TYPE_LABEL[document.type]}</p>
+          <p className="text-[11px] font-bold tracking-wide text-[#0b7f76]">{DOCUMENT_TYPE_LABEL[document.type]}</p>
           <h2 className="mt-0.5 font-bold text-[#173d50]">{document.title}</h2>
           {document.subtitle ? <p className="mt-0.5 text-xs text-[#789097]">{document.subtitle}</p> : null}
         </div>

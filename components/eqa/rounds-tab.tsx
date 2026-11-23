@@ -255,6 +255,17 @@ function RoundCard({ round, data, actor, focus, onNavigate, onOk, onErr, forceCo
   </Card>
 }
 
+// Specimen type and submission method repeat round after round: offer the
+// values already used (plus common ones) to pick, while still allowing a new one.
+const SPECIMEN_TYPE_DEFAULTS = ['Plasma', 'Serum', 'Whole blood', 'DBS', 'Swab']
+const SUBMISSION_METHOD_DEFAULTS = ['ส่งผ่านเว็บไซต์ผู้จัด', 'Email', 'ไปรษณีย์']
+function usedValues(rounds: EqaRound[], pick: (round: EqaRound) => string | null, defaults: string[]) {
+  const counts = new Map<string, number>()
+  for (const round of rounds) { const value = pick(round)?.trim(); if (value) counts.set(value, (counts.get(value) ?? 0) + 1) }
+  const used = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([value]) => value)
+  return [...used, ...defaults.filter((value) => !used.some((item) => item.toLocaleLowerCase() === value.toLocaleLowerCase()))]
+}
+
 const RECEIPT_MISSING_RING = 'ring-2 ring-inset ring-[#eed4a6] border-[#eed4a6]'
 
 function ReceiptEditor({ round, data, onOk, onErr }: { round: EqaRound; data: EqaWorkspace; onOk: Update; onErr: (text: string) => void }) {
@@ -295,6 +306,8 @@ function ReceiptEditor({ round, data, onOk, onErr }: { round: EqaRound; data: Eq
     catch (error) { onErr(error instanceof Error ? error.message : 'บันทึกไม่สำเร็จ') } finally { setBusy(false) }
   }
   const allItems = data.annualPlans.flatMap((plan) => plan.items.map((item) => ({ ...item, planYear: plan.planYear })))
+  const specimenTypes = usedValues(data.rounds, (item) => item.specimenType, SPECIMEN_TYPE_DEFAULTS)
+  const submissionMethods = usedValues(data.rounds, (item) => item.submissionMethod, SUBMISSION_METHOD_DEFAULTS)
   return <form onSubmit={submit} className="mt-3 space-y-3 rounded-md border border-[#dce7e8] bg-[#fbfdfd] p-3">
     <div className="flex flex-wrap items-start justify-between gap-2 rounded-md border border-[#e3ebec] bg-white px-3 py-2"><div><p className="text-sm font-bold text-[#315763]">1. รับตัวอย่างและบันทึกข้อมูล</p><p className="mt-0.5 text-[11px] text-[#789097]">บันทึกได้หลายครั้งระหว่างรอข้อมูลครบ ระบบจะไฮไลต์ช่องที่ยังขาดให้</p></div>{missingCount ? <span className="text-xs font-semibold text-[#a9700f]">ยังกรอกไม่ครบ · ขาดอีก {missingCount} ช่อง</span> : <span className="text-xs font-semibold text-[#2f7d44]">ข้อมูลรับตัวอย่างครบแล้ว · ไปขั้นตอนลงผลได้</span>}
     </div>
@@ -342,11 +355,11 @@ function ReceiptEditor({ round, data, onOk, onErr }: { round: EqaRound; data: Eq
       </div>
     </div>
     <div className="md:col-span-2 xl:col-span-4 border-t border-[#e3ebec] pt-2"><p className="text-xs font-bold text-[#55727c]">ผู้รับผิดชอบและการส่งผล</p></div>
-    <Field label="ชนิดตัวอย่าง"><Input className={missing.specimenType ? RECEIPT_MISSING_RING : ''} value={form.specimenType} onChange={(event) => setForm({ ...form, specimenType: event.target.value })} /></Field>
+    <Field label="ชนิดตัวอย่าง" hint="เลือกจากรายการหรือพิมพ์ใหม่"><datalist id={`eqa-specimen-types-${round.id}`}>{specimenTypes.map((value) => <option key={value} value={value} />)}</datalist><Input list={`eqa-specimen-types-${round.id}`} className={missing.specimenType ? RECEIPT_MISSING_RING : ''} value={form.specimenType} onChange={(event) => setForm({ ...form, specimenType: event.target.value })} /></Field>
     <Field label="ผู้รับตัวอย่าง"><UserSelect className={missing.receiverId ? RECEIPT_MISSING_RING : ''} users={data.users} allowed={isEqaStaff} value={form.receiverId} onChange={(value) => setForm({ ...form, receiverId: value })} /></Field>
     <Field label="ผู้ตรวจวิเคราะห์"><UserSelect className={missing.analystId ? RECEIPT_MISSING_RING : ''} users={data.users} allowed={isEqaStaff} value={form.analystId} onChange={(value) => setForm({ ...form, analystId: value })} /></Field>
     <Field label="วันที่ตรวจวิเคราะห์"><Input className={missing.analysisDate ? RECEIPT_MISSING_RING : ''} type="date" value={form.analysisDate} onChange={(event) => setForm({ ...form, analysisDate: event.target.value })} /></Field>
     <Field label="วันที่ส่งผล"><Input className={missing.submissionDate ? RECEIPT_MISSING_RING : ''} type="date" value={form.submissionDate} onChange={(event) => setForm({ ...form, submissionDate: event.target.value })} /></Field>
-    <Field label="วิธีส่งผล"><Input className={missing.submissionMethod ? RECEIPT_MISSING_RING : ''} value={form.submissionMethod} onChange={(event) => setForm({ ...form, submissionMethod: event.target.value })} /></Field>
+    <Field label="วิธีส่งผล" hint="เลือกจากรายการหรือพิมพ์ใหม่"><datalist id={`eqa-submission-methods-${round.id}`}>{submissionMethods.map((value) => <option key={value} value={value} />)}</datalist><Input list={`eqa-submission-methods-${round.id}`} className={missing.submissionMethod ? RECEIPT_MISSING_RING : ''} value={form.submissionMethod} onChange={(event) => setForm({ ...form, submissionMethod: event.target.value })} /></Field>
   </div><Field label="รายละเอียดอื่นๆ"><Textarea rows={2} value={form.otherDetails} onChange={(event) => setForm({ ...form, otherDetails: event.target.value })} /></Field><div className="flex items-center gap-2"><Button disabled={busy}>บันทึกแบบรับตัวอย่าง</Button><SavedFlash show={saved} /></div></form>
 }
