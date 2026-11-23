@@ -192,6 +192,7 @@ export function CalendarView({
     { key: 'day', label: 'วัน' },
   ]
   const activeTypes = data.types.filter((type) => type.isActive)
+  const allShown = activeTypes.every((type) => !hidden.has(type.id))
 
   return (
     <div className="cal mx-auto max-w-[1500px] space-y-4">
@@ -246,6 +247,18 @@ export function CalendarView({
       </div>
 
       <div className="-mx-1 flex items-center gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none] md:flex-wrap">
+        {activeTypes.length > 1 ? (
+          <button
+            type="button"
+            className="cal-filter"
+            style={{ '--c': COLOR_HEX.slate } as React.CSSProperties}
+            aria-pressed={allShown}
+            title={allShown ? 'ซ่อนทุกประเภท' : 'แสดงทุกประเภท'}
+            onClick={() => setHidden(allShown ? new Set(activeTypes.map((type) => type.id)) : new Set())}
+          >
+            ทั้งหมด
+          </button>
+        ) : null}
         {activeTypes.map((type) => (
           <button
             key={type.id}

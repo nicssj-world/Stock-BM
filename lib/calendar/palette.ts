@@ -11,6 +11,12 @@ export const COLOR_HEX: Record<CalendarColor, string> = {
   green: '#3a8638',
   orange: '#c45722',
   slate: '#55677a',
+  cyan: '#0b7a9c',
+  indigo: '#4350b0',
+  pink: '#b0377f',
+  red: '#c0392b',
+  brown: '#8a5a3a',
+  lime: '#5b7d16',
 }
 
 /** LINE renders emoji natively; they stand in for the Phosphor icon inside chat messages. */

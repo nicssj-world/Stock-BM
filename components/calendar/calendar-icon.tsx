@@ -127,6 +127,12 @@ export const COLOR_LABELS: Record<CalendarColor, string> = {
   green: 'เขียว',
   orange: 'ส้ม',
   slate: 'เทา',
+  cyan: 'ฟ้าอมเขียว',
+  indigo: 'คราม',
+  pink: 'บานเย็น',
+  red: 'แดง',
+  brown: 'น้ำตาล',
+  lime: 'เขียวมะกอก',
 }
 
 export function CalendarIcon({ iconKey, size = 16, className = '' }: { iconKey: string; size?: number; className?: string }) {

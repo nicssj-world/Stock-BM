@@ -1,4 +1,5 @@
-export const CALENDAR_COLORS = ['teal', 'rose', 'amber', 'sky', 'violet', 'green', 'orange', 'slate'] as const
+/** Swatch order in the type editor: roughly by hue. */
+export const CALENDAR_COLORS = ['teal', 'cyan', 'sky', 'indigo', 'violet', 'pink', 'rose', 'red', 'orange', 'amber', 'brown', 'lime', 'green', 'slate'] as const
 export type CalendarColor = (typeof CALENDAR_COLORS)[number]
 
 export const CALENDAR_KINDS = ['duty', 'leave', 'other'] as const
