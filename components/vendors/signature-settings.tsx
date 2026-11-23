@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { PenLine, Upload } from 'lucide-react'
 import { api, Button, Field, Input, Notice } from '@/components/ui'
 import { SignaturePad, type SignaturePadHandle } from '@/components/signature-pad'
+import { primeMySignature } from '@/components/my-signature-field'
 import { toSignaturePng } from '@/lib/signature-png'
 
 /** The user's own position title and signature, reused when they sign EQA documents, equipment records and vendor reports: draw with a finger or pen, or upload an image. */
@@ -26,12 +27,19 @@ export function SignatureSettings({ position, signature }: { position: string | 
     })
   }
   const put = (body: object) => api('/api/vendors/signer', { method: 'PUT', body: JSON.stringify(body) })
+  // Also refresh the client-side copy, so signing forms opened later in this
+  // session offer the new signature without a full page reload.
+  const saveSignature = async (file: File) => {
+    const png = await toSignaturePng(file)
+    await put({ signaturePng: png })
+    primeMySignature(png)
+  }
   const saveDrawn = () => run(async () => {
     const file = await pad.current?.toFile()
     if (!file) throw new Error('กรุณาเซ็นชื่อก่อนบันทึก')
-    await put({ signaturePng: await toSignaturePng(file) })
+    await saveSignature(file)
   }, 'บันทึกลายเซ็นแล้ว')
-  const upload = (file?: File) => { if (file) run(async () => { await put({ signaturePng: await toSignaturePng(file) }) }, 'บันทึกลายเซ็นแล้ว') }
+  const upload = (file?: File) => { if (file) run(() => saveSignature(file), 'บันทึกลายเซ็นแล้ว') }
 
   return <div className="space-y-6">
     <div className="space-y-3"><div><h3 className="font-bold text-[#173d50]">ตำแหน่ง</h3><p className="text-sm text-[#6a838c]">แสดงใต้ชื่อบนรายงานประเมินผู้ขาย · ต้องมีตำแหน่งจึงถูกเลือกเป็นผู้ลงนามได้</p></div>
@@ -39,7 +47,7 @@ export function SignatureSettings({ position, signature }: { position: string | 
 
     <div className="space-y-3"><div><h3 className="font-bold text-[#173d50]">ลายเซ็น</h3><p className="text-sm text-[#6a838c]">ใช้เมื่อคุณกดลงนามเอกสาร EQA บันทึกงานเครื่องมือ (ผู้รับงาน) และรายงานประเมินผู้ขาย · เห็นได้เฉพาะเจ้าของ · เอกสารที่ลงนามแล้วเก็บสำเนาลายเซ็น ณ เวลาที่ลงนาม การเปลี่ยนลายเซ็นภายหลังจึงไม่กระทบเอกสารเดิม</p></div>
       <div className="space-y-2 rounded-xl border border-[#d3e1e3] p-3"><p className="text-xs text-[#81979c]">ลายเซ็นปัจจุบัน</p>
-        {signature ? <div className="grid justify-items-start gap-2"><Image src={signature} alt="ลายเซ็นปัจจุบันของคุณ" width={450} height={130} unoptimized className="h-auto max-h-24 w-auto rounded border border-[#d3e1e3] bg-white" /><Button type="button" variant="secondary" disabled={pending} onClick={() => { if (window.confirm('ลบลายเซ็นของคุณ?')) run(() => api('/api/vendors/signer', { method: 'DELETE' }), 'ลบลายเซ็นแล้ว') }}>ลบลายเซ็น</Button></div> : <p className="text-sm text-[#6a838c]">ยังไม่มีลายเซ็น</p>}</div>
+        {signature ? <div className="grid justify-items-start gap-2"><Image src={signature} alt="ลายเซ็นปัจจุบันของคุณ" width={450} height={130} unoptimized className="h-auto max-h-24 w-auto rounded border border-[#d3e1e3] bg-white" /><Button type="button" variant="secondary" disabled={pending} onClick={() => { if (window.confirm('ลบลายเซ็นของคุณ?')) run(async () => { await api('/api/vendors/signer', { method: 'DELETE' }); primeMySignature(null) }, 'ลบลายเซ็นแล้ว') }}>ลบลายเซ็น</Button></div> : <p className="text-sm text-[#6a838c]">ยังไม่มีลายเซ็น</p>}</div>
       <SignaturePad label="เซ็นใหม่ด้วยนิ้วหรือปากกา" onReady={ready} />
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" disabled={pending} onClick={saveDrawn}><PenLine className="size-4" aria-hidden="true" /> บันทึกลายเซ็นที่เซ็น</Button>
