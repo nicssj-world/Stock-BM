@@ -159,8 +159,8 @@ export function RoundResultsTable({ round, data, canAddRows, defaultIqcAnalyteId
       ),
       actions: (
         <div className="flex items-center gap-2">
-          <Button type="button" variant="danger" className="min-h-11 px-3 sm:min-h-9 sm:px-2" title={`ลบ ${label}`} aria-label={`ลบ ${label}`} disabled={busy} onClick={() => removeRow(row)}><Trash2 className="size-4" aria-hidden="true" /></Button>
-          {saved && (saved.outcome === 'warning' || saved.outcome === 'unacceptable') ? <Button type="button" variant="secondary" className="min-h-11 px-3 text-xs whitespace-nowrap sm:min-h-9" onClick={() => onNavigate({ kind: 'corrective', roundId: round.id, resultId: saved.id })}>{correctiveAction ? 'เปิด CAPA เดิม' : 'เปิด CAPA'}</Button> : null}
+          <Button type="button" variant="danger" className="min-h-11 px-3" title={`ลบ ${label}`} aria-label={`ลบ ${label}`} disabled={busy} onClick={() => removeRow(row)}><Trash2 className="size-4" aria-hidden="true" /></Button>
+          {saved && (saved.outcome === 'warning' || saved.outcome === 'unacceptable') ? <Button type="button" variant="secondary" className="min-h-11 px-3 text-xs whitespace-nowrap" onClick={() => onNavigate({ kind: 'corrective', roundId: round.id, resultId: saved.id })}>{correctiveAction ? 'เปิด CAPA เดิม' : 'เปิด CAPA'}</Button> : null}
         </div>
       ),
     }
@@ -203,7 +203,7 @@ export function RoundResultsTable({ round, data, canAddRows, defaultIqcAnalyteId
             {rows.map((row, index) => {
               const fields = fieldsFor(row, index)
               return (
-                <tr key={row.key} className={fields.isChanged ? 'bg-[#fffbf0]' : undefined}>
+                <tr key={row.key} className={`align-top ${fields.isChanged ? 'bg-[#fffbf0]' : ''}`}>
                   <td className="p-1.5">{fields.sampleCode}</td>
                   <td className="p-1.5">{fields.analyte}</td>
                   <td className="p-1.5">{fields.submitted}</td>
