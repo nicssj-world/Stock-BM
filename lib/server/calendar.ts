@@ -109,6 +109,7 @@ function mapType(row: RecordRow, usage: Map<string, number>): CalendarType {
     colorKey: pick(row.color_key, CALENDAR_COLORS, 'slate'),
     kind: pick(row.kind, CALENDAR_KINDS, 'other'),
     inLineDigest: row.in_line_digest === true,
+    requiresTitle: row.requires_title === true,
     sortOrder: Number(row.sort_order ?? 100),
     isActive: row.is_active === true,
     usageCount: usage.get(id) ?? 0,
@@ -125,6 +126,7 @@ function mapEvent(row: RecordRow, users: LoadedUsers): CalendarEvent {
     startDate: asString(row.start_date),
     endDate: asString(row.end_date),
     dayPart: pick(row.day_part, DAY_PARTS, 'full'),
+    title: nullableString(row.title),
     note: nullableString(row.note),
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
@@ -214,16 +216,24 @@ export interface EntryInput {
   startDate: string
   endDate: string
   dayPart: DayPart
+  title: string | null
   note: string | null
 }
 
 async function requireType(typeId: string, allowInactive = false) {
-  const { data, error } = await getAdminClient().from('bm_calendar_types').select('id,name,is_active').eq('id', typeId).maybeSingle()
+  const { data, error } = await getAdminClient().from('bm_calendar_types').select('id,name,is_active,requires_title').eq('id', typeId).maybeSingle()
   fail(error)
   const row = data as RecordRow | null
   if (!row) throw new HttpError(404, 'ไม่พบประเภทนี้')
   if (!allowInactive && row.is_active !== true) throw new HttpError(400, 'ประเภทนี้ถูกปิดใช้งานแล้ว')
-  return asString(row.name)
+  return { name: asString(row.name), requiresTitle: row.requires_title === true }
+}
+
+/** Only types that ask for a title keep one; it is mandatory for them. */
+function entryTitle(input: EntryInput, type: { name: string; requiresTitle: boolean }) {
+  if (!type.requiresTitle) return null
+  if (!input.title) throw new HttpError(400, `${type.name} ต้องใส่หัวข้อ`)
+  return input.title
 }
 
 function validateEntry(input: EntryInput) {
@@ -247,6 +257,7 @@ function snapshot(row: RecordRow) {
     startDate: asString(row.start_date),
     endDate: asString(row.end_date),
     dayPart: asString(row.day_part),
+    title: nullableString(row.title),
     note: nullableString(row.note),
   }
 }
@@ -256,7 +267,7 @@ export async function createCalendarEntry(input: EntryInput, actor: BmActor) {
   const today = todayBangkok()
   const denied = entryPermissionError(actor, input, today)
   if (denied) throw new HttpError(403, denied)
-  await requireType(input.typeId)
+  const title = entryTitle(input, await requireType(input.typeId))
   const users = await loadUsers()
   if (!users.active.some((user) => user.id === input.userId)) throw new HttpError(400, 'ไม่พบผู้ใช้นี้ในทีม')
   const row = {
@@ -265,6 +276,7 @@ export async function createCalendarEntry(input: EntryInput, actor: BmActor) {
     start_date: input.startDate,
     end_date: input.endDate,
     day_part: input.dayPart,
+    title,
     note: input.note,
     created_by: actor.id,
     updated_by: actor.id,
@@ -285,10 +297,10 @@ export async function updateCalendarEntry(id: string, input: EntryInput, actor: 
   if (deniedBefore) throw new HttpError(403, deniedBefore)
   const deniedAfter = entryPermissionError(actor, input, today)
   if (deniedAfter) throw new HttpError(403, deniedAfter)
-  await requireType(input.typeId, input.typeId === before.typeId)
+  const title = entryTitle(input, await requireType(input.typeId, input.typeId === before.typeId))
   const users = await loadUsers()
   if (input.userId !== before.userId && !users.active.some((user) => user.id === input.userId)) throw new HttpError(400, 'ไม่พบผู้ใช้นี้ในทีม')
-  const after = { typeId: input.typeId, userId: input.userId, startDate: input.startDate, endDate: input.endDate, dayPart: input.dayPart, note: input.note }
+  const after = { typeId: input.typeId, userId: input.userId, startDate: input.startDate, endDate: input.endDate, dayPart: input.dayPart, title, note: input.note }
   const { data, error } = await getAdminClient()
     .from('bm_calendar_events')
     .update({
@@ -297,6 +309,7 @@ export async function updateCalendarEntry(id: string, input: EntryInput, actor: 
       start_date: after.startDate,
       end_date: after.endDate,
       day_part: after.dayPart,
+      title: after.title,
       note: after.note,
       updated_by: actor.id,
       updated_at: new Date().toISOString(),
@@ -374,6 +387,7 @@ export async function getCalendarEntryHistory(id: string): Promise<CalendarHisto
         changes.push(`วันที่ ${thaiRange(asString(b.startDate), asString(b.endDate))} → ${thaiRange(asString(a.startDate), asString(a.endDate))}`)
       }
       if (b.dayPart !== a.dayPart) changes.push(`ช่วง ${DAY_PART_LABEL[pick(b.dayPart, DAY_PARTS, 'full')]} → ${DAY_PART_LABEL[pick(a.dayPart, DAY_PARTS, 'full')]}`)
+      if ((b.title ?? null) !== (a.title ?? null)) changes.push(a.title ? `หัวข้อ “${asString(a.title)}”` : 'ลบหัวข้อ')
       if ((b.note ?? null) !== (a.note ?? null)) changes.push('หมายเหตุ')
     }
     return {
@@ -393,6 +407,7 @@ export interface TypeInput {
   colorKey: CalendarColor
   kind: CalendarKind
   inLineDigest: boolean
+  requiresTitle: boolean
   isActive: boolean
 }
 
@@ -417,6 +432,7 @@ export async function createCalendarType(input: TypeInput, actor: BmActor) {
       color_key: input.colorKey,
       kind: input.kind,
       in_line_digest: input.inLineDigest,
+      requires_title: input.requiresTitle,
       is_active: input.isActive,
       sort_order: sortOrder,
       created_by: actor.id,
@@ -440,6 +456,7 @@ export async function updateCalendarType(id: string, input: TypeInput, actor: Bm
       color_key: input.colorKey,
       kind: input.kind,
       in_line_digest: input.inLineDigest,
+      requires_title: input.requiresTitle,
       is_active: input.isActive,
       updated_at: new Date().toISOString(),
     })
@@ -626,11 +643,12 @@ export async function buildFeedForToken(token: string, scope: 'mine' | 'team') {
     scope === 'team' ? loadHolidays(from, to) : Promise.resolve([] as CalendarHoliday[]),
   ])
   const typeById = new Map(types.map((type) => [type.id, type]))
-  // Notes stay out of the feed: phone calendars sync to third-party servers.
+  // Notes stay out of the feed: phone calendars sync to third-party servers. Titles are meant to be shared.
   const feed: FeedEvent[] = events.map((event) => {
     const type = typeById.get(event.typeId)
     const part = event.dayPart === 'full' ? '' : ` (${DAY_PART_LABEL[event.dayPart]})`
-    const summary = scope === 'mine' ? `${type?.name ?? 'รายการ'}${part}` : `${type?.name ?? 'รายการ'} · ${event.userName}${part}`
+    const what = `${type?.name ?? 'รายการ'}${event.title ? `: ${event.title}` : ''}`
+    const summary = scope === 'mine' ? `${what}${part}` : `${what} · ${event.userName}${part}`
     return { uid: `${event.id}@molecular-cbh-calendar`, startDate: event.startDate, endDate: event.endDate, summary, updatedAt: event.updatedAt }
   })
   for (const holiday of holidays.filter((item) => item.isDayOff)) {
@@ -710,7 +728,7 @@ export async function runDigest(date = todayBangkok()) {
       .flatMap((event) => {
         const type = typeById.get(event.typeId)
         return type?.inLineDigest
-          ? [{ typeName: type.name, iconKey: type.iconKey, colorKey: type.colorKey, kind: type.kind, sortOrder: type.sortOrder, userName: event.userName, dayPart: event.dayPart }]
+          ? [{ typeName: type.name, iconKey: type.iconKey, colorKey: type.colorKey, kind: type.kind, sortOrder: type.sortOrder, userName: event.userName, dayPart: event.dayPart, title: event.title }]
           : []
       }),
   }))

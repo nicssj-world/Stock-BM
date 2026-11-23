@@ -174,11 +174,11 @@ export function CalendarView({
 
   function openNew(date: string) {
     const firstType = data.types.find((type) => type.isActive)
-    setEntry({ id: null, typeId: firstType?.id ?? '', userId: actor.id, startDate: date, endDate: date, dayPart: 'full', note: '' })
+    setEntry({ id: null, typeId: firstType?.id ?? '', userId: actor.id, startDate: date, endDate: date, dayPart: 'full', title: '', note: '' })
   }
 
   function openExisting(event: CalendarEvent) {
-    setEntry({ id: event.id, typeId: event.typeId, userId: event.userId, startDate: event.startDate, endDate: event.endDate, dayPart: event.dayPart, note: event.note ?? '' })
+    setEntry({ id: event.id, typeId: event.typeId, userId: event.userId, startDate: event.startDate, endDate: event.endDate, dayPart: event.dayPart, title: event.title ?? '', note: event.note ?? '' })
   }
 
   function goToDay(day: string) {
@@ -379,11 +379,14 @@ function Chip({ event, type, mine, onOpen }: { event: CalendarEvent; type: Calen
       className={`cal-chip ${mine ? 'is-mine' : ''}`}
       style={colorStyle(type)}
       onClick={() => onOpen(event)}
-      title={`${type?.name ?? ''} · ${event.userName}${event.note ? ` — ${event.note}` : ''}`}
-      aria-label={`${type?.name ?? 'รายการ'} ${event.userName} ${DAY_PART_LABEL[event.dayPart]}`}
+      title={`${type?.name ?? ''}${event.title ? `: ${event.title}` : ''} · ${event.userName}${event.note ? ` — ${event.note}` : ''}`}
+      aria-label={`${type?.name ?? 'รายการ'}${event.title ? ` ${event.title}` : ''} ${event.userName} ${DAY_PART_LABEL[event.dayPart]}`}
     >
       <CalendarIcon iconKey={type?.iconKey ?? 'star'} size={15} className="flex-none text-[var(--c)]" />
-      <span className="min-w-0 truncate font-semibold">{event.userName}</span>
+      <span className="min-w-0 truncate">
+        <span className="font-semibold">{event.userName}</span>
+        {event.title ? <span className="opacity-80"> · {event.title}</span> : null}
+      </span>
       {part ? <span className="ml-auto flex-none text-[11px] opacity-80">{part}</span> : null}
     </button>
   )
@@ -398,7 +401,7 @@ function Row({ event, type, mine, onOpen }: { event: CalendarEvent; type: Calend
         <span className="text-sm font-semibold text-[#173d50]">
           {event.userName}{mine ? ' (ฉัน)' : ''}
         </span>
-        <span className="truncate text-[12.5px] text-[#6a838c]">{type?.name ?? 'ประเภทที่ถูกลบ'}{event.note ? ` · ${event.note}` : ''}</span>
+        <span className="truncate text-[12.5px] text-[#6a838c]">{event.title ? `${type?.name ?? 'ประเภทที่ถูกลบ'}: ${event.title}` : type?.name ?? 'ประเภทที่ถูกลบ'}{event.note ? ` · ${event.note}` : ''}</span>
       </span>
       <span className="cal-tag">{tag}</span>
     </button>

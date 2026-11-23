@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useId, useMemo, useState, type FormEvent } from 'react'
-import { CalendarRange, Clock3, Copy, LoaderCircle, Pencil, RefreshCw, StickyNote, Trash2, UserRound } from 'lucide-react'
+import { CalendarRange, Clock3, Copy, LoaderCircle, Pencil, RefreshCw, StickyNote, Trash2, Type as TitleIcon, UserRound } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import { formatThaiDateTime } from '@/lib/bm/thai-date'
 import { DAY_PART_LABEL, entryPermissionError, isLockedForStaff, KIND_LABEL, STAFF_EDIT_WINDOW_DAYS, THAI_DAYS_SHORT, THAI_MONTHS_SHORT, dayOfWeek, daysBetween, thaiRange } from '@/lib/calendar/rules'
@@ -43,6 +43,7 @@ export type EntryDraft = {
   startDate: string
   endDate: string
   dayPart: DayPart
+  title: string
   note: string
 }
 
@@ -122,7 +123,8 @@ function EntryHistory({ history }: { history: CalendarHistoryEntry[] | null }) {
 
 function lineDigestText(type: CalendarType | undefined) {
   if (!type) return ''
-  return type.inLineDigest ? 'แจ้งในกลุ่ม LINE ล่วงหน้า 1 วัน ช่วงบ่าย (ไม่แสดงหมายเหตุ)' : `${type.name} ไม่ได้แจ้งในกลุ่ม LINE`
+  if (!type.inLineDigest) return `${type.name} ไม่ได้แจ้งในกลุ่ม LINE`
+  return type.requiresTitle ? 'แจ้งในกลุ่ม LINE ล่วงหน้า 1 วัน ช่วงบ่าย พร้อมหัวข้อ (ไม่แสดงหมายเหตุ)' : 'แจ้งในกลุ่ม LINE ล่วงหน้า 1 วัน ช่วงบ่าย (ไม่แสดงหมายเหตุ)'
 }
 
 function LineDigestNote({ text }: { text: string }) {
@@ -168,6 +170,7 @@ function EntryDetails({
   const days = daysBetween(draft.startDate, draft.endDate) + 1
   const buddhistYear = Number(draft.endDate.slice(0, 4)) + 543
   const note = draft.note.trim()
+  const entryTitle = draft.title.trim()
 
   return (
     <div className="grid gap-4">
@@ -185,6 +188,11 @@ function EntryDetails({
       </div>
 
       <dl className="grid">
+        {entryTitle || type?.requiresTitle ? (
+          <DetailRow icon={<TitleIcon className="size-4" />} label="หัวข้อ">
+            {entryTitle ? <span className="font-semibold break-words">{entryTitle}</span> : <span className="text-[#6a838c]">ยังไม่ได้ใส่</span>}
+          </DetailRow>
+        ) : null}
         <DetailRow icon={<UserRound className="size-4" />} label="ของ">
           <span className="font-semibold">{ownerName}</span>{draft.userId === actor.id ? <span className="ml-1 text-[#55727c]">(ฉัน)</span> : null}
         </DetailRow>
@@ -243,6 +251,7 @@ function EntryForm({
   const isAdmin = actor.role === 'Admin'
   const choosable = types.filter((type) => type.isActive || type.id === draft.typeId)
   const selectedType = types.find((type) => type.id === form.typeId)
+  const needsTitle = Boolean(selectedType?.requiresTitle)
   const readOnly = !isNew && entryPermissionError(actor, { userId: draft.userId, endDate: draft.endDate }, today) !== null
   const lockedForStaff = !isNew && isLockedForStaff(draft.endDate, today)
 
@@ -262,10 +271,11 @@ function EntryForm({
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (!form.typeId) return setError('เลือกประเภทก่อนบันทึก')
+    if (needsTitle && !form.title.trim()) return setError(`${selectedType?.name ?? 'ประเภทนี้'} ต้องใส่หัวข้อ`)
     if (form.endDate < form.startDate) return setError('วันที่สิ้นสุดต้องไม่ก่อนวันเริ่ม แก้ช่อง “ถึง”')
     setBusy('save')
     try {
-      const body = JSON.stringify({ ...form, note: form.note.trim() || null })
+      const body = JSON.stringify({ ...form, title: needsTitle ? form.title.trim() : null, note: form.note.trim() || null })
       const result = isNew
         ? await api<{ event: CalendarEvent }>('/api/calendar', { method: 'POST', body })
         : await api<{ event: CalendarEvent }>(`/api/calendar/entries/${draft.id}`, { method: 'PATCH', body })
@@ -314,6 +324,21 @@ function EntryForm({
           </div>
         </div>
 
+        {needsTitle ? (
+          <label className="block">
+            <span className={labelClass}>หัวข้อ</span>
+            <Input
+              required
+              maxLength={80}
+              value={form.title}
+              onChange={(event) => update('title', event.target.value)}
+              placeholder="เช่น อบรม ISO 15189, ประชุม QC ประจำเดือน"
+              aria-invalid={Boolean(error) && !form.title.trim()}
+            />
+            <span className={hintClass}>แสดงในปฏิทินและในกลุ่ม LINE</span>
+          </label>
+        ) : null}
+
         <label className="block">
           <span className={labelClass}>ของ</span>
           <Select value={form.userId} onChange={(event) => update('userId', event.target.value)} disabled={!isAdmin}>
@@ -353,7 +378,7 @@ function EntryForm({
         </div>
 
         <label className="block">
-          <span className={labelClass}>หมายเหตุ <span className="font-normal text-[#6a838c]">(ไม่บังคับ)</span></span>
+          <span className={labelClass}>หมายเหตุ <span className="font-normal text-[#6a838c]">(ไม่บังคับ · ไม่แสดงใน LINE)</span></span>
           <Textarea rows={2} maxLength={300} value={form.note} onChange={(event) => update('note', event.target.value)} placeholder="เช่น ติดต่อได้ทางไลน์" />
         </label>
       </fieldset>
@@ -402,6 +427,7 @@ type TypeDraft = {
   colorKey: CalendarColor
   kind: CalendarKind
   inLineDigest: boolean
+  requiresTitle: boolean
   isActive: boolean
 }
 
@@ -451,12 +477,12 @@ function TypePanel({ types, onChanged }: { types: CalendarType[]; onChanged: (ty
                 <span className="grid min-w-0 flex-1">
                   <span className="text-sm font-semibold">{type.name}</span>
                   <span className="text-xs text-[#6a838c]">
-                    {KIND_LABEL[type.kind]}{type.inLineDigest ? ' · แจ้ง LINE' : ''}{type.isActive ? '' : ' · ปิดใช้งาน'} · ใช้ {type.usageCount} รายการ
+                    {KIND_LABEL[type.kind]}{type.inLineDigest ? ' · แจ้ง LINE' : ''}{type.requiresTitle ? ' · ต้องใส่หัวข้อ' : ''}{type.isActive ? '' : ' · ปิดใช้งาน'} · ใช้ {type.usageCount} รายการ
                   </span>
                 </span>
                 <Button
                   variant="secondary"
-                  onClick={() => setDraft({ id: type.id, name: type.name, iconKey: (ICON_KEYS as readonly string[]).includes(type.iconKey) ? (type.iconKey as CalendarIconKey) : 'star', colorKey: type.colorKey, kind: type.kind, inLineDigest: type.inLineDigest, isActive: type.isActive })}
+                  onClick={() => setDraft({ id: type.id, name: type.name, iconKey: (ICON_KEYS as readonly string[]).includes(type.iconKey) ? (type.iconKey as CalendarIconKey) : 'star', colorKey: type.colorKey, kind: type.kind, inLineDigest: type.inLineDigest, requiresTitle: type.requiresTitle, isActive: type.isActive })}
                 >
                   แก้ไข
                 </Button>
@@ -465,7 +491,7 @@ function TypePanel({ types, onChanged }: { types: CalendarType[]; onChanged: (ty
           </ul>
           <p className="text-xs text-[#6a838c]">ประเภทลบไม่ได้ ปิดใช้งานแทน ประวัติเดิมยังแสดงอยู่</p>
           <div className="flex justify-end">
-            <Button onClick={() => setDraft({ id: null, name: '', iconKey: 'flask', colorKey: 'green', kind: 'other', inLineDigest: false, isActive: true })}>เพิ่มประเภท</Button>
+            <Button onClick={() => setDraft({ id: null, name: '', iconKey: 'flask', colorKey: 'green', kind: 'other', inLineDigest: false, requiresTitle: false, isActive: true })}>เพิ่มประเภท</Button>
           </div>
         </div>
       ) : (
@@ -510,6 +536,10 @@ function TypePanel({ types, onChanged }: { types: CalendarType[]; onChanged: (ty
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" className="size-4 accent-[#0b7f76]" checked={draft.inLineDigest} onChange={(event) => setDraft({ ...draft, inLineDigest: event.target.checked })} />
             แจ้งประเภทนี้ในกลุ่ม LINE ล่วงหน้า 1 วัน (ช่วงบ่าย)
+          </label>
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-0.5 size-4 accent-[#0b7f76]" checked={draft.requiresTitle} onChange={(event) => setDraft({ ...draft, requiresTitle: event.target.checked })} />
+            <span>ต้องใส่หัวข้อ <span className="block text-xs text-[#6a838c]">เช่น ประชุม/อบรม · หัวข้อแสดงในปฏิทิน, LINE และปฏิทินมือถือ</span></span>
           </label>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" className="size-4 accent-[#0b7f76]" checked={draft.isActive} onChange={(event) => setDraft({ ...draft, isActive: event.target.checked })} />

@@ -153,6 +153,14 @@ describe('heads-up digest (sent the workday before)', () => {
     expect(message).toBe('📅 แจ้งล่วงหน้า\n\nพรุ่งนี้ · พฤหัสบดี 19 พ.ย.\n🩸 เวรเจาะเลือด: เจ\n💼 ลากิจ: เมย์ (บ่าย)\n🤒 ลาป่วย: บอม')
   })
 
+  it('adds the title after the person but never the note', () => {
+    const meeting: DigestEntry = { typeName: 'ประชุม / อบรม', iconKey: 'presentation', colorKey: 'violet', kind: 'other', sortOrder: 50, userName: 'เมย์', dayPart: 'pm', title: 'ประชุม QC' }
+    const training: DigestEntry = { ...meeting, userName: 'บอม', dayPart: 'full', title: 'อบรม ISO 15189' }
+    const message = buildDigestMessage('2026-11-18', [{ date: '2026-11-19', isOffDay: false, holidayName: null, entries: [meeting, training] }])
+    expect(message).toContain('ประชุม / อบรม: บอม “อบรม ISO 15189”, เมย์ (บ่าย) “ประชุม QC”')
+    expect(JSON.stringify(buildDigestFlex('2026-11-18', [{ date: '2026-11-19', isOffDay: false, holidayName: null, entries: [meeting] }]).contents)).toContain('เมย์ (บ่าย) “ประชุม QC”')
+  })
+
   it('shows only duty on days off and skips empty days', () => {
     const days: DigestDay[] = [
       { date: '2026-11-21', isOffDay: true, holidayName: null, entries: [blood, sick] },

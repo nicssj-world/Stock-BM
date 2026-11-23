@@ -14,6 +14,8 @@ export interface CalendarType {
   colorKey: CalendarColor
   kind: CalendarKind
   inLineDigest: boolean
+  /** Entries of this type must carry a title (shown in the calendar, LINE and the phone feed). */
+  requiresTitle: boolean
   sortOrder: number
   isActive: boolean
   usageCount: number
@@ -27,6 +29,7 @@ export interface CalendarEvent {
   startDate: string
   endDate: string
   dayPart: DayPart
+  title: string | null
   note: string | null
   createdAt: string
   updatedAt: string

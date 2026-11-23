@@ -184,6 +184,14 @@ export interface DigestEntry {
   sortOrder: number
   userName: string
   dayPart: DayPart
+  /** Shared title (e.g. the meeting's topic); never the private note. */
+  title?: string | null
+}
+
+/** "เมย์ (บ่าย) “ประชุม QC”" */
+export function digestPerson(entry: DigestEntry) {
+  const part = entry.dayPart === 'full' ? '' : ` (${DAY_PART_LABEL[entry.dayPart]})`
+  return `${entry.userName}${part}${entry.title ? ` “${entry.title}”` : ''}`
 }
 
 export interface DigestDay {
@@ -246,7 +254,7 @@ export function digestSections(today: string, days: DigestDay[]): DigestSection[
         typeName,
         emoji: emojiFor(items[0].iconKey),
         color: COLOR_HEX[items[0].colorKey] ?? COLOR_HEX.slate,
-        people: items.map((item) => (item.dayPart === 'full' ? item.userName : `${item.userName} (${DAY_PART_LABEL[item.dayPart]})`)).join(', '),
+        people: items.map(digestPerson).join(', '),
       })),
     })
   }
