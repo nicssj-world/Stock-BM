@@ -262,6 +262,11 @@ function RoundCard({ round, data, actor, focus, onNavigate, onOk, onErr, forceCo
     ...(analystConfirmed ? ['analyst' as const] : []),
     ...(!technicalManagerReady ? ['technical-manager' as const] : []),
   ]
+  const lockedApprovalReasons = technicalManagerReady ? {} : {
+    'technical-manager': analystConfirmed
+      ? { message: 'กด "บันทึกผลประเมินและสรุปผล" ในขั้นที่ 3 ก่อน', target: { kind: 'round-summary' as const, roundId: round.id } }
+      : { message: 'รอผู้ทำการตรวจวิเคราะห์ลงนาม และบันทึกผลประเมินและสรุปผลก่อน' },
+  }
   const nextStep = roundProgress(round).find((step) => !step.done)
   const nextAction = nextStep?.label ?? 'รอบนี้ดำเนินการครบแล้ว'
   const lockedSteps = useMemo(() => new Set<string>([...(showResults ? [] : ['results']), ...(showSummary ? [] : ['summary'])]), [showResults, showSummary])
@@ -343,8 +348,7 @@ function RoundCard({ round, data, actor, focus, onNavigate, onOk, onErr, forceCo
     {showSummary ? <div id={`eqa-round-${round.id}-summary`} className="mt-3 rounded-lg border border-[#d6e2e3] bg-[#f8fbfb] p-3"><div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-sm font-bold text-[#315763]">3. บันทึกผลประเมินและสรุปผลอัตโนมัติ</p><p className="mt-0.5 text-xs text-[#789097]">acceptable ทุกตัวอย่าง = ผ่าน · warning หรือ unacceptable อย่างใดอย่างหนึ่ง = ไม่ผ่าน</p></div><StatusBadge tone={OUTCOME_TONE[round.summaryOutcome === 'pass' ? 'acceptable' : round.summaryOutcome === 'fail' ? 'unacceptable' : 'not-evaluated']} label={round.summaryOutcome === 'pass' ? 'ผ่านเกณฑ์' : round.summaryOutcome === 'fail' ? 'ไม่ผ่านเกณฑ์' : 'รอผลประเมิน'} /></div><div className="mt-3 grid gap-2 md:grid-cols-[200px_1fr_auto]"><Field label="สรุปผลรอบ (ระบบคำนวณ)"><Input value={round.summaryOutcome === 'pass' ? 'ผ่านเกณฑ์' : round.summaryOutcome === 'fail' ? 'ไม่ผ่านเกณฑ์' : 'ยังไม่ประเมิน'} readOnly /></Field><Field label="หมายเหตุ/การปรับปรุงแก้ไข"><Textarea rows={2} value={summaryNote} onChange={(event) => setSummaryNote(event.target.value)} /></Field><div className="flex items-end gap-2">{round.status === 'submitted' ? <Button className="self-end" disabled={confirmingEvaluation} onClick={confirmEvaluation}>บันทึกผลประเมินและสรุปผล</Button> : <><Button className="self-end" onClick={saveSummary}>บันทึกหมายเหตุ</Button><SavedFlash show={summarySaved} /></>}</div></div></div> : showResults ? <StepLocked text="ให้ผู้ทำการตรวจวิเคราะห์ลงนามรับรองผลที่ส่งก่อน จึงจะบันทึกผลประเมินและสรุปผลได้" /> : null}
     {showApproval ? <>
     {canAttachCertificate ? <div className="mt-3"><AttachmentList module="eqa" entityType="eqa-round" entityId={round.id} kind="eqa-certificate" canDelete={actor.role === 'Admin'} label="Certificate / รายงานผล" /></div> : null}
-    <ApprovalPanel actor={actor} data={data} type="round-receipt" entityId={round.id} state={round.documentState} approvals={round.approvals} readiness={roundReceiptIssues(round)} analystId={round.analystId} lockedRoles={lockedApprovalRoles} onNavigate={onNavigate} onOk={onOk} onErr={onErr} />
-    {!technicalManagerReady ? <StepLocked text="การลงนามของผู้จัดการวิชาการจะแสดงหลังบันทึกผลประเมินและสรุปผลรอบ" /> : null}
+    <ApprovalPanel actor={actor} data={data} type="round-receipt" entityId={round.id} state={round.documentState} approvals={round.approvals} readiness={roundReceiptIssues(round)} analystId={round.analystId} lockedRoles={lockedApprovalRoles} lockedReasons={lockedApprovalReasons} onNavigate={onNavigate} onOk={onOk} onErr={onErr} />
     </> : null}
     </> : null}
   </Card>

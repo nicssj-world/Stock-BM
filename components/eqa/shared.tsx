@@ -41,8 +41,8 @@ function roleName(role: EqaApprovalRole) {
   return EQA_APPROVAL_ROLE_LABELS[role]
 }
 
-export function ApprovalPanel({ actor, data, type, entityId, state, approvals, readiness, analystId, visibleRoles, lockedRoles, onNavigate, onOk, onErr }: {
-  actor: BmActor; data: EqaWorkspace; type: EqaDocumentType; entityId: string; state: EqaDocumentState; approvals: EqaDocumentApproval[]; readiness: EqaReadinessIssue[]; analystId?: string | null; visibleRoles?: EqaApprovalRole[]; lockedRoles?: EqaApprovalRole[]; onNavigate?: (target: EqaReadinessTarget) => void; onOk: Update; onErr: (text: string) => void
+export function ApprovalPanel({ actor, data, type, entityId, state, approvals, readiness, analystId, visibleRoles, lockedRoles, lockedReasons, onNavigate, onOk, onErr }: {
+  actor: BmActor; data: EqaWorkspace; type: EqaDocumentType; entityId: string; state: EqaDocumentState; approvals: EqaDocumentApproval[]; readiness: EqaReadinessIssue[]; analystId?: string | null; visibleRoles?: EqaApprovalRole[]; lockedRoles?: EqaApprovalRole[]; lockedReasons?: Partial<Record<EqaApprovalRole, EqaReadinessIssue>>; onNavigate?: (target: EqaReadinessTarget) => void; onOk: Update; onErr: (text: string) => void
 }) {
   const allRoles: EqaApprovalRole[] = type === 'round-receipt' ? ['analyst', 'technical-manager'] : APPROVAL_ROLES
   const roles = visibleRoles ? allRoles.filter((role) => visibleRoles.includes(role)) : allRoles
@@ -172,6 +172,8 @@ export function ApprovalPanel({ actor, data, type, entityId, state, approvals, r
           const signed = Boolean(approval?.signatureAttachmentId)
           const legacyApproval = Boolean(approval && !signed)
           const canAct = canSign(role) && !lockedRoles?.includes(role)
+          // A role waiting on an earlier step says so, instead of "waiting for you" with no button.
+          const lockedReason = lockedRoles?.includes(role) ? lockedReasons?.[role] : undefined
           return <div key={role} className={`rounded-lg border bg-white p-3 text-xs ${signed ? 'border-[#c6e2ca]' : 'border-[#e1eaea]'}`}>
             <div className="flex items-start justify-between gap-2"><div><p className="font-bold text-[#315763]">{roleName(role)}</p><p className="mt-1 leading-5 text-[#789097]">{SIGNER_HELP[role]}</p></div>{signed ? <CheckCircle2 className="size-5 shrink-0 text-[#2f7d44]" aria-label="ลงนามแล้ว" /> : null}</div>
             {signed ? <>
@@ -181,7 +183,7 @@ export function ApprovalPanel({ actor, data, type, entityId, state, approvals, r
               <p className="mt-0.5 text-[10px] text-[#9aafb4]">บันทึกโดยบัญชี {approval!.approvedByName}</p>
               {approval && (approval.approvedById === actor.id || actor.role === 'Admin') ? <Button variant="ghost" className="mt-2 min-h-9 px-2 py-1 text-xs" disabled={busyRole === role} onClick={() => revoke(role)}>ถอนลายเซ็น</Button> : null}
             </> : <>
-              {legacyApproval ? <p className="mt-3 rounded-md border border-[#eed4a6] bg-[#fffaf0] px-2 py-1.5 text-[11px] leading-4 text-[#8b5c0b]">มีการยืนยันเดิมโดย {approval!.approvedByName} แต่ยังไม่มีภาพลายเซ็น</p> : <p className="mt-3 min-h-8 text-[#789097]">{isOwnRole(role) === true ? 'รอคุณลงนาม' : assigneeName ? `รอ ${assigneeName} ลงนาม` : 'ยังไม่มีผู้ลงนามในระบบ · ใช้เครื่องนี้กรอกชื่อและเซ็นได้'}</p>}
+              {lockedReason ? <p className="mt-3 rounded-md border border-dashed border-[#dbe6e7] bg-[#fbfdfd] px-2 py-1.5 text-[11px] leading-4 text-[#58747d]">ยังลงนามไม่ได้ · {lockedReason.target && onNavigate ? <button type="button" className="text-left font-semibold text-[#0b7f76] underline decoration-dotted hover:text-[#173d50]" onClick={() => onNavigate(lockedReason.target!)}>{lockedReason.message}</button> : lockedReason.message}</p> : legacyApproval ? <p className="mt-3 rounded-md border border-[#eed4a6] bg-[#fffaf0] px-2 py-1.5 text-[11px] leading-4 text-[#8b5c0b]">มีการยืนยันเดิมโดย {approval!.approvedByName} แต่ยังไม่มีภาพลายเซ็น</p> : <p className="mt-3 min-h-8 text-[#789097]">{isOwnRole(role) === true ? 'รอคุณลงนาม' : assigneeName ? `รอ ${assigneeName} ลงนาม` : 'ยังไม่มีผู้ลงนามในระบบ · ใช้เครื่องนี้กรอกชื่อและเซ็นได้'}</p>}
               {canAct && signingRole !== role && isOwnRole(role) === true && mine.signature ? <>
                 <Button className="mt-2 min-h-10 w-full px-3 py-2 text-xs" disabled={Boolean(readiness.length) || busyRole !== null} onClick={() => signWithSaved(role)}>{busyRole === role ? <LoaderCircle className="size-4 animate-spin" /> : <PenLine className="size-4" />}ลงนามด้วยลายเซ็นของฉัน</Button>
                 <button type="button" className="mt-1 min-h-9 w-full rounded-md text-[11px] font-semibold text-[#58747d] hover:text-[#173d50] focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none disabled:opacity-50" disabled={Boolean(readiness.length) || busyRole !== null} onClick={() => startSigning(role, assigneeName || approval?.signerName || '')}>ดูลายเซ็นหรือวาดใหม่ก่อนลงนาม</button>
