@@ -49,3 +49,6 @@ yarn-error.log*
 next-env.d.ts
 
 .vercel
+
+# Impeccable design-review snapshots (local only)
+.impeccable/
