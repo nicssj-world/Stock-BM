@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 const service = readFileSync(join(process.cwd(), 'lib/server/iqc.ts'), 'utf8')
 const specRoute = readFileSync(join(process.cwd(), 'app/api/iqc/specs/route.ts'), 'utf8')
 const view = readFileSync(join(process.cwd(), 'components/iqc-view.tsx'), 'utf8')
+const settings = readFileSync(join(process.cwd(), 'components/iqc-settings-center.tsx'), 'utf8')
 
 describe('IQC data integrity controls', () => {
   it('enforces active, unexpired lots at the server boundary', () => {
@@ -20,7 +21,9 @@ describe('IQC data integrity controls', () => {
 
   it('requires a reason and recalculates results when an assigned spec changes', () => {
     expect(specRoute).toContain('changeReason')
-    expect(view).toContain('เหตุผลแก้ไข Spec')
+    // The spec editor lives in the IQC setup center.
+    expect(settings).toContain('เหตุผลที่แก้ไขค่าเดิม')
+    expect(settings).toContain('changeReason: changeReason.trim() || null')
     expect(service).toContain('await recalculateChartStatuses(input.controlLotId, input.analyteId)')
   })
 

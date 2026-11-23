@@ -32,7 +32,6 @@ describe('IQC equipment source', () => {
     expect(iqcView).toContain('Test set ที่กำหนดสำหรับเครื่องนี้:')
     expect(iqcView).toContain('plannedTestSetGroups.map(')
     expect(iqcView).toContain('const availableAnalytes = useMemo(')
-    expect(iqcView).toContain('Test: {tests.length ? tests.map((plan) => plan.analyteCode).join(\', \') : \'ยังไม่ได้กำหนด\'}')
   })
 
   it('can fill a named test set as one group of IQC analytes', () => {
@@ -44,8 +43,8 @@ describe('IQC equipment source', () => {
   })
 
   it('allows a Control plan to be saved for every analyte in a selected test set', () => {
-    expect(iqcView).toContain('จะกำหนด Control plan ให้ครบ {selectedAnalyteIds.length} รายการในชุด {testSet}')
-    expect(iqcView).toContain('analyteIds: selectedAnalyteIds')
+    // Control plans are set up in the IQC setup center, one test set at a time.
+    expect(iqcSettings).toContain('JSON.stringify({ analyteIds: selectedAnalytes.map((analyte) => analyte.id), instrumentId')
     expect(iqcService).toContain('analyteIds?: string[]')
     expect(iqcService).toContain(".in('analyte_id', analyteIds)")
   })
