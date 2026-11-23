@@ -138,6 +138,13 @@ export function roundReceiptReadiness(round: Parameters<typeof roundReceiptIssue
   return roundReceiptIssues(round).map((issue) => issue.message)
 }
 
+// Like IQC, a CAPA is only finished once its fix is confirmed effective. EQA
+// stores that as a closed row whose effectiveness is still pending, so this
+// derives IQC's "awaiting-effectiveness" step without a schema change.
+export function capaAwaitingEffectiveness(action: Pick<EqaCorrectiveAction, 'status' | 'effectivenessOutcome'>) {
+  return action.status === 'closed' && action.effectivenessOutcome === 'pending'
+}
+
 export function annualSummaryIssues(item: EqaPlanItem, rounds: EqaRound[], correctiveActions: EqaCorrectiveAction[]): EqaReadinessIssue[] {
   const issues: EqaReadinessIssue[] = []
   const planItemTarget: EqaReadinessTarget = { kind: 'plan-item', planItemId: item.id }
@@ -160,6 +167,7 @@ export function annualSummaryIssues(item: EqaPlanItem, rounds: EqaRound[], corre
       const actions = correctiveActions.filter((action) => action.roundId === round.id)
       if (!actions.length) issues.push({ message: `${round.roundLabel}: ผลไม่ผ่านแต่ยังไม่มี corrective action`, target: { kind: 'corrective', roundId: round.id } })
       else if (actions.some((action) => action.status !== 'closed')) issues.push({ message: `${round.roundLabel}: corrective action ยังไม่ปิด`, target: { kind: 'corrective', roundId: round.id } })
+      else if (actions.some(capaAwaitingEffectiveness)) issues.push({ message: `${round.roundLabel}: CAPA ยังไม่ได้ยืนยันประสิทธิผลการแก้ไข`, target: { kind: 'corrective', roundId: round.id } })
     }
   }
   return issues
@@ -194,3 +202,14 @@ export function roundProgress(round: EqaRound): EqaRoundStep[] {
     { key: 'approved', label: 'ลงนามครบ', done: approved },
   ]
 }
+
+type EqaUser = { id: string; stockRole: 'Admin' | 'Staff' | 'Assistant' | 'Signer' | null }
+
+// People who do EQA work (receive samples, analyse, own a CAPA, plan a month):
+// only active Stock-BM Admin/Staff. Anyone else could not sign as analyst or
+// even open the round.
+export function isEqaStaff(user: EqaUser) { return user.stockRole === 'Admin' || user.stockRole === 'Staff' }
+
+// Approver accounts may also be Signer accounts (approvers outside the unit).
+// Someone without Stock-BM access would leave the role unsignable.
+export function isEqaApproverCandidate(user: EqaUser) { return isEqaStaff(user) || user.stockRole === 'Signer' }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analyteDefaultUnit, analyteScopeOptions, annualPlanReadiness, annualSummaryIssues, annualSummaryReadiness, deriveRoundSummaryOutcome, displayRoundLabel, missingPlannedRounds, plannedRoundDueDate, plannedRoundLabel, roundProgress, roundReceiptIssues, roundReceiptReadiness } from '@/lib/eqa/rules'
+import { analyteDefaultUnit, analyteScopeOptions, annualPlanReadiness, capaAwaitingEffectiveness, isEqaApproverCandidate, isEqaStaff, annualSummaryIssues, annualSummaryReadiness, deriveRoundSummaryOutcome, displayRoundLabel, missingPlannedRounds, plannedRoundDueDate, plannedRoundLabel, roundProgress, roundReceiptIssues, roundReceiptReadiness } from '@/lib/eqa/rules'
 import type { EqaPlanItem, EqaRound } from '@/lib/eqa/types'
 
 const item: EqaPlanItem = {
@@ -27,7 +27,23 @@ describe('EQA report readiness', () => {
   it('requires closed CAPA for a failed annual-summary round', () => {
     const failed = { ...round, summaryOutcome: 'fail' as const, results: [{ sampleCode: 'S1', submittedValue: '120', outcome: 'warning' as const }] } as unknown as EqaRound
     expect(annualSummaryReadiness(item, [failed, round], [])).toContain('C1: ผลไม่ผ่านแต่ยังไม่มี corrective action')
-    expect(annualSummaryReadiness(item, [failed, round], [{ id: 'ca', roundId: 'round', status: 'closed' } as never])).toEqual([])
+    expect(annualSummaryReadiness(item, [failed, round], [{ id: 'ca', roundId: 'round', status: 'closed', effectivenessOutcome: 'effective' } as never])).toEqual([])
+  })
+
+  it('keeps a failed round open until its CAPA is confirmed effective (as in IQC)', () => {
+    const failed = { ...round, summaryOutcome: 'fail' as const, results: [{ sampleCode: 'S1', submittedValue: '120', outcome: 'warning' as const }] } as unknown as EqaRound
+    const awaiting = { id: 'ca', roundId: 'round', status: 'closed', effectivenessOutcome: 'pending' } as never
+    expect(capaAwaitingEffectiveness(awaiting)).toBe(true)
+    expect(annualSummaryReadiness(item, [failed], [awaiting])).toContain('C1: CAPA ยังไม่ได้ยืนยันประสิทธิผลการแก้ไข')
+    expect(capaAwaitingEffectiveness({ status: 'open', effectivenessOutcome: 'ineffective' })).toBe(false)
+  })
+})
+
+describe('EQA people pickers', () => {
+  it('limits EQA work to active Stock Admin/Staff, and approvers may also be Signers', () => {
+    const roles = ['Admin', 'Staff', 'Assistant', 'Signer', null] as const
+    expect(roles.filter((stockRole) => isEqaStaff({ id: 'u', stockRole }))).toEqual(['Admin', 'Staff'])
+    expect(roles.filter((stockRole) => isEqaApproverCandidate({ id: 'u', stockRole }))).toEqual(['Admin', 'Staff', 'Signer'])
   })
 })
 

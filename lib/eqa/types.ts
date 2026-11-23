@@ -211,7 +211,9 @@ export interface EqaWorkspace {
   annualSummaries: EqaAnnualSummary[]
   correctiveActions: EqaCorrectiveAction[]
   approverAssignments: EqaApproverAssignment[]
-  users: { id: string; displayName: string }[]
+  /** Active people. stockRole is their Stock-BM access (null = none): pickers
+   *  narrow this with eqaStaffUsers / eqaApproverCandidates. */
+  users: { id: string; displayName: string; stockRole: 'Admin' | 'Staff' | 'Assistant' | 'Signer' | null }[]
   iqcAnalytes: { id: string; code: string; name: string; groupLabel: string | null; scale: 'linear' | 'log10'; unit: string | null }[]
   summary: {
     schemeCount: number

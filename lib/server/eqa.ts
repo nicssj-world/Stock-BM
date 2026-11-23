@@ -31,6 +31,7 @@ import { daysUntil, todayBangkok } from '@/lib/bm/rules'
 import { writeAudit } from '@/lib/server/audit'
 import { HttpError } from '@/lib/server/errors'
 import { deleteEntityAttachments, deleteStoredAttachment, uploadAttachment } from '@/lib/server/attachments'
+import { selectAll } from '@/lib/supabase/select-all'
 import { getAdminClient } from '@/lib/supabase/admin'
 import { getSavedSignatureFile } from '@/lib/server/user-signature'
 
@@ -88,6 +89,21 @@ function nullableNumber(value: unknown) { return value == null || value === '' ?
 function clean(value: string | null | undefined) { return value?.trim() || null }
 function assertAdmin(actor: BmActor) { if (actor.role !== 'Admin') throw new HttpError(403, 'Admin permission required') }
 function assertOperator(actor: BmActor) { if (actor.role === 'Assistant') throw new HttpError(403, 'EQA Staff or Admin permission required') }
+/** The person's active Stock-BM role, or null (no access, or inactive). */
+async function activeStockRole(userId: string) {
+  const admin = getAdminClient()
+  const [{ data: access, error: accessError }, { data: person, error: personError }] = await Promise.all([
+    admin.from('bm_user_access').select('role').eq('user_id', userId).eq('is_active', true).maybeSingle(),
+    admin.from('nipt_users').select('is_active').eq('id', userId).maybeSingle(),
+  ])
+  fail(accessError); fail(personError)
+  return person && (person as RecordRow).is_active ? nullableString((access as RecordRow | null)?.role) : null
+}
+// Receiver, analyst and CAPA owner do EQA work themselves: Admin or Staff only.
+async function assertEqaStaff(userId: string, label: string) {
+  const role = await activeStockRole(userId)
+  if (role !== 'Admin' && role !== 'Staff') throw new HttpError(400, `${label}ต้องเป็นผู้ใช้ Stock-BM (Admin หรือ Staff) ที่ยังใช้งานอยู่`)
+}
 function documentKey(documentType: EqaDocumentType, entityId: string) { return `${documentType}:${entityId}` }
 function approvalKey(documentType: EqaDocumentType, entityId: string, revision: number) { return `${documentType}:${entityId}:${revision}` }
 
@@ -120,29 +136,37 @@ function defaultDocumentState(documentType: EqaDocumentType, entityId: string): 
 export async function getEqaWorkspace(actor: BmActor): Promise<EqaWorkspace> {
   assertOperator(actor)
   const admin = getAdminClient()
+  // Tables that grow every year are read page by page: PostgREST silently
+  // caps a select at 1000 rows, which would drop results, signatures and --
+  // worst -- open CAPAs from the annual-summary readiness check.
   const results = await Promise.all([
     admin.from('eqa_providers').select('*').order('name'),
     admin.from('eqa_schemes').select('*').order('name'),
     admin.from('eqa_annual_plans').select('*').order('plan_year', { ascending: false }),
-    admin.from('eqa_plan_items').select('*').order('sort_order'),
-    admin.from('eqa_plan_occurrences').select('*').order('planned_month').order('sort_order'),
-    admin.from('eqa_rounds').select('*').order('result_due_date', { ascending: true, nullsFirst: false }),
-    admin.from('eqa_results').select('*').order('created_at'),
-    admin.from('eqa_corrective_actions').select('*').order('created_at', { ascending: false }).limit(500),
-    admin.from('iqc_analytes').select('id,code,name,group_label,scale,unit').eq('is_active', true).order('code'),
-    admin.from('bm_portal_equipment_links').select('portal_equipment_id,entity_id').eq('module', 'eqa'),
-    admin.from('bm_portal_equipment_refs').select('portal_equipment_id,lab_code,name,status'),
-    admin.from('nipt_users').select('id,display_name,is_active').order('display_name'),
+    selectAll((from, to) => admin.from('eqa_plan_items').select('*').order('sort_order').order('id').range(from, to)),
+    selectAll((from, to) => admin.from('eqa_plan_occurrences').select('*').order('planned_month').order('sort_order').order('id').range(from, to)),
+    selectAll((from, to) => admin.from('eqa_rounds').select('*').order('result_due_date', { ascending: true, nullsFirst: false }).order('id').range(from, to)),
+    selectAll((from, to) => admin.from('eqa_results').select('*').order('created_at').order('id').range(from, to)),
+    selectAll((from, to) => admin.from('eqa_corrective_actions').select('*').order('created_at', { ascending: false }).order('id').range(from, to)),
+    selectAll((from, to) => admin.from('iqc_analytes').select('id,code,name,group_label,scale,unit').eq('is_active', true).order('code').order('id').range(from, to)),
+    selectAll((from, to) => admin.from('bm_portal_equipment_links').select('portal_equipment_id,entity_id').eq('module', 'eqa').order('portal_equipment_id').order('entity_id').range(from, to)),
+    selectAll((from, to) => admin.from('bm_portal_equipment_refs').select('portal_equipment_id,lab_code,name,status').order('portal_equipment_id').range(from, to)),
+    selectAll((from, to) => admin.from('nipt_users').select('id,display_name,is_active').order('display_name').order('id').range(from, to)),
     admin.from('eqa_approver_assignments').select('*'),
-    admin.from('eqa_document_states').select('*'),
-    admin.from('eqa_document_approvals').select('*').order('approved_at'),
+    selectAll((from, to) => admin.from('bm_user_access').select('user_id,role').eq('is_active', true).order('user_id').range(from, to)),
+    selectAll((from, to) => admin.from('eqa_document_states').select('*').order('id').range(from, to)),
+    selectAll((from, to) => admin.from('eqa_document_approvals').select('*').order('approved_at').order('id').range(from, to)),
   ])
   for (const result of results) fail(result.error)
-  const [providerData, schemeData, planData, planItemData, occurrenceData, roundData, resultData, caData, iqcAnalyteData, equipmentLinkData, equipmentData, userData, assignmentData, stateData, approvalData] = results.map((result) => result.data ?? [])
+  const [providerData, schemeData, planData, planItemData, occurrenceData, roundData, resultData, caData, iqcAnalyteData, equipmentLinkData, equipmentData, userData, assignmentData, accessData, stateData, approvalData] = results.map((result) => result.data ?? [])
 
   const userRows = userData as RecordRow[]
   const userNameMap = new Map(userRows.map((row) => [asString(row.id), asString(row.display_name)]))
-  const users = userRows.filter((row) => Boolean(row.is_active)).map((row) => ({ id: asString(row.id), displayName: asString(row.display_name) }))
+  const stockRoleById = new Map((accessData as RecordRow[]).map((row) => [asString(row.user_id), asString(row.role)]))
+  const users: EqaWorkspace['users'] = userRows.filter((row) => Boolean(row.is_active)).map((row) => {
+    const role = stockRoleById.get(asString(row.id))
+    return { id: asString(row.id), displayName: asString(row.display_name), stockRole: role === 'Admin' || role === 'Staff' || role === 'Assistant' || role === 'Signer' ? role : null }
+  })
 
   const providers: EqaProvider[] = (providerData as RecordRow[]).map((row) => ({ id: asString(row.id), name: asString(row.name), isActive: Boolean(row.is_active) }))
   const providerMap = new Map(providers.map((provider) => [provider.id, provider]))
@@ -553,9 +577,13 @@ export async function updateRound(id: string, input: { roundLabel?: string; subm
 export async function updateRoundReceipt(id: string, input: EqaRoundReceiptInput, actor: BmActor) {
   assertOperator(actor)
   const admin = getAdminClient()
-  const { data: currentRound, error: currentError } = await admin.from('eqa_rounds').select('plan_item_id').eq('id', id).maybeSingle()
+  const { data: currentRound, error: currentError } = await admin.from('eqa_rounds').select('plan_item_id,receiver_id,analyst_id').eq('id', id).maybeSingle()
   fail(currentError); if (!currentRound) throw new HttpError(404, 'Round not found')
   const previousPlanItemId = nullableString((currentRound as RecordRow).plan_item_id)
+  // Only a newly chosen person is checked, so a saved receipt whose analyst
+  // later lost access can still be edited.
+  if (input.receiverId && input.receiverId !== nullableString((currentRound as RecordRow).receiver_id)) await assertEqaStaff(input.receiverId, 'ผู้รับตัวอย่าง')
+  if (input.analystId && input.analystId !== nullableString((currentRound as RecordRow).analyst_id)) await assertEqaStaff(input.analystId, 'ผู้ตรวจวิเคราะห์')
 
   const update: RecordRow = {
     external_sent_date: input.externalSentDate || null, sample_received_date: input.sampleReceivedDate || null,
@@ -644,6 +672,18 @@ export async function updateResult(id: string, input: { analyte: string; sampleC
   fail((await admin.from('eqa_results').update({ analyte: input.analyte.trim(), sample_code: clean(input.sampleCode), submitted_value: clean(input.submittedValue), unit: clean(input.unit), ct_value: input.ctValue ?? null, evaluation_score: input.evaluationScore ?? null, outcome: input.outcome, iqc_analyte_id: input.iqcAnalyteId || null, assigned_value: clean(input.assignedValue) }).eq('id', id)).error)
   const roundId = asString((current as RecordRow).round_id); await syncRoundSummary(admin, roundId); await invalidateResultDocuments(roundId); await writeAudit(actor, 'eqa.result.update', 'eqa-result', id, input); return getEqaWorkspace(actor)
 }
+export async function setRoundIqcPanel(roundId: string, iqcAnalyteId: string | null, actor: BmActor) {
+  assertOperator(actor); const admin = getAdminClient()
+  const { data: round, error: roundError } = await admin.from('eqa_rounds').select('id').eq('id', roundId).maybeSingle(); fail(roundError); if (!round) throw new HttpError(404, 'Round not found')
+  if (iqcAnalyteId) {
+    const { data: analyte, error: analyteError } = await admin.from('iqc_analytes').select('id').eq('id', iqcAnalyteId).maybeSingle(); fail(analyteError)
+    if (!analyte) throw new HttpError(400, 'ไม่พบ IQC panel ที่เลือก')
+  }
+  // One UPDATE for the whole round: it either links every result or none.
+  const { data, error } = await admin.from('eqa_results').update({ iqc_analyte_id: iqcAnalyteId }).eq('round_id', roundId).select('id'); fail(error)
+  await invalidateResultDocuments(roundId)
+  await writeAudit(actor, 'eqa.round.iqcPanel.set', 'eqa-round', roundId, { iqcAnalyteId, resultCount: (data ?? []).length }); return getEqaWorkspace(actor)
+}
 export async function deleteResult(id: string, actor: BmActor) {
   assertOperator(actor); const admin = getAdminClient(); const { data, error } = await admin.from('eqa_results').select('round_id,analyte').eq('id', id).maybeSingle(); fail(error); if (!data) throw new HttpError(404, 'EQA result not found')
   const { count, error: correctiveActionError } = await admin.from('eqa_corrective_actions').select('id', { count: 'exact', head: true }).eq('result_id', id); fail(correctiveActionError)
@@ -653,6 +693,7 @@ export async function deleteResult(id: string, actor: BmActor) {
 
 export async function createEqaCorrectiveAction(input: { roundId: string; resultId?: string | null; problem: string; issueTypes?: string[]; probableErrorType?: CorrectiveErrorType | null; probableErrorNote?: string | null; reviewFindings?: Record<string, unknown> | null; rootCause?: string | null; actionTypes?: string[]; actionTaken?: string | null; correctionOutcome?: CorrectiveCorrectionOutcome | null; correctionOutcomeNote?: string | null; preventiveAction?: string | null; ownerId?: string | null; dueDate?: string | null }, actor: BmActor) {
   assertOperator(actor); if (!input.problem.trim()) throw new HttpError(400, 'Problem description is required')
+  if (input.ownerId) await assertEqaStaff(input.ownerId, 'ผู้รับผิดชอบ CAPA ')
   const admin = getAdminClient()
   if (input.resultId) {
     const { data: linkedResult, error: linkedResultError } = await admin.from('eqa_results').select('round_id').eq('id', input.resultId).maybeSingle()
@@ -682,9 +723,10 @@ export async function createEqaCorrectiveAction(input: { roundId: string; result
 export async function updateEqaCorrectiveAction(id: string, input: { problem?: string; issueTypes?: string[]; probableErrorType?: CorrectiveErrorType | null; probableErrorNote?: string | null; reviewFindings?: Record<string, unknown> | null; rootCause?: string | null; actionTypes?: string[]; actionTaken?: string | null; correctionOutcome?: CorrectiveCorrectionOutcome | null; correctionOutcomeNote?: string | null; preventiveAction?: string | null; ownerId?: string | null; dueDate?: string | null }, actor: BmActor) {
   assertOperator(actor)
   const admin = getAdminClient()
-  const { data: existing, error: existingError } = await admin.from('eqa_corrective_actions').select('status').eq('id', id).maybeSingle()
+  const { data: existing, error: existingError } = await admin.from('eqa_corrective_actions').select('status,owner_id').eq('id', id).maybeSingle()
   fail(existingError); if (!existing) throw new HttpError(404, 'Corrective action not found')
   if (asString((existing as RecordRow).status) === 'closed') throw new HttpError(400, 'Closed corrective action cannot be edited')
+  if (input.ownerId && input.ownerId !== nullableString((existing as RecordRow).owner_id)) await assertEqaStaff(input.ownerId, 'ผู้รับผิดชอบ CAPA ')
 
   const update: RecordRow = {}
   if (input.problem !== undefined) {
@@ -778,8 +820,15 @@ export async function deleteEqaCorrectiveAction(id: string, actor: BmActor) {
   return getEqaWorkspace(actor)
 }
 
-export async function setEqaApproverAssignment(role: EqaAssignedApprovalRole, userId: string, actor: BmActor) {
+export async function setEqaApproverAssignment(role: EqaAssignedApprovalRole, userId: string | null, actor: BmActor) {
   assertAdmin(actor); if (!ASSIGNED_APPROVAL_ROLES.includes(role)) throw new HttpError(400, 'Invalid approval role')
+  if (!userId) {
+    fail((await getAdminClient().from('eqa_approver_assignments').delete().eq('approval_role', role)).error)
+    await writeAudit(actor, 'eqa.approver.unassign', 'eqa-approver-assignment', undefined, { role }); return getEqaWorkspace(actor)
+  }
+  // An account without Stock-BM access could never sign, leaving the role stuck.
+  const stockRole = await activeStockRole(userId)
+  if (stockRole !== 'Admin' && stockRole !== 'Staff' && stockRole !== 'Signer') throw new HttpError(400, 'ผู้อนุมัติต้องมีบัญชี Stock-BM ที่ใช้งานอยู่ (Admin, Staff หรือ Signer)')
   fail((await getAdminClient().from('eqa_approver_assignments').upsert({ approval_role: role, user_id: userId, updated_by: actor.id, updated_at: new Date().toISOString() }, { onConflict: 'approval_role' })).error)
   // The assignment key is the role slug, not a UUID. Keep it in the audit
   // detail because bm_audit_logs.entity_id is UUID-typed.

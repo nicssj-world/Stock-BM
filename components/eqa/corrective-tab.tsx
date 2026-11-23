@@ -9,6 +9,7 @@ import {
   type CorrectiveActionDraft,
 } from '@/lib/corrective-actions'
 import { formatDate, formatDateTime } from '@/lib/bm/rules'
+import { capaAwaitingEffectiveness, isEqaStaff } from '@/lib/eqa/rules'
 import { api, Button, Card, Notice, StatusBadge } from '@/components/ui'
 import { AttachmentList } from '@/components/attachments'
 import {
@@ -17,7 +18,7 @@ import {
 } from '@/components/corrective-action-form'
 import type { Update } from '@/components/eqa/shared'
 
-type EqaCorrectiveActionFilter = 'active' | 'open' | 'closed' | 'all'
+type EqaCorrectiveActionFilter = 'active' | 'open' | 'awaiting-effectiveness' | 'closed' | 'all'
 
 export type EqaCorrectiveContext = {
   roundId: string
@@ -145,7 +146,8 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
   const effectiveFocusId = focusId ?? localFocusId
   const actionCounts = useMemo(() => ({
     open: data.correctiveActions.filter((action) => action.status === 'open').length,
-    closed: data.correctiveActions.filter((action) => action.status === 'closed').length,
+    awaitingEffectiveness: data.correctiveActions.filter(capaAwaitingEffectiveness).length,
+    closed: data.correctiveActions.filter((action) => action.status === 'closed' && !capaAwaitingEffectiveness(action)).length,
   }), [data.correctiveActions])
   const focusedAction = useMemo(
     () => (focusId ? data.correctiveActions.find((action) => action.id === focusId) ?? null : null),
@@ -155,7 +157,7 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
     focusFilterOverride
     && focusId
     && actionFilter === 'active'
-    && focusedAction?.status === 'closed',
+    && focusedAction?.status === 'closed' && !capaAwaitingEffectiveness(focusedAction),
   )
 
   const filteredActions = useMemo(() => {
@@ -164,8 +166,10 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
       const statusMatches = showingFocusedHistory
         ? action.id === focusId
         : actionFilter === 'all'
-          || (actionFilter === 'active' && action.status !== 'closed')
-          || action.status === actionFilter
+          || (actionFilter === 'active' && (action.status !== 'closed' || capaAwaitingEffectiveness(action)))
+          || (actionFilter === 'open' && action.status === 'open')
+          || (actionFilter === 'awaiting-effectiveness' && capaAwaitingEffectiveness(action))
+          || (actionFilter === 'closed' && action.status === 'closed' && !capaAwaitingEffectiveness(action))
       const textMatches = !normalizedQuery || [action.problem, action.roundLabel, resultLabel(action), action.ownerName, action.createdByName]
         .filter((value): value is string => Boolean(value))
         .some((value) => value.toLocaleLowerCase().includes(normalizedQuery))
@@ -312,7 +316,7 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
        systemSignals={systemSignals}
        suggestedIssueTypes={suggestedIssueTypes}
        initialValue={{ problem: suggestedProblem }}
-       ownerOptions={data.users}
+       ownerOptions={data.users.filter(isEqaStaff)}
       busy={busy}
       onSubmit={create}
     />
@@ -325,8 +329,9 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
           </div>
           <div className="flex flex-wrap gap-1">
             {([
-              ['active', `กำลังดำเนินการ ${actionCounts.open}`],
+              ['active', `กำลังดำเนินการ ${actionCounts.open + actionCounts.awaitingEffectiveness}`],
               ['open', `Open ${actionCounts.open}`],
+              ['awaiting-effectiveness', `รอยืนยันผลการแก้ไข ${actionCounts.awaitingEffectiveness}`],
               ['closed', `Closed ${actionCounts.closed}`],
               ['all', `ทั้งหมด ${data.correctiveActions.length}`],
             ] as [EqaCorrectiveActionFilter, string][]).map(([value, label]) => <button key={value} type="button" aria-pressed={!showingFocusedHistory && actionFilter === value} onClick={() => selectActionFilter(value)} className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${!showingFocusedHistory && actionFilter === value ? 'border-[#0b7f76] bg-[#e6f5f2] text-[#08766e]' : 'border-[#d6e2e3] bg-white text-[#58747d] hover:bg-[#f3f9f9]'}`}>{label}</button>)}
@@ -344,7 +349,7 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
               <button type="button" onClick={() => toggleExpanded(action.id)} aria-expanded={isExpanded} className="min-w-0 flex-1 p-4 text-left focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0b7f76] focus-visible:outline-none">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-bold text-[#315763]">{action.roundLabel}</span>
-                  <StatusBadge tone={action.status === 'closed' ? 'accepted' : 'warning'} label={action.status === 'closed' ? 'ปิดแล้ว' : 'กำลังดำเนินการ'} />
+                  <StatusBadge tone={capaAwaitingEffectiveness(action) ? 'warning' : action.status === 'closed' ? 'accepted' : 'warning'} label={capaAwaitingEffectiveness(action) ? 'รอยืนยันผลการแก้ไข' : action.status === 'closed' ? 'ปิดแล้ว' : 'กำลังดำเนินการ'} />
                   {isLegacy ? <span className="rounded-full border border-[#eed4a6] bg-[#fff9ed] px-2 py-0.5 text-[10px] font-bold text-[#a9700f]">{action.status === 'closed' ? 'ข้อมูลเดิม' : 'ต้องเติมข้อมูลก่อนปิด'}</span> : null}
                   <ChevronDown className={`size-4 shrink-0 text-[#789097] transition-transform ${isExpanded ? 'rotate-180' : ''}`} aria-hidden="true" />
                 </div>
@@ -366,7 +371,7 @@ export function CorrectiveTab({ data, actor, onOk, onErr, focusId, initialContex
                 mode="edit"
                 context={contextSummary(data.rounds.find((round) => round.id === action.roundId) ?? null, action.resultId, data.correctiveActions)}
                 systemSignals={data.rounds.find((round) => round.id === action.roundId)?.results.find((result) => result.id === action.resultId) ? [`Outcome จากผู้จัด: ${data.rounds.find((round) => round.id === action.roundId)?.results.find((result) => result.id === action.resultId)?.outcome}`] : []}
-                ownerOptions={data.users}
+                ownerOptions={data.users.filter((user) => isEqaStaff(user) || user.id === action.ownerId)}
                 initialValue={actionToDraft(action)}
                 busy={busy}
                 onSubmit={(value, intent) => saveEditing(action, value, intent)}

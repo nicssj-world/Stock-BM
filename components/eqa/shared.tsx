@@ -25,8 +25,10 @@ export const STATUS_TONE: Record<string, StatusTone> = { scheduled: 'neutral', r
 export const OUTCOME_TONE: Record<string, StatusTone> = { acceptable: 'accepted', warning: 'warning', unacceptable: 'rejected', 'not-evaluated': 'neutral' }
 export const THAI_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
 
-export function UserSelect({ users, value, onChange, className }: { users: EqaWorkspace['users']; value: string; onChange: (value: string) => void; className?: string }) {
-  return <Select className={className} value={value} onChange={(event) => onChange(event.target.value)}><option value="">—</option>{users.map((user) => <option key={user.id} value={user.id}>{user.displayName}</option>)}</Select>
+/** Picks from the people `allowed` lets through; a current value outside that set stays visible (flagged) so saved records still read correctly. */
+export function UserSelect({ users, allowed, value, onChange, className }: { users: EqaWorkspace['users']; allowed: (user: EqaWorkspace['users'][number]) => boolean; value: string; onChange: (value: string) => void; className?: string }) {
+  const options = users.filter((user) => allowed(user) || user.id === value)
+  return <Select className={className} value={value} onChange={(event) => onChange(event.target.value)}><option value="">—</option>{value && !options.some((user) => user.id === value) ? <option value={value}>(ผู้ใช้ที่ไม่ใช้งานแล้ว)</option> : null}{options.map((user) => <option key={user.id} value={user.id}>{user.displayName}{allowed(user) ? '' : ' (ไม่มีสิทธิ์แล้ว)'}</option>)}</Select>
 }
 
 const SIGNER_HELP: Record<EqaApprovalRole, string> = {
