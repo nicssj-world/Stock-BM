@@ -166,7 +166,18 @@ describe('heads-up digest (sent the workday before)', () => {
     const training: DigestEntry = { ...meeting, userName: 'บอม', dayPart: 'full', title: 'อบรม ISO 15189' }
     const message = buildDigestMessage('2026-11-18', [{ date: '2026-11-19', isOffDay: false, holidayName: null, entries: [meeting, training] }])
     expect(message).toContain('ประชุม / อบรม: บอม “อบรม ISO 15189”, เมย์ (บ่าย) “ประชุม QC”')
-    expect(JSON.stringify(buildDigestFlex('2026-11-18', [{ date: '2026-11-19', isOffDay: false, holidayName: null, entries: [meeting] }]).contents)).toContain('เมย์ (บ่าย) “ประชุม QC”')
+  })
+
+  it('gives each titled person a full-width line with the title beneath', () => {
+    const meeting: DigestEntry = { typeName: 'ประชุม / อบรม', iconKey: 'presentation', colorKey: 'violet', kind: 'other', sortOrder: 50, userName: 'เมย์', dayPart: 'pm', title: 'ประชุม QC' }
+    const ot: DigestEntry = { typeName: 'OT CD4', iconKey: 'clipboard', colorKey: 'green', kind: 'duty', sortOrder: 5, userName: 'บอม', dayPart: 'full' }
+    const json = JSON.stringify(buildDigestFlex('2026-11-18', [{ date: '2026-11-19', isOffDay: false, holidayName: null, entries: [meeting, { ...meeting, userName: 'เจ', dayPart: 'am', title: 'อบรม ISO' }, ot] }]).contents)
+    expect(json).toContain('"text":"• เจ (เช้า)"')
+    expect(json).toContain('"text":"อบรม ISO"')
+    expect(json).toContain('"text":"• เมย์ (บ่าย)"')
+    expect(json).not.toContain('“')
+    // untitled types stay on one line
+    expect(json).toContain('"text":"บอม"')
   })
 
   it('shows only duty on days off and skips empty days', () => {

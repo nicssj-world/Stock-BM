@@ -190,10 +190,14 @@ export interface DigestEntry {
   title?: string | null
 }
 
+/** "เมย์ (บ่าย)" */
+function digestName(entry: DigestEntry) {
+  return entry.dayPart === 'full' ? entry.userName : `${entry.userName} (${DAY_PART_LABEL[entry.dayPart]})`
+}
+
 /** "เมย์ (บ่าย) “ประชุม QC”" */
 export function digestPerson(entry: DigestEntry) {
-  const part = entry.dayPart === 'full' ? '' : ` (${DAY_PART_LABEL[entry.dayPart]})`
-  return `${entry.userName}${part}${entry.title ? ` “${entry.title}”` : ''}`
+  return `${digestName(entry)}${entry.title ? ` “${entry.title}”` : ''}`
 }
 
 export interface DigestDay {
@@ -233,7 +237,7 @@ export interface DigestSection {
   /** e.g. "เสาร์ 21 พ.ย." */
   label: string
   holidayName: string | null
-  rows: { typeName: string; emoji: string; color: string; people: string }[]
+  rows: { typeName: string; emoji: string; color: string; people: string; persons: { name: string; title: string | null }[] }[]
 }
 
 /** Groups each announced day's entries by type (duty first), dropping days with nothing to say. */
@@ -257,6 +261,7 @@ export function digestSections(today: string, days: DigestDay[]): DigestSection[
         emoji: emojiFor(items[0].iconKey),
         color: COLOR_HEX[items[0].colorKey] ?? COLOR_HEX.slate,
         people: items.map(digestPerson).join(', '),
+        persons: items.map((item) => ({ name: digestName(item), title: item.title || null })),
       })),
     })
   }
@@ -292,17 +297,48 @@ export function buildDigestFlex(today: string, days: DigestDay[], calendarUrl?: 
       spacing: 'sm',
       contents: [
         ...heading,
-        ...section.rows.map((row) => ({
-          type: 'box',
-          layout: 'baseline',
-          spacing: 'sm',
-          margin: 'sm',
-          contents: [
-            { type: 'text', text: row.emoji, size: 'sm', flex: 0 },
-            { type: 'text', text: row.typeName, size: 'sm', weight: 'bold', color: row.color, flex: 0 },
-            { type: 'text', text: row.people, size: 'sm', color: INK, wrap: true, flex: 1 },
-          ],
-        })),
+        ...section.rows.map((row) => {
+          // Short name lists fit on the type's line; titled entries get one full-width line per person.
+          if (!row.persons.some((person) => person.title)) {
+            return {
+              type: 'box',
+              layout: 'baseline',
+              spacing: 'sm',
+              margin: 'sm',
+              contents: [
+                { type: 'text', text: row.emoji, size: 'sm', flex: 0 },
+                { type: 'text', text: row.typeName, size: 'sm', weight: 'bold', color: row.color, flex: 0 },
+                { type: 'text', text: row.people, size: 'sm', color: INK, wrap: true, flex: 1 },
+              ],
+            }
+          }
+          return {
+            type: 'box',
+            layout: 'vertical',
+            margin: 'sm',
+            spacing: 'sm',
+            contents: [
+              {
+                type: 'box',
+                layout: 'baseline',
+                spacing: 'sm',
+                contents: [
+                  { type: 'text', text: row.emoji, size: 'sm', flex: 0 },
+                  { type: 'text', text: row.typeName, size: 'sm', weight: 'bold', color: row.color, wrap: true, flex: 1 },
+                ],
+              },
+              ...row.persons.map((person) => ({
+                type: 'box',
+                layout: 'vertical',
+                paddingStart: '24px',
+                contents: [
+                  { type: 'text', text: `• ${person.name}`, size: 'sm', color: INK, wrap: true },
+                  ...(person.title ? [{ type: 'text', text: person.title, size: 'xs', color: MUTED, wrap: true, margin: 'xs' }] : []),
+                ],
+              })),
+            ],
+          }
+        }),
       ],
     })
   })
