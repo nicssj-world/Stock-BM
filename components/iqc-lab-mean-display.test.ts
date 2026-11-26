@@ -13,12 +13,12 @@ describe('IQC LAB Mean display', () => {
     expect(overview).toContain("chart.activeLimit === 'lab' ? 'LAB Mean/SD' : 'Assigned Mean/SD'")
   })
 
-  it('allows the three mean/SD cards to switch the chart reference', () => {
+  it('allows the three mean/SD buttons to switch the chart reference', () => {
     expect(chart).toContain("type MeanView = 'active' | 'assigned' | 'lab'")
     expect(chart).toContain("const [meanView, setMeanView] = useState<MeanView>('active')")
     expect(chart).toContain('aria-pressed={selected}')
     expect(chart).toContain('onClick={() => setMeanView(view)}')
-    expect(chart).toContain('กดการ์ดเพื่อเปลี่ยนเส้นและสเกลของกราฟสำหรับเปรียบเทียบ')
+    expect(chart).toContain('กดปุ่มเพื่อเปลี่ยนเส้นและสเกลของกราฟสำหรับเปรียบเทียบ')
   })
 
   it('keeps the three values explicit, including the LAB lock state', () => {
