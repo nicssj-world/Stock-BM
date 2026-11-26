@@ -8,8 +8,21 @@ export type CalendarKind = (typeof CALENDAR_KINDS)[number]
 export const DAY_PARTS = ['full', 'am', 'pm'] as const
 export type DayPart = (typeof DAY_PARTS)[number]
 
+/** One calendar (the default team calendar or one an Admin added). */
+export interface CalendarBook {
+  id: string
+  name: string
+  colorKey: CalendarColor
+  /** Admin-only: LINE group the heads-up goes to; null = the default group. Blank for non-Admins. */
+  lineGroupId: string | null
+  isDefault: boolean
+  isActive: boolean
+  sortOrder: number
+}
+
 export interface CalendarType {
   id: string
+  calendarId: string
   name: string
   iconKey: string
   colorKey: CalendarColor
@@ -24,6 +37,7 @@ export interface CalendarType {
 
 export interface CalendarEvent {
   id: string
+  calendarId: string
   typeId: string
   userId: string
   userName: string
@@ -53,6 +67,9 @@ export interface CalendarUser {
 export interface CalendarWorkspace {
   from: string
   to: string
+  /** The calendar shown; `calendars` lists every one the switcher offers (inactive ones only for Admins). */
+  calendarId: string
+  calendars: CalendarBook[]
   today: string
   types: CalendarType[]
   events: CalendarEvent[]

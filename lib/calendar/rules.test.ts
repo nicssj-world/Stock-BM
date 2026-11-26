@@ -205,6 +205,15 @@ describe('heads-up digest (sent the workday before)', () => {
     expect(JSON.stringify(buildDigestFlex('2026-12-09', days).contents)).not.toContain('footer')
   })
 
+  it('names a calendar other than the main one in the text and the Flex header', () => {
+    const days: DigestDay[] = [{ date: '2026-11-19', isOffDay: false, holidayName: null, entries: [blood] }]
+    expect(buildDigestMessage('2026-11-18', days, 'ตารางเครื่องมือ').startsWith('📅 แจ้งล่วงหน้า · ตารางเครื่องมือ\n\n')).toBe(true)
+    const flex = buildDigestFlex('2026-11-18', days, undefined, 'ตารางเครื่องมือ')
+    expect(flex.altText.startsWith('📅 แจ้งล่วงหน้า · ตารางเครื่องมือ')).toBe(true)
+    expect(JSON.stringify(flex.contents)).toContain('"text":"ตารางเครื่องมือ · Genomics-CBH"')
+    expect(JSON.stringify(buildDigestFlex('2026-11-18', days).contents)).toContain('"text":"ปฏิทินทีม · Genomics-CBH"')
+  })
+
   it('never sends empty, and never on a day off', () => {
     const empty: DigestDay = { date: '2026-11-19', isOffDay: false, holidayName: null, entries: [] }
     const leaveOnSaturday: DigestDay = { date: '2026-11-21', isOffDay: true, holidayName: null, entries: [sick] }

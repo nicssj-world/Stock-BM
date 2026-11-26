@@ -9,6 +9,7 @@ import {
   CALENDAR_COLORS,
   CALENDAR_KINDS,
   DAY_PARTS,
+  type CalendarBook,
   type CalendarColor,
   type CalendarEvent,
   type CalendarHistoryEntry,
@@ -431,7 +432,19 @@ type TypeDraft = {
   isActive: boolean
 }
 
-export function TypeDialog({ open, onClose, types, onChanged }: { open: boolean; onClose: () => void; types: CalendarType[]; onChanged: (types: CalendarType[]) => void }) {
+export function TypeDialog({
+  open,
+  onClose,
+  calendar,
+  types,
+  onChanged,
+}: {
+  open: boolean
+  onClose: () => void
+  calendar: CalendarBook
+  types: CalendarType[]
+  onChanged: (types: CalendarType[]) => void
+}) {
   const labelId = useId()
   const [editing, setEditing] = useState(false)
   function close() {
@@ -439,14 +452,24 @@ export function TypeDialog({ open, onClose, types, onChanged }: { open: boolean;
     onClose()
   }
   return (
-    <Modal open={open} onClose={close} title="ประเภทรายการ" labelId={labelId} dismissOnBackdrop={!editing}>
-      <TypePanel types={types} onChanged={onChanged} onEditingChange={setEditing} />
+    <Modal open={open} onClose={close} title={`ประเภทรายการ · ${calendar.name}`} labelId={labelId} dismissOnBackdrop={!editing}>
+      <TypePanel calendarId={calendar.id} types={types} onChanged={onChanged} onEditingChange={setEditing} />
     </Modal>
   )
 }
 
 /** Mounted only while the dialog is open, so its draft resets every time. */
-function TypePanel({ types, onChanged, onEditingChange }: { types: CalendarType[]; onChanged: (types: CalendarType[]) => void; onEditingChange: (editing: boolean) => void }) {
+function TypePanel({
+  calendarId,
+  types,
+  onChanged,
+  onEditingChange,
+}: {
+  calendarId: string
+  types: CalendarType[]
+  onChanged: (types: CalendarType[]) => void
+  onEditingChange: (editing: boolean) => void
+}) {
   const [draft, setDraft] = useState<TypeDraft | null>(null)
   const isEditing = draft !== null
   useEffect(() => onEditingChange(isEditing), [isEditing, onEditingChange])
@@ -462,7 +485,7 @@ function TypePanel({ types, onChanged, onEditingChange }: { types: CalendarType[
       const { id, ...body } = draft
       const result = await api<{ types: CalendarType[] }>(id ? `/api/calendar/types/${id}` : '/api/calendar/types', {
         method: id ? 'PATCH' : 'POST',
-        body: JSON.stringify(body),
+        body: JSON.stringify(id ? body : { ...body, calendarId }),
       })
       onChanged(result.types)
       setDraft(null)
@@ -560,6 +583,137 @@ function TypePanel({ types, onChanged, onEditingChange }: { types: CalendarType[
         </div>
       )}
     </>
+  )
+}
+
+/* ---------- calendars (Admin) ---------- */
+
+type CalendarDraft = { id: string | null; name: string; colorKey: CalendarColor; lineGroupId: string; isActive: boolean; isDefault: boolean }
+
+export function CalendarBookDialog({
+  open,
+  onClose,
+  calendars,
+  onChanged,
+}: {
+  open: boolean
+  onClose: () => void
+  calendars: CalendarBook[]
+  /** `createdId` is set when a new calendar was just added, so the view can switch to it. */
+  onChanged: (calendars: CalendarBook[], createdId?: string) => void
+}) {
+  const labelId = useId()
+  const [editing, setEditing] = useState(false)
+  function close() {
+    setEditing(false)
+    onClose()
+  }
+  return (
+    <Modal open={open} onClose={close} title="ปฏิทิน" labelId={labelId} dismissOnBackdrop={!editing}>
+      <CalendarBookPanel calendars={calendars} onChanged={onChanged} onEditingChange={setEditing} />
+    </Modal>
+  )
+}
+
+function CalendarBookPanel({
+  calendars,
+  onChanged,
+  onEditingChange,
+}: {
+  calendars: CalendarBook[]
+  onChanged: (calendars: CalendarBook[], createdId?: string) => void
+  onEditingChange: (editing: boolean) => void
+}) {
+  const [draft, setDraft] = useState<CalendarDraft | null>(null)
+  const isEditing = draft !== null
+  useEffect(() => onEditingChange(isEditing), [isEditing, onEditingChange])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function save() {
+    if (!draft) return
+    if (!draft.name.trim()) return setError('ใส่ชื่อปฏิทินก่อนบันทึก')
+    setBusy(true)
+    setError('')
+    try {
+      const { id, isDefault: _isDefault, ...body } = draft
+      void _isDefault
+      const result = await api<{ id: string; calendars: CalendarBook[] }>(id ? `/api/calendar/calendars/${id}` : '/api/calendar/calendars', {
+        method: id ? 'PATCH' : 'POST',
+        body: JSON.stringify({ ...body, lineGroupId: body.lineGroupId.trim() || null }),
+      })
+      onChanged(result.calendars, id ? undefined : result.id)
+      setDraft(null)
+    } catch (saveError) {
+      setError(messageOf(saveError, 'บันทึกปฏิทินไม่สำเร็จ'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!draft) {
+    return (
+      <div className="grid gap-3">
+        <ul className="grid gap-1.5">
+          {calendars.map((calendar) => (
+            <li key={calendar.id} className={`flex items-center gap-2.5 rounded-[9px] border border-[#d6e2e3] px-2.5 py-2 ${calendar.isActive ? '' : 'opacity-55'}`} style={colorVar(calendar.colorKey)}>
+              <i className="inline-block size-3 flex-none rounded-full bg-[var(--c)]" aria-hidden />
+              <span className="grid min-w-0 flex-1">
+                <span className="text-sm font-semibold">{calendar.name}</span>
+                <span className="text-xs text-[#6a838c]">
+                  {calendar.isDefault ? 'ปฏิทินหลัก · แสดงในหน้าแรก' : 'ปฏิทินเพิ่ม'}
+                  {calendar.lineGroupId ? ' · กลุ่ม LINE ของตัวเอง' : ' · กลุ่ม LINE หลัก'}
+                  {calendar.isActive ? '' : ' · ปิดใช้งาน'}
+                </span>
+              </span>
+              <Button
+                variant="secondary"
+                onClick={() => setDraft({ id: calendar.id, name: calendar.name, colorKey: calendar.colorKey, lineGroupId: calendar.lineGroupId ?? '', isActive: calendar.isActive, isDefault: calendar.isDefault })}
+              >
+                แก้ไข
+              </Button>
+            </li>
+          ))}
+        </ul>
+        <p className="text-xs text-[#6a838c]">แต่ละปฏิทินมีประเภทรายการ, แจ้ง LINE และลิงก์ปฏิทินมือถือของตัวเอง วันหยุดราชการใช้ร่วมกัน · ปฏิทินลบไม่ได้ ปิดใช้งานแทน</p>
+        <div className="flex justify-end">
+          <Button onClick={() => setDraft({ id: null, name: '', colorKey: 'indigo', lineGroupId: '', isActive: true, isDefault: false })}>เพิ่มปฏิทิน</Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid gap-4">
+      <h3 className="text-sm font-bold text-[#173d50]">{draft.id ? 'แก้ไขปฏิทิน' : 'เพิ่มปฏิทิน'}</h3>
+      <label className="block">
+        <span className={labelClass}>ชื่อ</span>
+        <Input value={draft.name} maxLength={40} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="เช่น ตารางเครื่องมือ" />
+      </label>
+      <div>
+        <span className={labelClass} id="cal-book-color-label">สี</span>
+        <div role="group" aria-labelledby="cal-book-color-label" className="flex flex-wrap gap-2">
+          {CALENDAR_COLORS.map((color) => (
+            <button key={color} type="button" className="cal-swatch" style={colorVar(color)} aria-pressed={draft.colorKey === color} aria-label={COLOR_LABELS[color]} title={COLOR_LABELS[color]} onClick={() => setDraft({ ...draft, colorKey: color })} />
+          ))}
+        </div>
+      </div>
+      <label className="block">
+        <span className={labelClass}>LINE group ID (ไม่บังคับ)</span>
+        <Input value={draft.lineGroupId} maxLength={64} className="mono" onChange={(event) => setDraft({ ...draft, lineGroupId: event.target.value })} placeholder="เว้นว่าง = ส่งเข้ากลุ่ม LINE หลัก" />
+        <span className={hintClass}>แจ้งล่วงหน้าของปฏิทินนี้ส่งเข้ากลุ่มนี้ บอทต้องอยู่ในกลุ่มนั้นก่อน · ส่งเฉพาะประเภทที่เปิด “แจ้ง LINE”</span>
+      </label>
+      <label className={`flex items-center gap-2 text-sm ${draft.isDefault ? 'opacity-60' : ''}`}>
+        <input type="checkbox" className="size-4 accent-[#0b7f76]" checked={draft.isActive} disabled={draft.isDefault} onChange={(event) => setDraft({ ...draft, isActive: event.target.checked })} />
+        เปิดใช้งาน{draft.isDefault ? ' (ปฏิทินหลักปิดไม่ได้)' : ''}
+      </label>
+      {!draft.id ? <p className="text-xs text-[#6a838c]">บันทึกแล้วจะสลับไปปฏิทินใหม่ จากนั้นกด “ประเภท” เพื่อเพิ่มประเภทรายการ</p> : null}
+      {error ? <p role="alert" className="text-[13px] font-semibold text-[#af3541]">{error}</p> : null}
+      <div className="flex justify-end gap-2">
+        <Button variant="secondary" onClick={() => { setDraft(null); setError('') }}>ยกเลิก</Button>
+        <Button onClick={save} disabled={busy}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : null}บันทึก</Button>
+      </div>
+    </div>
   )
 }
 
@@ -709,7 +863,7 @@ function HolidayPanel({ syncedAt, syncError, onChanged }: { syncedAt: string | n
 
 /* ---------- phone calendar subscription ---------- */
 
-export function SubscribeDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function SubscribeDialog({ open, onClose, calendar }: { open: boolean; onClose: () => void; calendar: CalendarBook }) {
   const labelId = useId()
   const [token, setToken] = useState<string | null>(null)
   const [scope, setScope] = useState<'mine' | 'team'>('mine')
@@ -725,7 +879,9 @@ export function SubscribeDialog({ open, onClose }: { open: boolean; onClose: () 
       .catch((loadError) => setError(messageOf(loadError, 'สร้างลิงก์ไม่สำเร็จ')))
   }, [open, token])
 
-  const url = token ? `${window.location.origin}/api/calendar/feed/${token}.ics${scope === 'team' ? '?scope=team' : ''}` : ''
+  // The main calendar keeps its original link so phones that already subscribed keep working.
+  const query = [scope === 'team' ? 'scope=team' : '', calendar.isDefault ? '' : `calendar=${calendar.id}`].filter(Boolean).join('&')
+  const url = token ? `${window.location.origin}/api/calendar/feed/${token}.ics${query ? `?${query}` : ''}` : ''
 
   async function copy() {
     try {
@@ -752,7 +908,7 @@ export function SubscribeDialog({ open, onClose }: { open: boolean; onClose: () 
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="เพิ่มลงปฏิทินมือถือ" labelId={labelId}>
+    <Modal open={open} onClose={onClose} title={`เพิ่มลงปฏิทินมือถือ · ${calendar.name}`} labelId={labelId}>
       <div className="grid gap-4">
         <div>
           <span className={labelClass} id="cal-scope-label">แสดงในปฏิทินมือถือ</span>
@@ -767,7 +923,7 @@ export function SubscribeDialog({ open, onClose }: { open: boolean; onClose: () 
             <Input id="cal-feed-url" readOnly value={url || 'กำลังสร้างลิงก์…'} className="mono !text-[13px] text-[#6a838c]" onFocus={(event) => event.target.select()} />
             <Button type="button" onClick={copy} disabled={!url}><Copy className="size-4" />{copied ? 'คัดลอกแล้ว' : 'คัดลอก'}</Button>
           </span>
-          <span className={hintClass}>ลิงก์นี้เป็นของคุณคนเดียว อย่าส่งต่อ หมายเหตุจะไม่แสดงในปฏิทินมือถือ</span>
+          <span className={hintClass}>ลิงก์นี้เป็นของคุณคนเดียว อย่าส่งต่อ หมายเหตุจะไม่แสดงในปฏิทินมือถือ · ลิงก์นี้แสดงเฉพาะปฏิทิน “{calendar.name}”</span>
         </label>
         <div>
           <span className={labelClass}>Google Calendar</span>

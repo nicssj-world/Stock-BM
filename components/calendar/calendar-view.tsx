@@ -2,7 +2,7 @@
 
 import './calendar.css'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CalendarDays, ChevronLeft, ChevronRight, LoaderCircle, Plus, Settings2, Smartphone, Tags } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, Layers, LoaderCircle, Plus, Settings2, Smartphone, Tags } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import {
   addDays,
@@ -23,10 +23,10 @@ import {
   thaiRange,
   weekRange,
 } from '@/lib/calendar/rules'
-import type { CalendarEvent, CalendarKind, CalendarType, CalendarWorkspace } from '@/lib/calendar/types'
+import type { CalendarBook, CalendarEvent, CalendarKind, CalendarType, CalendarWorkspace } from '@/lib/calendar/types'
 import { api, Button, Notice, PageHeader } from '@/components/ui'
 import { CalendarIcon, COLOR_HEX } from '@/components/calendar/calendar-icon'
-import { EntryDialog, HolidayDialog, SubscribeDialog, TypeDialog, type EntryDraft } from '@/components/calendar/calendar-dialogs'
+import { CalendarBookDialog, EntryDialog, HolidayDialog, SubscribeDialog, TypeDialog, type EntryDraft } from '@/components/calendar/calendar-dialogs'
 
 export type CalendarViewMode = 'month' | 'week' | 'day'
 
@@ -35,6 +35,10 @@ const MOBILE_QUERY = '(max-width: 767px)'
 
 function rangeFor(view: CalendarViewMode, anchor: string) {
   return view === 'month' ? monthGridRange(anchor.slice(0, 7)) : weekRange(anchor)
+}
+
+function calendarQuery(calendar: CalendarBook | undefined) {
+  return calendar && !calendar.isDefault ? `cal=${calendar.id}&` : ''
 }
 
 function colorStyle(type: CalendarType | undefined) {
@@ -73,10 +77,11 @@ export function CalendarView({
   const [hidden, setHidden] = useState<Set<string>>(() => new Set())
   const [mineOnly, setMineOnly] = useState(false)
   const [entry, setEntry] = useState<EntryDraft | null>(null)
-  const [dialog, setDialog] = useState<'types' | 'holidays' | 'subscribe' | null>(null)
+  const [dialog, setDialog] = useState<'types' | 'holidays' | 'subscribe' | 'calendars' | null>(null)
   const [toast, setToast] = useState<{ text: string; undo?: () => void } | null>(null)
   const isAdmin = actor.role === 'Admin'
   const today = data.today
+  const calendar = data.calendars.find((item) => item.id === data.calendarId) ?? data.calendars[0]
 
   /* phones get week/day only */
   useEffect(() => {
@@ -90,23 +95,35 @@ export function CalendarView({
     return () => query.removeEventListener('change', sync)
   }, [])
 
-  const load = useCallback(async (from: string, to: string) => {
-    setLoading(true)
-    setError('')
-    try {
-      const result = await api<{ workspace: CalendarWorkspace }>(`/api/calendar?from=${from}&to=${to}`)
-      setData(result.workspace)
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'โหลดปฏิทินไม่สำเร็จ')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const currentCalendarId = data.calendarId
+  /** Loads a range of one calendar (the one on screen unless another is given). */
+  const load = useCallback(
+    async (from: string, to: string, calendarId: string = currentCalendarId) => {
+      setLoading(true)
+      setError('')
+      try {
+        const result = await api<{ workspace: CalendarWorkspace }>(`/api/calendar?from=${from}&to=${to}&calendar=${calendarId}`)
+        setData(result.workspace)
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : 'โหลดปฏิทินไม่สำเร็จ')
+      } finally {
+        setLoading(false)
+      }
+    },
+    [currentCalendarId],
+  )
 
   /* keep the URL shareable */
   useEffect(() => {
-    window.history.replaceState(null, '', `/calendar?view=${view}&date=${anchor}`)
-  }, [view, anchor])
+    window.history.replaceState(null, '', `/calendar?${calendarQuery(calendar)}view=${view}&date=${anchor}`)
+  }, [view, anchor, calendar])
+
+  function switchCalendar(calendarId: string) {
+    if (calendarId === data.calendarId) return
+    setHidden(new Set())
+    const { from, to } = rangeFor(view, anchor)
+    void load(from, to, calendarId)
+  }
 
   /** Move the calendar; fetch only when the new range leaves the loaded one. */
   function go(nextView: CalendarViewMode, nextAnchor: string) {
@@ -194,21 +211,50 @@ export function CalendarView({
     { key: 'week', label: 'สัปดาห์' },
     { key: 'day', label: 'วัน' },
   ]
-  const activeTypes = data.types.filter((type) => type.isActive)
+  // A closed calendar (Admins can still open one) is read-only.
+  const activeTypes = calendar?.isActive === false ? [] : data.types.filter((type) => type.isActive)
+  const switchable = data.calendars.length > 1 || isAdmin
   const allShown = activeTypes.every((type) => !hidden.has(type.id))
 
   return (
     <div className="cal mx-auto max-w-[1500px] space-y-4">
       <PageHeader
         eyebrow="Team Calendar"
-        title="ปฏิทิน / Calendar"
-        description="ลา · เวรเจาะเลือด · วันหยุดของทีม"
+        title={!calendar || calendar.isDefault ? 'ปฏิทิน / Calendar' : calendar.name}
+        description={!calendar || calendar.isDefault ? 'ลา · เวรเจาะเลือด · วันหยุดของทีม' : 'วันหยุดราชการใช้ร่วมกับปฏิทินทีม'}
         actions={
           <Button className="hidden md:inline-flex" onClick={() => openNew(defaultNewDate)} disabled={!activeTypes.length}>
             <Plus className="size-4" /> ลงรายการ / Add
           </Button>
         }
       />
+
+      {switchable ? (
+        <div className="-mx-1 flex items-center gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
+          <div role="tablist" aria-label="เลือกปฏิทิน" className="inline-flex flex-none gap-1 rounded-[10px] border border-[#d6e2e3] bg-[#f4f8f7] p-[3px]">
+            {data.calendars.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={item.id === data.calendarId}
+                onClick={() => switchCalendar(item.id)}
+                style={{ '--c': COLOR_HEX[item.colorKey] } as React.CSSProperties}
+                className={`inline-flex min-h-[34px] flex-none items-center gap-2 rounded-[7px] px-3.5 text-sm font-semibold whitespace-nowrap transition focus-visible:ring-2 focus-visible:ring-[#0b7f76] focus-visible:outline-none ${item.id === data.calendarId ? 'bg-white text-[#173d50] shadow-sm' : 'text-[#6a838c] hover:text-[#173d50]'} ${item.isActive ? '' : 'opacity-60'}`}
+              >
+                <i className="inline-block size-2.5 rounded-full bg-[var(--c)]" aria-hidden />
+                {item.name}
+                {item.isActive ? null : <span className="text-[11px] font-normal">(ปิด)</span>}
+              </button>
+            ))}
+          </div>
+          {isAdmin ? (
+            <Button variant="secondary" className="!min-h-10 flex-none max-md:!px-0 max-md:size-10" aria-label="จัดการปฏิทิน" title="จัดการปฏิทิน" onClick={() => setDialog('calendars')}>
+              <Layers className="size-4" /><span className="max-md:hidden">จัดการปฏิทิน</span>
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
 
       <div role="toolbar" aria-label="ควบคุมปฏิทิน" className="flex flex-wrap items-center gap-2.5">
         <h2 aria-live="polite" className="order-first basis-full text-base font-bold text-[#173d50] md:order-none md:basis-auto md:text-lg">
@@ -294,7 +340,11 @@ export function CalendarView({
           {error} <button type="button" className="font-semibold underline" onClick={() => void reload()}>ลองอีกครั้ง</button>
         </Notice>
       ) : null}
-      {!activeTypes.length ? <Notice tone="warning">ยังไม่มีประเภทที่เปิดใช้งาน {isAdmin ? 'กด “ประเภท” เพื่อเพิ่ม' : 'ติดต่อ Admin'}</Notice> : null}
+      {calendar?.isActive === false ? (
+        <Notice tone="warning">ปฏิทินนี้ถูกปิดใช้งาน ดูได้อย่างเดียว เปิดใช้งานอีกครั้งได้ที่ “จัดการปฏิทิน”</Notice>
+      ) : !activeTypes.length ? (
+        <Notice tone="warning">ยังไม่มีประเภทที่เปิดใช้งาน {isAdmin ? 'กด “ประเภท” เพื่อเพิ่ม' : 'ติดต่อ Admin'}</Notice>
+      ) : null}
 
       <section className={`paper overflow-hidden rounded-lg transition-opacity ${loading ? 'opacity-70' : ''}`} aria-busy={loading}>
         {view === 'month' ? (
@@ -359,7 +409,22 @@ export function CalendarView({
       />
       {isAdmin ? (
         <>
-          <TypeDialog open={dialog === 'types'} onClose={() => setDialog(null)} types={data.types} onChanged={(types) => setData((current) => ({ ...current, types }))} />
+          {calendar ? (
+            <TypeDialog open={dialog === 'types'} onClose={() => setDialog(null)} calendar={calendar} types={data.types} onChanged={(types) => setData((current) => ({ ...current, types }))} />
+          ) : null}
+          <CalendarBookDialog
+            open={dialog === 'calendars'}
+            onClose={() => setDialog(null)}
+            calendars={data.calendars}
+            onChanged={(calendars, createdId) => {
+              setData((current) => ({ ...current, calendars }))
+              if (createdId) {
+                setDialog(null)
+                switchCalendar(createdId)
+                setToast({ text: 'เพิ่มปฏิทินแล้ว กด “ประเภท” เพื่อเพิ่มประเภทรายการ' })
+              }
+            }}
+          />
           <HolidayDialog
             open={dialog === 'holidays'}
             onClose={() => setDialog(null)}
@@ -369,7 +434,7 @@ export function CalendarView({
           />
         </>
       ) : null}
-      <SubscribeDialog open={dialog === 'subscribe'} onClose={() => setDialog(null)} />
+      {calendar ? <SubscribeDialog key={calendar.id} open={dialog === 'subscribe'} onClose={() => setDialog(null)} calendar={calendar} /> : null}
     </div>
   )
 }

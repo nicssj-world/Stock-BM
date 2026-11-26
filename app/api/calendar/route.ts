@@ -8,10 +8,10 @@ const rangeSchema = z.object({ from: dateKeySchema, to: dateKeySchema })
 
 export async function GET(request: Request) {
   return respond(async () => {
-    await requireStockOperator()
+    const actor = await requireStockOperator()
     const params = new URL(request.url).searchParams
     const { from, to } = rangeSchema.parse({ from: params.get('from'), to: params.get('to') })
-    return { workspace: await getCalendarWorkspace(from, to) }
+    return { workspace: await getCalendarWorkspace(from, to, actor, params.get('calendar')) }
   })
 }
 

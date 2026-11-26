@@ -5,7 +5,7 @@ import { isDateKey, monthGridRange, weekRange } from '@/lib/calendar/rules'
 import { requireFullPageActor } from '@/lib/server/auth'
 import { getCalendarWorkspace } from '@/lib/server/calendar'
 
-export default async function CalendarPage({ searchParams }: { searchParams: Promise<{ view?: string; date?: string }> }) {
+export default async function CalendarPage({ searchParams }: { searchParams: Promise<{ view?: string; date?: string; cal?: string }> }) {
   const actor = await requireFullPageActor()
   const params = await searchParams
   const view: CalendarViewMode = params.view === 'week' || params.view === 'day' ? params.view : 'month'
@@ -14,7 +14,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
 
   let workspace
   try {
-    workspace = await getCalendarWorkspace(range.from, range.to)
+    workspace = await getCalendarWorkspace(range.from, range.to, actor, params.cal)
   } catch (error) {
     // Most likely the calendar migration has not been applied yet.
     return (
@@ -22,7 +22,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
         <PageHeader eyebrow="Team Calendar" title="ปฏิทิน / Calendar" description="ลา · เวรเจาะเลือด · วันหยุดของทีม" />
         <Notice tone="warning">
           ปฏิทินยังใช้งานไม่ได้ ระบบโหลดข้อมูลไม่สำเร็จ ({error instanceof Error ? error.message : 'unknown error'})
-          {actor.role === 'Admin' ? ' ตรวจว่าได้ apply migration 20261119000100_bm_team_calendar.sql แล้ว' : ' แจ้ง Admin'}
+          {actor.role === 'Admin' ? ' ตรวจว่าได้ apply migration ของปฏิทิน (ล่าสุด 202611260001_calendar_multi.sql) แล้ว' : ' แจ้ง Admin'}
         </Notice>
       </div>
     )

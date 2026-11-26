@@ -3,9 +3,10 @@ import { buildFeedForToken } from '@/lib/server/calendar'
 // Public by design: phone calendar apps cannot log in, so the secret token in the URL is the credential.
 export async function GET(request: Request, { params }: { params: Promise<{ token: string }> }) {
   const token = (await params).token.replace(/\.ics$/i, '')
-  const scope = new URL(request.url).searchParams.get('scope') === 'team' ? 'team' : 'mine'
+  const query = new URL(request.url).searchParams
+  const scope = query.get('scope') === 'team' ? 'team' : 'mine'
   try {
-    const body = await buildFeedForToken(token, scope)
+    const body = await buildFeedForToken(token, scope, query.get('calendar'))
     if (!body) return new Response('Not found', { status: 404 })
     return new Response(body, {
       headers: {

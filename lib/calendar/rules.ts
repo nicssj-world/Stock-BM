@@ -269,19 +269,20 @@ export function digestSections(today: string, days: DigestDay[]): DigestSection[
 }
 
 /** Plain-text version: LINE's notification preview and the fallback when a Flex message is rejected. */
-export function buildDigestMessage(today: string, days: DigestDay[]) {
+/** `calendarName` labels a digest from a calendar other than the main team one. */
+export function buildDigestMessage(today: string, days: DigestDay[], calendarName?: string) {
   const blocks = digestSections(today, days).map((section) => {
     const head = `${section.isTomorrow ? 'พรุ่งนี้ · ' : ''}${section.label}${section.holidayName ? ` (${section.holidayName})` : ''}`
     return [head, ...section.rows.map((row) => `${row.emoji} ${row.typeName}: ${row.people}`)].join('\n')
   })
-  return ['📅 แจ้งล่วงหน้า', ...blocks].join('\n\n')
+  return [calendarName ? `📅 แจ้งล่วงหน้า · ${calendarName}` : '📅 แจ้งล่วงหน้า', ...blocks].join('\n\n')
 }
 
 const INK = '#173d50'
 const MUTED = '#6a838c'
 
 /** Flex bubble in the app's colors. `calendarUrl` adds an "open calendar" button when known. */
-export function buildDigestFlex(today: string, days: DigestDay[], calendarUrl?: string) {
+export function buildDigestFlex(today: string, days: DigestDay[], calendarUrl?: string, calendarName?: string) {
   const sections = digestSections(today, days)
   const body: Record<string, unknown>[] = []
   sections.forEach((section, index) => {
@@ -353,7 +354,7 @@ export function buildDigestFlex(today: string, days: DigestDay[], calendarUrl?: 
       paddingAll: '16px',
       contents: [
         { type: 'text', text: '📅 แจ้งล่วงหน้า', weight: 'bold', size: 'lg', color: '#ffffff' },
-        { type: 'text', text: 'ปฏิทินทีม · Genomics-CBH', size: 'xs', color: '#cce7eb', margin: 'xs' },
+        { type: 'text', text: `${calendarName ?? 'ปฏิทินทีม'} · Genomics-CBH`, size: 'xs', color: '#cce7eb', margin: 'xs' },
       ],
     },
     body: { type: 'box', layout: 'vertical', paddingAll: '16px', contents: body.length ? body : [{ type: 'text', text: 'ไม่มีรายการ', color: MUTED, size: 'sm' }] },
@@ -367,7 +368,7 @@ export function buildDigestFlex(today: string, days: DigestDay[], calendarUrl?: 
       contents: [{ type: 'button', style: 'primary', color: '#0b7f76', height: 'sm', action: { type: 'uri', label: 'เปิดปฏิทิน', uri: calendarUrl } }],
     }
   }
-  const altText = buildDigestMessage(today, days)
+  const altText = buildDigestMessage(today, days, calendarName)
   return { type: 'flex', altText: altText.length > 400 ? `${altText.slice(0, 397)}…` : altText, contents: bubble }
 }
 

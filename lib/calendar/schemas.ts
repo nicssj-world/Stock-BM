@@ -16,6 +16,8 @@ export const entrySchema = z.object({
 })
 
 export const typeSchema = z.object({
+  /** Only read when creating; a type never moves to another calendar. */
+  calendarId: z.string().uuid().optional(),
   name: z.string().trim().min(1, 'ใส่ชื่อประเภท').max(40, 'ชื่อยาวเกิน 40 ตัวอักษร'),
   iconKey: z.enum(CALENDAR_ICON_KEYS),
   colorKey: z.enum(CALENDAR_COLORS),
@@ -28,4 +30,16 @@ export const typeSchema = z.object({
 export const manualHolidaySchema = z.object({
   date: dateKeySchema,
   name: z.string().trim().min(1, 'ใส่ชื่อวันหยุด').max(80, 'ชื่อยาวเกิน 80 ตัวอักษร'),
+})
+
+export const calendarSchema = z.object({
+  name: z.string().trim().min(1, 'ใส่ชื่อปฏิทิน').max(40, 'ชื่อยาวเกิน 40 ตัวอักษร'),
+  colorKey: z.enum(CALENDAR_COLORS),
+  lineGroupId: z
+    .string()
+    .trim()
+    .nullish()
+    .transform((value) => value || null)
+    .refine((value) => value === null || /^[A-Za-z0-9]{10,64}$/.test(value), 'LINE group ID ไม่ถูกต้อง'),
+  isActive: z.boolean(),
 })
