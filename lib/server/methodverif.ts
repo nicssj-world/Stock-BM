@@ -8,6 +8,7 @@ import {
   defaultLinearity,
   defaultLod,
   defaultPrecision,
+  defaultQualitative,
   METHODVERIF_SECTIONS,
   type ComparisonData,
   type LinearityData,
@@ -17,6 +18,7 @@ import {
   type MethodVerifStudy,
   type MethodVerifWorkspace,
   type PrecisionData,
+  type QualitativeData,
 } from '@/lib/methodverif/types'
 import { writeAudit } from '@/lib/server/audit'
 import { HttpError } from '@/lib/server/errors'
@@ -87,6 +89,20 @@ function comparisonOf(value: unknown, scale: 'linear' | 'log10'): ComparisonData
   }
 }
 
+function qualitativeOf(value: unknown): QualitativeData {
+  const data = asObject(value)
+  const base = defaultQualitative()
+  const num = (key: keyof QualitativeData, fallback: number) => (typeof data[key] === 'number' ? (data[key] as number) : fallback)
+  return {
+    referenceLabel: typeof data.referenceLabel === 'string' ? data.referenceLabel : base.referenceLabel,
+    minSamples: num('minSamples', base.minSamples),
+    minAgreementPercent: num('minAgreementPercent', base.minAgreementPercent),
+    minReproducibilityPercent: num('minReproducibilityPercent', base.minReproducibilityPercent),
+    samples: Array.isArray(data.samples) ? (data.samples as QualitativeData['samples']) : [],
+    reproducibility: Array.isArray(data.reproducibility) ? (data.reproducibility as QualitativeData['reproducibility']) : [],
+  }
+}
+
 async function loadContext() {
   const admin = getAdminClient()
   const [{ data: instrumentRows, error: instrumentError }, { data: analyteRows, error: analyteError }] = await Promise.all([
@@ -127,6 +143,7 @@ async function mapStudies(rows: RecordRow[], context: Awaited<ReturnType<typeof 
       lod: lodOf(row.lod_data),
       linearity: linearityOf(row.linearity_data, scale),
       comparison: comparisonOf(row.comparison_data, scale),
+      qualitative: qualitativeOf(row.qualitative_data),
       status: asString(row.status) as MethodVerifStatus,
       conclusion: nullableString(row.conclusion),
       startedOn: nullableString(row.started_on),
@@ -178,6 +195,7 @@ export async function createMethodVerifStudy(input: CreateMethodVerifInput, acto
       lod_data: defaultLod(),
       linearity_data: defaultLinearity(input.scale),
       comparison_data: { ...defaultComparison(input.scale), referenceLabel: input.referenceLabel?.trim() ?? '' },
+      qualitative_data: { ...defaultQualitative(), referenceLabel: input.referenceLabel?.trim() ?? '' },
       started_on: input.startedOn || null,
       created_by: actor.id,
     })
@@ -209,8 +227,9 @@ export async function updateMethodVerifStudy(id: string, patch: UpdateMethodVeri
   if (patch.lod !== undefined) update.lod_data = patch.lod
   if (patch.linearity !== undefined) update.linearity_data = patch.linearity
   if (patch.comparison !== undefined) update.comparison_data = patch.comparison
+  if (patch.qualitative !== undefined) update.qualitative_data = patch.qualitative
   if (patch.conclusion !== undefined) update.conclusion = clean(patch.conclusion)
-  const dataChanged = patch.precision !== undefined || patch.lod !== undefined || patch.linearity !== undefined || patch.comparison !== undefined
+  const dataChanged = patch.precision !== undefined || patch.lod !== undefined || patch.linearity !== undefined || patch.comparison !== undefined || patch.qualitative !== undefined
   if (dataChanged && current.status === 'draft' && !patch.status) update.status = 'in-progress'
 
   if (patch.status) {
@@ -222,6 +241,7 @@ export async function updateMethodVerifStudy(id: string, patch: UpdateMethodVeri
         lod: patch.lod ?? current.lod,
         linearity: patch.linearity ?? current.linearity,
         comparison: patch.comparison ?? current.comparison,
+        qualitative: patch.qualitative ?? current.qualitative,
       })
       if (evaluation.overall !== 'passed') throw new HttpError(409, `ยังไม่ผ่านเกณฑ์: ${evaluation.reasons.slice(0, 4).join(' · ')}`)
     }

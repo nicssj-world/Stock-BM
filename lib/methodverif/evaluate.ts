@@ -1,6 +1,7 @@
 import { compareInstruments, type ComparePair, type CompareSummary } from '@/lib/instcomp/compare'
 import { linearityVerification, lodVerification, precisionLevel, type LinearityResult, type LodResult, type PrecisionLevelResult, type Verdict } from '@/lib/methodverif/stats'
-import type { MethodVerifSection, MethodVerifStudy } from '@/lib/methodverif/types'
+import { qualitativeAgreement, qualitativeReproducibility, type QualitativeAgreementResult, type ReproducibilityResult } from '@/lib/methodverif/qualitative'
+import { defaultQualitative, type MethodVerifSection, type MethodVerifStudy } from '@/lib/methodverif/types'
 
 export interface SectionOutcome {
   verdict: Verdict
@@ -14,6 +15,8 @@ export interface StudyEvaluation {
   linearity: LinearityResult
   comparison: { pairs: ComparePair[]; summary: CompareSummary }
   comparisonOutcome: SectionOutcome
+  qualitative: { agreement: QualitativeAgreementResult; reproducibility: ReproducibilityResult }
+  qualitativeOutcome: SectionOutcome
   sections: Record<MethodVerifSection, SectionOutcome>
   overall: Verdict
   reasons: string[]
@@ -24,6 +27,7 @@ export const SECTION_LABEL: Record<MethodVerifSection, string> = {
   lod: 'Limit of detection (EP17)',
   linearity: 'Linearity (EP06)',
   comparison: 'Method comparison (EP09)',
+  qualitative: 'Qualitative agreement (EP12)',
 }
 
 function combine(verdicts: Verdict[]): Verdict {
@@ -34,7 +38,7 @@ function combine(verdicts: Verdict[]): Verdict {
 }
 
 
-export function evaluateStudy(study: Pick<MethodVerifStudy, 'scale' | 'requiredSections' | 'precision' | 'lod' | 'linearity' | 'comparison'>): StudyEvaluation {
+export function evaluateStudy(study: Pick<MethodVerifStudy, 'scale' | 'requiredSections' | 'precision' | 'lod' | 'linearity' | 'comparison'> & { qualitative?: MethodVerifStudy['qualitative'] }): StudyEvaluation {
   const levels = study.precision.levels
   const precision = levels.map((level) => precisionLevel(level, study.scale, levels.length))
   const precisionOutcome: SectionOutcome = levels.length
@@ -47,11 +51,21 @@ export function evaluateStudy(study: Pick<MethodVerifStudy, 'scale' | 'requiredS
     { scale: study.scale, biasLimit: study.comparison.biasLimit, pairLimit: study.comparison.pairLimit, minPairs: study.comparison.minPairs },
   )
   const comparisonOutcome: SectionOutcome = { verdict: comparison.summary.verdict, reasons: comparison.summary.reasons }
+  const qualitativeData = study.qualitative ?? defaultQualitative()
+  const agreement = qualitativeAgreement(qualitativeData.samples, qualitativeData)
+  const reproducibility = qualitativeReproducibility(qualitativeData.reproducibility, qualitativeData.minReproducibilityPercent)
+  // Reproducibility is optional: with no replicates entered only the agreement is judged.
+  const hasReproducibility = reproducibility.n > 0
+  const qualitativeOutcome: SectionOutcome = {
+    verdict: combine(hasReproducibility ? [agreement.verdict, reproducibility.verdict] : [agreement.verdict]),
+    reasons: [...agreement.reasons.map((reason) => `Agreement: ${reason}`), ...(hasReproducibility ? reproducibility.reasons.map((reason) => `Reproducibility: ${reason}`) : [])],
+  }
   const sections: Record<MethodVerifSection, SectionOutcome> = {
     precision: precisionOutcome,
     lod: { verdict: lod.verdict, reasons: lod.reasons },
     linearity: { verdict: linearity.verdict, reasons: linearity.reasons },
     comparison: comparisonOutcome,
+    qualitative: qualitativeOutcome,
   }
   const required = study.requiredSections
   return {
@@ -61,6 +75,8 @@ export function evaluateStudy(study: Pick<MethodVerifStudy, 'scale' | 'requiredS
     linearity,
     comparison,
     comparisonOutcome,
+    qualitative: { agreement, reproducibility },
+    qualitativeOutcome,
     sections,
     overall: combine(required.map((section) => sections[section].verdict)),
     reasons: required.flatMap((section) => sections[section].verdict === 'passed' ? [] : sections[section].reasons.map((reason) => `${SECTION_LABEL[section]}: ${reason}`)),

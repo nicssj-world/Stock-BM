@@ -82,6 +82,14 @@ export default async function MethodVerificationReportPage({ params }: { params:
   const comparisonRef = study.comparison.referenceLabel.trim() || 'เครื่องเดิม'
   const chartStudy = { scale: study.scale, pairLimit: study.comparison.pairLimit, referenceLabel: comparisonRef, candidateLabel: study.instrumentLabel }
   const showComparisonAppendix = required.has('comparison') && study.comparison.samples.length > 0
+  const quantitative = study.requiredSections.some((section) => section !== 'qualitative')
+  const qAgreement = evaluation.qualitative.agreement
+  const qRepro = evaluation.qualitative.reproducibility
+  const qualitativeRef = study.qualitative.referenceLabel.trim() || 'วิธีอ้างอิง'
+  const hasContent = (row: MethodVerifStudy['qualitative']['samples'][number]) => Boolean(row.sampleLabel || row.referenceResult || row.candidateResult)
+  const qSampleCount = study.qualitative.samples.filter(hasContent).length
+  const showQualitativeAppendix = required.has('qualitative') && (qSampleCount > 0 || study.qualitative.reproducibility.length > 0)
+  const ratio = (part: number, whole: number, percent: number | null) => (whole ? `${part}/${whole} (${percent}%)` : '—')
 
   return (
     <main className="report-page">
@@ -93,7 +101,7 @@ export default async function MethodVerificationReportPage({ params }: { params:
       <section className="sheet">
         <div className="doc-code">สถานะ: {STATUS_LABEL[study.status]}</div>
         <h1>รายงาน Method verification</h1>
-        <p className="subhead">{REPORT_SUBHEAD} · ISO 15189:2022 ข้อ 7.3.2 · CLSI EP15-A3 / EP17-A2 / EP06 / EP09</p>
+        <p className="subhead">{REPORT_SUBHEAD} · ISO 15189:2022 ข้อ 7.3.2 · CLSI EP15-A3 / EP17-A2 / EP06 / EP09{required.has('qualitative') ? ' / EP12-A2' : ''}</p>
 
         <table className="info">
           <tbody>
@@ -101,7 +109,7 @@ export default async function MethodVerificationReportPage({ params }: { params:
             <tr><th>การทดสอบ</th><td>{study.testName}{study.unit ? ` (${study.unit})` : ''}</td></tr>
             <tr><th>เครื่อง</th><td>{study.instrumentLabel}</td></tr>
             <tr><th>วันที่เริ่มทวนสอบ</th><td>{formatThaiDate(study.startedOn)}</td></tr>
-            <tr><th>สเกลการคำนวณ</th><td>{study.scale === 'log10' ? 'log10 — claim ผู้ผลิตเป็น SD ในหน่วย log10' : 'linear — claim ผู้ผลิตเป็น CV%'}</td></tr>
+            <tr><th>สเกลการคำนวณ</th><td>{quantitative ? (study.scale === 'log10' ? 'log10 — claim ผู้ผลิตเป็น SD ในหน่วย log10' : 'linear — claim ผู้ผลิตเป็น CV%') : 'ผลเชิงคุณภาพ (categorical)'}</td></tr>
           </tbody>
         </table>
 
@@ -210,6 +218,33 @@ export default async function MethodVerificationReportPage({ params }: { params:
           </>
         ) : null}
 
+        {required.has('qualitative') ? (
+          <>
+            <h2>{quantitative ? '5. ' : ''}ผลเชิงคุณภาพ — Agreement / Reproducibility (CLSI EP12-A2)</h2>
+            <p className="muted">วิธีอ้างอิง: {qualitativeRef} → เครื่องใหม่: {study.instrumentLabel} · เกณฑ์: อย่างน้อย {study.qualitative.minSamples} ตัวอย่าง, agreement ≥ {study.qualitative.minAgreementPercent}%, reproducibility (ผลสุดท้าย) ≥ {study.qualitative.minReproducibilityPercent}% · Negative / Not detected นับเป็นผลลบสำหรับ NPA</p>
+            <table className="sheet-grid">
+              <tbody>
+                <tr><th>Overall agreement</th><td className="num">{ratio(qAgreement.agree, qAgreement.n, qAgreement.agreementPercent)}</td><th>95% CI (Wilson)</th><td className="num">{qAgreement.agreementCi ? `${qAgreement.agreementCi.lower}–${qAgreement.agreementCi.upper}%` : '—'}</td></tr>
+                <tr><th>PPA</th><td className="num">{ratio(qAgreement.positiveAgree, qAgreement.referencePositive, qAgreement.ppa)}</td><th>NPA</th><td className="num">{ratio(qAgreement.negativeAgree, qAgreement.referenceNegative, qAgreement.npa)}</td></tr>
+                <tr><th>Reproducibility ผลครั้งแรก</th><td className="num">{ratio(qRepro.firstMatch, qRepro.n, qRepro.firstPercent)}</td><th>Reproducibility ผลสุดท้าย</th><td className="num">{ratio(qRepro.finalMatch, qRepro.n, qRepro.finalPercent)}{qRepro.retestedN ? ` · รันซ้ำ ${qRepro.retestedN} หลอด` : ''}</td></tr>
+                <tr><th>ผล</th><td className={VERDICT_CLASS[evaluation.sections.qualitative.verdict]} colSpan={3}>{VERDICT_LABEL[evaluation.sections.qualitative.verdict]}</td></tr>
+              </tbody>
+            </table>
+            {qAgreement.categories.length ? (
+              <table className="sheet-grid" style={{ marginTop: 6 }}>
+                <thead><tr><th>{qualitativeRef}</th><th>{study.instrumentLabel}</th><th className="num">จำนวน</th></tr></thead>
+                <tbody>{qAgreement.categories.map((row) => <tr key={`${row.reference}|${row.candidate}`}><td>{row.reference}</td><td className={row.agree ? '' : 'bad'}>{row.candidate}</td><td className="num">{row.count}</td></tr>)}</tbody>
+              </table>
+            ) : null}
+            {qRepro.samples.length ? (
+              <table className="sheet-grid" style={{ marginTop: 6 }}>
+                <thead><tr><th>ตัวอย่าง</th><th>ผลที่ควรได้</th><th className="num">n</th><th className="num">ตรง (ครั้งแรก)</th><th className="num">ตรง (ผลสุดท้าย)</th></tr></thead>
+                <tbody>{qRepro.samples.map((sample, index) => <tr key={index}><td>{sample.sampleLabel || '—'}</td><td>{sample.expected}</td><td className="num">{sample.n}</td><td className="num">{sample.firstMatch}/{sample.n}</td><td className="num">{sample.finalMatch}/{sample.n}</td></tr>)}</tbody>
+              </table>
+            ) : null}
+          </>
+        ) : null}
+
         <h2>สรุปผล / ความเห็น</h2>
         <div className="conclusion">{study.conclusion ?? ''}</div>
 
@@ -221,7 +256,7 @@ export default async function MethodVerificationReportPage({ params }: { params:
         <p className="footer-note">{REPORT_FOOTER}</p>
       </section>
 
-      {study.precision.levels.length || attachments.length || showComparisonAppendix ? (
+      {study.precision.levels.length || attachments.length || showComparisonAppendix || showQualitativeAppendix ? (
         <section className="sheet sheet-break">
           <PrecisionRaw study={study} />
           {showComparisonAppendix ? (
@@ -244,6 +279,46 @@ export default async function MethodVerificationReportPage({ params }: { params:
                         <td className="num">{raw?.candidateRaw || '—'}</td>
                         <td className="num">{pair.difference == null ? '—' : `${pair.difference >= 0 ? '+' : ''}${fmt(pair.difference, study.scale === 'log10' ? 2 : 1)}`}</td>
                         <td className={flagged ? 'bad' : pair.category === 'quantitative' ? 'ok' : ''}>{label}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </>
+          ) : null}
+          {showQualitativeAppendix && qSampleCount ? (
+            <>
+              <h2>ภาคผนวก ค: ผลเชิงคุณภาพรายตัวอย่าง ({qSampleCount} ราย)</h2>
+              <table className="sheet-grid">
+                <thead><tr><th className="center">#</th><th>ตัวอย่าง</th><th>{qualitativeRef}</th><th>{study.instrumentLabel}</th><th>ผล</th></tr></thead>
+                <tbody>
+                  {study.qualitative.samples.map((row, index) => {
+                    if (!hasContent(row)) return null
+                    const category = qAgreement.pairs[index]?.category
+                    return (
+                      <tr key={index}>
+                        <td className="center">{index + 1}</td><td>{row.sampleLabel}</td><td>{row.referenceResult || '—'}</td><td>{row.candidateResult || '—'}</td>
+                        <td className={category === 'agree' ? 'ok' : category === 'disagree' || category === 'invalid' ? 'bad' : ''}>{category === 'agree' ? 'ตรงกัน' : category === 'disagree' ? 'ไม่ตรงกัน' : category === 'invalid' ? 'Invalid' : 'ไม่ครบ'}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </>
+          ) : null}
+          {showQualitativeAppendix && study.qualitative.reproducibility.length ? (
+            <>
+              <h2>ภาคผนวก ง: Reproducibility รายหลอด ({study.qualitative.reproducibility.length} หลอด)</h2>
+              <table className="sheet-grid">
+                <thead><tr><th className="center">#</th><th>ตัวอย่าง</th><th>Replicate</th><th>Run</th><th>ผลที่ควรได้</th><th>ผล</th><th>ผลรันซ้ำ</th><th>หมายเหตุ</th><th>ผล</th></tr></thead>
+                <tbody>
+                  {study.qualitative.reproducibility.map((row, index) => {
+                    const result = qRepro.rows[index]
+                    return (
+                      <tr key={index}>
+                        <td className="center">{index + 1}</td><td>{row.sampleLabel}</td><td>{row.replicateId}</td><td>{row.run}</td><td>{row.expected}</td>
+                        <td className={result?.firstMatch === false ? 'bad' : ''}>{row.result || '—'}</td><td>{row.retest || '—'}</td><td>{row.note}</td>
+                        <td className={result?.finalMatch ? 'ok' : result?.finalMatch === false ? 'bad' : ''}>{result?.finalMatch == null ? '—' : result.finalMatch ? (result.retested && result.firstMatch === false ? 'ตรง (หลังรันซ้ำ)' : 'ตรง') : 'ไม่ตรง'}</td>
                       </tr>
                     )
                   })}

@@ -20,6 +20,7 @@ import {
   type MethodVerifStudy,
   type MethodVerifWorkspace,
   type PrecisionData,
+  type QualitativeData,
 } from '@/lib/methodverif/types'
 import { formatDate } from '@/lib/bm/rules'
 import { api, Button, Card, Field, Input, Notice, PageHeader, Select, StatCard, StatusBadge, type StatusTone, Textarea } from '@/components/ui'
@@ -47,7 +48,8 @@ const VERDICT: Record<Verdict, { tone: StatusTone; label: string }> = {
   insufficient: { tone: 'not_evaluated', label: 'ข้อมูลยังไม่พอ' },
 }
 
-const SECTION_SHORT: Record<MethodVerifSection, string> = { precision: 'Precision', lod: 'LoD', linearity: 'Linearity', comparison: 'Comparison' }
+const SECTION_SHORT: Record<MethodVerifSection, string> = { precision: 'Precision', lod: 'LoD', linearity: 'Linearity', comparison: 'Comparison', qualitative: 'Qualitative' }
+const QUANTITATIVE_SECTIONS = METHODVERIF_SECTIONS.filter((section) => section !== 'qualitative')
 
 const CATEGORY_LABEL: Record<ComparePair['category'], string> = {
   quantitative: '',
@@ -96,7 +98,7 @@ export function MethodVerificationView({ actor, initialData }: { actor: BmActor;
       <PageHeader
         eyebrow="Quality · ISO 15189 7.3.2"
         title="Method verification"
-        description="ทวนสอบวิธีตรวจก่อนใช้งานจริง ต่อการทดสอบ × เครื่อง: Precision (EP15), LoD (EP17), Linearity (EP06) และ Method comparison (EP09)"
+        description="ทวนสอบวิธีตรวจก่อนใช้งานจริง ต่อการทดสอบ × เครื่อง: Precision (EP15), LoD (EP17), Linearity (EP06), Method comparison (EP09) และผลเชิงคุณภาพ (EP12)"
         actions={<Button onClick={() => setShowCreate((value) => !value)}><Plus className="size-4" /> สร้างรายการใหม่</Button>}
       />
 
@@ -140,7 +142,7 @@ function CreateForm({ data, onCreated, onError }: { data: MethodVerifWorkspace; 
   const [unit, setUnit] = useState('')
   const [startedOn, setStartedOn] = useState('')
   const [referenceLabel, setReferenceLabel] = useState('')
-  const [sections, setSections] = useState<MethodVerifSection[]>([...METHODVERIF_SECTIONS])
+  const [sections, setSections] = useState<MethodVerifSection[]>([...QUANTITATIVE_SECTIONS])
 
   function pickAnalyte(id: string) {
     setAnalyteId(id)
@@ -167,7 +169,7 @@ function CreateForm({ data, onCreated, onError }: { data: MethodVerifWorkspace; 
           unit: unit || null,
           requiredSections: sections,
           startedOn: startedOn || null,
-          referenceLabel: sections.includes('comparison') ? referenceLabel || null : null,
+          referenceLabel: sections.includes('comparison') || sections.includes('qualitative') ? referenceLabel || null : null,
         }),
       })
       onCreated(result.id)
@@ -196,15 +198,17 @@ function CreateForm({ data, onCreated, onError }: { data: MethodVerifWorkspace; 
               {data.instruments.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.name}{item.isActive ? '' : ' (ปิดใช้)'}</option>)}
             </Select>
           </Field>
-          <Field label="สเกลที่ใช้คำนวณ">
-            <Select value={scale} onChange={(event) => setScale(event.target.value as CompareScale)}>
-              <option value="log10">log10 (viral load) — claim เป็น SD log</option>
-              <option value="linear">linear — claim เป็น CV%</option>
-            </Select>
-          </Field>
+          {sections.some((section) => section !== 'qualitative') ? (
+            <Field label="สเกลที่ใช้คำนวณ">
+              <Select value={scale} onChange={(event) => setScale(event.target.value as CompareScale)}>
+                <option value="log10">log10 (viral load) — claim เป็น SD log</option>
+                <option value="linear">linear — claim เป็น CV%</option>
+              </Select>
+            </Field>
+          ) : null}
           <Field label="หน่วย"><Input value={unit} onChange={(event) => setUnit(event.target.value)} placeholder="cp/mL, IU/mL" /></Field>
           <Field label="วันที่เริ่มทวนสอบ"><Input type="date" value={startedOn} onChange={(event) => setStartedOn(event.target.value)} /></Field>
-          {sections.includes('comparison') ? <Field label="เครื่องเดิมที่ใช้เทียบ (Method comparison)"><Input value={referenceLabel} onChange={(event) => setReferenceLabel(event.target.value)} placeholder="เช่น cobas 8800 Sn5046" /></Field> : null}
+          {sections.includes('comparison') || sections.includes('qualitative') ? <Field label="เครื่องเดิม / วิธีอ้างอิงที่ใช้เทียบ"><Input value={referenceLabel} onChange={(event) => setReferenceLabel(event.target.value)} placeholder="เช่น cobas 8800 Sn5046" /></Field> : null}
           <Field label="ชื่อรายการ (ไม่บังคับ)"><Input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="สร้างให้อัตโนมัติถ้าเว้นว่าง" /></Field>
         </div>
         <fieldset>
@@ -222,6 +226,7 @@ function CreateForm({ data, onCreated, onError }: { data: MethodVerifWorkspace; 
               </label>
             ))}
           </div>
+          <p className="mt-1 text-[11px] text-[#789097]">การทดสอบที่รายงานผลเป็นกลุ่ม (เช่น HPV16+ / Other HR+ / Negative) เลือกเฉพาะ {SECTION_LABEL.qualitative}</p>
         </fieldset>
         <div className="flex justify-end"><Button type="submit" disabled={busy || !sections.length || !instrumentId}>{busy ? 'กำลังบันทึก…' : 'สร้างรายการ'}</Button></div>
       </form>
@@ -258,11 +263,12 @@ function StudyDetail({ study, isAdmin, onDone, onError }: { study: MethodVerifSt
   const [lod, setLod] = useState<LodData>(study.lod)
   const [linearity, setLinearity] = useState<LinearityData>(study.linearity)
   const [comparison, setComparison] = useState<ComparisonData>(study.comparison)
+  const [qualitative, setQualitative] = useState<QualitativeData>(study.qualitative)
   const [conclusion, setConclusion] = useState(study.conclusion ?? '')
   const [busy, setBusy] = useState(false)
-  const evaluation = useMemo(() => evaluateStudy({ ...study, precision, lod, linearity, comparison }), [study, precision, lod, linearity, comparison])
-  const dirty = JSON.stringify({ precision, lod, linearity, comparison, conclusion })
-    !== JSON.stringify({ precision: study.precision, lod: study.lod, linearity: study.linearity, comparison: study.comparison, conclusion: study.conclusion ?? '' })
+  const evaluation = useMemo(() => evaluateStudy({ ...study, precision, lod, linearity, comparison, qualitative }), [study, precision, lod, linearity, comparison, qualitative])
+  const dirty = JSON.stringify({ precision, lod, linearity, comparison, qualitative, conclusion })
+    !== JSON.stringify({ precision: study.precision, lod: study.lod, linearity: study.linearity, comparison: study.comparison, qualitative: study.qualitative, conclusion: study.conclusion ?? '' })
 
   async function patch(body: Record<string, unknown>, text: string) {
     setBusy(true)
@@ -277,7 +283,7 @@ function StudyDetail({ study, isAdmin, onDone, onError }: { study: MethodVerifSt
   }
 
   function saveBody() {
-    return { precision, lod, linearity, comparison, conclusion }
+    return { precision, lod, linearity, comparison, qualitative, conclusion }
   }
 
   async function remove() {
@@ -299,7 +305,7 @@ function StudyDetail({ study, isAdmin, onDone, onError }: { study: MethodVerifSt
     <div className="space-y-5 border-t border-[#e1ebec] px-5 py-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="grid gap-1 text-xs text-[#58747d]">
-          <p><span className="font-semibold text-[#315763]">การทดสอบ:</span> {study.testName}{study.unit ? ` (${study.unit})` : ''} · สเกล {study.scale === 'log10' ? 'log10 (claim = SD log)' : 'linear (claim = CV%)'}</p>
+          <p><span className="font-semibold text-[#315763]">การทดสอบ:</span> {study.testName}{study.unit ? ` (${study.unit})` : ''}{study.requiredSections.some((section) => section !== 'qualitative') ? ` · สเกล ${study.scale === 'log10' ? 'log10 (claim = SD log)' : 'linear (claim = CV%)'}` : ' · ผลเชิงคุณภาพ'}</p>
           <p><span className="font-semibold text-[#315763]">ผู้สร้าง:</span> {study.createdByName ?? '—'}{study.approvedByName ? ` · อนุมัติโดย ${study.approvedByName}` : ''}</p>
         </div>
         <Link href={`/method-verification/report/${study.id}`} className="inline-flex min-h-11 items-center gap-2 rounded-md border border-[#c9dadd] bg-white px-3.5 py-2 text-sm font-semibold text-[#244854] hover:bg-[#f7fbfb]">
@@ -313,6 +319,7 @@ function StudyDetail({ study, isAdmin, onDone, onError }: { study: MethodVerifSt
       {required.has('lod') ? <LodEditor value={lod} onChange={setLod} unit={study.unit} locked={locked} evaluation={evaluation} /> : null}
       {required.has('linearity') ? <LinearityEditor value={linearity} onChange={setLinearity} scale={study.scale} unit={study.unit} locked={locked} evaluation={evaluation} /> : null}
       {required.has('comparison') ? <ComparisonEditor value={comparison} onChange={setComparison} scale={study.scale} candidateLabel={study.instrumentLabel} locked={locked} evaluation={evaluation} /> : null}
+      {required.has('qualitative') ? <QualitativeEditor value={qualitative} onChange={setQualitative} candidateLabel={study.instrumentLabel} locked={locked} evaluation={evaluation} /> : null}
 
       <div className="space-y-2">
         <Field label="สรุปผล / ความเห็น">
@@ -605,6 +612,156 @@ function ComparisonEditor({ value, onChange, scale, candidateLabel, locked, eval
           </tbody>
         </table>
       </div>
+    </Section>
+  )
+}
+
+const QUALITATIVE_CATEGORY_LABEL = { agree: 'ตรงกัน', disagree: 'ไม่ตรงกัน', incomplete: 'ไม่ครบ', invalid: 'Invalid' } as const
+type ReproRow = QualitativeData['reproducibility'][number]
+const EMPTY_REPRO: ReproRow = { sampleLabel: '', replicateId: '', run: '', expected: '', result: '', retest: '', note: '' }
+const REPRO_FIELDS: [keyof ReproRow, string, string][] = [
+  ['sampleLabel', 'ตัวอย่าง', 'w-36'],
+  ['replicateId', 'Replicate', 'w-28'],
+  ['run', 'Run', 'w-28'],
+  ['expected', 'ผลที่ควรได้', 'w-28'],
+  ['result', 'ผล', 'w-28'],
+  ['retest', 'ผลรันซ้ำ', 'w-28'],
+  ['note', 'หมายเหตุ', 'w-44'],
+]
+
+function QualitativeEditor({ value, onChange, candidateLabel, locked, evaluation }: { value: QualitativeData; onChange: (next: QualitativeData) => void; candidateLabel: string; locked: boolean; evaluation: StudyEvaluation }) {
+  const { agreement, reproducibility } = evaluation.qualitative
+  const referenceLabel = value.referenceLabel.trim() || 'วิธีอ้างอิง'
+  const samples = value.samples.length ? value.samples : [{ sampleLabel: '', referenceResult: '', candidateResult: '' }]
+  const setSample = (index: number, patch: Partial<QualitativeData['samples'][number]>) => onChange({ ...value, samples: samples.map((row, i) => (i === index ? { ...row, ...patch } : row)) })
+  const repro = value.reproducibility
+  const setRepro = (index: number, patch: Partial<ReproRow>) => onChange({ ...value, reproducibility: repro.map((row, i) => (i === index ? { ...row, ...patch } : row)) })
+  const pct = (part: number, whole: number, percent: number | null) => (whole ? `${part}/${whole} (${percent}%)` : '—')
+  const stats: [string, string][] = [
+    ['Overall agreement', pct(agreement.agree, agreement.n, agreement.agreementPercent)],
+    ['95% CI (Wilson)', agreement.agreementCi ? `${agreement.agreementCi.lower}–${agreement.agreementCi.upper}%` : '—'],
+    ['PPA (บวกตรงกัน)', pct(agreement.positiveAgree, agreement.referencePositive, agreement.ppa)],
+    ['NPA (ลบตรงกัน)', pct(agreement.negativeAgree, agreement.referenceNegative, agreement.npa)],
+    ['Reproducibility (ผลสุดท้าย)', pct(reproducibility.finalMatch, reproducibility.n, reproducibility.finalPercent)],
+    ['Reproducibility (ผลครั้งแรก)', pct(reproducibility.firstMatch, reproducibility.n, reproducibility.firstPercent)],
+  ]
+  const cell = 'min-h-8 py-1'
+  return (
+    <Section title={SECTION_LABEL.qualitative} verdict={evaluation.sections.qualitative.verdict} reasons={evaluation.sections.qualitative.reasons}>
+      <p className="text-xs text-[#789097]">สำหรับการทดสอบที่รายงานผลเป็นกลุ่ม (เช่น HPV16+ / HPV18+ / Other HR+ / Negative) · ผลต้องสะกดตรงกันจึงนับว่าตรง (ไม่สนตัวพิมพ์เล็ก-ใหญ่และช่องว่าง) · Negative / Not detected / TND นับเป็นผลลบสำหรับ NPA ผลอื่นนับเป็นผลบวกสำหรับ PPA</p>
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="min-w-56 flex-1"><Field label="วิธีอ้างอิง / เครื่องเดิม"><Input disabled={locked} value={value.referenceLabel} onChange={(event) => onChange({ ...value, referenceLabel: event.target.value })} placeholder="เช่น cobas 8800 Sn5046" /></Field></div>
+        <div className="w-32"><Field label="ตัวอย่างขั้นต่ำ"><Input type="number" min={1} disabled={locked} value={value.minSamples} onChange={(event) => onChange({ ...value, minSamples: Math.max(1, Number(event.target.value) || 1) })} /></Field></div>
+        <div className="w-36"><Field label="Agreement ≥ (%)"><Input type="number" min={1} max={100} disabled={locked} value={value.minAgreementPercent} onChange={(event) => onChange({ ...value, minAgreementPercent: Math.min(100, Math.max(1, Number(event.target.value) || 95)) })} /></Field></div>
+        <div className="w-40"><Field label="Reproducibility ≥ (%)"><Input type="number" min={1} max={100} disabled={locked} value={value.minReproducibilityPercent} onChange={(event) => onChange({ ...value, minReproducibilityPercent: Math.min(100, Math.max(1, Number(event.target.value) || 95)) })} /></Field></div>
+      </div>
+      <p className="text-[11px] text-[#789097]">ผ่านเมื่อจำนวนตัวอย่างที่อ่านผลได้ครบขั้นต่ำและ agreement ถึงเกณฑ์ · ถ้ากรอก reproducibility ด้วย ผลสุดท้ายของแต่ละหลอด (ผลรันซ้ำถ้ามี) ต้องตรงกับผลที่ควรได้ถึงเกณฑ์ โดยแสดงผลครั้งแรกไว้เสมอ</p>
+
+      <div className="grid gap-px overflow-hidden rounded-md border border-[#dbe8e9] bg-[#dbe8e9] sm:grid-cols-2 xl:grid-cols-3">
+        {stats.map(([label, text]) => (
+          <div key={label} className="bg-white px-3 py-2">
+            <p className="text-[11px] font-semibold text-[#789097]">{label}</p>
+            <p className="mono text-sm font-bold text-[#173d50]">{text}</p>
+          </div>
+        ))}
+      </div>
+
+      {agreement.categories.length ? (
+        <div className="overflow-x-auto rounded-md border border-[#e1ebec]">
+          <table className="w-full min-w-[420px] text-left text-xs">
+            <thead className="bg-[#f7fbfb] text-[#789097]"><tr><th className="px-2 py-2">{referenceLabel}</th><th className="px-2 py-2">{candidateLabel}</th><th className="px-2 py-2 text-right">จำนวน</th></tr></thead>
+            <tbody className="divide-y divide-[#edf2f2]">
+              {agreement.categories.map((row) => (
+                <tr key={`${row.reference}|${row.candidate}`} className={row.agree ? '' : 'bg-[#fff6f6]'}>
+                  <td className="px-2 py-1">{row.reference}</td><td className="px-2 py-1">{row.candidate}</td><td className="mono px-2 py-1 text-right">{row.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      <h4 className="pt-1 text-xs font-bold text-[#315763]">1. Agreement — ตัวอย่างชุดเดียวกันบนวิธีอ้างอิงและเครื่องใหม่</h4>
+      {!locked ? (
+        <div className="flex flex-wrap gap-2">
+          <PasteBox
+            hint="วางจาก Excel 3 คอลัมน์: ตัวอย่าง · ผลวิธีอ้างอิง · ผลเครื่องใหม่ (หรือ 2 คอลัมน์ไม่มีชื่อตัวอย่าง)"
+            placeholder={'S001\tHPV16+\tHPV16+\nS002\tNegative\tNegative'}
+            onApply={(grid) => {
+              const parsed = grid.map((cells) => (cells.length >= 3 ? { sampleLabel: cells[0], referenceResult: cells[1], candidateResult: cells[2] } : { sampleLabel: '', referenceResult: cells[0] ?? '', candidateResult: cells[1] ?? '' }))
+              onChange({ ...value, samples: [...value.samples.filter((row) => row.sampleLabel || row.referenceResult || row.candidateResult), ...parsed].slice(0, 500) })
+            }}
+          />
+          <Button type="button" variant="secondary" onClick={() => onChange({ ...value, samples: [...samples, { sampleLabel: '', referenceResult: '', candidateResult: '' }] })}><Plus className="size-4" /> เพิ่มแถว</Button>
+        </div>
+      ) : null}
+      <div className="overflow-x-auto rounded-md border border-[#e1ebec]">
+        <table className="w-full min-w-[640px] text-left text-xs">
+          <thead className="bg-[#f7fbfb] text-[#789097]">
+            <tr><th className="w-10 px-2 py-2">#</th><th className="px-2 py-2">ตัวอย่าง</th><th className="px-2 py-2">{referenceLabel}</th><th className="px-2 py-2">{candidateLabel}</th><th className="px-2 py-2">ผล</th>{!locked ? <th className="w-10 px-2 py-2" /> : null}</tr>
+          </thead>
+          <tbody className="divide-y divide-[#edf2f2]">
+            {samples.map((row, index) => {
+              const pair = row.sampleLabel || row.referenceResult || row.candidateResult ? agreement.pairs[index] : undefined
+              return (
+                <tr key={index}>
+                  <td className="px-2 py-1 text-[#9aafb4]">{index + 1}</td>
+                  <td className="px-2 py-1"><Input aria-label={`ตัวอย่างแถว ${index + 1}`} disabled={locked} className={cell} value={row.sampleLabel} onChange={(event) => setSample(index, { sampleLabel: event.target.value })} /></td>
+                  <td className="px-2 py-1"><Input aria-label={`ผลวิธีอ้างอิงแถว ${index + 1}`} disabled={locked} className={cell} value={row.referenceResult} onChange={(event) => setSample(index, { referenceResult: event.target.value })} /></td>
+                  <td className="px-2 py-1"><Input aria-label={`ผลเครื่องใหม่แถว ${index + 1}`} disabled={locked} className={cell} value={row.candidateResult} onChange={(event) => setSample(index, { candidateResult: event.target.value })} /></td>
+                  <td className="px-2 py-1">{pair ? pair.category === 'agree' ? <span className="text-[#2f7d44]">ตรงกัน</span> : <StatusBadge tone={pair.category === 'disagree' || pair.category === 'invalid' ? 'rejected' : 'neutral'} label={QUALITATIVE_CATEGORY_LABEL[pair.category]} /> : null}</td>
+                  {!locked ? <td className="px-2 py-1"><button type="button" aria-label={`ลบแถว ${index + 1}`} onClick={() => onChange({ ...value, samples: samples.filter((_, i) => i !== index) })} className="rounded p-1 text-[#af3541] hover:bg-[#fff1f2]"><Trash2 className="size-4" /></button></td> : null}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <h4 className="pt-1 text-xs font-bold text-[#315763]">2. Reproducibility — ตรวจซ้ำตัวอย่างเดิมหลายหลอด / หลาย run (ไม่บังคับ)</h4>
+      {!locked ? (
+        <div className="flex flex-wrap gap-2">
+          <PasteBox
+            hint="วางจาก Excel 7 คอลัมน์: ตัวอย่าง · Replicate ID · Run · ผลที่ควรได้ · ผล · ผลรันซ้ำ (ว่างได้) · หมายเหตุ เช่น Ct"
+            placeholder={'S007\tHPV16-01\tRun 1\tHPV16+\tHPV16+\t\tCt 30.8'}
+            onApply={(grid) => onChange({ ...value, reproducibility: [...repro.filter((row) => row.sampleLabel || row.result), ...grid.map((cells) => ({ sampleLabel: cells[0] ?? '', replicateId: cells[1] ?? '', run: cells[2] ?? '', expected: cells[3] ?? '', result: cells[4] ?? '', retest: cells[5] ?? '', note: cells[6] ?? '' }))].slice(0, 200) })}
+          />
+          <Button type="button" variant="secondary" onClick={() => onChange({ ...value, reproducibility: [...repro, { ...EMPTY_REPRO, sampleLabel: repro.at(-1)?.sampleLabel ?? '', expected: repro.at(-1)?.expected ?? '' }] })}><Plus className="size-4" /> เพิ่มหลอด</Button>
+        </div>
+      ) : null}
+      {repro.length ? (
+        <div className="overflow-x-auto rounded-md border border-[#e1ebec]">
+          <table className="w-full min-w-[900px] text-left text-xs">
+            <thead className="bg-[#f7fbfb] text-[#789097]">
+              <tr><th className="w-10 px-2 py-2">#</th>{REPRO_FIELDS.map(([key, label]) => <th key={key} className="px-2 py-2">{label}</th>)}<th className="px-2 py-2">ผล</th>{!locked ? <th className="w-10 px-2 py-2" /> : null}</tr>
+            </thead>
+            <tbody className="divide-y divide-[#edf2f2]">
+              {repro.map((row, index) => {
+                const result = reproducibility.rows[index]
+                return (
+                  <tr key={index}>
+                    <td className="px-2 py-1 text-[#9aafb4]">{index + 1}</td>
+                    {REPRO_FIELDS.map(([key, label, width]) => (
+                      <td key={key} className="px-2 py-1"><Input aria-label={`${label} หลอด ${index + 1}`} disabled={locked} className={`${cell} ${width}`} value={row[key]} onChange={(event) => setRepro(index, { [key]: event.target.value })} /></td>
+                    ))}
+                    <td className="px-2 py-1">
+                      {result?.finalMatch == null ? null : result.finalMatch
+                        ? <span className="text-[#2f7d44]">{result.retested && result.firstMatch === false ? 'ตรง (หลังรันซ้ำ)' : 'ตรง'}</span>
+                        : <StatusBadge tone="rejected" label="ไม่ตรง" />}
+                    </td>
+                    {!locked ? <td className="px-2 py-1"><button type="button" aria-label={`ลบหลอด ${index + 1}`} onClick={() => onChange({ ...value, reproducibility: repro.filter((_, i) => i !== index) })} className="rounded p-1 text-[#af3541] hover:bg-[#fff1f2]"><Trash2 className="size-4" /></button></td> : null}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      {reproducibility.samples.length ? (
+        <p className="mono text-xs text-[#315763]">
+          {reproducibility.samples.map((sample) => `${sample.sampleLabel || '—'} (${sample.expected}): ${sample.finalMatch}/${sample.n}${sample.firstMatch !== sample.finalMatch ? ` · ครั้งแรก ${sample.firstMatch}/${sample.n}` : ''}`).join(' · ')}
+        </p>
+      ) : null}
     </Section>
   )
 }

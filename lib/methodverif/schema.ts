@@ -34,7 +34,26 @@ export const comparisonSchema = z.object({
   samples: z.array(z.object({ sampleLabel: z.string().trim().max(80), referenceRaw: raw, candidateRaw: raw })).max(500),
 })
 
-const sections = z.array(z.enum(['precision', 'lod', 'linearity', 'comparison'])).min(1)
+const label = z.string().trim().max(80)
+
+export const qualitativeSchema = z.object({
+  referenceLabel: z.string().trim().max(120),
+  minSamples: z.number().int().min(1).max(500),
+  minAgreementPercent: z.number().min(1).max(100),
+  minReproducibilityPercent: z.number().min(1).max(100),
+  samples: z.array(z.object({ sampleLabel: label, referenceResult: raw, candidateResult: raw })).max(500),
+  reproducibility: z.array(z.object({
+    sampleLabel: label,
+    replicateId: label,
+    run: z.string().trim().max(40),
+    expected: raw,
+    result: raw,
+    retest: raw,
+    note: z.string().trim().max(200),
+  })).max(200),
+})
+
+const sections = z.array(z.enum(['precision', 'lod', 'linearity', 'comparison', 'qualitative'])).min(1)
 
 export const createMethodVerifSchema = z.object({
   title: z.string().trim().min(1).max(200),
@@ -53,6 +72,7 @@ export const updateMethodVerifSchema = createMethodVerifSchema.partial().extend(
   lod: lodSchema.optional(),
   linearity: linearitySchema.optional(),
   comparison: comparisonSchema.optional(),
+  qualitative: qualitativeSchema.optional(),
   status: z.enum(['draft', 'in-progress', 'passed', 'failed', 'approved', 'rejected']).optional(),
   conclusion: z.string().trim().max(3000).nullable().optional(),
 })
