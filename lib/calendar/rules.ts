@@ -219,7 +219,7 @@ export function parseGoogleHolidayIcs(text: string, range: { from: string; to: s
   return result.sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name))
 }
 
-/* ---------- LINE heads-up digest (sent the workday before) ---------- */
+/* ---------- LINE heads-up digest (sent the day before) ---------- */
 
 export interface DigestEntry {
   typeName: string
@@ -267,27 +267,14 @@ export interface DigestDay {
   entries: DigestEntry[]
 }
 
-/**
- * Days announced by a digest sent on `today`: tomorrow through the next workday,
- * so a Friday (or a day before a holiday) also covers the days off in between.
- */
-export function digestTargetDays(today: string, isOffDay: (dateKey: string) => boolean) {
-  const days: string[] = []
-  for (let day = addDays(today, 1); days.length < 14; day = addDays(day, 1)) {
-    days.push(day)
-    if (!isOffDay(day)) break
-  }
-  return days
-}
-
 /** On days off only duty matters; leave on a Saturday is noise. */
 export function relevantEntries(day: DigestDay) {
   return day.isOffDay ? day.entries.filter((entry) => entry.kind === 'duty') : day.entries
 }
 
-/** Sent only on workdays, and never empty. */
-export function shouldSendDigest(todayIsOffDay: boolean, days: DigestDay[]) {
-  return !todayIsOffDay && days.some((day) => relevantEntries(day).length > 0)
+/** Sent any day of the week, but never empty. */
+export function shouldSendDigest(days: DigestDay[]) {
+  return days.some((day) => relevantEntries(day).length > 0)
 }
 
 export interface DigestSection {

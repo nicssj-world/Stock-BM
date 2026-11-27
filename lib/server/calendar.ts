@@ -18,7 +18,6 @@ import {
   parseGoogleHolidayIcs,
   shouldSendDigest,
   thaiRange,
-  digestTargetDays,
   type DigestDay,
   type FeedEvent,
 } from '@/lib/calendar/rules'
@@ -889,7 +888,7 @@ async function pushDigest(calendar: CalendarBook, date: string, days: DigestDay[
 type DigestResult = { calendarId: string; calendarName: string; date: string; status: string; duplicate: boolean; error?: string }
 
 /**
- * Afternoon heads-up for tomorrow (through the next workday), one message per open calendar.
+ * Afternoon heads-up for tomorrow (weekends and holidays included), one message per open calendar.
  * `date` is the send day. One calendar failing does not stop the others; the run then reports 502.
  */
 export async function runDigest(date = todayBangkok()) {
@@ -914,7 +913,7 @@ export async function runDigest(date = todayBangkok()) {
 async function runDigestFor(calendar: CalendarBook, date: string, users: LoadedUsers, isOffDay: (day: string) => boolean, holidayByDate: Map<string, string>) {
   const admin = getAdminClient()
   const types = await loadTypes(calendar.id)
-  const targets = digestTargetDays(date, isOffDay)
+  const targets = [addDays(date, 1)]
   const events = await loadEvents(targets[0], targets[targets.length - 1], users, { calendarId: calendar.id })
   const typeById = new Map(types.map((type) => [type.id, type]))
   const days: DigestDay[] = targets.map((day) => ({
@@ -953,7 +952,7 @@ async function runDigestFor(calendar: CalendarBook, date: string, users: LoadedU
     return { date, status: 'sending', duplicate: true }
   }
 
-  if (!shouldSendDigest(isOffDay(date), days)) {
+  if (!shouldSendDigest(days)) {
     await ledger().upsert({ calendar_id: calendar.id, digest_date: date, status: 'skipped', finished_at: new Date().toISOString() })
     return { date, status: 'skipped', duplicate: false }
   }

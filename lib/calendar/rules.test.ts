@@ -7,7 +7,6 @@ import {
   buildIcsFeed,
   canEditEntry,
   digestAnnounceDay,
-  digestTargetDays,
   entryPermissionError,
   isWeekend,
   foldIcsLine,
@@ -131,25 +130,10 @@ describe('Google holiday parsing', () => {
   })
 })
 
-describe('heads-up digest (sent the workday before)', () => {
+describe('heads-up digest (sent the day before)', () => {
   const sick: DigestEntry = { typeName: 'ลาป่วย', iconKey: 'thermometer', colorKey: 'orange', kind: 'leave', sortOrder: 30, userName: 'บอม', dayPart: 'full' }
   const blood: DigestEntry = { typeName: 'เวรเจาะเลือด', iconKey: 'drop', colorKey: 'rose', kind: 'duty', sortOrder: 10, userName: 'เจ', dayPart: 'full' }
   const halfDay: DigestEntry = { typeName: 'ลากิจ', iconKey: 'briefcase', colorKey: 'amber', kind: 'leave', sortOrder: 20, userName: 'เมย์', dayPart: 'pm' }
-  const holidays = new Set(['2026-12-07', '2026-12-10'])
-  const isOffDay = (day: string) => isWeekend(day) || holidays.has(day)
-
-  it('targets tomorrow on a normal workday', () => {
-    expect(digestTargetDays('2026-11-18', isOffDay)).toEqual(['2026-11-19'])
-  })
-
-  it('covers the weekend and Monday when sent on Friday', () => {
-    expect(digestTargetDays('2026-11-20', isOffDay)).toEqual(['2026-11-21', '2026-11-22', '2026-11-23'])
-  })
-
-  it('runs through a long weekend into the next workday', () => {
-    // Fri 4 Dec → Sat 5, Sun 6, Mon 7 (substitution holiday), Tue 8
-    expect(digestTargetDays('2026-12-04', isOffDay)).toEqual(['2026-12-05', '2026-12-06', '2026-12-07', '2026-12-08'])
-  })
 
   it('puts duty first, marks half days and labels tomorrow', () => {
     const message = buildDigestMessage('2026-11-18', [{ date: '2026-11-19', isOffDay: false, holidayName: null, entries: [sick, blood, halfDay] }])
@@ -252,14 +236,13 @@ describe('heads-up digest (sent the workday before)', () => {
     expect(JSON.stringify(buildDigestFlex('2026-11-18', days).contents)).toContain('"text":"ปฏิทินทีม · Genomics-CBH"')
   })
 
-  it('never sends empty, and never on a day off', () => {
+  it('sends only when tomorrow has something relevant', () => {
     const empty: DigestDay = { date: '2026-11-19', isOffDay: false, holidayName: null, entries: [] }
     const leaveOnSaturday: DigestDay = { date: '2026-11-21', isOffDay: true, holidayName: null, entries: [sick] }
     const full: DigestDay = { date: '2026-11-19', isOffDay: false, holidayName: null, entries: [sick] }
-    expect(shouldSendDigest(false, [empty])).toBe(false)
-    expect(shouldSendDigest(false, [leaveOnSaturday])).toBe(false)
-    expect(shouldSendDigest(false, [full])).toBe(true)
-    expect(shouldSendDigest(true, [full])).toBe(false)
+    expect(shouldSendDigest([empty])).toBe(false)
+    expect(shouldSendDigest([leaveOnSaturday])).toBe(false)
+    expect(shouldSendDigest([full])).toBe(true)
   })
 })
 
