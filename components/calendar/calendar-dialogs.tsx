@@ -475,12 +475,16 @@ function TypePanel({
   useEffect(() => onEditingChange(isEditing), [isEditing, onEditingChange])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [notice, setNotice] = useState('')
+  const currentType = types.find((type) => type.id === draft?.id)
 
   async function save() {
     if (!draft) return
     if (!draft.name.trim()) return setError('ใส่ชื่อประเภทก่อนบันทึก')
     setBusy(true)
     setError('')
+    setNotice('')
     try {
       const { id, ...body } = draft
       const result = await api<{ types: CalendarType[] }>(id ? `/api/calendar/types/${id}` : '/api/calendar/types', {
@@ -496,10 +500,28 @@ function TypePanel({
     }
   }
 
+  async function remove() {
+    if (!draft?.id || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api<{ types: CalendarType[] }>(`/api/calendar/types/${draft.id}`, { method: 'DELETE' })
+      onChanged(result.types)
+      setDraft(null)
+      setNotice('ลบประเภทเรียบร้อยแล้ว')
+    } catch (deleteError) {
+      setError(messageOf(deleteError, 'ลบประเภทไม่สำเร็จ'))
+    } finally {
+      setConfirmDelete(false)
+      setBusy(false)
+    }
+  }
+
   return (
     <>
       {!draft ? (
         <div className="grid gap-3">
+          {notice ? <p role="status" className="text-sm text-[#0b7f76]">{notice}</p> : null}
           <ul className="grid gap-1.5">
             {types.map((type) => (
               <li key={type.id} className={`flex items-center gap-2.5 rounded-[9px] border border-[#d6e2e3] px-2.5 py-2 ${type.isActive ? '' : 'opacity-55'}`} style={colorVar(type.colorKey)}>
@@ -519,7 +541,7 @@ function TypePanel({
               </li>
             ))}
           </ul>
-          <p className="text-xs text-[#6a838c]">ประเภทลบไม่ได้ ปิดใช้งานแทน ประวัติเดิมยังแสดงอยู่</p>
+          <p className="text-xs text-[#6a838c]">ลบประเภทที่ยังไม่เคยใช้งานได้ หากมีรายการที่เกี่ยวข้องให้ปิดใช้งานแทน</p>
           <div className="flex justify-end">
             <Button onClick={() => setDraft({ id: null, name: '', iconKey: 'flask', colorKey: 'green', kind: 'other', inLineDigest: false, requiresTitle: false, isActive: true })}>เพิ่มประเภท</Button>
           </div>
@@ -576,9 +598,23 @@ function TypePanel({
             เปิดใช้งาน
           </label>
           {error ? <p role="alert" className="text-[13px] font-semibold text-[#af3541]">{error}</p> : null}
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => { setDraft(null); setError('') }}>ยกเลิก</Button>
-            <Button onClick={save} disabled={busy}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : null}บันทึก</Button>
+          {confirmDelete ? (
+            <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg bg-[#fff1f2] px-3 py-2.5 text-[13px] text-[#173d50]">
+              <span className="flex-1">ลบประเภท “{currentType?.name ?? draft.name}” ใช่ไหม?</span>
+              <Button type="button" variant="secondary" onClick={() => setConfirmDelete(false)} disabled={busy}>ไม่ลบ</Button>
+              <Button type="button" variant="danger" onClick={remove} disabled={busy}>
+                {busy ? <LoaderCircle className="size-4 animate-spin" /> : null} ลบประเภท
+              </Button>
+            </div>
+          ) : null}
+          <div className="flex flex-wrap justify-end gap-2">
+            {draft.id && !confirmDelete ? (
+              <Button type="button" variant="ghost" className="mr-auto !text-[#af3541]" disabled={busy} onClick={() => { setError(''); setConfirmDelete(true) }}>
+                <Trash2 className="size-4" /> ลบประเภท
+              </Button>
+            ) : null}
+            <Button variant="secondary" disabled={busy} onClick={() => { setDraft(null); setError(''); setConfirmDelete(false) }}>ยกเลิก</Button>
+            <Button onClick={save} disabled={busy || confirmDelete}>{busy && !confirmDelete ? <LoaderCircle className="size-4 animate-spin" /> : null}บันทึก</Button>
           </div>
         </div>
       )}

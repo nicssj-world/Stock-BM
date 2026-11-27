@@ -541,6 +541,35 @@ export async function updateCalendarType(id: string, { calendarId: _ignored, ...
   return loadTypes(calendarId)
 }
 
+/** Permanently remove only an unused type, including checks for soft-deleted entries. */
+export async function deleteCalendarType(id: string, actor: BmActor) {
+  assertAdmin(actor)
+  const admin = getAdminClient()
+  const { data: current, error: currentError } = await admin.from('bm_calendar_types').select('calendar_id,name').eq('id', id).maybeSingle()
+  fail(currentError)
+  if (!current) throw new HttpError(404, 'ไม่พบประเภทนี้')
+  const calendarId = asString((current as RecordRow).calendar_id)
+
+  async function assertUnused() {
+    const { count, error } = await admin.from('bm_calendar_events').select('id', { count: 'exact', head: true }).eq('type_id', id)
+    fail(error)
+    if (count === null) throw new HttpError(500, 'ตรวจสอบรายการที่เกี่ยวข้องไม่สำเร็จ')
+    if (count > 0) throw new HttpError(409, `ประเภทนี้มีรายการที่เกี่ยวข้อง ${count} รายการ ไม่สามารถลบได้ กรุณาปิดใช้งานแทน`)
+  }
+
+  await assertUnused()
+  const { data, error } = await admin.from('bm_calendar_types').delete().eq('id', id).eq('calendar_id', calendarId).select('id').maybeSingle()
+  // The existing RESTRICT foreign keys also protect against a concurrent entry creation.
+  if (error?.code === '23503') {
+    await assertUnused()
+    throw new HttpError(409, 'ประเภทนี้มีรายการที่เกี่ยวข้อง ไม่สามารถลบได้ กรุณาปิดใช้งานแทน')
+  }
+  fail(error)
+  if (!data) throw new HttpError(404, 'ไม่พบประเภทนี้')
+  await writeAudit(actor, 'calendar.type_delete', 'calendar-type', id, { calendarId, name: asString((current as RecordRow).name) })
+  return loadTypes(calendarId)
+}
+
 /* ---------- calendars (Admin) ---------- */
 
 export interface CalendarInput {
