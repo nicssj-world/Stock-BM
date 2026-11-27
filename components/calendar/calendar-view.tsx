@@ -164,7 +164,7 @@ export function CalendarView({
             (ta?.sortOrder ?? 0) - (tb?.sortOrder ?? 0) ||
             a.typeId.localeCompare(b.typeId) ||
             DAY_PART_ORDER[a.dayPart] - DAY_PART_ORDER[b.dayPart] ||
-            a.userName.localeCompare(b.userName, 'th')
+            (a.userName ?? a.title ?? '').localeCompare(b.userName ?? b.title ?? '', 'th')
           )
         }),
     [data.events, hidden, mineOnly, actor.id, typeById],
@@ -183,7 +183,7 @@ export function CalendarView({
   const awayCount = useMemo(() => {
     const away = new Set<string>()
     for (const event of data.events) {
-      if (covers(event, anchor) && event.dayPart === 'full' && typeById.get(event.typeId)?.kind === 'leave') away.add(event.userId)
+      if (covers(event, anchor) && event.dayPart === 'full' && typeById.get(event.typeId)?.kind === 'leave' && event.userId) away.add(event.userId)
     }
     return away.size
   }, [data.events, anchor, typeById])
@@ -480,12 +480,13 @@ function Chip({
       className={`cal-chip ${mine ? 'is-mine' : ''} ${className}`}
       style={{ ...colorStyle(type), ...gridStyle }}
       onClick={() => onOpen(event)}
-      title={`${type?.name ?? ''}${event.title ? `: ${event.title}` : ''} · ${event.userName}${range ? ` · ${when}` : ''}${event.note ? ` — ${event.note}` : ''}`}
-      aria-label={`${type?.name ?? 'รายการ'}${event.title ? ` ${event.title}` : ''} ${event.userName} ${when}`}
+      title={`${type?.name ?? ''}${event.title ? `: ${event.title}` : ''}${event.userName ? ` · ${event.userName}` : ''}${range ? ` · ${when}` : ''}${event.note ? ` — ${event.note}` : ''}`}
+      aria-label={`${type?.name ?? 'รายการ'}${event.title ? ` ${event.title}` : ''}${event.userName ? ` ${event.userName}` : ''} ${when}`}
     >
       <CalendarIcon iconKey={type?.iconKey ?? 'star'} size={15} className="flex-none text-[var(--c)]" />
       <span className="min-w-0 truncate">
-        <span className="font-semibold">{event.userName}</span>
+        {/* A type without a person shows its own name where the person's name would be. */}
+        <span className="font-semibold">{event.userName ?? type?.name ?? 'รายการ'}</span>
         {event.title ? <span className="opacity-80"> · {event.title}</span> : null}
       </span>
       {part ? <span className="ml-auto flex-none text-[11px] opacity-80">{part}</span> : null}
@@ -500,9 +501,9 @@ function Row({ event, type, mine, onOpen }: { event: CalendarEvent; type: Calend
       <span className="cal-badge"><CalendarIcon iconKey={type?.iconKey ?? 'star'} size={20} /></span>
       <span className="grid min-w-0">
         <span className="text-sm font-semibold text-[#173d50]">
-          {event.userName}{mine ? ' (ฉัน)' : ''}
+          {event.userName ? `${event.userName}${mine ? ' (ฉัน)' : ''}` : event.title ?? type?.name ?? 'ประเภทที่ถูกลบ'}
         </span>
-        <span className="truncate text-[12.5px] text-[#6a838c]">{event.title ? `${type?.name ?? 'ประเภทที่ถูกลบ'}: ${event.title}` : type?.name ?? 'ประเภทที่ถูกลบ'}{event.note ? ` · ${event.note}` : ''}</span>
+        <span className="truncate text-[12.5px] text-[#6a838c]">{[event.userName ? (event.title ? `${type?.name ?? 'ประเภทที่ถูกลบ'}: ${event.title}` : type?.name ?? 'ประเภทที่ถูกลบ') : event.title ? type?.name ?? '' : 'ทั้งทีม', event.note].filter(Boolean).join(' · ')}</span>
       </span>
       <span className="cal-tag">{tag}</span>
     </button>

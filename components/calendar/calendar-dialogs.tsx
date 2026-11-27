@@ -40,7 +40,8 @@ function messageOf(error: unknown, fallback: string) {
 export type EntryDraft = {
   id: string | null
   typeId: string
-  userId: string
+  /** Null for an entry of a type without a person. */
+  userId: string | null
   startDate: string
   endDate: string
   dayPart: DayPart
@@ -194,9 +195,11 @@ function EntryDetails({
             {entryTitle ? <span className="font-semibold break-words">{entryTitle}</span> : <span className="text-[#6a838c]">ยังไม่ได้ใส่</span>}
           </DetailRow>
         ) : null}
-        <DetailRow icon={<UserRound className="size-4" />} label="ของ">
-          <span className="font-semibold">{ownerName}</span>{draft.userId === actor.id ? <span className="ml-1 text-[#55727c]">(ฉัน)</span> : null}
-        </DetailRow>
+        {draft.userId ? (
+          <DetailRow icon={<UserRound className="size-4" />} label="ของ">
+            <span className="font-semibold">{ownerName}</span>{draft.userId === actor.id ? <span className="ml-1 text-[#55727c]">(ฉัน)</span> : null}
+          </DetailRow>
+        ) : null}
         <DetailRow icon={<CalendarRange className="size-4" />} label="วันที่">
           <span className="font-semibold">{thaiRange(draft.startDate, draft.endDate)} {buddhistYear}</span>
           {days > 1 ? <span className="ml-1.5 text-[#55727c]">· {days} วัน</span> : null}
@@ -212,7 +215,7 @@ function EntryDetails({
       <LineDigestNote text={lineDigestText(type)} />
 
       {!canEdit ? (
-        <p className="text-xs text-[#55727c]">{draft.userId !== actor.id ? 'ดูได้อย่างเดียว แก้ได้เฉพาะเจ้าของรายการหรือ Admin' : `รายการนี้ผ่านมาเกิน ${STAFF_EDIT_WINDOW_DAYS} วันแล้ว แก้ไม่ได้ ติดต่อ Admin`}</p>
+        <p className="text-xs text-[#55727c]">{draft.userId && draft.userId !== actor.id ? 'ดูได้อย่างเดียว แก้ได้เฉพาะเจ้าของรายการหรือ Admin' : `รายการนี้ผ่านมาเกิน ${STAFF_EDIT_WINDOW_DAYS} วันแล้ว แก้ไม่ได้ ติดต่อ Admin`}</p>
       ) : null}
 
       <EntryHistory history={history} />
@@ -253,11 +256,14 @@ function EntryForm({
   const choosable = types.filter((type) => type.isActive || type.id === draft.typeId)
   const selectedType = types.find((type) => type.id === form.typeId)
   const needsTitle = Boolean(selectedType?.requiresTitle)
+  // A lab-wide type (e.g. an OT shift) has no owner: the "ของ" field disappears.
+  const needsOwner = selectedType?.requiresUser !== false
+  const ownerId = form.userId ?? actor.id
   const readOnly = !isNew && entryPermissionError(actor, { userId: draft.userId, endDate: draft.endDate }, today) !== null
   const lockedForStaff = !isNew && isLockedForStaff(draft.endDate, today)
 
   const peopleOptions = isAdmin ? users : users.filter((user) => user.id === actor.id)
-  const ownerMissing = !peopleOptions.some((user) => user.id === form.userId)
+  const ownerMissing = !peopleOptions.some((user) => user.id === ownerId)
 
   function update<K extends keyof EntryDraft>(key: K, value: EntryDraft[K]) {
     setForm((current) => {
@@ -276,7 +282,7 @@ function EntryForm({
     if (form.endDate < form.startDate) return setError('วันที่สิ้นสุดต้องไม่ก่อนวันเริ่ม แก้ช่อง “ถึง”')
     setBusy('save')
     try {
-      const body = JSON.stringify({ ...form, title: needsTitle ? form.title.trim() : null, note: form.note.trim() || null })
+      const body = JSON.stringify({ ...form, userId: needsOwner ? ownerId : null, title: needsTitle ? form.title.trim() : null, note: form.note.trim() || null })
       const result = isNew
         ? await api<{ event: CalendarEvent }>('/api/calendar', { method: 'POST', body })
         : await api<{ event: CalendarEvent }>(`/api/calendar/entries/${draft.id}`, { method: 'PATCH', body })
@@ -306,7 +312,7 @@ function EntryForm({
 
   return (
     <form onSubmit={submit} className="grid gap-4" noValidate>
-      {readOnly ? <Notice tone="info">{draft.userId !== actor.id ? 'ดูได้อย่างเดียว แก้ได้เฉพาะเจ้าของรายการหรือ Admin' : `รายการนี้ผ่านมาเกิน ${STAFF_EDIT_WINDOW_DAYS} วันแล้ว แก้ไม่ได้ ติดต่อ Admin`}</Notice> : null}
+      {readOnly ? <Notice tone="info">{draft.userId && draft.userId !== actor.id ? 'ดูได้อย่างเดียว แก้ได้เฉพาะเจ้าของรายการหรือ Admin' : `รายการนี้ผ่านมาเกิน ${STAFF_EDIT_WINDOW_DAYS} วันแล้ว แก้ไม่ได้ ติดต่อ Admin`}</Notice> : null}
       {!readOnly && isAdmin && lockedForStaff ? (
         <p className="rounded-lg bg-[#fff8e8] px-3 py-2 text-[13px] text-[#8a5410]">รายการนี้ผ่านมาเกิน {STAFF_EDIT_WINDOW_DAYS} วัน Staff แก้ไม่ได้แล้ว คุณแก้ได้เพราะเป็น Admin และการแก้จะถูกบันทึกในประวัติ</p>
       ) : null}
@@ -340,16 +346,18 @@ function EntryForm({
           </label>
         ) : null}
 
-        <label className="block">
-          <span className={labelClass}>ของ</span>
-          <Select value={form.userId} onChange={(event) => update('userId', event.target.value)} disabled={!isAdmin}>
-            {ownerMissing ? <option value={form.userId}>{users.find((user) => user.id === form.userId)?.displayName ?? 'ผู้ใช้ที่ไม่อยู่ในทีมแล้ว'}</option> : null}
-            {peopleOptions.map((user) => (
-              <option key={user.id} value={user.id}>{user.displayName}{user.id === actor.id ? ' (ฉัน)' : ''}</option>
-            ))}
-          </Select>
-          {!isAdmin ? <span className={hintClass}>ลงได้เฉพาะของตัวเอง · Admin ลงแทนคนอื่นได้</span> : null}
-        </label>
+        {needsOwner ? (
+          <label className="block">
+            <span className={labelClass}>ของ</span>
+            <Select value={ownerId} onChange={(event) => update('userId', event.target.value)} disabled={!isAdmin}>
+              {ownerMissing ? <option value={ownerId}>{users.find((user) => user.id === ownerId)?.displayName ?? 'ผู้ใช้ที่ไม่อยู่ในทีมแล้ว'}</option> : null}
+              {peopleOptions.map((user) => (
+                <option key={user.id} value={user.id}>{user.displayName}{user.id === actor.id ? ' (ฉัน)' : ''}</option>
+              ))}
+            </Select>
+            {!isAdmin ? <span className={hintClass}>ลงได้เฉพาะของตัวเอง · Admin ลงแทนคนอื่นได้</span> : null}
+          </label>
+        ) : null}
 
         <div className="grid grid-cols-2 gap-2.5">
           <label className="block">
@@ -392,7 +400,7 @@ function EntryForm({
 
       {confirmDelete ? (
         <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg bg-[#fff1f2] px-3 py-2.5 text-[13px] text-[#173d50]">
-          ลบ “{selectedType?.name} · {users.find((user) => user.id === form.userId)?.displayName ?? ''}” ใช่ไหม?
+          ลบ “{[selectedType?.name, needsOwner ? users.find((user) => user.id === ownerId)?.displayName : form.title.trim()].filter(Boolean).join(' · ')}” ใช่ไหม?
           <span className="flex-1" />
           <Button type="button" variant="secondary" onClick={() => setConfirmDelete(false)}>ไม่ลบ</Button>
           <Button type="button" variant="danger" onClick={remove} disabled={busy === 'delete'}>
@@ -429,6 +437,7 @@ type TypeDraft = {
   kind: CalendarKind
   inLineDigest: boolean
   requiresTitle: boolean
+  requiresUser: boolean
   isActive: boolean
 }
 
@@ -564,7 +573,7 @@ function TypePanel({
                 <span className="grid min-w-0 flex-1">
                   <span className="text-sm font-semibold">{type.name}</span>
                   <span className="text-xs text-[#6a838c]">
-                    {KIND_LABEL[type.kind]}{type.inLineDigest ? ' · แจ้ง LINE' : ''}{type.requiresTitle ? ' · ต้องใส่หัวข้อ' : ''}{type.isActive ? '' : ' · ปิดใช้งาน'} · ใช้ {type.usageCount} รายการ
+                    {KIND_LABEL[type.kind]}{type.inLineDigest ? ' · แจ้ง LINE' : ''}{type.requiresUser ? '' : ' · ไม่ระบุคน'}{type.requiresTitle ? ' · ต้องใส่หัวข้อ' : ''}{type.isActive ? '' : ' · ปิดใช้งาน'} · ใช้ {type.usageCount} รายการ
                   </span>
                 </span>
                 {orderDraft ? (
@@ -574,7 +583,7 @@ function TypePanel({
                   </span>
                 ) : <Button
                   variant="secondary"
-                  onClick={() => setDraft({ id: type.id, name: type.name, iconKey: (ICON_KEYS as readonly string[]).includes(type.iconKey) ? (type.iconKey as CalendarIconKey) : 'star', colorKey: type.colorKey, kind: type.kind, inLineDigest: type.inLineDigest, requiresTitle: type.requiresTitle, isActive: type.isActive })}
+                  onClick={() => setDraft({ id: type.id, name: type.name, iconKey: (ICON_KEYS as readonly string[]).includes(type.iconKey) ? (type.iconKey as CalendarIconKey) : 'star', colorKey: type.colorKey, kind: type.kind, inLineDigest: type.inLineDigest, requiresTitle: type.requiresTitle, requiresUser: type.requiresUser, isActive: type.isActive })}
                 >
                   แก้ไข
                 </Button>}
@@ -591,7 +600,7 @@ function TypePanel({
               <p className="text-xs text-[#6a838c]">ลบประเภทที่ยังไม่เคยใช้งานได้ หากมีรายการที่เกี่ยวข้องให้ปิดใช้งานแทน</p>
               <div className="flex justify-end gap-2">
                 <Button variant="secondary" disabled={types.length < 2} onClick={() => { const ids = types.map((type) => type.id); setOrderDraft({ ids, expectedIds: [...ids] }); setError(''); setNotice('') }}>จัดลำดับ</Button>
-                <Button onClick={() => setDraft({ id: null, name: '', iconKey: 'flask', colorKey: 'green', kind: 'other', inLineDigest: false, requiresTitle: false, isActive: true })}>เพิ่มประเภท</Button>
+                <Button onClick={() => setDraft({ id: null, name: '', iconKey: 'flask', colorKey: 'green', kind: 'other', inLineDigest: false, requiresTitle: false, requiresUser: true, isActive: true })}>เพิ่มประเภท</Button>
               </div>
             </>
           )}
@@ -642,6 +651,10 @@ function TypePanel({
           <label className="flex items-start gap-2 text-sm">
             <input type="checkbox" className="mt-0.5 size-4 accent-[#0b7f76]" checked={draft.requiresTitle} onChange={(event) => setDraft({ ...draft, requiresTitle: event.target.checked })} />
             <span>ต้องใส่หัวข้อ <span className="block text-xs text-[#6a838c]">เช่น ประชุม/อบรม · หัวข้อแสดงในปฏิทิน, LINE และปฏิทินมือถือ</span></span>
+          </label>
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-0.5 size-4 accent-[#0b7f76]" checked={!draft.requiresUser} onChange={(event) => setDraft({ ...draft, requiresUser: !event.target.checked })} />
+            <span>ไม่ต้องระบุคน <span className="block text-xs text-[#6a838c]">เช่น OT NIPT · ไม่มีช่อง “ของ” ปฏิทินแสดงชื่อประเภท (และหัวข้อถ้าติ๊กต้องใส่หัวข้อ) · Staff ทุกคนลงและแก้ได้</span></span>
           </label>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" className="size-4 accent-[#0b7f76]" checked={draft.isActive} onChange={(event) => setDraft({ ...draft, isActive: event.target.checked })} />

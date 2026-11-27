@@ -30,6 +30,8 @@ export interface CalendarType {
   inLineDigest: boolean
   /** Entries of this type must carry a title (shown in the calendar, LINE and the phone feed). */
   requiresTitle: boolean
+  /** False for a lab-wide type (e.g. an OT shift): its entries have no person. */
+  requiresUser: boolean
   sortOrder: number
   isActive: boolean
   usageCount: number
@@ -39,8 +41,9 @@ export interface CalendarEvent {
   id: string
   calendarId: string
   typeId: string
-  userId: string
-  userName: string
+  /** Null for an entry of a type without a person. */
+  userId: string | null
+  userName: string | null
   startDate: string
   endDate: string
   dayPart: DayPart

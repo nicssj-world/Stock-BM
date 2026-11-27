@@ -152,15 +152,15 @@ export function isLockedForStaff(endDate: string, today: string) {
   return endDate < addDays(today, -STAFF_EDIT_WINDOW_DAYS)
 }
 
-export function canEditEntry(editor: Editor, entry: { userId: string; endDate: string }, today: string) {
-  if (editor.role === 'Admin') return true
-  return entry.userId === editor.id && !isLockedForStaff(entry.endDate, today)
+/** `userId` null = an entry of a type without a person: any Staff may manage it. */
+export function canEditEntry(editor: Editor, entry: { userId: string | null; endDate: string }, today: string) {
+  return entryPermissionError(editor, entry, today) === null
 }
 
 /** Returns a Thai error message, or null when the editor may save this entry. */
-export function entryPermissionError(editor: Editor, entry: { userId: string; endDate: string }, today: string) {
+export function entryPermissionError(editor: Editor, entry: { userId: string | null; endDate: string }, today: string) {
   if (editor.role === 'Admin') return null
-  if (entry.userId !== editor.id) return 'ลงหรือแก้ได้เฉพาะรายการของตัวเอง'
+  if (entry.userId !== null && entry.userId !== editor.id) return 'ลงหรือแก้ได้เฉพาะรายการของตัวเอง'
   if (isLockedForStaff(entry.endDate, today)) return `รายการที่ผ่านมาเกิน ${STAFF_EDIT_WINDOW_DAYS} วันแก้ไม่ได้ ติดต่อ Admin`
   return null
 }
@@ -227,7 +227,8 @@ export interface DigestEntry {
   colorKey: CalendarColor
   kind: CalendarKind
   sortOrder: number
-  userName: string
+  /** Null for a type without a person: the title (if any) stands in for the name. */
+  userName: string | null
   dayPart: DayPart
   /** Shared title (e.g. the meeting's topic); never the private note. */
   title?: string | null
@@ -236,10 +237,25 @@ export interface DigestEntry {
   endDate?: string
 }
 
-/** "เมย์ (บ่าย)", or "เมย์ (8–9 ธ.ค.)" for a multi-day entry. */
+/**
+ * "เมย์ (บ่าย)", or "เมย์ (8–9 ธ.ค.)" for a multi-day entry. Without a person the title is the name,
+ * and without either only the qualifier remains ("บ่าย"), or nothing.
+ */
 function digestName(entry: DigestEntry) {
-  if (entry.startDate && entry.endDate && entry.startDate !== entry.endDate) return `${entry.userName} (${thaiCompactRange(entry.startDate, entry.endDate)})`
-  return entry.dayPart === 'full' ? entry.userName : `${entry.userName} (${DAY_PART_LABEL[entry.dayPart]})`
+  const who = entry.userName ?? entry.title ?? ''
+  const when =
+    entry.startDate && entry.endDate && entry.startDate !== entry.endDate
+      ? thaiCompactRange(entry.startDate, entry.endDate)
+      : entry.dayPart === 'full'
+        ? ''
+        : DAY_PART_LABEL[entry.dayPart]
+  if (!when) return who
+  return who ? `${who} (${when})` : when
+}
+
+/** The title shown beside a person; a type without a person already uses it as the name. */
+function digestTitle(entry: DigestEntry) {
+  return entry.userName ? entry.title || null : null
 }
 
 /**
@@ -256,7 +272,8 @@ export function digestAnnounceDay(entry: { startDate: string; endDate: string; k
 
 /** "เมย์ (บ่าย) “ประชุม QC”" */
 export function digestPerson(entry: DigestEntry) {
-  return `${digestName(entry)}${entry.title ? ` “${entry.title}”` : ''}`
+  const title = digestTitle(entry)
+  return `${digestName(entry)}${title ? ` “${title}”` : ''}`
 }
 
 export interface DigestDay {
@@ -294,7 +311,7 @@ export function digestSections(today: string, days: DigestDay[]): DigestSection[
     const entries = relevantEntries(day)
     if (!entries.length) continue
     const groups = new Map<string, DigestEntry[]>()
-    for (const entry of [...entries].sort((a, b) => order[a.kind] - order[b.kind] || a.sortOrder - b.sortOrder || a.typeName.localeCompare(b.typeName, 'th') || DAY_PART_ORDER[a.dayPart] - DAY_PART_ORDER[b.dayPart] || a.userName.localeCompare(b.userName, 'th'))) {
+    for (const entry of [...entries].sort((a, b) => order[a.kind] - order[b.kind] || a.sortOrder - b.sortOrder || a.typeName.localeCompare(b.typeName, 'th') || DAY_PART_ORDER[a.dayPart] - DAY_PART_ORDER[b.dayPart] || (a.userName ?? a.title ?? '').localeCompare(b.userName ?? b.title ?? '', 'th'))) {
       groups.set(entry.typeName, [...(groups.get(entry.typeName) ?? []), entry])
     }
     sections.push({
@@ -306,8 +323,8 @@ export function digestSections(today: string, days: DigestDay[]): DigestSection[
         typeName,
         emoji: emojiFor(items[0].iconKey),
         color: COLOR_HEX[items[0].colorKey] ?? COLOR_HEX.slate,
-        people: items.map(digestPerson).join(', '),
-        persons: items.map((item) => ({ name: digestName(item), title: item.title || null })),
+        people: items.map(digestPerson).filter(Boolean).join(', '),
+        persons: items.map((item) => ({ name: digestName(item), title: digestTitle(item) })).filter((person) => person.name || person.title),
       })),
     })
   }
@@ -319,7 +336,7 @@ export function digestSections(today: string, days: DigestDay[]): DigestSection[
 export function buildDigestMessage(today: string, days: DigestDay[], calendarName?: string) {
   const blocks = digestSections(today, days).map((section) => {
     const head = `${section.isTomorrow ? 'พรุ่งนี้ · ' : ''}${section.label}${section.holidayName ? ` (${section.holidayName})` : ''}`
-    return [head, ...section.rows.map((row) => `${row.emoji} ${row.typeName}: ${row.people}`)].join('\n')
+    return [head, ...section.rows.map((row) => `${row.emoji} ${row.typeName}${row.people ? `: ${row.people}` : ''}`)].join('\n')
   })
   return [calendarName ? `📅 แจ้งล่วงหน้า · ${calendarName}` : '📅 แจ้งล่วงหน้า', ...blocks].join('\n\n')
 }
@@ -354,8 +371,9 @@ export function buildDigestFlex(today: string, days: DigestDay[], calendarUrl?: 
               margin: 'sm',
               contents: [
                 { type: 'text', text: row.emoji, size: 'sm', flex: 0 },
-                { type: 'text', text: row.typeName, size: 'sm', weight: 'bold', color: row.color, flex: 0 },
-                { type: 'text', text: row.people, size: 'sm', color: INK, wrap: true, flex: 1 },
+                { type: 'text', text: row.typeName, size: 'sm', weight: 'bold', color: row.color, flex: row.people ? 0 : 1, wrap: !row.people },
+                // LINE rejects an empty text, so a type with nobody and no title shows only its name.
+                ...(row.people ? [{ type: 'text', text: row.people, size: 'sm', color: INK, wrap: true, flex: 1 }] : []),
               ],
             }
           }

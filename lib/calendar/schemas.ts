@@ -7,7 +7,8 @@ export const dateKeySchema = z.string().refine(isDateKey, 'วันที่ไ
 
 export const entrySchema = z.object({
   typeId: z.string().uuid('เลือกประเภท'),
-  userId: z.string().uuid(),
+  /** Null (or left out) for a type without a person; the server decides from the type. */
+  userId: z.string().uuid().nullish().transform((value) => value ?? null),
   startDate: dateKeySchema,
   endDate: dateKeySchema,
   dayPart: z.enum(DAY_PARTS),
@@ -24,6 +25,7 @@ export const typeSchema = z.object({
   kind: z.enum(CALENDAR_KINDS),
   inLineDigest: z.boolean(),
   requiresTitle: z.boolean().default(false),
+  requiresUser: z.boolean().default(true),
   isActive: z.boolean(),
 })
 

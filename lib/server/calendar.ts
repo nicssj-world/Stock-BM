@@ -124,6 +124,7 @@ function mapType(row: RecordRow, usage: Map<string, number>): CalendarType {
     kind: pick(row.kind, CALENDAR_KINDS, 'other'),
     inLineDigest: row.in_line_digest === true,
     requiresTitle: row.requires_title === true,
+    requiresUser: row.requires_user !== false,
     sortOrder: Number(row.sort_order ?? 100),
     isActive: row.is_active === true,
     usageCount: usage.get(id) ?? 0,
@@ -131,13 +132,13 @@ function mapType(row: RecordRow, usage: Map<string, number>): CalendarType {
 }
 
 function mapEvent(row: RecordRow, users: LoadedUsers): CalendarEvent {
-  const userId = asString(row.user_id)
+  const userId = nullableString(row.user_id)
   return {
     id: asString(row.id),
     calendarId: asString(row.calendar_id),
     typeId: asString(row.type_id),
     userId,
-    userName: users.nameById.get(userId) ?? 'ไม่พบผู้ใช้',
+    userName: userId ? (users.nameById.get(userId) ?? 'ไม่พบผู้ใช้') : null,
     startDate: asString(row.start_date),
     endDate: asString(row.end_date),
     dayPart: pick(row.day_part, DAY_PARTS, 'full'),
@@ -270,7 +271,8 @@ export async function getCalendarWorkspace(from: string, to: string, actor: BmAc
 
 export interface EntryInput {
   typeId: string
-  userId: string
+  /** Ignored (stored as null) when the type has no person. */
+  userId: string | null
   startDate: string
   endDate: string
   dayPart: DayPart
@@ -279,14 +281,21 @@ export interface EntryInput {
 }
 
 async function requireType(typeId: string, allowInactive = false) {
-  const { data, error } = await getAdminClient().from('bm_calendar_types').select('id,name,is_active,requires_title,calendar_id').eq('id', typeId).maybeSingle()
+  const { data, error } = await getAdminClient().from('bm_calendar_types').select('id,name,is_active,requires_title,requires_user,calendar_id').eq('id', typeId).maybeSingle()
   fail(error)
   const row = data as RecordRow | null
   if (!row) throw new HttpError(404, 'ไม่พบประเภทนี้')
   if (!allowInactive && row.is_active !== true) throw new HttpError(400, 'ประเภทนี้ถูกปิดใช้งานแล้ว')
   const calendar = await requireCalendar(asString(row.calendar_id))
   if (!calendar.isActive) throw new HttpError(400, `ปฏิทิน “${calendar.name}” ถูกปิดใช้งานแล้ว`)
-  return { name: asString(row.name), requiresTitle: row.requires_title === true, calendarId: calendar.id }
+  return { name: asString(row.name), requiresTitle: row.requires_title === true, requiresUser: row.requires_user !== false, calendarId: calendar.id }
+}
+
+/** The person an entry belongs to: required for a person type, always null for a lab-wide one. */
+function entryUserId(input: EntryInput, type: { requiresUser: boolean }) {
+  if (!type.requiresUser) return null
+  if (!input.userId) throw new HttpError(400, 'เลือกคนที่เป็นเจ้าของรายการ')
+  return input.userId
 }
 
 /** Only types that ask for a title keep one; it is mandatory for them. */
@@ -314,7 +323,7 @@ function snapshot(row: RecordRow) {
   return {
     calendarId: asString(row.calendar_id),
     typeId: asString(row.type_id),
-    userId: asString(row.user_id),
+    userId: nullableString(row.user_id),
     startDate: asString(row.start_date),
     endDate: asString(row.end_date),
     dayPart: asString(row.day_part),
@@ -326,16 +335,17 @@ function snapshot(row: RecordRow) {
 export async function createCalendarEntry(input: EntryInput, actor: BmActor) {
   validateEntry(input)
   const today = todayBangkok()
-  const denied = entryPermissionError(actor, input, today)
-  if (denied) throw new HttpError(403, denied)
   const type = await requireType(input.typeId)
+  const userId = entryUserId(input, type)
+  const denied = entryPermissionError(actor, { userId, endDate: input.endDate }, today)
+  if (denied) throw new HttpError(403, denied)
   const title = entryTitle(input, type)
   const users = await loadUsers()
-  if (!users.active.some((user) => user.id === input.userId)) throw new HttpError(400, 'ไม่พบผู้ใช้นี้ในทีม')
+  if (userId && !users.active.some((user) => user.id === userId)) throw new HttpError(400, 'ไม่พบผู้ใช้นี้ในทีม')
   const row = {
     calendar_id: type.calendarId,
     type_id: input.typeId,
-    user_id: input.userId,
+    user_id: userId,
     start_date: input.startDate,
     end_date: input.endDate,
     day_part: input.dayPart,
@@ -358,14 +368,15 @@ export async function updateCalendarEntry(id: string, input: EntryInput, actor: 
   const before = snapshot(current)
   const deniedBefore = entryPermissionError(actor, { userId: before.userId, endDate: before.endDate }, today)
   if (deniedBefore) throw new HttpError(403, deniedBefore)
-  const deniedAfter = entryPermissionError(actor, input, today)
-  if (deniedAfter) throw new HttpError(403, deniedAfter)
   const type = await requireType(input.typeId, input.typeId === before.typeId)
   if (type.calendarId !== before.calendarId) throw new HttpError(400, 'ย้ายรายการไปปฏิทินอื่นไม่ได้ ลบแล้วลงใหม่ในปฏิทินนั้นแทน')
+  const userId = entryUserId(input, type)
+  const deniedAfter = entryPermissionError(actor, { userId, endDate: input.endDate }, today)
+  if (deniedAfter) throw new HttpError(403, deniedAfter)
   const title = entryTitle(input, type)
   const users = await loadUsers()
-  if (input.userId !== before.userId && !users.active.some((user) => user.id === input.userId)) throw new HttpError(400, 'ไม่พบผู้ใช้นี้ในทีม')
-  const after = { calendarId: before.calendarId, typeId: input.typeId, userId: input.userId, startDate: input.startDate, endDate: input.endDate, dayPart: input.dayPart, title, note: input.note }
+  if (userId && userId !== before.userId && !users.active.some((user) => user.id === userId)) throw new HttpError(400, 'ไม่พบผู้ใช้นี้ในทีม')
+  const after = { calendarId: before.calendarId, typeId: input.typeId, userId, startDate: input.startDate, endDate: input.endDate, dayPart: input.dayPart, title, note: input.note }
   const { data, error } = await getAdminClient()
     .from('bm_calendar_events')
     .update({
@@ -415,7 +426,7 @@ export async function restoreCalendarEntry(id: string, actor: BmActor) {
   fail(error)
   const row = data as RecordRow | null
   if (!row || !row.deleted_at) throw new HttpError(404, 'ไม่พบรายการที่ลบ')
-  const denied = entryPermissionError(actor, { userId: asString(row.user_id), endDate: asString(row.end_date) }, todayBangkok())
+  const denied = entryPermissionError(actor, { userId: nullableString(row.user_id), endDate: asString(row.end_date) }, todayBangkok())
   if (denied) throw new HttpError(403, denied)
   if (actor.role !== 'Admin' && asString(row.deleted_by) !== actor.id) throw new HttpError(403, 'กู้คืนได้เฉพาะรายการที่ตัวเองลบ')
   const { data: restored, error: restoreError } = await getAdminClient()
@@ -438,7 +449,7 @@ export async function getCalendarEntryHistory(id: string): Promise<CalendarHisto
   ])
   fail(error)
   const typeName = (typeId: unknown) => types.find((type) => type.id === typeId)?.name ?? 'ประเภทที่ถูกลบ'
-  const userName = (userId: unknown) => users.nameById.get(asString(userId)) ?? 'ไม่พบผู้ใช้'
+  const userName = (userId: unknown) => (userId ? (users.nameById.get(asString(userId)) ?? 'ไม่พบผู้ใช้') : 'ไม่ระบุคน')
   return ((data ?? []) as RecordRow[]).map((row) => {
     const action = asString(row.action)
     const detail = (row.detail ?? {}) as { before?: RecordRow; after?: RecordRow }
@@ -447,7 +458,7 @@ export async function getCalendarEntryHistory(id: string): Promise<CalendarHisto
       const b = detail.before
       const a = detail.after
       if (b.typeId !== a.typeId) changes.push(`ประเภท ${typeName(b.typeId)} → ${typeName(a.typeId)}`)
-      if (b.userId !== a.userId) changes.push(`คน ${userName(b.userId)} → ${userName(a.userId)}`)
+      if ((b.userId ?? null) !== (a.userId ?? null)) changes.push(`คน ${userName(b.userId)} → ${userName(a.userId)}`)
       if (b.startDate !== a.startDate || b.endDate !== a.endDate) {
         changes.push(`วันที่ ${thaiRange(asString(b.startDate), asString(b.endDate))} → ${thaiRange(asString(a.startDate), asString(a.endDate))}`)
       }
@@ -473,6 +484,7 @@ export interface TypeInput {
   kind: CalendarKind
   inLineDigest: boolean
   requiresTitle: boolean
+  requiresUser: boolean
   isActive: boolean
 }
 
@@ -501,6 +513,7 @@ export async function createCalendarType(input: TypeInput & { calendarId?: strin
       kind: input.kind,
       in_line_digest: input.inLineDigest,
       requires_title: input.requiresTitle,
+      requires_user: input.requiresUser,
       is_active: input.isActive,
       sort_order: sortOrder,
       created_by: actor.id,
@@ -531,6 +544,7 @@ export async function updateCalendarType(id: string, { calendarId: _ignored, ...
       kind: input.kind,
       in_line_digest: input.inLineDigest,
       requires_title: input.requiresTitle,
+      requires_user: input.requiresUser,
       is_active: input.isActive,
       updated_at: new Date().toISOString(),
     })
@@ -754,11 +768,12 @@ export async function getCalendarTodaySummary(): Promise<CalendarTodaySummary> {
     if (!type) continue
     if (type.kind === 'duty') {
       const group = duty.get(type.id) ?? { typeName: type.name, iconKey: type.iconKey, colorKey: type.colorKey, people: [] }
-      group.people.push(event.userName)
+      const who = event.userName ?? event.title
+      if (who) group.people.push(who)
       duty.set(type.id, group)
     } else if (type.kind === 'leave') {
-      away.push({ name: event.userName, typeName: type.name, iconKey: type.iconKey, colorKey: type.colorKey, dayPart: event.dayPart })
-      if (event.dayPart === 'full') absent.add(event.userId)
+      away.push({ name: event.userName ?? event.title ?? type.name, typeName: type.name, iconKey: type.iconKey, colorKey: type.colorKey, dayPart: event.dayPart })
+      if (event.dayPart === 'full' && event.userId) absent.add(event.userId)
     }
   }
   const activeIds = new Set(users.active.map((user) => user.id))
@@ -822,7 +837,7 @@ export async function buildFeedForToken(token: string, scope: 'mine' | 'team', c
     const type = typeById.get(event.typeId)
     const part = event.dayPart === 'full' ? '' : ` (${DAY_PART_LABEL[event.dayPart]})`
     const what = `${type?.name ?? 'รายการ'}${event.title ? `: ${event.title}` : ''}`
-    const summary = scope === 'mine' ? `${what}${part}` : `${what} · ${event.userName}${part}`
+    const summary = scope === 'mine' || !event.userName ? `${what}${part}` : `${what} · ${event.userName}${part}`
     return { uid: `${event.id}@molecular-cbh-calendar`, startDate: event.startDate, endDate: event.endDate, summary, updatedAt: event.updatedAt }
   })
   for (const holiday of holidays.filter((item) => item.isDayOff)) {

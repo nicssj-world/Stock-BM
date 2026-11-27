@@ -54,6 +54,11 @@ describe('entry permissions', () => {
     expect(entryPermissionError(staff, { userId: 'u2', endDate: '2026-11-20' }, today)).toContain('ของตัวเอง')
   })
 
+  it('lets any staff manage a lab-wide entry, within the same 7-day window', () => {
+    expect(entryPermissionError(staff, { userId: null, endDate: '2026-11-20' }, today)).toBeNull()
+    expect(entryPermissionError(staff, { userId: null, endDate: '2026-11-11' }, today)).toContain('เกิน 7 วัน')
+  })
+
   it('lets admins edit anything', () => {
     expect(canEditEntry(admin, { userId: 'u2', endDate: '2025-01-01' }, today)).toBe(true)
   })
@@ -208,6 +213,19 @@ describe('heads-up digest (sent the day before)', () => {
     // Lane 0 is free again from Tuesday.
     expect(byId.later).toMatchObject({ column: 3, span: 4, lane: 0, continuesAfter: true })
     expect(lanes).toBe(2)
+  })
+
+  it('names a lab-wide entry by its title, or only its type, never an empty text', () => {
+    const ot: DigestEntry = { typeName: 'OT NIPT 2 ทุ่ม', iconKey: 'flag', colorKey: 'indigo', kind: 'duty', sortOrder: 5, userName: null, dayPart: 'full' }
+    const titled: DigestEntry = { ...ot, typeName: 'ตรวจเยี่ยม', kind: 'other', title: 'สรพ.', dayPart: 'am' }
+    const days: DigestDay[] = [{ date: '2026-11-28', isOffDay: false, holidayName: null, entries: [ot, titled] }]
+    const message = buildDigestMessage('2026-11-27', days)
+    expect(message).toContain('OT NIPT 2 ทุ่ม\n')
+    expect(message).not.toContain('OT NIPT 2 ทุ่ม:')
+    expect(message).toContain('ตรวจเยี่ยม: สรพ. (เช้า)')
+    const json = JSON.stringify(buildDigestFlex('2026-11-27', days).contents)
+    expect(json).not.toContain('"text":""')
+    expect(json).toContain('"text":"สรพ. (เช้า)"')
   })
 
   it('announces a multi-day entry once, with its range', () => {
