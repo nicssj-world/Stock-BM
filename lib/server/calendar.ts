@@ -192,9 +192,11 @@ async function requireCalendar(id: string) {
   return mapCalendar(data as RecordRow, true)
 }
 
-async function loadTypes(calendarId?: string): Promise<CalendarType[]> {
+async function loadTypes(calendarId?: string, forButtons = false): Promise<CalendarType[]> {
   const admin = getAdminClient()
-  let typeQuery = admin.from('bm_calendar_types').select('*').order('sort_order').order('name')
+  let typeQuery = admin.from('bm_calendar_types').select('*')
+  if (forButtons) typeQuery = typeQuery.order('button_sort_order', { ascending: true, nullsFirst: false })
+  typeQuery = typeQuery.order('sort_order').order('name').order('id')
   let usageQuery = admin.from('bm_calendar_events').select('type_id')
   if (calendarId) {
     typeQuery = typeQuery.eq('calendar_id', calendarId)
@@ -242,7 +244,7 @@ export async function getCalendarWorkspace(from: string, to: string, actor: BmAc
   const calendars = isAdmin ? allCalendars : allCalendars.filter((calendar) => calendar.isActive)
   const calendar = resolveCalendar(calendars, calendarId, isAdmin)
   const [types, events, holidays, settings] = await Promise.all([
-    loadTypes(calendar.id),
+    loadTypes(calendar.id, true),
     loadEvents(from, to, users, { calendarId: calendar.id }),
     loadHolidays(from, to),
     getAdminClient().from('bm_calendar_settings').select('holidays_synced_at,holidays_sync_error').eq('id', true).maybeSingle(),
@@ -507,7 +509,7 @@ export async function createCalendarType(input: TypeInput & { calendarId?: strin
     .single()
   fail(error)
   await writeAudit(actor, 'calendar.type_create', 'calendar-type', asString((data as RecordRow).id), { ...input, calendarId: calendar.id, name })
-  return loadTypes(calendar.id)
+  return loadTypes(calendar.id, true)
 }
 
 /** A type never moves to another calendar; a calendarId in the input is ignored. */
@@ -538,7 +540,7 @@ export async function updateCalendarType(id: string, { calendarId: _ignored, ...
   fail(error)
   if (!data) throw new HttpError(404, 'ไม่พบประเภทนี้')
   await writeAudit(actor, 'calendar.type_update', 'calendar-type', id, { ...input, name })
-  return loadTypes(calendarId)
+  return loadTypes(calendarId, true)
 }
 
 /** Permanently remove only an unused type, including checks for soft-deleted entries. */
@@ -567,7 +569,21 @@ export async function deleteCalendarType(id: string, actor: BmActor) {
   fail(error)
   if (!data) throw new HttpError(404, 'ไม่พบประเภทนี้')
   await writeAudit(actor, 'calendar.type_delete', 'calendar-type', id, { calendarId, name: asString((current as RecordRow).name) })
-  return loadTypes(calendarId)
+  return loadTypes(calendarId, true)
+}
+
+/** Persist button order independently from the event display order. */
+export async function reorderCalendarTypeButtons(input: { calendarId: string; ids: string[]; expectedIds: string[] }, actor: BmActor) {
+  assertAdmin(actor)
+  const { error } = await getAdminClient().rpc('bm_reorder_calendar_type_buttons', {
+    p_calendar_id: input.calendarId,
+    p_ids: input.ids,
+    p_expected_ids: input.expectedIds,
+  })
+  if (error?.code === '40001') throw new HttpError(409, 'ลำดับหรือประเภทรายการมีการเปลี่ยนแปลง กรุณาปิดและเปิดหน้าประเภทใหม่ก่อนจัดลำดับอีกครั้ง')
+  if (error?.code === '22023') throw new HttpError(400, 'รายการประเภทไม่ถูกต้อง')
+  fail(error)
+  return loadTypes(input.calendarId, true)
 }
 
 /* ---------- calendars (Admin) ---------- */

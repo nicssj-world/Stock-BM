@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useId, useMemo, useState, type FormEvent } from 'react'
-import { CalendarRange, Clock3, Copy, LoaderCircle, Pencil, RefreshCw, StickyNote, Trash2, Type as TitleIcon, UserRound } from 'lucide-react'
+import { ArrowDown, ArrowUp, CalendarRange, Clock3, Copy, LoaderCircle, Pencil, RefreshCw, StickyNote, Trash2, Type as TitleIcon, UserRound } from 'lucide-react'
 import type { BmActor } from '@/lib/bm/types'
 import { formatThaiDateTime } from '@/lib/bm/thai-date'
 import { DAY_PART_LABEL, entryPermissionError, isLockedForStaff, KIND_LABEL, STAFF_EDIT_WINDOW_DAYS, THAI_DAYS_SHORT, THAI_MONTHS_SHORT, dayOfWeek, daysBetween, thaiRange } from '@/lib/calendar/rules'
@@ -471,13 +471,46 @@ function TypePanel({
   onEditingChange: (editing: boolean) => void
 }) {
   const [draft, setDraft] = useState<TypeDraft | null>(null)
-  const isEditing = draft !== null
+  const [orderDraft, setOrderDraft] = useState<{ ids: string[]; expectedIds: string[] } | null>(null)
+  const isEditing = draft !== null || orderDraft !== null
   useEffect(() => onEditingChange(isEditing), [isEditing, onEditingChange])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [notice, setNotice] = useState('')
   const currentType = types.find((type) => type.id === draft?.id)
+  const orderedTypes = orderDraft ? orderDraft.ids.flatMap((id) => types.filter((type) => type.id === id)) : types
+
+  function moveType(id: string, direction: -1 | 1) {
+    setOrderDraft((current) => {
+      if (!current) return current
+      const index = current.ids.indexOf(id)
+      const target = index + direction
+      if (index < 0 || target < 0 || target >= current.ids.length) return current
+      const ids = [...current.ids]
+      ;[ids[index], ids[target]] = [ids[target], ids[index]]
+      return { ...current, ids }
+    })
+  }
+
+  async function saveOrder() {
+    if (!orderDraft || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api<{ types: CalendarType[] }>('/api/calendar/types', {
+        method: 'PATCH',
+        body: JSON.stringify({ calendarId, ...orderDraft }),
+      })
+      onChanged(result.types)
+      setOrderDraft(null)
+      setNotice('บันทึกลำดับประเภทเรียบร้อยแล้ว')
+    } catch (orderError) {
+      setError(messageOf(orderError, 'บันทึกลำดับไม่สำเร็จ'))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function save() {
     if (!draft) return
@@ -522,8 +555,10 @@ function TypePanel({
       {!draft ? (
         <div className="grid gap-3">
           {notice ? <p role="status" className="text-sm text-[#0b7f76]">{notice}</p> : null}
+          {orderDraft ? <p className="text-xs text-[#55727c]">กดลูกศรขึ้นหรือลงเพื่อจัดลำดับ แล้วกดบันทึกลำดับ</p> : null}
+          {error ? <p role="alert" className="text-[13px] font-semibold text-[#af3541]">{error}</p> : null}
           <ul className="grid gap-1.5">
-            {types.map((type) => (
+            {orderedTypes.map((type, index) => (
               <li key={type.id} className={`flex items-center gap-2.5 rounded-[9px] border border-[#d6e2e3] px-2.5 py-2 ${type.isActive ? '' : 'opacity-55'}`} style={colorVar(type.colorKey)}>
                 <span className="cal-badge"><CalendarIcon iconKey={type.iconKey} size={20} /></span>
                 <span className="grid min-w-0 flex-1">
@@ -532,19 +567,34 @@ function TypePanel({
                     {KIND_LABEL[type.kind]}{type.inLineDigest ? ' · แจ้ง LINE' : ''}{type.requiresTitle ? ' · ต้องใส่หัวข้อ' : ''}{type.isActive ? '' : ' · ปิดใช้งาน'} · ใช้ {type.usageCount} รายการ
                   </span>
                 </span>
-                <Button
+                {orderDraft ? (
+                  <span className="flex shrink-0 gap-1">
+                    <Button type="button" variant="ghost" className="!size-10 !min-h-10 !p-0" aria-label={`เลื่อน ${type.name} ขึ้น`} title="เลื่อนขึ้น" disabled={busy || index === 0} onClick={() => moveType(type.id, -1)}><ArrowUp className="size-4" /></Button>
+                    <Button type="button" variant="ghost" className="!size-10 !min-h-10 !p-0" aria-label={`เลื่อน ${type.name} ลง`} title="เลื่อนลง" disabled={busy || index === orderedTypes.length - 1} onClick={() => moveType(type.id, 1)}><ArrowDown className="size-4" /></Button>
+                  </span>
+                ) : <Button
                   variant="secondary"
                   onClick={() => setDraft({ id: type.id, name: type.name, iconKey: (ICON_KEYS as readonly string[]).includes(type.iconKey) ? (type.iconKey as CalendarIconKey) : 'star', colorKey: type.colorKey, kind: type.kind, inLineDigest: type.inLineDigest, requiresTitle: type.requiresTitle, isActive: type.isActive })}
                 >
                   แก้ไข
-                </Button>
+                </Button>}
               </li>
             ))}
           </ul>
-          <p className="text-xs text-[#6a838c]">ลบประเภทที่ยังไม่เคยใช้งานได้ หากมีรายการที่เกี่ยวข้องให้ปิดใช้งานแทน</p>
-          <div className="flex justify-end">
-            <Button onClick={() => setDraft({ id: null, name: '', iconKey: 'flask', colorKey: 'green', kind: 'other', inLineDigest: false, requiresTitle: false, isActive: true })}>เพิ่มประเภท</Button>
-          </div>
+          {orderDraft ? (
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" disabled={busy} onClick={() => { setOrderDraft(null); setError('') }}>ยกเลิก</Button>
+              <Button onClick={saveOrder} disabled={busy || orderDraft.ids.every((id, index) => id === orderDraft.expectedIds[index])}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : null}บันทึกลำดับ</Button>
+            </div>
+          ) : (
+            <>
+              <p className="text-xs text-[#6a838c]">ลบประเภทที่ยังไม่เคยใช้งานได้ หากมีรายการที่เกี่ยวข้องให้ปิดใช้งานแทน</p>
+              <div className="flex justify-end gap-2">
+                <Button variant="secondary" disabled={types.length < 2} onClick={() => { const ids = types.map((type) => type.id); setOrderDraft({ ids, expectedIds: [...ids] }); setError(''); setNotice('') }}>จัดลำดับ</Button>
+                <Button onClick={() => setDraft({ id: null, name: '', iconKey: 'flask', colorKey: 'green', kind: 'other', inLineDigest: false, requiresTitle: false, isActive: true })}>เพิ่มประเภท</Button>
+              </div>
+            </>
+          )}
         </div>
       ) : (
         <div className="grid gap-4">
