@@ -552,10 +552,9 @@ function MonthWeek({ week, month, onDay, ...props }: ViewProps & { week: string[
   const multiDay = [...new Map(lists.flat().filter((event) => event.startDate !== event.endDate).map((event) => [event.id, event])).values()]
   const { bars, lanes } = layoutWeekBars(multiDay, week[0])
   const shownLanes = Math.min(lanes, MAX_BAR_LANES)
-  const listRow = 3 + shownLanes
 
   return (
-    <div className="cal-week" style={{ gridTemplateRows: `auto auto${shownLanes ? ` repeat(${shownLanes}, auto)` : ''} 1fr` }}>
+    <div className="cal-week" style={{ gridTemplateRows: `auto${shownLanes ? ` repeat(${shownLanes}, auto)` : ''} 1fr` }}>
       {week.map((day, column) => {
         const holiday = props.holidayByDate.get(day)
         const state = [
@@ -587,15 +586,6 @@ function MonthWeek({ week, month, onDay, ...props }: ViewProps & { week: string[
         )
       })}
 
-      {week.map((day, column) => {
-        const holiday = props.holidayByDate.get(day)
-        return holiday ? (
-          <div key={`hol-${day}`} className="cal-holiday cal-week-item" style={{ gridColumn: column + 1, gridRow: 2 }} title={holiday}>
-            <span>{holiday}</span>
-          </div>
-        ) : null
-      })}
-
       {bars
         .filter((bar) => bar.lane < shownLanes)
         .map((bar) => (
@@ -606,21 +596,26 @@ function MonthWeek({ week, month, onDay, ...props }: ViewProps & { week: string[
             mine={bar.event.userId === props.actorId}
             onOpen={props.onOpen}
             className={`cal-bar ${bar.continuesBefore ? 'continues-before' : ''} ${bar.continuesAfter ? 'continues-after' : ''}`}
-            gridStyle={{ gridColumn: `${bar.column + 1} / span ${bar.span}`, gridRow: 3 + bar.lane }}
+            gridStyle={{ gridColumn: `${bar.column + 1} / span ${bar.span}`, gridRow: 2 + bar.lane }}
             range
           />
         ))}
 
       {week.map((day, column) => {
         const singles = lists[column].filter((event) => event.startDate === event.endDate)
-        const hiddenBars = bars.filter((bar) => bar.lane >= shownLanes && bar.column <= column && column < bar.column + bar.span).length
-        const budget = Math.max(1, (props.holidayByDate.has(day) ? 3 : 4) - shownLanes)
+        const holiday = props.holidayByDate.get(day)
+        const covering = bars.filter((bar) => bar.column <= column && column < bar.column + bar.span)
+        const hiddenBars = covering.filter((bar) => bar.lane >= shownLanes).length
+        // Each day's list starts right under its own bars, so one day never pushes another down.
+        const depth = Math.max(0, ...covering.filter((bar) => bar.lane < shownLanes).map((bar) => bar.lane + 1))
+        const budget = Math.max(1, (holiday ? 3 : 4) - depth)
         const fits = singles.length <= budget && hiddenBars === 0
         const shown = fits ? singles : singles.slice(0, Math.max(0, budget - 1))
         const more = singles.length - shown.length + hiddenBars
-        if (!shown.length && !more) return null
+        if (!holiday && !shown.length && !more) return null
         return (
-          <div key={`list-${day}`} className="cal-week-list" style={{ gridColumn: column + 1, gridRow: listRow }}>
+          <div key={`list-${day}`} className="cal-week-list" style={{ gridColumn: column + 1, gridRow: `${2 + depth} / -1` }}>
+            {holiday ? <div className="cal-holiday" title={holiday}><span>{holiday}</span></div> : null}
             {shown.map((event) => (
               <Chip key={event.id} event={event} type={props.typeById.get(event.typeId)} mine={event.userId === props.actorId} onOpen={props.onOpen} />
             ))}
