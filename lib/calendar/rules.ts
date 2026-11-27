@@ -98,6 +98,49 @@ export function thaiRange(startDate: string, endDate: string) {
   return startDate === endDate ? thaiShortDate(startDate) : `${thaiShortDate(startDate)} – ${thaiShortDate(endDate)}`
 }
 
+/** "21–22 ธ.ค." within a month, "30 พ.ย. – 2 ธ.ค." across months. */
+export function thaiCompactRange(startDate: string, endDate: string) {
+  if (startDate === endDate) return thaiShortDate(startDate)
+  if (startDate.slice(0, 7) === endDate.slice(0, 7)) return `${Number(startDate.slice(8))}–${thaiShortDate(endDate)}`
+  return thaiRange(startDate, endDate)
+}
+
+/* ---------- month view: multi-day bars ---------- */
+
+export interface WeekBar<T> {
+  event: T
+  /** 0-based column (Sunday = 0) where the bar starts within the week, and how many days it spans. */
+  column: number
+  span: number
+  lane: number
+  continuesBefore: boolean
+  continuesAfter: boolean
+}
+
+/**
+ * Lays out multi-day entries of one week as bars, Google-Calendar style: each bar takes
+ * the lowest free lane; earlier and longer bars go first, ties keep the given order.
+ */
+export function layoutWeekBars<T extends { id: string; startDate: string; endDate: string }>(events: T[], weekStart: string): { bars: WeekBar<T>[]; lanes: number } {
+  const weekEnd = addDays(weekStart, 6)
+  const segments = events
+    .filter((event) => event.startDate !== event.endDate && event.startDate <= weekEnd && event.endDate >= weekStart)
+    .map((event, order) => {
+      const from = event.startDate < weekStart ? weekStart : event.startDate
+      const to = event.endDate > weekEnd ? weekEnd : event.endDate
+      return { event, order, column: daysBetween(weekStart, from), span: daysBetween(from, to) + 1 }
+    })
+    .sort((a, b) => a.column - b.column || b.span - a.span || a.order - b.order)
+  const laneEnds: number[] = []
+  const bars: WeekBar<T>[] = segments.map(({ event, column, span }) => {
+    let lane = laneEnds.findIndex((end) => end < column)
+    if (lane === -1) lane = laneEnds.length
+    laneEnds[lane] = column + span - 1
+    return { event, column, span, lane, continuesBefore: event.startDate < weekStart, continuesAfter: event.endDate > weekEnd }
+  })
+  return { bars, lanes: laneEnds.length }
+}
+
 /* ---------- permissions ---------- */
 
 /** Staff may change their own entries until this many days after the entry ends. */
@@ -188,11 +231,27 @@ export interface DigestEntry {
   dayPart: DayPart
   /** Shared title (e.g. the meeting's topic); never the private note. */
   title?: string | null
+  /** Set for a multi-day entry: it is announced once, with its whole range. */
+  startDate?: string
+  endDate?: string
 }
 
-/** "เมย์ (บ่าย)" */
+/** "เมย์ (บ่าย)", or "เมย์ (8–9 ธ.ค.)" for a multi-day entry. */
 function digestName(entry: DigestEntry) {
+  if (entry.startDate && entry.endDate && entry.startDate !== entry.endDate) return `${entry.userName} (${thaiCompactRange(entry.startDate, entry.endDate)})`
   return entry.dayPart === 'full' ? entry.userName : `${entry.userName} (${DAY_PART_LABEL[entry.dayPart]})`
+}
+
+/**
+ * The one day a digest announces an entry: its first day that a digest would mention
+ * (duty counts on any day; leave and other entries only on workdays, see relevantEntries).
+ * Every later day of a multi-day entry stays quiet. Null when no day qualifies.
+ */
+export function digestAnnounceDay(entry: { startDate: string; endDate: string; kind: CalendarKind }, isOffDay: (dateKey: string) => boolean) {
+  for (let day = entry.startDate; day <= entry.endDate; day = addDays(day, 1)) {
+    if (entry.kind === 'duty' || !isOffDay(day)) return day
+  }
+  return null
 }
 
 /** "เมย์ (บ่าย) “ประชุม QC”" */

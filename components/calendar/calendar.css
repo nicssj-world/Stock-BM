@@ -47,11 +47,23 @@
   border-bottom: 1px solid var(--cal-line-soft);
   background: white;
 }
-.cal-cell:nth-child(7n) { border-right: 0; }
+.cal-cell.is-last-col { border-right: 0; }
 .cal-cell.is-weekend { background: var(--cal-we-bg); }
 .cal-cell.is-holiday { background: var(--cal-hol-bg); }
 .cal-cell.is-outside { background: var(--cal-surface-2); }
-.cal-cell.is-outside .cal-dnum { opacity: 0.45; }
+
+/* Month week: the 7 .cal-cell backgrounds span every row; day numbers, holidays,
+   multi-day bars (one row per lane) and single-day chips are laid over them. */
+.cal-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); row-gap: 3px; }
+.cal-week > * { min-width: 0; }
+.cal-week-head { z-index: 1; padding: 6px 6px 0; pointer-events: none; }
+.cal-week-head .cal-dnum { pointer-events: auto; }
+.cal-week-head.is-outside .cal-dnum { opacity: 0.45; }
+.cal-week-item { z-index: 1; margin: 0 6px; }
+.cal-week-list { z-index: 1; display: flex; flex-direction: column; gap: 3px; padding: 0 6px 6px; }
+.cal-bar { z-index: 1; width: auto; margin: 0 6px; }
+.cal-bar.continues-before { margin-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.cal-bar.continues-after { margin-right: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
 .cal-dnum {
   display: grid;
   width: 26px;
@@ -62,9 +74,9 @@
   font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
 }
-.cal-cell.is-weekend .cal-dnum { color: var(--cal-we-ink); }
-.cal-cell.is-holiday .cal-dnum { color: var(--cal-hol-ink); font-weight: 600; }
-.cal-cell.is-today .cal-dnum { background: var(--cal-accent); color: white; font-weight: 600; }
+.cal-week-head.is-weekend .cal-dnum { color: var(--cal-we-ink); }
+.cal-week-head.is-holiday .cal-dnum { color: var(--cal-hol-ink); font-weight: 600; }
+.cal-week-head.is-today .cal-dnum { background: var(--cal-accent); color: white; font-weight: 600; }
 .cal-add-day {
   display: grid;
   width: 26px;

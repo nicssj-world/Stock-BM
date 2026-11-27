@@ -10,6 +10,7 @@ import {
   buildIcsFeed,
   covers,
   DAY_PART_LABEL,
+  digestAnnounceDay,
   entryPermissionError,
   GOOGLE_TH_HOLIDAY_ICS,
   isWeekend,
@@ -920,13 +921,26 @@ async function runDigestFor(calendar: CalendarBook, date: string, users: LoadedU
     date: day,
     isOffDay: isOffDay(day),
     holidayName: holidayByDate.get(day) ?? null,
+    // A multi-day entry is announced once, on its first relevant day, with its whole range.
     entries: events
       .filter((event) => covers(event, day))
       .flatMap((event) => {
         const type = typeById.get(event.typeId)
-        return type?.inLineDigest
-          ? [{ typeName: type.name, iconKey: type.iconKey, colorKey: type.colorKey, kind: type.kind, sortOrder: type.sortOrder, userName: event.userName, dayPart: event.dayPart, title: event.title }]
-          : []
+        if (!type?.inLineDigest || digestAnnounceDay({ ...event, kind: type.kind }, isOffDay) !== day) return []
+        return [
+          {
+            typeName: type.name,
+            iconKey: type.iconKey,
+            colorKey: type.colorKey,
+            kind: type.kind,
+            sortOrder: type.sortOrder,
+            userName: event.userName,
+            dayPart: event.dayPart,
+            title: event.title,
+            startDate: event.startDate,
+            endDate: event.endDate,
+          },
+        ]
       }),
   }))
 

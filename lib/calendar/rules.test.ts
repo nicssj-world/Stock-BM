@@ -6,15 +6,18 @@ import {
   buildDigestMessage,
   buildIcsFeed,
   canEditEntry,
+  digestAnnounceDay,
   digestTargetDays,
   entryPermissionError,
   isWeekend,
   foldIcsLine,
   isDateKey,
+  layoutWeekBars,
   monthGridRange,
   normalizeTypeName,
   parseGoogleHolidayIcs,
   shouldSendDigest,
+  thaiCompactRange,
   weekRange,
   type DigestDay,
   type DigestEntry,
@@ -203,6 +206,41 @@ describe('heads-up digest (sent the workday before)', () => {
     // every Flex color must be #RRGGBB
     for (const color of json.match(/"(?:color|backgroundColor)":"[^"]*"/g) ?? []) expect(color).toMatch(/"#[0-9a-f]{6}"$/i)
     expect(JSON.stringify(buildDigestFlex('2026-12-09', days).contents)).not.toContain('footer')
+  })
+
+  it('lays multi-day entries out as week bars in the lowest free lane', () => {
+    const week = '2026-12-20' // Sun 20 – Sat 26
+    const events = [
+      { id: 'single', startDate: '2026-12-21', endDate: '2026-12-21' },
+      { id: 'meeting', startDate: '2026-12-21', endDate: '2026-12-22' },
+      { id: 'vacation', startDate: '2026-12-17', endDate: '2026-12-21' },
+      { id: 'later', startDate: '2026-12-23', endDate: '2026-12-30' },
+    ]
+    const { bars, lanes } = layoutWeekBars(events, week)
+    const byId = Object.fromEntries(bars.map((bar) => [bar.event.id, bar]))
+    expect(bars.map((bar) => bar.event.id)).toEqual(['vacation', 'meeting', 'later'])
+    expect(byId.vacation).toMatchObject({ column: 0, span: 2, lane: 0, continuesBefore: true, continuesAfter: false })
+    expect(byId.meeting).toMatchObject({ column: 1, span: 2, lane: 1 })
+    // Lane 0 is free again from Tuesday.
+    expect(byId.later).toMatchObject({ column: 3, span: 4, lane: 0, continuesAfter: true })
+    expect(lanes).toBe(2)
+  })
+
+  it('announces a multi-day entry once, with its range', () => {
+    const weekend = (day: string) => isWeekend(day)
+    // Mon 8 – Tue 9 Dec: announced for Mon 8 only.
+    expect(digestAnnounceDay({ startDate: '2026-12-08', endDate: '2026-12-09', kind: 'leave' }, weekend)).toBe('2026-12-08')
+    // Leave starting on a Saturday is first announced for Monday; duty on the Saturday itself.
+    expect(digestAnnounceDay({ startDate: '2026-12-05', endDate: '2026-12-08', kind: 'leave' }, weekend)).toBe('2026-12-07')
+    expect(digestAnnounceDay({ startDate: '2026-12-05', endDate: '2026-12-08', kind: 'duty' }, weekend)).toBe('2026-12-05')
+    expect(digestAnnounceDay({ startDate: '2026-12-05', endDate: '2026-12-06', kind: 'leave' }, weekend)).toBeNull()
+
+    const meeting: DigestEntry = { typeName: 'ประชุม / อบรม', iconKey: 'presentation', colorKey: 'violet', kind: 'other', sortOrder: 50, userName: 'Siriwat J.', dayPart: 'full', title: 'HIV กองควบคุมโรค', startDate: '2026-12-21', endDate: '2026-12-22' }
+    const vacation: DigestEntry = { typeName: 'ลาพักร้อน', iconKey: 'umbrella', colorKey: 'sky', kind: 'leave', sortOrder: 40, userName: 'Siritorn C.', dayPart: 'full', startDate: '2026-11-30', endDate: '2026-12-02' }
+    const message = buildDigestMessage('2026-11-27', [{ date: '2026-11-30', isOffDay: false, holidayName: null, entries: [meeting, vacation] }])
+    expect(message).toContain('Siriwat J. (21–22 ธ.ค.) “HIV กองควบคุมโรค”')
+    expect(message).toContain('Siritorn C. (30 พ.ย. – 2 ธ.ค.)')
+    expect(thaiCompactRange('2026-12-08', '2026-12-08')).toBe('8 ธ.ค.')
   })
 
   it('names a calendar other than the main one in the text and the Flex header', () => {

@@ -14,6 +14,7 @@ import {
   eachDay,
   isWeekend,
   KIND_LABEL,
+  layoutWeekBars,
   monthGridRange,
   THAI_DAYS,
   THAI_DAYS_SHORT,
@@ -452,16 +453,35 @@ type ViewProps = {
   canAdd: boolean
 }
 
-function Chip({ event, type, mine, onOpen }: { event: CalendarEvent; type: CalendarType | undefined; mine: boolean; onOpen: (event: CalendarEvent) => void }) {
+function Chip({
+  event,
+  type,
+  mine,
+  onOpen,
+  className = '',
+  gridStyle,
+  range = false,
+}: {
+  event: CalendarEvent
+  type: CalendarType | undefined
+  mine: boolean
+  onOpen: (event: CalendarEvent) => void
+  className?: string
+  /** Placement when the chip is a bar in the month grid. */
+  gridStyle?: React.CSSProperties
+  /** Multi-day bar: name the whole range instead of the day part. */
+  range?: boolean
+}) {
   const part = event.dayPart === 'full' ? '' : DAY_PART_LABEL[event.dayPart]
+  const when = range ? thaiRange(event.startDate, event.endDate) : DAY_PART_LABEL[event.dayPart]
   return (
     <button
       type="button"
-      className={`cal-chip ${mine ? 'is-mine' : ''}`}
-      style={colorStyle(type)}
+      className={`cal-chip ${mine ? 'is-mine' : ''} ${className}`}
+      style={{ ...colorStyle(type), ...gridStyle }}
       onClick={() => onOpen(event)}
-      title={`${type?.name ?? ''}${event.title ? `: ${event.title}` : ''} · ${event.userName}${event.note ? ` — ${event.note}` : ''}`}
-      aria-label={`${type?.name ?? 'รายการ'}${event.title ? ` ${event.title}` : ''} ${event.userName} ${DAY_PART_LABEL[event.dayPart]}`}
+      title={`${type?.name ?? ''}${event.title ? `: ${event.title}` : ''} · ${event.userName}${range ? ` · ${when}` : ''}${event.note ? ` — ${event.note}` : ''}`}
+      aria-label={`${type?.name ?? 'รายการ'}${event.title ? ` ${event.title}` : ''} ${event.userName} ${when}`}
     >
       <CalendarIcon iconKey={type?.iconKey ?? 'star'} size={15} className="flex-none text-[var(--c)]" />
       <span className="min-w-0 truncate">
@@ -504,9 +524,14 @@ function EmptyDay({ day, onAdd, canAdd, text = 'ไม่มีรายกา�
 
 /* ---------- month ---------- */
 
+/** Bar lanes shown per week; more multi-day entries fold into the day's "+N". */
+const MAX_BAR_LANES = 3
+
 function MonthGrid({ month, onDay, ...props }: ViewProps & { month: string; onDay: (day: string) => void }) {
   const { from, to } = monthGridRange(month)
   const days = eachDay(from, to)
+  const weeks: string[][] = []
+  for (let index = 0; index < days.length; index += 7) weeks.push(days.slice(index, index + 7))
   return (
     <div>
       <div className="cal-grid border-b border-[#d6e2e3]">
@@ -514,41 +539,97 @@ function MonthGrid({ month, onDay, ...props }: ViewProps & { month: string; onDa
           <div key={name} className={`cal-dow px-2.5 py-2 text-xs font-semibold text-[#6a838c] ${index === 0 || index === 6 ? 'is-weekend' : ''}`}>{name}</div>
         ))}
       </div>
-      <div className="cal-grid">
-        {days.map((day) => {
-          const list = props.eventsOn(day)
-          const holiday = props.holidayByDate.get(day)
-          const max = holiday ? 3 : 4
-          const shown = list.length > max ? list.slice(0, max - 1) : list
-          const classes = [
-            'cal-cell',
-            day.slice(0, 7) !== month ? 'is-outside' : '',
-            isWeekend(day) ? 'is-weekend' : '',
-            holiday ? 'is-holiday' : '',
-            day === props.today ? 'is-today' : '',
-          ].join(' ')
-          const [, m, d] = day.split('-').map(Number)
-          return (
-            <div key={day} className={classes}>
-              <div className="flex items-center justify-between">
-                <button type="button" className="cal-dnum hover:ring-1 hover:ring-[#d6e2e3]" onClick={() => onDay(day)} aria-label={`ดูวันที่ ${d} ${THAI_MONTHS[m - 1]}`}>{d}</button>
-                {props.canAdd ? (
-                  <button type="button" className="cal-add-day" onClick={() => props.onAdd(day)} aria-label={`ลงรายการวันที่ ${d} ${THAI_MONTHS[m - 1]}`}>
-                    <Plus className="size-4" />
-                  </button>
-                ) : null}
-              </div>
-              {holiday ? <div className="cal-holiday" title={holiday}><span>{holiday}</span></div> : null}
-              {shown.map((event) => (
-                <Chip key={event.id} event={event} type={props.typeById.get(event.typeId)} mine={event.userId === props.actorId} onOpen={props.onOpen} />
-              ))}
-              {list.length > shown.length ? (
-                <button type="button" className="cal-more" onClick={() => onDay(day)}>+{list.length - shown.length} รายการ</button>
-              ) : null}
-            </div>
-          )
-        })}
-      </div>
+      {weeks.map((week) => (
+        <MonthWeek key={week[0]} week={week} month={month} onDay={onDay} {...props} />
+      ))}
+    </div>
+  )
+}
+
+function MonthWeek({ week, month, onDay, ...props }: ViewProps & { week: string[]; month: string; onDay: (day: string) => void }) {
+  const lists = week.map((day) => props.eventsOn(day))
+  // Multi-day entries become bars across the week; the rest stay chips in their day.
+  const multiDay = [...new Map(lists.flat().filter((event) => event.startDate !== event.endDate).map((event) => [event.id, event])).values()]
+  const { bars, lanes } = layoutWeekBars(multiDay, week[0])
+  const shownLanes = Math.min(lanes, MAX_BAR_LANES)
+  const listRow = 3 + shownLanes
+
+  return (
+    <div className="cal-week" style={{ gridTemplateRows: `auto auto${shownLanes ? ` repeat(${shownLanes}, auto)` : ''} 1fr` }}>
+      {week.map((day, column) => {
+        const holiday = props.holidayByDate.get(day)
+        const state = [
+          day.slice(0, 7) !== month ? 'is-outside' : '',
+          isWeekend(day) ? 'is-weekend' : '',
+          holiday ? 'is-holiday' : '',
+          day === props.today ? 'is-today' : '',
+        ].join(' ')
+        const [, m, d] = day.split('-').map(Number)
+        return (
+          <div key={day} className={`cal-cell ${state} ${column === 6 ? 'is-last-col' : ''}`} style={{ gridColumn: column + 1, gridRow: '1 / -1' }}>
+            {props.canAdd ? (
+              <button type="button" className="cal-add-day absolute top-1.5 right-1.5" onClick={() => props.onAdd(day)} aria-label={`ลงรายการวันที่ ${d} ${THAI_MONTHS[m - 1]}`}>
+                <Plus className="size-4" />
+              </button>
+            ) : null}
+          </div>
+        )
+      })}
+
+      {week.map((day, column) => {
+        const holiday = props.holidayByDate.get(day)
+        const state = [day.slice(0, 7) !== month ? 'is-outside' : '', isWeekend(day) ? 'is-weekend' : '', holiday ? 'is-holiday' : '', day === props.today ? 'is-today' : ''].join(' ')
+        const [, m, d] = day.split('-').map(Number)
+        return (
+          <div key={`head-${day}`} className={`cal-week-head ${state}`} style={{ gridColumn: column + 1, gridRow: 1 }}>
+            <button type="button" className="cal-dnum hover:ring-1 hover:ring-[#d6e2e3]" onClick={() => onDay(day)} aria-label={`ดูวันที่ ${d} ${THAI_MONTHS[m - 1]}`}>{d}</button>
+          </div>
+        )
+      })}
+
+      {week.map((day, column) => {
+        const holiday = props.holidayByDate.get(day)
+        return holiday ? (
+          <div key={`hol-${day}`} className="cal-holiday cal-week-item" style={{ gridColumn: column + 1, gridRow: 2 }} title={holiday}>
+            <span>{holiday}</span>
+          </div>
+        ) : null
+      })}
+
+      {bars
+        .filter((bar) => bar.lane < shownLanes)
+        .map((bar) => (
+          <Chip
+            key={bar.event.id}
+            event={bar.event}
+            type={props.typeById.get(bar.event.typeId)}
+            mine={bar.event.userId === props.actorId}
+            onOpen={props.onOpen}
+            className={`cal-bar ${bar.continuesBefore ? 'continues-before' : ''} ${bar.continuesAfter ? 'continues-after' : ''}`}
+            gridStyle={{ gridColumn: `${bar.column + 1} / span ${bar.span}`, gridRow: 3 + bar.lane }}
+            range
+          />
+        ))}
+
+      {week.map((day, column) => {
+        const singles = lists[column].filter((event) => event.startDate === event.endDate)
+        const hiddenBars = bars.filter((bar) => bar.lane >= shownLanes && bar.column <= column && column < bar.column + bar.span).length
+        const budget = Math.max(1, (props.holidayByDate.has(day) ? 3 : 4) - shownLanes)
+        const fits = singles.length <= budget && hiddenBars === 0
+        const shown = fits ? singles : singles.slice(0, Math.max(0, budget - 1))
+        const more = singles.length - shown.length + hiddenBars
+        if (!shown.length && !more) return null
+        return (
+          <div key={`list-${day}`} className="cal-week-list" style={{ gridColumn: column + 1, gridRow: listRow }}>
+            {shown.map((event) => (
+              <Chip key={event.id} event={event} type={props.typeById.get(event.typeId)} mine={event.userId === props.actorId} onOpen={props.onOpen} />
+            ))}
+            {more ? (
+              <button type="button" className="cal-more" onClick={() => onDay(day)}>+{more} รายการ</button>
+            ) : null}
+          </div>
+        )
+      })}
     </div>
   )
 }
